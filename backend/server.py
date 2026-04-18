@@ -11661,6 +11661,38 @@ async def re_extract_training_from_existing_certificate(
             )
         raise HTTPException(status_code=400, detail=f"Could not read certificate: {str(e)}")
     
+    # Fix B: Check if proposed items already exist for this document.
+    # If so, return them as preview with already_proposed=True to avoid
+    # wasting AI credits on a duplicate extraction.
+    if doc_id_for_status:
+        existing_proposed_for_doc = await db.proposed_training_items.find(
+            {"employee_id": employee_id, "source_document_id": doc_id_for_status},
+            {"_id": 0}
+        ).to_list(50)
+        active_proposed = [p for p in existing_proposed_for_doc if p.get("status") in ("proposed", "approved")]
+        if active_proposed:
+            logger.info(f"Re-extract skipped AI: {len(active_proposed)} proposed items already exist for doc {doc_id_for_status}")
+            return {
+                "success": True,
+                "certificate_url": certificate_url,
+                "original_filename": original_filename,
+                "trainings": [{
+                    "training_name": p.get("raw_course_title") or p.get("mapped_training_title", "Unknown"),
+                    "completion_date": p.get("completion_date") or p.get("completed_at"),
+                    "expiry_date": p.get("expiry_date") or p.get("expires_at"),
+                    "provider": p.get("provider"),
+                    "is_mandatory": p.get("is_mandatory", False),
+                    "confidence": p.get("confidence", "high"),
+                    "already_proposed": True,
+                    "existing_status": p.get("status"),
+                } for p in active_proposed],
+                "total_extracted": len(active_proposed),
+                "updates_count": 0,
+                "new_count": 0,
+                "message": f"This certificate already has {len(active_proposed)} extracted item(s) pending review. No AI credits used.",
+                "skipped_ai": True,
+            }
+
     # Extract trainings using AI with enhanced prompts
     extracted = await extract_training_from_certificate(contents, original_filename)
     
@@ -11692,11 +11724,10 @@ async def re_extract_training_from_existing_certificate(
         "record_status": {"$nin": ["superseded", "deleted"]}
     }, {"_id": 0, "training_name": 1, "id": 1, "requirement_id": 1}).to_list(200)
     
-    # Also check pending proposed items to prevent re-submission of same items
+    # Check ALL proposed items (any status) to prevent re-submission
     existing_proposed = await db.proposed_training_items.find({
         "employee_id": employee_id,
-        "status": "proposed"
-    }, {"_id": 0, "raw_course_title": 1, "mapped_training_title": 1, "id": 1}).to_list(200)
+    }, {"_id": 0, "raw_course_title": 1, "mapped_training_title": 1, "id": 1, "status": 1}).to_list(200)
     
     # Build normalised name set for dedup (alias-aware)
     def _normalise_training_name(name):
@@ -11821,11 +11852,10 @@ async def bulk_save_training_records(
     skipped_duplicates = []
     touched_document_ids = set()
     
-    # Build set of existing proposed items for dedup
+    # Build set of existing proposed items for dedup (check ALL statuses, not just proposed)
     existing_proposed = await db.proposed_training_items.find({
         "employee_id": employee_id,
-        "status": "proposed"
-    }, {"_id": 0, "raw_course_title": 1, "mapped_training_title": 1}).to_list(200)
+    }, {"_id": 0, "raw_course_title": 1, "mapped_training_title": 1, "status": 1}).to_list(200)
     
     def _norm(name):
         n = name.lower().strip().replace("&", "and").replace("-", " ").replace("_", " ")
@@ -11867,8 +11897,10 @@ async def bulk_save_training_records(
             except Exception as e:
                 logger.warning(f"Expiry calculation failed for {training_name}: {e}")
         
-        # Generate training ID
-        training_id = training_name.lower().replace(" ", "_").replace("&", "and")[:30]
+        # Generate training ID — use canonical mandatory code when available (Fix E)
+        from services.training_evaluator import resolve_mandatory_training_code
+        canonical_code = resolve_mandatory_training_code(training_name)
+        training_id = canonical_code or training_name.lower().replace(" ", "_").replace("&", "and")[:30]
         training_id = re.sub(r'[^a-z0-9_]', '', training_id)
         
         is_mandatory = is_mandatory_training(training_name)
@@ -11906,8 +11938,47 @@ async def bulk_save_training_records(
         saved_records.append({
             "id": item_id,
             "training_name": training_name,
-            "is_mandatory": is_mandatory
+            "is_mandatory": is_mandatory,
+            "canonical_code": canonical_code,
+            "document_id": document_id,
+            "completion_date": completion_date,
+            "expiry_date": expiry_date,
         })
+
+    # Fix A: Create preliminary training_records for mandatory items so the
+    # evaluator returns "awaiting_review" instead of "missing" immediately.
+    preliminary_records = []
+    for rec in saved_records:
+        if rec.get("canonical_code"):
+            # Check if a training_record already exists for this requirement
+            existing_tr = await db.training_records.find_one({
+                "employee_id": employee_id,
+                "requirement_id": rec["canonical_code"],
+                "record_status": "active",
+            })
+            if not existing_tr:
+                preliminary_records.append({
+                    "id": str(uuid.uuid4()),
+                    "employee_id": employee_id,
+                    "training_name": rec["training_name"],
+                    "requirement_id": rec["canonical_code"],
+                    "mandatory": True,
+                    "completion_date": rec.get("completion_date"),
+                    "expiry_date": rec.get("expiry_date"),
+                    "status": "completed",
+                    "certificate_url": None,
+                    "verified": False,
+                    "completion_method": "certificate",
+                    "record_status": "active",
+                    "source_document_id": rec.get("document_id"),
+                    "intake_item_id": rec["id"],
+                    "ai_extracted": True,
+                    "created_at": now,
+                    "updated_at": now,
+                })
+    if preliminary_records:
+        await db.training_records.insert_many(preliminary_records)
+        logger.info(f"[bulk-save] Created {len(preliminary_records)} preliminary training_records for mandatory items (awaiting verification)")
 
     if touched_document_ids:
         await db.employee_documents.update_many(

@@ -207,6 +207,12 @@ def _get_mandatory_training_ids():
     return get_canonical_mandatory_training_ids()
 
 
+def _resolve_mandatory_code(training_name):
+    """Lazy import of resolve_mandatory_training_code from training evaluator service."""
+    from services.training_evaluator import resolve_mandatory_training_code
+    return resolve_mandatory_training_code(training_name)
+
+
 # ==================== WORKER DASHBOARD ====================
 
 @router.get("/worker/dashboard")
@@ -1554,17 +1560,6 @@ async def worker_upload_document(
                     }}
                 )
                 
-                mandatory_codes = {
-                    "safeguarding": ["safeguarding", "safeguard", "protection of adults"],
-                    "manual_handling": ["manual handling", "moving and handling", "people handling"],
-                    "fire_safety": ["fire safety", "fire awareness", "fire marshal", "fire warden"],
-                    "health_safety": ["health and safety", "health & safety", "h&s awareness"],
-                    "basic_life_support": ["basic life support", "bls", "first aid", "resuscitation", "cpr"],
-                    "infection_control": ["infection control", "infection prevention", "ipc"],
-                    "information_governance": ["information governance", "data protection", "gdpr", "confidentiality"],
-                    "prevent": ["prevent", "counter terrorism", "radicalisation", "prevent duty"]
-                }
-                
                 existing_training_records = await db.training_records.find(
                     {"employee_id": employee_id, "record_status": {"$ne": "superseded"}}
                 ).to_list(200)
@@ -1593,23 +1588,15 @@ async def worker_upload_document(
                     training_name = training.get("training_name", "Unknown Training")
                     training_name_normalized = normalize_name(training_name)
                     
-                    matched_code = None
-                    training_lower = training_name.lower()
-                    for code, keywords in mandatory_codes.items():
-                        if any(kw in training_lower for kw in keywords):
-                            matched_code = code
-                            break
+                    matched_code = _resolve_mandatory_code(training_name)
                     
                     is_duplicate = training_name_normalized in existing_names
                     
                     if matched_code and not is_duplicate:
                         for rec in existing_training_records:
-                            rec_name = normalize_name(rec.get("training_name"))
-                            for kw in mandatory_codes.get(matched_code, []):
-                                if kw in rec_name:
-                                    is_duplicate = True
-                                    break
-                            if is_duplicate:
+                            rec_code = _resolve_mandatory_code(rec.get("training_name", ""))
+                            if rec_code == matched_code:
+                                is_duplicate = True
                                 break
                     
                     if is_duplicate:

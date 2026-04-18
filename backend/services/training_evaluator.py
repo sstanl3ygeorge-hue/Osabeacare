@@ -448,6 +448,41 @@ def is_mandatory_training_canonical(training_id: str) -> bool:
     return training_id in get_canonical_mandatory_training_ids()
 
 
+# Keyword map used by resolve_mandatory_training_code to find canonical codes.
+_MANDATORY_KEYWORD_MAP = {
+    "safeguarding": ["safeguarding", "safeguard", "protection of adults"],
+    "manual_handling": ["manual handling", "moving and handling", "people handling", "moving & handling"],
+    "fire_safety": ["fire safety", "fire awareness", "fire marshal", "fire warden"],
+    "health_safety": ["health and safety", "health & safety", "h&s awareness", "health safety"],
+    "basic_life_support": ["basic life support", "bls", "first aid", "resuscitation", "cpr"],
+    "infection_control": ["infection control", "infection prevention", "ipc"],
+    "information_governance": ["information governance", "data protection", "gdpr", "confidentiality"],
+    "prevent": ["prevent", "counter terrorism", "radicalisation", "prevent duty"],
+}
+
+
+def resolve_mandatory_training_code(training_name: str):
+    """Resolve a training name to its canonical mandatory requirement ID.
+
+    Returns the canonical code (e.g. ``"safeguarding"``) when the name
+    matches a mandatory training, or ``None`` if no match is found.
+    Uses the keyword map, then falls back to TRAINING_ALIASES.
+    """
+    if not training_name:
+        return None
+    name_lower = training_name.lower().strip()
+    # Keyword match
+    for code, keywords in _MANDATORY_KEYWORD_MAP.items():
+        if any(kw in name_lower for kw in keywords):
+            return code
+    # Alias match
+    normalised = name_lower.replace(" ", "_").replace("&", "and").replace("-", "_")
+    canon = TRAINING_ALIASES.get(normalised)
+    if canon and canon in get_canonical_mandatory_training_ids():
+        return canon
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Async functions (require _db)
 # ---------------------------------------------------------------------------

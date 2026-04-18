@@ -110,6 +110,86 @@ async def create_training_record(
     return TrainingRecordResponse(**record_data)
 
 
+@router.post("/employees/{employee_id}/training/backfill-from-proposed")
+async def backfill_training_records_from_proposed(
+    employee_id: str,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Backfill: create preliminary training_records for mandatory proposed items
+    that don't yet have a corresponding training_record.
+
+    Fixes the state where proposed items exist (from extraction) but the
+    Mandatory tab shows 'Missing' because the evaluator only queries
+    training_records.
+    """
+    db = get_db()
+    from services.training_evaluator import resolve_mandatory_training_code
+    now = datetime.now(timezone.utc).isoformat()
+
+    proposed = await db.proposed_training_items.find(
+        {"employee_id": employee_id, "status": {"$in": ["proposed", "approved"]}},
+        {"_id": 0},
+    ).to_list(200)
+
+    if not proposed:
+        return {"success": True, "created": 0, "message": "No proposed items to backfill"}
+
+    created = 0
+    for item in proposed:
+        name = item.get("raw_course_title") or item.get("mapped_training_title") or ""
+        code = resolve_mandatory_training_code(name)
+        if not code:
+            code = item.get("mapped_training_code")
+            if not code:
+                continue
+
+        existing = await db.training_records.find_one({
+            "employee_id": employee_id,
+            "requirement_id": code,
+            "record_status": "active",
+        })
+        if existing:
+            continue
+
+        await db.training_records.insert_one({
+            "id": str(uuid.uuid4()),
+            "employee_id": employee_id,
+            "training_name": name,
+            "requirement_id": code,
+            "mandatory": True,
+            "completion_date": item.get("completion_date") or item.get("completed_at"),
+            "expiry_date": item.get("expiry_date") or item.get("expires_at"),
+            "status": "completed",
+            "certificate_url": None,
+            "verified": False,
+            "completion_method": "certificate",
+            "record_status": "active",
+            "source_document_id": item.get("source_document_id"),
+            "intake_item_id": item.get("id"),
+            "ai_extracted": True,
+            "created_at": now,
+            "updated_at": now,
+        })
+        created += 1
+
+    if created:
+        await log_audit_action(
+            user.get("user_id"),
+            "training_backfill_from_proposed",
+            "employee",
+            employee_id,
+            {"created_count": created},
+        )
+        logger.info(f"Backfilled {created} training_records from proposed items for employee {employee_id}")
+
+    return {
+        "success": True,
+        "created": created,
+        "message": f"Created {created} preliminary training record(s) from proposed items",
+    }
+
+
 @router.get("/training-records", response_model=List[TrainingRecordResponse])
 async def get_training_records(
     employee_id: Optional[str] = None,

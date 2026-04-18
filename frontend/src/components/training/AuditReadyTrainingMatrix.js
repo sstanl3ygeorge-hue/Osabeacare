@@ -252,6 +252,40 @@ export default function AuditReadyTrainingMatrix({
         certificatesUploaded: certificatesFailed ? null : trainingCerts.length,
         needsReview: pendingReview
       });
+
+      // Auto-backfill: if proposed items exist but mandatory tab shows
+      // missing for those same trainings, create preliminary records.
+      if (pendingReview > 0 && allItems.filter(item => item.status === 'missing').length > 0) {
+        try {
+          const backfillRes = await axios.post(
+            `${API}/api/employees/${employeeId}/training/backfill-from-proposed`,
+            {},
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+          if (backfillRes.data?.created > 0) {
+            // Re-fetch matrix to pick up the new records
+            const refreshedMatrix = await axios.get(
+              `${API}/api/employees/${employeeId}/training/matrix`,
+              { headers: { Authorization: `Bearer ${token}` } }
+            );
+            const refreshedData = refreshedMatrix.data || {};
+            const refreshedItems = refreshedData.items || [];
+            setMandatoryTraining(refreshedItems);
+            setAdditionalTraining(refreshedData.additional_items || []);
+            const refreshedSummary = refreshedData.summary || {};
+            setSummary(prev => ({
+              ...prev,
+              totalRequired: refreshedSummary.total || refreshedItems.length,
+              current: refreshedItems.filter(isMandatoryTrainingSatisfied).length,
+              missing: refreshedItems.filter(item => item.status === 'missing').length,
+              blockers: refreshedSummary.blockers || 0,
+            }));
+          }
+        } catch (backfillErr) {
+          // Non-critical — silently ignore
+          console.debug('Auto-backfill skipped:', backfillErr?.message);
+        }
+      }
       
     } catch (err) {
       console.error('Error fetching training data:', err);
@@ -436,6 +470,12 @@ export default function AuditReadyTrainingMatrix({
         { headers: { Authorization: `Bearer ${token}` } }
       );
       if (response.data.success && response.data.trainings?.length > 0) {
+        // If AI was skipped because items already exist, just inform the admin
+        if (response.data.skipped_ai) {
+          toast.info(response.data.message || 'Items already extracted — check Training Library for pending reviews');
+          fetchTrainingData();
+          return;
+        }
         // Auto-submit extracted items as proposed for review
         const trainingsToSave = response.data.trainings
           .filter(t => !t.already_proposed)
@@ -448,7 +488,7 @@ export default function AuditReadyTrainingMatrix({
           );
           toast.success(`Extracted ${trainingsToSave.length} training(s) — submitted for review`);
         } else {
-          toast.info('All extracted trainings already pending review');
+          toast.info('All extracted trainings already pending review — check Training Library tab');
         }
         fetchTrainingData();
       } else {

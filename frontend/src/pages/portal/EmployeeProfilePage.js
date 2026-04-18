@@ -5224,8 +5224,8 @@ export default function EmployeeProfilePage() {
               {employmentGapEvaluation?.is_complete !== undefined && (
                 <div className="rounded-xl border border-[#E4E8EB] bg-white p-3 shadow-sm">
                   <p className="text-xs text-text-muted">10-year history</p>
-                  <Badge variant="outline" className={`mt-2 ${gapAnalysisRun && employmentGapEvaluation.is_complete && coverageMet ? 'bg-green-100 text-green-700 border-green-200' : 'bg-amber-100 text-amber-700 border-amber-200'}`}>
-                    {gapAnalysisRun && employmentGapEvaluation.is_complete && coverageMet ? 'Reviewed' : 'Not yet assessed'}
+                  <Badge variant="outline" className={`mt-2 ${gapAnalysisRun && employmentGapEvaluation.is_complete && coverageMet && (employmentCoverage?.coverage_percent ?? 0) > 0 ? 'bg-green-100 text-green-700 border-green-200' : 'bg-amber-100 text-amber-700 border-amber-200'}`}>
+                    {gapAnalysisRun && employmentGapEvaluation.is_complete && coverageMet && (employmentCoverage?.coverage_percent ?? 0) > 0 ? 'Reviewed' : 'Not yet assessed'}
                   </Badge>
                 </div>
               )}
@@ -5535,7 +5535,7 @@ export default function EmployeeProfilePage() {
                 </div>
               )}
 
-              {employmentHistoryExists && employmentHistoryGapRow && !employmentHistoryGapRow.has_gaps && employmentGapEvaluation && gapAnalysisRun && coverageMet && (
+              {employmentHistoryExists && employmentHistoryGapRow && !employmentHistoryGapRow.has_gaps && employmentGapEvaluation && gapAnalysisRun && coverageMet && (employmentCoverage?.coverage_percent ?? 0) > 0 && (
                 <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg flex items-start gap-3">
                   <CheckCircle className="h-5 w-5 text-green-600 flex-shrink-0 mt-0.5" />
                   <div>

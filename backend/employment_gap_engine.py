@@ -52,16 +52,49 @@ class GapStatus(str, Enum):
 # =============================================================================
 
 def parse_employment_date(date_str) -> Optional[datetime]:
-    """Parse employment date string to datetime."""
+    """Parse employment date string to datetime.
+
+    Handles ISO (YYYY-MM-DD), DD/MM/YYYY, DD-MM-YYYY and 2-digit year
+    variants (DD/MM/YY, DD-MM-YY).
+    """
     if not date_str:
         return None
-    
-    try:
-        if isinstance(date_str, str):
-            if 'T' in date_str:
-                return datetime.fromisoformat(date_str.replace('Z', '+00:00'))
-            return datetime.fromisoformat(f"{date_str}T00:00:00+00:00")
+
+    if not isinstance(date_str, str):
         return date_str if date_str.tzinfo else date_str.replace(tzinfo=timezone.utc)
+
+    date_str = date_str.strip()
+
+    # ISO with time component
+    if 'T' in date_str:
+        try:
+            return datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+        except Exception:
+            pass
+
+    # DD/MM/YYYY or DD-MM-YYYY (4-digit year)
+    import re
+    m = re.match(r'^(\d{1,2})[/\-](\d{1,2})[/\-](\d{4})$', date_str)
+    if m:
+        try:
+            day, month, year = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            return datetime(year, month, day, tzinfo=timezone.utc)
+        except Exception:
+            pass
+
+    # DD/MM/YY or DD-MM-YY (2-digit year)
+    m = re.match(r'^(\d{1,2})[/\-](\d{1,2})[/\-](\d{2})$', date_str)
+    if m:
+        try:
+            day, month, short_year = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            year = 2000 + short_year if short_year < 80 else 1900 + short_year
+            return datetime(year, month, day, tzinfo=timezone.utc)
+        except Exception:
+            pass
+
+    # Plain ISO YYYY-MM-DD
+    try:
+        return datetime.fromisoformat(f"{date_str}T00:00:00+00:00")
     except Exception:
         return None
 
@@ -566,6 +599,10 @@ def compute_coverage_summary(
     }
     has_unresolved = any(g.get("status") in unresolved_statuses for g in all_gaps)
 
+    # Cannot meet the requirement if no days were actually covered
+    # (e.g. all dates failed to parse, or all entries fall outside the window).
+    requirement_met = (not has_unresolved) and (total_covered > 0)
+
     return {
         "coverage_start": coverage_start.strftime("%Y-%m-%d"),
         "coverage_end": coverage_end.strftime("%Y-%m-%d"),
@@ -575,7 +612,7 @@ def compute_coverage_summary(
         "earliest_entry_date": earliest_date.strftime("%Y-%m-%d") if earliest_date else None,
         "latest_entry_date": latest_end.strftime("%Y-%m-%d") if latest_end else None,
         "has_current_employment": has_current,
-        "meets_10_year_requirement": not has_unresolved,
+        "meets_10_year_requirement": requirement_met,
     }
 
 

@@ -59,13 +59,66 @@ const COMPETENCY_TYPES = [
   { value: "supervision", label: "Staff Supervision", is_critical: false },
 ];
 
-// Status options
+// Status options — used in Add / Edit / Record Result form dropdowns
 const STATUS_OPTIONS = [
   { value: "competent", label: "Assessed competent", color: "bg-green-100 text-green-700 border-green-200" },
-  { value: "not_competent", label: "Rejected / action required", color: "bg-red-100 text-red-700 border-red-200" },
-  { value: "training_required", label: "Awaiting admin review", color: "bg-amber-100 text-amber-700 border-amber-200" },
-  { value: "scheduled", label: "Awaiting admin review", color: "bg-blue-100 text-blue-700 border-blue-200" },
+  { value: "not_competent", label: "Not yet competent — action required", color: "bg-red-100 text-red-700 border-red-200" },
+  { value: "training_required", label: "Training required — awaiting review", color: "bg-amber-100 text-amber-700 border-amber-200" },
+  { value: "scheduled", label: "Assessment scheduled", color: "bg-blue-100 text-blue-700 border-blue-200" },
 ];
+
+/* ─── Display status config ──────────────────────────────────── *
+ * Maps derived display keys to strict CQC-safe labels.           *
+ * Covers both derived keys and raw backend keys (for history).   */
+const DISPLAY_STATUS = {
+  competent:         { label: 'Assessed competent',                  color: 'bg-green-100 text-green-700 border-green-200',  icon: CheckCircle },
+  not_competent:     { label: 'Not yet competent — action required', color: 'bg-red-100 text-red-700 border-red-200',      icon: XCircle },
+  awaiting_review:   { label: 'Awaiting admin review',               color: 'bg-amber-100 text-amber-700 border-amber-200',  icon: Clock },
+  training_required: { label: 'Training required',                   color: 'bg-amber-100 text-amber-700 border-amber-200',  icon: Clock },
+  scheduled:         { label: 'Awaiting assessment',                 color: 'bg-blue-100 text-blue-700 border-blue-200',     icon: Calendar },
+  reassessment_due:  { label: 'Reassessment due',                    color: 'bg-orange-100 text-orange-700 border-orange-200', icon: AlertTriangle },
+  overdue:           { label: 'Overdue',                             color: 'bg-red-100 text-red-700 border-red-200',        icon: AlertTriangle },
+  cannot_assess:     { label: 'Cannot assess',                       color: 'bg-gray-200 text-gray-700 border-gray-300',     icon: AlertTriangle },
+};
+
+/* ─── Derive display status from raw competency record ───────── *
+ * A competency should only show as safe/complete when there is   *
+ * a proper assessment outcome with assessor and date.            *
+ * Missing evidence → cannot assess. Expired → overdue.           */
+function deriveDisplayStatus(comp) {
+  const now = new Date();
+  const reviewDue = comp.review_due_date ? new Date(comp.review_due_date) : null;
+  const scheduledDate = comp.scheduled_date ? new Date(comp.scheduled_date) : null;
+
+  // Scheduled assessment
+  if (comp.status === 'scheduled') {
+    return (scheduledDate && scheduledDate < now) ? 'overdue' : 'scheduled';
+  }
+
+  // Training needed / pending review
+  if (comp.status === 'training_required') return 'awaiting_review';
+
+  // Not competent
+  if (comp.status === 'not_competent') return 'not_competent';
+
+  // Competent — validate evidence and check expiry
+  if (comp.status === 'competent') {
+    // Missing assessor or date → weak record, cannot confirm competence
+    if (!comp.assessed_by_name && !comp.assessed_by) return 'cannot_assess';
+    if (!comp.assessed_at && !comp.assessment_date) return 'cannot_assess';
+    // Review overdue
+    if (reviewDue && reviewDue < now) return 'overdue';
+    // Reassessment due within 30 days
+    if (reviewDue) {
+      const daysUntil = Math.ceil((reviewDue - now) / (1000 * 60 * 60 * 24));
+      if (daysUntil <= 30 && daysUntil > 0) return 'reassessment_due';
+    }
+    return 'competent';
+  }
+
+  // Unknown status
+  return 'cannot_assess';
+}
 
 /**
  * CompetencyAssessmentsPanel - Full competency assessment management
@@ -294,30 +347,21 @@ export default function CompetencyAssessmentsPanel({ employeeId, employeeName, o
   };
 
   const getStatusBadge = (status) => {
-    const statusConfig = STATUS_OPTIONS.find(s => s.value === status);
-    if (!statusConfig) return <Badge variant="outline">Cannot assess</Badge>;
-    
-    const Icon = status === 'competent' ? CheckCircle : status === 'not_competent' ? XCircle : AlertTriangle;
-    
+    const config = DISPLAY_STATUS[status];
+    if (!config) {
+      return (
+        <Badge variant="outline" className="bg-gray-100 text-gray-600 flex items-center gap-1">
+          <AlertTriangle className="h-3 w-3" />Cannot assess
+        </Badge>
+      );
+    }
+    const Icon = config.icon;
     return (
-      <Badge className={cn("flex items-center gap-1", statusConfig.color)}>
+      <Badge className={cn("flex items-center gap-1", config.color)}>
         <Icon className="h-3 w-3" />
-        {statusConfig.label}
+        {config.label}
       </Badge>
     );
-  };
-
-  const isReviewDueSoon = (reviewDate) => {
-    if (!reviewDate) return false;
-    const due = new Date(reviewDate);
-    const now = new Date();
-    const daysUntilDue = Math.ceil((due - now) / (1000 * 60 * 60 * 24));
-    return daysUntilDue <= 30 && daysUntilDue > 0;
-  };
-
-  const isOverdue = (reviewDate) => {
-    if (!reviewDate) return false;
-    return new Date(reviewDate) < new Date();
   };
 
   const renderFormDialog = (isEdit = false) => (
@@ -451,13 +495,22 @@ export default function CompetencyAssessmentsPanel({ employeeId, employeeName, o
     );
   }
 
-  // Group competencies by status for summary
-  const competentCount = competencies.filter(c => c.status === 'competent').length;
-  const trainingRequiredCount = competencies.filter(c => c.status === 'training_required').length;
-  const notCompetentCount = competencies.filter(c => c.status === 'not_competent').length;
-  const reviewDueSoon = competencies.filter(c => isReviewDueSoon(c.review_due_date)).length;
-  const overdueCount = competencies.filter(c => isOverdue(c.review_due_date)).length;
-  const pendingReviewCount = trainingRequiredCount + reviewDueSoon;
+  // Enrich each record with derived display status
+  const enriched = competencies.map(c => ({ ...c, _ds: deriveDisplayStatus(c) }));
+
+  // Summary counts from derived status
+  const counts = {
+    competent:        enriched.filter(c => c._ds === 'competent').length,
+    not_competent:    enriched.filter(c => c._ds === 'not_competent').length,
+    awaiting:         enriched.filter(c => c._ds === 'scheduled' || c._ds === 'awaiting_review').length,
+    reassessment_due: enriched.filter(c => c._ds === 'reassessment_due').length,
+    overdue:          enriched.filter(c => c._ds === 'overdue').length,
+    cannot_assess:    enriched.filter(c => c._ds === 'cannot_assess').length,
+  };
+  const weaknessCount = counts.cannot_assess + enriched.filter(c =>
+    (c._ds === 'not_competent' && !c.notes) ||
+    (c._ds === 'competent' && !c.review_due_date)
+  ).length;
 
   return (
     <div className="space-y-4" data-testid="competency-assessments-panel">
@@ -506,39 +559,55 @@ export default function CompetencyAssessmentsPanel({ employeeId, employeeName, o
         
         {/* Summary Stats */}
         <CardContent className="pt-0 pb-4">
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-6 gap-3">
             <div className="p-3 bg-green-50 rounded-lg text-center border border-green-100">
-              <p className="text-2xl font-bold text-green-700">{competentCount}</p>
+              <p className="text-2xl font-bold text-green-700">{counts.competent}</p>
               <p className="text-xs text-green-600">Assessed competent</p>
             </div>
-            <div className="p-3 bg-amber-50 rounded-lg text-center border border-amber-100">
-              <p className="text-2xl font-bold text-amber-700">{trainingRequiredCount}</p>
-              <p className="text-xs text-amber-600">Awaiting admin review</p>
-            </div>
             <div className="p-3 bg-red-50 rounded-lg text-center border border-red-100">
-              <p className="text-2xl font-bold text-red-700">{notCompetentCount}</p>
-              <p className="text-xs text-red-600">Rejected / action required</p>
+              <p className="text-2xl font-bold text-red-700">{counts.not_competent}</p>
+              <p className="text-xs text-red-600">Not yet competent</p>
+            </div>
+            <div className="p-3 bg-amber-50 rounded-lg text-center border border-amber-100">
+              <p className="text-2xl font-bold text-amber-700">{counts.awaiting}</p>
+              <p className="text-xs text-amber-600">Awaiting assessment / review</p>
             </div>
             <div className={cn(
               "p-3 rounded-lg text-center border",
-              reviewDueSoon > 0 ? "bg-orange-50 border-orange-100" : "bg-gray-50 border-gray-100"
+              counts.reassessment_due > 0 ? "bg-orange-50 border-orange-100" : "bg-gray-50 border-gray-100"
             )}>
-              <p className={cn("text-2xl font-bold", reviewDueSoon > 0 ? "text-orange-700" : "text-gray-500")}>{reviewDueSoon}</p>
-              <p className={cn("text-xs", reviewDueSoon > 0 ? "text-orange-600" : "text-gray-500")}>Due soon</p>
+              <p className={cn("text-2xl font-bold", counts.reassessment_due > 0 ? "text-orange-700" : "text-gray-500")}>{counts.reassessment_due}</p>
+              <p className={cn("text-xs", counts.reassessment_due > 0 ? "text-orange-600" : "text-gray-500")}>Reassessment due</p>
             </div>
             <div className={cn(
               "p-3 rounded-lg text-center border",
-              overdueCount > 0 ? "bg-red-50 border-red-100" : "bg-gray-50 border-gray-100"
+              counts.overdue > 0 ? "bg-red-50 border-red-100" : "bg-gray-50 border-gray-100"
             )}>
-              <p className={cn("text-2xl font-bold", overdueCount > 0 ? "text-red-700" : "text-gray-500")}>{overdueCount}</p>
-              <p className={cn("text-xs", overdueCount > 0 ? "text-red-600" : "text-gray-500")}>Overdue</p>
+              <p className={cn("text-2xl font-bold", counts.overdue > 0 ? "text-red-700" : "text-gray-500")}>{counts.overdue}</p>
+              <p className={cn("text-xs", counts.overdue > 0 ? "text-red-600" : "text-gray-500")}>Overdue</p>
+            </div>
+            <div className={cn(
+              "p-3 rounded-lg text-center border",
+              counts.cannot_assess > 0 ? "bg-gray-200 border-gray-300" : "bg-gray-50 border-gray-100"
+            )}>
+              <p className={cn("text-2xl font-bold", counts.cannot_assess > 0 ? "text-gray-700" : "text-gray-400")}>{counts.cannot_assess}</p>
+              <p className={cn("text-xs", counts.cannot_assess > 0 ? "text-gray-600" : "text-gray-400")}>Cannot assess</p>
             </div>
           </div>
-          <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-            <span className="font-medium">Competency blockers:</span> {notCompetentCount + overdueCount} &nbsp;|&nbsp;
-            <span className="font-medium">Pending reviews:</span> {pendingReviewCount} &nbsp;|&nbsp;
-            <span className="font-medium">Cannot assess:</span> 0 &nbsp;|&nbsp;
-            <span className="font-medium">Assessed competent:</span> {competentCount}
+          <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
+            <div className="flex flex-wrap gap-x-6 gap-y-1">
+              <span><span className="font-semibold text-red-700">{counts.not_competent + counts.overdue}</span> blockers</span>
+              <span><span className="font-semibold text-amber-700">{counts.awaiting + counts.reassessment_due}</span> pending</span>
+              <span><span className="font-semibold text-gray-700">{counts.cannot_assess}</span> cannot assess</span>
+              <span><span className="font-semibold text-green-700">{counts.competent}</span> assessed competent</span>
+            </div>
+            {weaknessCount > 0 && (
+              <div className="flex items-center gap-1.5 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5 mt-2 w-fit">
+                <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                <span className="font-medium">{weaknessCount} audit weakness{weaknessCount !== 1 ? 'es' : ''}</span>
+                <span className="text-amber-600">— missing assessor, date, reason, or review schedule</span>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -546,11 +615,11 @@ export default function CompetencyAssessmentsPanel({ employeeId, employeeName, o
       {/* Competencies Table */}
       <Card className="border-gray-200 shadow-sm">
         <CardContent className="p-0">
-          {competencies.length === 0 ? (
-            <div className="text-center py-12 text-gray-500">
-              <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />
-              <p>No competency assessments recorded</p>
-              <p className="text-sm text-gray-400 mt-1">Click "Add Assessment" to record a competency</p>
+          {enriched.length === 0 ? (
+            <div className="text-center py-12 text-amber-700">
+              <AlertTriangle className="h-12 w-12 mx-auto mb-4 text-amber-400" />
+              <p className="font-medium">No competency assessments recorded</p>
+              <p className="text-sm text-amber-600 mt-1">Cannot confirm any competency outcomes — add an assessment to begin tracking</p>
             </div>
           ) : (
             <Table>
@@ -560,22 +629,25 @@ export default function CompetencyAssessmentsPanel({ employeeId, employeeName, o
                   <TableHead>Status</TableHead>
                   <TableHead>Assessed Date</TableHead>
                   <TableHead>Review Due</TableHead>
-                  <TableHead>Assessed By</TableHead>
+                  <TableHead>Assessor</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {competencies.map((comp) => {
+                {enriched.map((comp) => {
                   const isCritical = COMPETENCY_TYPES.find(t => t.value === comp.competency_type)?.is_critical;
-                  const dueSoon = isReviewDueSoon(comp.review_due_date);
-                  const overdue = isOverdue(comp.review_due_date);
+                  const ds = comp._ds;
+                  const isWeak = ds === 'cannot_assess'
+                    || (ds === 'not_competent' && !comp.notes)
+                    || (ds === 'competent' && !comp.review_due_date);
                   
                   return (
                     <TableRow 
                       key={comp.id} 
                       className={cn(
-                        overdue && "bg-red-50/50",
-                        dueSoon && !overdue && "bg-amber-50/50"
+                        (ds === 'overdue' || ds === 'not_competent') && "bg-red-50/50",
+                        (ds === 'reassessment_due' || ds === 'awaiting_review') && "bg-amber-50/50",
+                        ds === 'cannot_assess' && "bg-gray-100/50"
                       )}
                       data-testid={`competency-row-${comp.id}`}
                     >
@@ -589,33 +661,57 @@ export default function CompetencyAssessmentsPanel({ employeeId, employeeName, o
                           )}
                         </div>
                       </TableCell>
-                      <TableCell>{getStatusBadge(comp.status)}</TableCell>
+                      <TableCell>
+                        {getStatusBadge(ds)}
+                        {isWeak && (
+                          <div className="flex items-center gap-1 text-[10px] text-amber-600 mt-1">
+                            <AlertTriangle className="h-3 w-3 shrink-0" />
+                            {ds === 'cannot_assess' ? 'Missing assessor or date'
+                              : ds === 'not_competent' && !comp.notes ? 'No reason recorded'
+                              : 'No review date set'}
+                          </div>
+                        )}
+                      </TableCell>
                       <TableCell className="text-sm text-gray-600">
-                        {formatBackendDate(comp.assessed_at, { format: 'short' })}
+                        {comp.assessed_at || comp.assessment_date
+                          ? formatBackendDate(comp.assessed_at || comp.assessment_date, { format: 'short' })
+                          : <span className="text-gray-400 italic">Not recorded</span>}
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">
-                          <span className={cn(
-                            "text-sm",
-                            overdue ? "text-red-600 font-medium" : dueSoon ? "text-amber-600 font-medium" : "text-gray-600"
-                          )}>
-                            {formatBackendDate(comp.review_due_date, { format: 'short' })}
-                          </span>
-                          {overdue && (
-                            <Badge className="bg-red-100 text-red-700 text-[10px] px-1">Overdue</Badge>
-                          )}
-                          {dueSoon && !overdue && (
-                            <Badge className="bg-amber-100 text-amber-700 text-[10px] px-1">Due soon</Badge>
+                          {comp.review_due_date ? (
+                            <>
+                              <span className={cn(
+                                "text-sm",
+                                ds === 'overdue' ? "text-red-600 font-medium" : ds === 'reassessment_due' ? "text-orange-600 font-medium" : "text-gray-600"
+                              )}>
+                                {formatBackendDate(comp.review_due_date, { format: 'short' })}
+                              </span>
+                              {ds === 'overdue' && (
+                                <Badge className="bg-red-100 text-red-700 text-[10px] px-1">Overdue</Badge>
+                              )}
+                              {ds === 'reassessment_due' && (
+                                <Badge className="bg-orange-100 text-orange-700 text-[10px] px-1">Due</Badge>
+                              )}
+                            </>
+                          ) : (
+                            <span className="text-gray-400 italic text-sm">Not set</span>
                           )}
                         </div>
                       </TableCell>
-                      <TableCell className="text-sm text-gray-600">
-                        {comp.assessed_by_name || 'Unknown'}
+                      <TableCell className="text-sm">
+                        {comp.assessed_by_name ? (
+                          <span className="text-gray-600">{comp.assessed_by_name}</span>
+                        ) : (
+                          <span className="text-amber-600 italic flex items-center gap-1">
+                            <AlertTriangle className="h-3 w-3" />Not recorded
+                          </span>
+                        )}
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-1">
-                          {/* Record Result button for scheduled or overdue */}
-                          {(comp.status === 'scheduled' || overdue) && (
+                          {/* Record Result button for scheduled or overdue assessments */}
+                          {(comp.status === 'scheduled' || ds === 'overdue') && (
                             <Button
                               variant="outline"
                               size="sm"

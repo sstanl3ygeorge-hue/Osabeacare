@@ -666,8 +666,9 @@ export default function ApplyPage() {
       setIsSubmitted(true);
       toast.success('Application submitted successfully!');
     } catch (error) {
-      console.error('Application submission error:', error.response?.data || error);
+      console.error('Application submission error:', error.response?.status, error.response?.data || error.message || error);
       const errorData = error.response?.data;
+      const status = error.response?.status;
       let errorMessage = 'Something went wrong. Please try again.';
       
       if (errorData?.detail) {
@@ -682,9 +683,13 @@ export default function ApplyPage() {
           errorMessage = `Validation error: ${fieldErrors}`;
           console.error('Validation errors:', errorData.detail);
         }
+      } else if (!error.response) {
+        errorMessage = 'Network error — please check your internet connection and try again.';
+      } else if (status >= 500) {
+        errorMessage = `Server error (${status}). Please wait a moment and try again. If the problem persists, contact support.`;
       }
       
-      toast.error(errorMessage);
+      toast.error(errorMessage, { duration: 8000 });
     } finally {
       setIsSubmitting(false);
       submitLock.current = false;

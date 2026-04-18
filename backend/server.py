@@ -751,6 +751,19 @@ async def retrieve_file_bytes(file_url: str) -> tuple:
 
 
 app = FastAPI(title="Osabea Healthcare Solutions API")
+
+
+# ── Global exception handler: return JSON (not plain text) for unhandled 500s ──
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.error(f"Unhandled exception on {request.method} {request.url.path}: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"Internal server error: {type(exc).__name__}: {str(exc)[:300]}"},
+    )
 api_router = APIRouter(prefix="/api")
 
 # ==================== MODELS ====================
@@ -25119,7 +25132,11 @@ async def submit_structured_application(form: StructuredApplicationForm):
         "updated_at": now
     }
     
-    await db.form_submissions.insert_one(form_submission)
+    try:
+        await db.form_submissions.insert_one(form_submission)
+    except Exception as fs_err:
+        logger.error(f"Non-blocking: form_submissions insert failed for {app_id}: {fs_err}")
+        post_create_warnings.append(f"form_submission: {str(fs_err)}")
     
     # ==================== 2b. INSERT REFERENCES INTO db.references ====================
     # This ensures references appear in the Recruitment Record's References section

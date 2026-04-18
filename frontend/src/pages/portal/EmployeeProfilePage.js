@@ -3241,27 +3241,28 @@ export default function EmployeeProfilePage() {
   const cvLinkedForReview = Boolean(employee?.cv_document_id && activeCvDocument);
   const cvReviewReady = Boolean(cvLinkedForReview && activeCvDocument && cvIsPdf);
   const cvStatusLabel = cvReviewReady
-    ? (employee?.cv_status === 'approved' ? 'Verified' : 'Awaiting admin review')
+    ? (employee?.cv_status === 'approved' ? 'Approved' : 'Review action required')
     : !cvFileExists
       ? 'Missing'
       : !cvIsPdf
-        ? 'Evidence on file, unsupported format'
-        : 'Evidence on file, not linked for review';
-  const cvStatusBadgeClass = cvReviewReady
-    ? 'bg-green-100 text-green-700 border-green-200'
-    : cvFileExists
-      ? 'bg-amber-100 text-amber-700 border-amber-200'
-      : 'bg-gray-100 text-gray-600 border-gray-200';
+        ? 'Uploaded — unsupported format'
+        : 'Uploaded — select as review CV';
+  const cvStatusBadgeClass =
+    (cvReviewReady && employee?.cv_status === 'approved')
+      ? 'bg-green-100 text-green-700 border-green-200'
+      : cvFileExists
+        ? 'bg-amber-100 text-amber-700 border-amber-200'
+        : 'bg-gray-100 text-gray-600 border-gray-200';
   const cvReviewStateLabel =
     cvReviewReady && employee?.cv_status === 'approved'
-      ? 'CV has been verified.'
+      ? 'CV has been approved for employment review.'
     : cvReviewReady && employee?.cv_extraction_status === 'reviewed'
-        ? 'CV has been reviewed and is awaiting admin review.'
+        ? 'CV has been extracted — approve or reject to continue.'
         : !cvFileExists
           ? 'No CV file is currently available on this page.'
           : !cvIsPdf
-            ? 'A CV file exists, but it is not in a reviewable PDF format.'
-            : 'A CV file exists, but it is not linked as the active reviewable CV yet.';
+            ? 'A CV file exists but is not in a reviewable PDF format. Upload a PDF to enable review.'
+            : 'A CV file exists but is not linked as the review CV. Click "Link as Review CV" or upload a PDF.';
   const cvRecoveryActionLabel = cvFileExists ? 'Replace with PDF' : 'Upload PDF CV';
   const gapVerifiedCount = employmentGapEvaluation?.verified_count;
   const gapNeedsReviewCount = employmentGapEvaluation
@@ -3372,7 +3373,7 @@ export default function EmployeeProfilePage() {
     (!employmentGapsCannotAssess && employmentHistoryExists && !allGapsResolved) ? 'Gaps unresolved' : null,
   ].filter(Boolean);
   const employmentStatusWarnings = [
-    cvLinkBlocksReview ? 'CV file exists but is not linked for review — consider uploading a PDF CV or linking the active document' : null,
+    cvLinkBlocksReview ? 'CV uploaded but not selected as the review CV — upload a PDF or link the active document' : null,
   ].filter(Boolean);
 
   if (loading) {
@@ -5224,7 +5225,7 @@ export default function EmployeeProfilePage() {
                 <div className="rounded-xl border border-[#E4E8EB] bg-white p-3 shadow-sm">
                   <p className="text-xs text-text-muted">10-year history</p>
                   <Badge variant="outline" className={`mt-2 ${gapAnalysisRun && employmentGapEvaluation.is_complete && coverageMet ? 'bg-green-100 text-green-700 border-green-200' : 'bg-amber-100 text-amber-700 border-amber-200'}`}>
-                    {gapAnalysisRun && employmentGapEvaluation.is_complete && coverageMet ? 'Reviewed' : 'Awaiting admin review'}
+                    {gapAnalysisRun && employmentGapEvaluation.is_complete && coverageMet ? 'Reviewed' : 'Not yet assessed'}
                   </Badge>
                 </div>
               )}
@@ -5547,7 +5548,7 @@ export default function EmployeeProfilePage() {
                 <div className="mb-4 p-4 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-3">
                   <Clock className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
                   <div>
-                    <p className="font-medium text-amber-800">CV reviewed - awaiting admin review</p>
+                    <p className="font-medium text-amber-800">CV extracted — approve or reject</p>
                     <p className="text-sm text-amber-600 mt-1">
                       Found {employee?.cv_extracted_employment_history?.length || 0} jobs, 
                       {employee?.cv_gaps_detected?.length || 0} gaps detected.
@@ -5559,7 +5560,7 @@ export default function EmployeeProfilePage() {
                       </Button>
                       <Button size="sm" variant="outline" onClick={() => setCvRejectDialogOpen(true)} className="text-red-600 border-red-200 hover:bg-red-50">
                         <XCircle className="h-4 w-4 mr-1" />
-                        Reject with Reason
+                        Reject — request action
                       </Button>
                     </div>
                   </div>
@@ -5570,9 +5571,9 @@ export default function EmployeeProfilePage() {
                 <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg flex items-start gap-3">
                   <CheckCircle className="h-5 w-5 text-green-600 flex-shrink-0 mt-0.5" />
                   <div>
-                    <p className="font-medium text-green-800">CV Verified</p>
+                    <p className="font-medium text-green-800">CV approved</p>
                     <p className="text-sm text-green-600 mt-1">
-                      Employment history verified with {employee?.cv_extracted_employment_history?.length || 0} jobs extracted.
+                      Employment history accepted — {employee?.cv_extracted_employment_history?.length || 0} jobs extracted.
                     </p>
                   </div>
                 </div>
@@ -5647,19 +5648,36 @@ export default function EmployeeProfilePage() {
                     These explanations were provided by the applicant during the application form. They are preserved regardless of whether automated gap detection succeeded.
                   </p>
                   <div className="space-y-2">
-                    {employee.gap_explanations.map((expl, idx) => (
-                      <div key={expl.gap_id || idx} className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                        <div className="flex items-center gap-2 mb-1">
-                          <Badge variant="outline" className="text-xs bg-blue-100 text-blue-700 border-blue-200">
-                            {expl.gap_id || `Gap ${idx + 1}`}
-                          </Badge>
-                          {expl.reason_type && (
-                            <span className="text-xs text-blue-600 capitalize">{expl.reason_type.replace(/_/g, ' ')}</span>
-                          )}
+                    {employee.gap_explanations.map((expl, idx) => {
+                      const hasDateRange = expl.gap_start || expl.start_date;
+                      const gapStart = expl.gap_start || expl.start_date;
+                      const gapEnd = expl.gap_end || expl.end_date;
+                      const fmtDate = (d) => d ? new Date(d + 'T00:00:00Z').toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }) : '?';
+                      return (
+                        <div key={expl.gap_id || idx} className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                          <div className="flex items-center gap-2 mb-1 flex-wrap">
+                            {hasDateRange ? (
+                              <span className="text-xs font-medium text-blue-800">
+                                {fmtDate(gapStart)} — {fmtDate(gapEnd)}
+                              </span>
+                            ) : (
+                              <span className="text-xs font-medium text-blue-800">Gap {idx + 1}</span>
+                            )}
+                            {expl.duration_days && (
+                              <Badge variant="outline" className="text-[10px] bg-blue-100 text-blue-700 border-blue-200">
+                                {expl.duration_days} days
+                              </Badge>
+                            )}
+                            {expl.reason_type && (
+                              <Badge variant="outline" className="text-[10px] bg-blue-100 text-blue-600 border-blue-200 capitalize">
+                                {expl.reason_type.replace(/_/g, ' ')}
+                              </Badge>
+                            )}
+                          </div>
+                          <p className="text-sm text-gray-700">{expl.explanation || 'No explanation text provided by applicant'}</p>
                         </div>
-                        <p className="text-sm text-gray-700">{expl.explanation || 'No explanation text provided'}</p>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               )}

@@ -5143,27 +5143,35 @@ export default function EmployeeProfilePage() {
                 )}
               </div>
               <DialogFooter className="gap-2">
-                {/* Download PDF for pre-interview questionnaire */}
-                {viewFormSubmission?.formType === 'pre_interview_questionnaire' && (
+                {/* Download PDF for any form with a submission */}
+                {viewFormSubmission?.submissionId && (
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={async () => {
                       try {
-                        const resp = await axios.get(
-                          `${API}/employees/${employee?.id}/pre-interview-questionnaire/download-pdf`,
-                          { headers: { Authorization: `Bearer ${token}` }, responseType: 'blob' }
-                        );
+                        let url, filename;
+                        if (viewFormSubmission.formType === 'pre_interview_questionnaire') {
+                          url = `${API}/employees/${employee?.id}/pre-interview-questionnaire/download-pdf`;
+                          filename = `pre_interview_questionnaire_${employee?.first_name || ''}_${employee?.last_name || ''}.pdf`;
+                        } else {
+                          url = `${API}/form-submissions/${viewFormSubmission.submissionId}/download-pdf`;
+                          filename = `${viewFormSubmission.formType || 'form'}_${employee?.first_name || ''}_${employee?.last_name || ''}.pdf`;
+                        }
+                        const resp = await axios.get(url, {
+                          headers: { Authorization: `Bearer ${token}` },
+                          responseType: 'blob'
+                        });
                         const blob = new Blob([resp.data], { type: 'application/pdf' });
-                        const url = window.URL.createObjectURL(blob);
+                        const blobUrl = window.URL.createObjectURL(blob);
                         const link = document.createElement('a');
-                        link.href = url;
-                        link.download = `pre_interview_questionnaire_${employee?.first_name || ''}_${employee?.last_name || ''}.pdf`;
+                        link.href = blobUrl;
+                        link.download = filename;
                         document.body.appendChild(link);
                         link.click();
                         document.body.removeChild(link);
-                        window.URL.revokeObjectURL(url);
-                        toast.success('Pre-interview questionnaire PDF downloaded');
+                        window.URL.revokeObjectURL(blobUrl);
+                        toast.success('PDF downloaded');
                       } catch { toast.error('Failed to download PDF'); }
                     }}
                     className="mr-auto"

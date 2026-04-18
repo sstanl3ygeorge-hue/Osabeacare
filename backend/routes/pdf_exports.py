@@ -307,8 +307,7 @@ async def generate_form_pdf(submission_id: str, user: dict = Depends(require_adm
         mapping_config = PDF_FIELD_MAPPINGS[form_type]
     
     # Application forms have their own dedicated generator - no mapping required
-    if form_type != "application_form" and not mapping_config:
-        raise HTTPException(status_code=400, detail=f"No PDF mapping configured for form type: {form_type}")
+    # Other form types can use the generic structured generator
     
     # Prepare submission data with metadata.
     # Application forms store the richer structured source of truth in form_data,
@@ -324,11 +323,22 @@ async def generate_form_pdf(submission_id: str, user: dict = Depends(require_adm
     # Generate PDF based on form type
     if form_type == "application_form":
         pdf_bytes = await generate_application_form_pdf(submission_data, employee)
-    elif form_type == "staff_health_questionnaire":
+    elif form_type == "staff_health_questionnaire" and mapping_config:
         pdf_bytes = await generate_staff_health_pdf(submission_data, employee, mapping_config)
     else:
-        # Generic PDF generation for other form types (can be extended)
-        raise HTTPException(status_code=400, detail=f"PDF generation not yet implemented for form type: {form_type}")
+        # Use the generic structured form PDF generator for all other form types
+        from services.pdf_service import generate_structured_form_pdf
+        FORM_BASED_REQUIREMENTS = get_form_based_requirements()
+        template_def = FORM_BASED_REQUIREMENTS.get(form_type, {})
+        template_sections = template_def.get("sections", None)
+        form_name = template_def.get("name", form_type.replace("_", " ").title())
+        pdf_bytes = generate_structured_form_pdf(
+            form_type=form_type,
+            form_name=form_name,
+            submission_data=submission_data,
+            employee_data=employee,
+            template_sections=template_sections,
+        )
     
     # Save generated PDF to storage
     export_id = str(uuid.uuid4())

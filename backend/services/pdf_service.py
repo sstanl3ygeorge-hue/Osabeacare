@@ -863,6 +863,149 @@ def generate_generic_pdf_content(form_data: Dict[str, Any], styles) -> list:
     return elements
 
 
+def generate_structured_form_pdf(
+    form_type: str,
+    form_name: str,
+    submission_data: Dict[str, Any],
+    employee_data: Dict[str, Any],
+    template_sections: Optional[List[Dict[str, Any]]] = None,
+) -> bytes:
+    """
+    Generate a branded PDF for any form type using its template sections/fields.
+
+    If *template_sections* (the ``sections`` list from ``FORM_BASED_REQUIREMENTS``)
+    is provided the PDF uses the proper section titles and field labels.
+    Otherwise it falls back to a simple key→value dump.
+
+    Returns raw PDF bytes.
+    """
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=20 * mm,
+        leftMargin=20 * mm,
+        topMargin=20 * mm,
+        bottomMargin=20 * mm,
+    )
+
+    styles = create_pdf_styles()
+    elements = []
+
+    # ── Header with logo ────────────────────────────────────────────────
+    logo = get_logo_image()
+    if logo:
+        elements.append(logo)
+        elements.append(Spacer(1, 3 * mm))
+
+    elements.append(Paragraph("Osabea Healthcare Solutions", styles["CompanyName"]))
+    elements.append(HRFlowable(width="100%", thickness=1, color=BORDER_COLOR, spaceAfter=5 * mm))
+
+    # Form title
+    title = form_name or form_type.replace("_", " ").title()
+    elements.append(Paragraph(title, styles["FormTitle"]))
+
+    # ── Employee info table ─────────────────────────────────────────────
+    emp_name = (
+        f"{employee_data.get('first_name', '')} {employee_data.get('last_name', '')}".strip()
+        or employee_data.get("name", "Unknown")
+    )
+    emp_code = (
+        employee_data.get("employee_code")
+        or employee_data.get("applicant_reference")
+        or employee_data.get("id", "")[:8]
+    )
+    submitted_at = submission_data.get("_submitted_at") or submission_data.get("submitted_at", "")
+    if submitted_at:
+        try:
+            submitted_at = datetime.fromisoformat(submitted_at.replace("Z", "+00:00")).strftime("%d %B %Y %H:%M")
+        except Exception:
+            pass
+
+    info_rows = [
+        ["Employee:", emp_name],
+        ["Employee ID:", emp_code],
+    ]
+    if submitted_at:
+        info_rows.append(["Submitted:", submitted_at])
+
+    info_table = Table(info_rows, colWidths=[35 * mm, 135 * mm])
+    info_table.setStyle(TableStyle([
+        ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 10),
+        ("TEXTCOLOR", (0, 0), (0, -1), TEXT_SECONDARY),
+        ("TEXTCOLOR", (1, 0), (1, -1), TEXT_PRIMARY),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3 * mm),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+    ]))
+    elements.append(info_table)
+    elements.append(Spacer(1, 4 * mm))
+    elements.append(HRFlowable(width="100%", thickness=0.5, color=BORDER_COLOR, spaceAfter=6 * mm))
+
+    # ── Body: structured sections or raw dump ───────────────────────────
+    if template_sections:
+        for section in template_sections:
+            section_title = section.get("title", "")
+            if section_title:
+                elements.append(Paragraph(section_title, styles["SectionHeader"]))
+
+            fields = section.get("fields", [])
+            if not fields:
+                continue
+
+            table_rows = []
+            for field in fields:
+                field_id = field.get("id", "")
+                label = field.get("label", field_id.replace("_", " ").title())
+                raw = submission_data.get(field_id)
+
+                # Format value
+                if raw is None:
+                    val = "N/A"
+                elif isinstance(raw, bool):
+                    val = "Yes" if raw else "No"
+                elif isinstance(raw, list):
+                    val = ", ".join(str(v) for v in raw)
+                elif isinstance(raw, dict):
+                    parts = [f"{k}: {v}" for k, v in raw.items()]
+                    val = "; ".join(parts) if parts else "N/A"
+                else:
+                    val = str(raw) if raw != "" else "N/A"
+
+                # Checkboxes render as tick/cross
+                if field.get("type") == "checkbox":
+                    val = "\u2713 Yes" if raw else "\u2717 No"
+
+                table_rows.append([
+                    Paragraph(label, styles["FieldLabel"]),
+                    Paragraph(val, styles["FieldValue"]),
+                ])
+
+            if table_rows:
+                t = Table(table_rows, colWidths=[75 * mm, 95 * mm])
+                t.setStyle(TableStyle([
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 2 * mm),
+                    ("TOPPADDING", (0, 0), (-1, -1), 2 * mm),
+                    ("LINEBELOW", (0, 0), (-1, -2), 0.25, BORDER_COLOR),
+                ]))
+                elements.append(t)
+                elements.append(Spacer(1, 3 * mm))
+    else:
+        # Fallback: raw key→value dump (for form types without a template)
+        elements.extend(generate_generic_pdf_content(submission_data, styles))
+
+    # ── Footer ──────────────────────────────────────────────────────────
+    elements.append(Spacer(1, 10 * mm))
+    elements.append(HRFlowable(width="100%", thickness=0.5, color=BORDER_COLOR, spaceBefore=5 * mm))
+    footer_text = f"Generated by Osabea Healthcare Solutions Compliance System on {datetime.now(timezone.utc).strftime('%d %B %Y %H:%M UTC')}"
+    elements.append(Paragraph(footer_text, styles["Footer"]))
+    elements.append(Paragraph("This is an official compliance document. Store securely.", styles["Footer"]))
+
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer.getvalue()
+
 
 # =============================================================================
 # SMART VERIFICATION SYSTEM - PDF Generation & Stamping

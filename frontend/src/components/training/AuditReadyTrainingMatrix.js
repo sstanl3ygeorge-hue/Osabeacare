@@ -65,13 +65,13 @@ const API = process.env.REACT_APP_BACKEND_URL;
 
 // Status styling for training items
 const STATUS_STYLES = {
-  current: { bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-200', icon: CheckCircle2, label: 'Verified' },
+  current: { bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-200', icon: CheckCircle2, label: 'Current' },
   completed: { bg: 'bg-blue-50', text: 'text-blue-700', border: 'border-blue-200', icon: Clock, label: 'Submitted, not reviewed' },
   verified: { bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-200', icon: CheckCircle2, label: 'Verified' },
-  expiring_soon: { bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-200', icon: Clock, label: 'Awaiting admin review' },
-  due_soon: { bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-200', icon: Clock, label: 'Awaiting admin review' },
-  expired: { bg: 'bg-red-50', text: 'text-red-700', border: 'border-red-200', icon: AlertTriangle, label: 'Rejected / action required' },
-  overdue: { bg: 'bg-red-50', text: 'text-red-700', border: 'border-red-200', icon: AlertTriangle, label: 'Rejected / action required' },
+  expiring_soon: { bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-200', icon: Clock, label: 'Due soon' },
+  due_soon: { bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-200', icon: Clock, label: 'Due soon' },
+  expired: { bg: 'bg-red-50', text: 'text-red-700', border: 'border-red-200', icon: AlertTriangle, label: 'Expired' },
+  overdue: { bg: 'bg-red-50', text: 'text-red-700', border: 'border-red-200', icon: AlertTriangle, label: 'Overdue' },
   missing: { bg: 'bg-gray-100', text: 'text-gray-600', border: 'border-gray-200', icon: XCircle, label: 'Missing' },
   pending: { bg: 'bg-blue-50', text: 'text-blue-700', border: 'border-blue-200', icon: Clock, label: 'Awaiting admin review' },
   awaiting_review: { bg: 'bg-purple-50', text: 'text-purple-700', border: 'border-purple-200', icon: Clock, label: 'Awaiting admin review' },
@@ -446,7 +446,7 @@ export default function AuditReadyTrainingMatrix({
         </div>
         <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
           <p className="text-2xl font-bold text-amber-700">{summary.needsRenewal}</p>
-          <p className="text-xs text-amber-600">Awaiting admin review</p>
+          <p className="text-xs text-amber-600">Needs renewal</p>
         </div>
         <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
           <p className="text-2xl font-bold text-red-700">{summary.missing}</p>
@@ -466,7 +466,7 @@ export default function AuditReadyTrainingMatrix({
         </div>
         <div className="p-3 bg-gray-100 border border-gray-200 rounded-lg">
           <p className="text-2xl font-bold text-gray-700">{progressPercent}%</p>
-          <p className="text-xs text-gray-500">Verified</p>
+          <p className="text-xs text-gray-500">Current</p>
         </div>
       </div>
 
@@ -474,13 +474,13 @@ export default function AuditReadyTrainingMatrix({
         <span className="font-medium">Training blockers:</span> {summary.blockers} &nbsp;|&nbsp;
         <span className="font-medium">Pending reviews:</span> {summary.needsReview + summary.needsRenewal} &nbsp;|&nbsp;
         <span className="font-medium">Cannot assess:</span> 0 &nbsp;|&nbsp;
-        <span className="font-medium">Verified:</span> {summary.current}/{summary.totalRequired}
+        <span className="font-medium">Current:</span> {summary.current}/{summary.totalRequired}
       </div>
 
       {/* Progress Bar */}
       <div className="bg-white border border-gray-200 rounded-lg p-4">
         <div className="flex items-center justify-between mb-2">
-          <span className="text-sm font-medium text-gray-700">Mandatory Training Verified</span>
+          <span className="text-sm font-medium text-gray-700">Mandatory Training Current</span>
           <span className="text-sm font-bold">{progressPercent}%</span>
         </div>
         <Progress 

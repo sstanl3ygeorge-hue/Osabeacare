@@ -771,6 +771,10 @@ export default function EmployeeProfilePage() {
 
   // Admin signs off Employment Review
   const handleSignOffEmploymentReview = async () => {
+    if (!employmentReadyForSignOff) {
+      toast.error('Employment Review cannot be signed off until all blockers are cleared.');
+      return;
+    }
     setEmploymentSignOffLoading(true);
     try {
       await axios.post(
@@ -3237,12 +3241,12 @@ export default function EmployeeProfilePage() {
   const cvLinkedForReview = Boolean(employee?.cv_document_id && activeCvDocument);
   const cvReviewReady = Boolean(cvLinkedForReview && activeCvDocument && cvIsPdf);
   const cvStatusLabel = cvReviewReady
-    ? (employee?.cv_status === 'approved' ? 'Verified' : 'Evidence on file')
+    ? (employee?.cv_status === 'approved' ? 'Verified' : 'Awaiting admin review')
     : !cvFileExists
       ? 'Missing'
       : !cvIsPdf
-        ? 'Rejected / action required'
-        : 'Cannot assess';
+        ? 'Evidence on file, unsupported format'
+        : 'Evidence on file, not linked for review';
   const cvStatusBadgeClass = cvReviewReady
     ? 'bg-green-100 text-green-700 border-green-200'
     : cvFileExists
@@ -3270,31 +3274,105 @@ export default function EmployeeProfilePage() {
   const employmentCoverage = employee?.employment_coverage || null;
   const coverageMet = Boolean(employmentCoverage?.meets_10_year_requirement);
   const employmentCannotAssess = !complianceFile;
-  const allGapsResolved = employmentGapEvaluation
-    ? Boolean(gapAnalysisRun && employmentGapEvaluation.is_complete && gapNeedsReviewCount === 0)
-    : !employmentHistoryExists;
-  // declarationsOnFile: true once EditDeclarationsDialog has been saved (dbs_consent_given is always written)
-  const declarationsOnFile = Boolean(
-    employee?.declarations && 'dbs_consent_given' in employee.declarations
-  );
-  // Pre-conditions gate: all data requirements satisfied, ready for admin sign-off
-  // Coverage must be met AND all gaps resolved
-  const employmentReadyForSignOff = Boolean(!employmentCannotAssess && applicationAvailable && declarationsOnFile && employmentHistoryExists && allGapsResolved && coverageMet);
   // Persisted sign-off: only true once an admin has explicitly signed off via the backend
   const employmentSignedOff = Boolean(employee?.employment_review_signed_off);
   const employmentSignedOffBy = employee?.employment_review_signed_off_by_name
     || employee?.employment_review_signed_off_by || null;
   const employmentSignedOffAt = employee?.employment_review_signed_off_at || null;
+  const coverageAssessed = Boolean(employmentCoverage);
+  const gapAnalysisFailed = employee?.gap_analysis_status === 'failed';
+  const employmentGapsCannotAssess = Boolean(
+    employmentHistoryExists && (gapAnalysisFailed || !employmentHistoryGapRow || !gapAnalysisRun || !employmentGapEvaluation)
+  );
+  const allGapsResolved = Boolean(
+    employmentHistoryExists &&
+    gapAnalysisRun &&
+    employmentGapEvaluation &&
+    employmentGapEvaluation.is_complete &&
+    gapNeedsReviewCount === 0
+  );
+  // declarationsOnFile: true once EditDeclarationsDialog has been saved (dbs_consent_given is always written)
+  const declarationsOnFile = Boolean(
+    employee?.declarations && 'dbs_consent_given' in employee.declarations
+  );
+  const declarationsReviewRecorded = Boolean(
+    employee?.declarations_reviewed_at ||
+    employee?.declarations_reviewed_by ||
+    employee?.declarations?.reviewed_at ||
+    employee?.declarations?.reviewed_by ||
+    employee?.declarations?.review_status === 'reviewed' ||
+    employee?.declarations?.review_status === 'signed_off' ||
+    employee?.declarations?.reviewed === true
+  );
+  const declarationsAdequatelyReviewed = Boolean(
+    declarationsOnFile && (declarationsReviewRecorded || employmentSignedOff)
+  );
+  // CV linkage is supporting evidence, not a sign-off prerequisite.
+  // The mandatory chain is: application form + employment history + coverage + gaps + declarations.
+  // A CV may not exist (e.g. entry-level workers) and that already does not block sign-off,
+  // so an unlinked/non-PDF CV should not block either — it is surfaced as a warning instead.
+  const cvLinkBlocksReview = Boolean(cvFileExists && !cvReviewReady && employee?.cv_status !== 'approved');
+  // Pre-conditions gate: all data requirements satisfied, ready for admin sign-off
+  // Coverage must be met AND all gaps resolved
+  const employmentReadyForSignOff = Boolean(
+    !employmentSignedOff &&
+    !employmentCannotAssess &&
+    applicationAvailable &&
+    declarationsAdequatelyReviewed &&
+    employmentHistoryExists &&
+    coverageAssessed &&
+    coverageMet &&
+    !employmentGapsCannotAssess &&
+    allGapsResolved
+  );
   // Final "Complete" requires the persisted sign-off, not just derived conditions
   const employmentComplete = employmentSignedOff;
+  const employmentDecisionState = employmentComplete
+    ? 'Signed off'
+    : employmentCannotAssess || employmentGapsCannotAssess || !coverageAssessed
+      ? 'Cannot assess'
+      : employmentReadyForSignOff
+        ? 'Ready for sign-off'
+        : 'Blocked';
+  const employmentDecisionClasses = employmentDecisionState === 'Signed off'
+    ? {
+        panel: 'border-green-200 bg-green-50',
+        icon: 'text-green-600',
+        text: 'text-green-800',
+        subtext: 'text-green-700',
+      }
+    : employmentDecisionState === 'Ready for sign-off'
+      ? {
+          panel: 'border-blue-200 bg-blue-50',
+          icon: 'text-blue-600',
+          text: 'text-blue-800',
+          subtext: 'text-blue-700',
+        }
+      : employmentDecisionState === 'Cannot assess'
+        ? {
+            panel: 'border-red-200 bg-red-50',
+            icon: 'text-red-600',
+            text: 'text-red-800',
+            subtext: 'text-red-700',
+          }
+        : {
+            panel: 'border-amber-200 bg-amber-50',
+            icon: 'text-amber-600',
+            text: 'text-amber-800',
+            subtext: 'text-amber-700',
+          };
   const employmentStatusBlockers = [
-    employmentCannotAssess  ? 'Cannot assess employment compliance file' : null,
-    !applicationAvailable    ? 'Upload or attach application form' : null,
-    !declarationsOnFile      ? 'Record applicant declarations before sign-off' : null,
-    !employmentHistoryExists ? 'Add or extract employment history' : null,
-    !allGapsResolved         ? 'Review or resolve employment gaps' : null,
-    !employmentCoverage      ? 'Cannot assess 10-year employment coverage' : null,
-    (employmentCoverage && !coverageMet) ? '10-year employment coverage incomplete' : null,
+    employmentCannotAssess ? 'Compliance file unavailable' : null,
+    !applicationAvailable ? 'Application evidence missing' : null,
+    !declarationsAdequatelyReviewed ? 'Declarations not reviewed' : null,
+    !employmentHistoryExists ? 'Employment history missing' : null,
+    !coverageAssessed ? '10-year coverage not assessed' : null,
+    (coverageAssessed && !coverageMet) ? '10-year coverage incomplete' : null,
+    employmentGapsCannotAssess ? 'Cannot assess employment gaps' : null,
+    (!employmentGapsCannotAssess && employmentHistoryExists && !allGapsResolved) ? 'Gaps unresolved' : null,
+  ].filter(Boolean);
+  const employmentStatusWarnings = [
+    cvLinkBlocksReview ? 'CV file exists but is not linked for review — consider uploading a PDF CV or linking the active document' : null,
   ].filter(Boolean);
 
   if (loading) {
@@ -3892,7 +3970,7 @@ export default function EmployeeProfilePage() {
                     }`}>
                       <Calendar className={`h-4 w-4 ${days <= 0 ? 'text-red-600' : 'text-amber-600'}`} />
                       <span className={`text-sm font-medium ${days <= 0 ? 'text-red-700' : 'text-amber-700'}`}>
-                        RTW {days <= 0 ? 'Rejected / action required' : 'Awaiting admin review'}
+                        RTW {days <= 0 ? 'Expired' : `Expires ${days}d`}
                       </span>
                     </div>
                   );
@@ -3910,7 +3988,7 @@ export default function EmployeeProfilePage() {
                     }`}>
                       <Calendar className={`h-4 w-4 ${days <= 0 ? 'text-red-600' : 'text-amber-600'}`} />
                       <span className={`text-sm font-medium ${days <= 0 ? 'text-red-700' : 'text-amber-700'}`}>
-                        DBS {days <= 0 ? 'Rejected / action required' : 'Awaiting admin review'}
+                        DBS {days <= 0 ? 'Overdue' : `Review ${days}d`}
                       </span>
                     </div>
                   );
@@ -4747,7 +4825,7 @@ export default function EmployeeProfilePage() {
                             const statusLabel = isVerified ? 'Verified'
                               : isRejected ? 'Rejected / action required'
                               : isAwaiting ? 'Submitted, not reviewed'
-                              : isInProgress ? 'Awaiting admin review'
+                              : isInProgress ? 'Worker in progress'
                               : 'Missing';
 
                             const statusColor = isVerified ? 'bg-green-100 text-green-700'
@@ -4877,7 +4955,7 @@ export default function EmployeeProfilePage() {
                                             className={isInProgress ? 'bg-amber-50 text-amber-700 text-xs' : 'bg-slate-100 text-slate-600 text-xs'}
                                             data-testid={`form-status-${form.key}`}
                                           >
-                                            {isInProgress ? 'Awaiting admin review' : 'Missing'}
+                                            {isInProgress ? 'Worker in progress' : 'Missing'}
                                           </Badge>
                                         )}
 
@@ -4950,14 +5028,14 @@ export default function EmployeeProfilePage() {
         {/* Employment history + gap verification + declarations */}
         <TabsContent value="employment">
           <div className="space-y-6">
-            <div className={`rounded-xl border p-4 ${employmentComplete ? 'border-green-200 bg-green-50' : 'border-amber-200 bg-amber-50'}`}>
+            <div className={`rounded-xl border p-4 ${employmentDecisionClasses.panel}`}>
               <div className="flex items-start gap-3">
-                <div className={`mt-0.5 ${employmentComplete ? 'text-green-600' : 'text-amber-600'}`}>
-                  {employmentComplete ? <CheckCircle className="h-5 w-5" /> : <AlertTriangle className="h-5 w-5" />}
+                <div className={`mt-0.5 ${employmentDecisionClasses.icon}`}>
+                  {employmentComplete || employmentReadyForSignOff ? <CheckCircle className="h-5 w-5" /> : <AlertTriangle className="h-5 w-5" />}
                 </div>
                 <div className="flex-1">
-                  <p className={`font-medium ${employmentComplete ? 'text-green-800' : 'text-amber-800'}`}>
-                    Employment Status: {employmentComplete ? 'Signed off' : employmentCannotAssess ? 'Cannot assess' : 'Rejected / action required'}
+                  <p className={`font-medium ${employmentDecisionClasses.text}`}>
+                    Employment Status: {employmentDecisionState}
                   </p>
                   {employmentComplete && (
                     <p className="mt-1 text-xs text-green-700">
@@ -4978,13 +5056,28 @@ export default function EmployeeProfilePage() {
                           : <CheckCircle className="h-4 w-4 mr-1" />}
                         Sign off employment review
                       </Button>
-                      <p className="text-xs text-amber-700">Confirms application, declarations, and employment history have been reviewed.</p>
+                      <p className="text-xs text-blue-700">Confirms application evidence, declarations, coverage, and gap decisions have been reviewed.</p>
                     </div>
                   )}
                   {!employmentReadyForSignOff && !employmentSignedOff && employmentStatusBlockers.length > 0 && (
-                    <p className="mt-1 text-sm text-amber-700">
-                      Blockers: {employmentStatusBlockers.join(' · ')}
-                    </p>
+                    <div className={`mt-2 text-sm ${employmentDecisionClasses.subtext}`}>
+                      <p className="font-medium">Blockers</p>
+                      <ul className="mt-1 list-disc space-y-1 pl-5">
+                        {employmentStatusBlockers.map((blocker) => (
+                          <li key={blocker}>{blocker}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {!employmentSignedOff && employmentStatusWarnings.length > 0 && (
+                    <div className="mt-2 text-sm text-amber-700">
+                      <p className="font-medium">Attention</p>
+                      <ul className="mt-1 list-disc space-y-1 pl-5">
+                        {employmentStatusWarnings.map((warning) => (
+                          <li key={warning}>{warning}</li>
+                        ))}
+                      </ul>
+                    </div>
                   )}
                 </div>
               </div>
@@ -5005,8 +5098,8 @@ export default function EmployeeProfilePage() {
               {employmentGapEvaluation?.is_complete !== undefined && (
                 <div className="rounded-xl border border-[#E4E8EB] bg-white p-3 shadow-sm">
                   <p className="text-xs text-text-muted">10-year history</p>
-                  <Badge variant="outline" className={`mt-2 ${gapAnalysisRun && employmentGapEvaluation.is_complete ? 'bg-green-100 text-green-700 border-green-200' : 'bg-amber-100 text-amber-700 border-amber-200'}`}>
-                    {gapAnalysisRun && employmentGapEvaluation.is_complete ? 'Reviewed' : 'Awaiting admin review'}
+                  <Badge variant="outline" className={`mt-2 ${gapAnalysisRun && employmentGapEvaluation.is_complete && coverageMet ? 'bg-green-100 text-green-700 border-green-200' : 'bg-amber-100 text-amber-700 border-amber-200'}`}>
+                    {gapAnalysisRun && employmentGapEvaluation.is_complete && coverageMet ? 'Reviewed' : 'Awaiting admin review'}
                   </Badge>
                 </div>
               )}
@@ -5021,7 +5114,7 @@ export default function EmployeeProfilePage() {
               <div className="rounded-xl border border-[#E4E8EB] bg-white p-3 shadow-sm">
                 <p className="text-xs text-text-muted">Blockers</p>
                 <p className="mt-2 text-sm font-medium text-gray-800">
-                  {employmentCannotAssess ? 'Cannot assess' : employmentStatusBlockers.length}
+                  {employmentDecisionState === 'Cannot assess' ? 'Cannot assess' : employmentStatusBlockers.length}
                 </p>
               </div>
             </div>
@@ -5053,6 +5146,21 @@ export default function EmployeeProfilePage() {
                       <p className="text-xs text-slate-500">
                         {employmentCoverage.total_days_covered} of {employmentCoverage.total_days_required} days covered
                         {employmentCoverage.earliest_entry_date && ` · Earliest entry: ${new Date(employmentCoverage.earliest_entry_date + 'T00:00:00Z').toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })}`}
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+            {!employmentCoverage && employmentHistoryExists && (
+              <Card className="border-red-200 bg-red-50 shadow-sm">
+                <CardContent className="py-4">
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-medium text-red-800">10-year coverage not assessed</p>
+                      <p className="mt-1 text-xs text-red-700">
+                        Employment history exists, but the profile does not currently prove the required 10-year coverage period.
                       </p>
                     </div>
                   </div>
@@ -5144,6 +5252,22 @@ export default function EmployeeProfilePage() {
                           <p className="text-xs text-gray-600 mt-1">
                             Includes criminal/health declarations, DBS consent, right-to-work restrictions, and professional declarations.
                           </p>
+                          <Badge
+                            variant="outline"
+                            className={`mt-2 ${
+                              declarationsAdequatelyReviewed
+                                ? 'bg-green-100 text-green-700 border-green-200'
+                                : declarationsOnFile
+                                  ? 'bg-amber-100 text-amber-700 border-amber-200'
+                                  : 'bg-gray-100 text-gray-600 border-gray-200'
+                            }`}
+                          >
+                            {declarationsAdequatelyReviewed
+                              ? 'Reviewed'
+                              : declarationsOnFile
+                                ? 'Submitted, not reviewed'
+                                : 'Missing'}
+                          </Badge>
                         </div>
                         {!isAuditor() && (
                           <Button
@@ -5329,26 +5453,14 @@ export default function EmployeeProfilePage() {
                 </div>
               )}
               
-              {/* Gap analysis empty state */}
-              {employmentHistoryExists && employmentHistoryGapRow && !gapAnalysisRun && employee?.gap_analysis_status !== 'failed' && (
-                <div className="mb-4 p-4 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-3">
-                  <AlertTriangle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
-                  <div>
-                    <p className="font-medium text-amber-800">Gap analysis not yet run</p>
-                    <p className="text-sm text-amber-600 mt-1">10-year employment gap analysis has not been generated for this profile. Use "Review CV" in the CV section above to trigger gap detection, or the analysis may not have been run yet.</p>
-                  </div>
-                </div>
-              )}
-
-              {/* Gap analysis failed alert */}
-              {employee?.gap_analysis_status === 'failed' && (
+              {/* Gap analysis unavailable state */}
+              {employmentGapsCannotAssess && (
                 <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
                   <AlertCircle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
                   <div>
-                    <p className="font-medium text-red-800">Gap analysis failed</p>
+                    <p className="font-medium text-red-800">Cannot assess employment gaps</p>
                     <p className="text-sm text-red-600 mt-1">
-                      Automatic gap detection encountered an error during application submission.
-                      The "No gaps detected" status below may be inaccurate. Use "Review CV" to re-run gap analysis.
+                      Employment gap analysis is failed, unavailable, or incomplete for this profile. Use "Review CV" to run gap detection before sign-off.
                     </p>
                     {employee?.gap_analysis_error && (
                       <p className="text-xs text-red-500 mt-1 font-mono">{employee.gap_analysis_error}</p>
@@ -5357,12 +5469,21 @@ export default function EmployeeProfilePage() {
                 </div>
               )}
 
-              {employmentHistoryExists && employmentHistoryGapRow && !employmentHistoryGapRow.has_gaps && employmentGapEvaluation && gapAnalysisRun && (
+              {employmentHistoryExists && employmentHistoryGapRow && !employmentHistoryGapRow.has_gaps && employmentGapEvaluation && gapAnalysisRun && coverageMet && (
                 <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg flex items-start gap-3">
                   <CheckCircle className="h-5 w-5 text-green-600 flex-shrink-0 mt-0.5" />
                   <div>
-                    <p className="font-medium text-green-800">{employmentHistoryGapRow.status_summary || 'No gaps detected within submitted history'}</p>
-                    <p className="text-sm text-green-600 mt-1">Gap analysis has run for the current employment history. Verify 10-year coverage separately.</p>
+                    <p className="font-medium text-green-800">{employmentHistoryGapRow.status_summary || 'No unresolved gaps and 10-year coverage confirmed'}</p>
+                    <p className="text-sm text-green-600 mt-1">Gap analysis has run and the employment history covers the required 10-year period.</p>
+                  </div>
+                </div>
+              )}
+              {employmentHistoryExists && employmentHistoryGapRow && !employmentHistoryGapRow.has_gaps && employmentGapEvaluation && gapAnalysisRun && !coverageMet && (
+                <div className="mb-4 p-4 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-3">
+                  <AlertTriangle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-medium text-amber-800">No gaps detected, but 10-year coverage is incomplete</p>
+                    <p className="text-sm text-amber-600 mt-1">No gaps were detected in the submitted history, but this is still blocked until the required 10-year coverage is confirmed.</p>
                   </div>
                 </div>
               )}

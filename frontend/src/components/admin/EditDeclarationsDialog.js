@@ -26,7 +26,7 @@ export default function EditDeclarationsDialog({
   currentData,
   onSuccess
 }) {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
   const [formData, setFormData] = useState({
     // Criminal Convictions
@@ -81,10 +81,19 @@ export default function EditDeclarationsDialog({
   const handleSave = async (reason) => {
     setIsLoading(true);
     try {
+      const reviewedAt = new Date().toISOString();
+      const reviewedDeclarations = {
+        ...formData,
+        reviewed: true,
+        reviewed_at: reviewedAt,
+        review_status: 'reviewed',
+        reviewed_by: user?.user_id || user?.id || user?.email || null,
+        reviewed_by_name: user?.name || user?.email || null
+      };
       await axios.put(
         `${API}/employees/${employeeId}/declarations`,
         {
-          declarations: formData,
+          declarations: reviewedDeclarations,
           edit_reason: reason
         },
         { headers: { Authorization: `Bearer ${token}` } }

@@ -61,7 +61,7 @@ const COMPETENCY_TYPES = [
 
 // Status options
 const STATUS_OPTIONS = [
-  { value: "competent", label: "Verified", color: "bg-green-100 text-green-700 border-green-200" },
+  { value: "competent", label: "Assessed competent", color: "bg-green-100 text-green-700 border-green-200" },
   { value: "not_competent", label: "Rejected / action required", color: "bg-red-100 text-red-700 border-red-200" },
   { value: "training_required", label: "Awaiting admin review", color: "bg-amber-100 text-amber-700 border-amber-200" },
   { value: "scheduled", label: "Awaiting admin review", color: "bg-blue-100 text-blue-700 border-blue-200" },
@@ -509,7 +509,7 @@ export default function CompetencyAssessmentsPanel({ employeeId, employeeName, o
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
             <div className="p-3 bg-green-50 rounded-lg text-center border border-green-100">
               <p className="text-2xl font-bold text-green-700">{competentCount}</p>
-              <p className="text-xs text-green-600">Verified</p>
+              <p className="text-xs text-green-600">Assessed competent</p>
             </div>
             <div className="p-3 bg-amber-50 rounded-lg text-center border border-amber-100">
               <p className="text-2xl font-bold text-amber-700">{trainingRequiredCount}</p>
@@ -524,21 +524,21 @@ export default function CompetencyAssessmentsPanel({ employeeId, employeeName, o
               reviewDueSoon > 0 ? "bg-orange-50 border-orange-100" : "bg-gray-50 border-gray-100"
             )}>
               <p className={cn("text-2xl font-bold", reviewDueSoon > 0 ? "text-orange-700" : "text-gray-500")}>{reviewDueSoon}</p>
-              <p className={cn("text-xs", reviewDueSoon > 0 ? "text-orange-600" : "text-gray-500")}>Awaiting admin review</p>
+              <p className={cn("text-xs", reviewDueSoon > 0 ? "text-orange-600" : "text-gray-500")}>Due soon</p>
             </div>
             <div className={cn(
               "p-3 rounded-lg text-center border",
               overdueCount > 0 ? "bg-red-50 border-red-100" : "bg-gray-50 border-gray-100"
             )}>
               <p className={cn("text-2xl font-bold", overdueCount > 0 ? "text-red-700" : "text-gray-500")}>{overdueCount}</p>
-              <p className={cn("text-xs", overdueCount > 0 ? "text-red-600" : "text-gray-500")}>Rejected / action required</p>
+              <p className={cn("text-xs", overdueCount > 0 ? "text-red-600" : "text-gray-500")}>Overdue</p>
             </div>
           </div>
           <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
             <span className="font-medium">Competency blockers:</span> {notCompetentCount + overdueCount} &nbsp;|&nbsp;
             <span className="font-medium">Pending reviews:</span> {pendingReviewCount} &nbsp;|&nbsp;
             <span className="font-medium">Cannot assess:</span> 0 &nbsp;|&nbsp;
-            <span className="font-medium">Verified:</span> {competentCount}
+            <span className="font-medium">Assessed competent:</span> {competentCount}
           </div>
         </CardContent>
       </Card>
@@ -605,7 +605,7 @@ export default function CompetencyAssessmentsPanel({ employeeId, employeeName, o
                             <Badge className="bg-red-100 text-red-700 text-[10px] px-1">Overdue</Badge>
                           )}
                           {dueSoon && !overdue && (
-                            <Badge className="bg-amber-100 text-amber-700 text-[10px] px-1">Awaiting admin review</Badge>
+                            <Badge className="bg-amber-100 text-amber-700 text-[10px] px-1">Due soon</Badge>
                           )}
                         </div>
                       </TableCell>

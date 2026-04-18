@@ -4699,6 +4699,7 @@ export default function EmployeeProfilePage() {
                   { key: 'staff_health_questionnaire', name: 'Staff Health Questionnaire', description: 'Medical history and health declarations', prefill: true, sensitive: true },
                   { key: 'staff_personal_info', name: 'Staff Personal Information', description: 'Contact details, NI number, bank details', prefill: true },
                   { key: 'hmrc_starter_checklist', name: 'HMRC Starter Checklist', description: 'Tax code and employment status', sensitive: true },
+                  { key: 'equal_opportunities', name: 'Equal Opportunities Monitoring', description: 'Equality & diversity monitoring (optional, non-blocking)', sensitive: true, optional: true },
                   { key: 'emergency_contacts', name: 'Emergency Contacts', description: 'Next of kin and emergency contact details', prefill: true },
                 ]
               },
@@ -4707,7 +4708,7 @@ export default function EmployeeProfilePage() {
                 sensitive: true,
                 forms: [
                   { key: 'conflict_of_interest', name: 'Conflict of Interest Declaration', description: 'Secondary employment, relationships or financial interests (NHS standard)', sensitive: true },
-                  { key: 'fit_proper_persons', name: 'Fit and Proper Persons Declaration', description: 'CQC Regulation 5 — managers and directors only', sensitive: true },
+                  ...(/manager|director/i.test(employee?.role || '') ? [{ key: 'fit_proper_persons', name: 'Fit and Proper Persons Declaration', description: 'CQC Regulation 5 — managers and directors only', sensitive: true }] : []),
                 ]
               },
               {

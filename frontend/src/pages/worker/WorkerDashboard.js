@@ -175,7 +175,7 @@ function EmploymentGapsSection() {
   };
 
   const coveragePct = coverage?.coverage_percent ?? 0;
-  const coverageMet = coverage?.meets_10_year_requirement ?? false;
+  const coverageMet = (coverage?.meets_10_year_requirement ?? false) && coveragePct > 0;
 
   return (
     <div className="space-y-4">

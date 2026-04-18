@@ -2574,12 +2574,11 @@ async def get_worker_employment_gaps(worker: dict = Depends(get_current_worker))
     from employment_gap_engine import evaluate_gaps_compliance, compute_coverage_summary
     evaluation = evaluate_gaps_compliance(gap_records)
 
-    # Compute 10-year coverage summary
+    # Compute 10-year coverage summary — always compute fresh so stale
+    # cached values (e.g. meets_10_year_requirement written before the
+    # total_covered > 0 guard) don't produce misleading badges.
     employment_history = (employee or {}).get("employment_history", [])
-    # Use stored coverage if available, otherwise compute fresh
-    coverage = (employee or {}).get("employment_coverage")
-    if not coverage:
-        coverage = compute_coverage_summary(employment_history)
+    coverage = compute_coverage_summary(employment_history)
 
     # Lazily assign stable IDs to any legacy entries without one
     if _ensure_entry_ids(employment_history):

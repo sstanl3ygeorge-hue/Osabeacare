@@ -15,7 +15,7 @@ import EvidenceReviewDialog from './EvidenceReviewDialog';
 import VerificationStampDialog from './VerificationStampDialog';
 import VerificationChecklistModal from './VerificationChecklistModal';
 import AmendmentRequestDialog from './AmendmentRequestDialog';
-import QuickVerifyStampDialog from './QuickVerifyStampDialog';
+import EvidenceReviewViewerDialog from './EvidenceReviewViewerDialog';
 import OnlineCheckVerifyDialog from './OnlineCheckVerifyDialog';
 import {
   Dialog,
@@ -633,7 +633,7 @@ export default function UploadRequirementCard({
                         )}
                         
                         {/* UNIFIED Verify & Stamp button - For Identity and PoA (simple checks) */}
-                        {/* Only show if NOT already verified/stamped */}
+                        {/* Opens in-app viewer to GUARANTEE admin has seen the document */}
                         {!isAuditor && !file.verification_stamp && !file.verified && file.status !== 'verified' && file.status !== 'rejected' && (key === 'identity' || key === 'proof_of_address') && (
                           <Button
                             size="sm"
@@ -644,11 +644,11 @@ export default function UploadRequirementCard({
                               file,
                               aiValidation: file.ai_extraction?.date_validation || null
                             })}
-                            title="Verify document and apply stamp"
+                            title="View, verify and stamp document"
                             data-testid={`${key}-verify-stamp-${file.file_id || file.id}`}
                           >
-                            <CheckCircle className="h-3 w-3 mr-1" />
-                            Verify & Stamp
+                            <Eye className="h-3 w-3 mr-1" />
+                            View & Approve
                           </Button>
                         )}
                         
@@ -2075,8 +2075,8 @@ export default function UploadRequirementCard({
         }}
       />
 
-      {/* NEW: Quick Verify & Stamp Dialog (Identity & PoA only) */}
-      <QuickVerifyStampDialog
+      {/* NEW: Evidence Review Viewer Dialog — in-app viewer + verify & stamp (Identity & PoA) */}
+      <EvidenceReviewViewerDialog
         isOpen={quickVerifyDialog.isOpen}
         onClose={() => setQuickVerifyDialog({ isOpen: false, file: null, aiValidation: null })}
         file={quickVerifyDialog.file}

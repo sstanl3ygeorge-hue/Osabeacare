@@ -124,9 +124,8 @@ export default function OnlineCheckVerifyDialog({
   onVerificationComplete,
 }) {
   const config = CONFIG[requirementType];
-  if (!config) return null;
 
-  const IconComponent = config.icon;
+  const IconComponent = config?.icon;
   const fileId = file?.file_id || file?.id;
   const fileName = file?.file_name || file?.name || file?.original_filename || 'Document';
 
@@ -155,6 +154,9 @@ export default function OnlineCheckVerifyDialog({
     resultAccurate: false,
     willStampBoth: false,
   });
+
+  // Early return AFTER all hooks
+  if (!config) return null;
 
   // ── Validation ───────────────────────────────────────────────────────────
   const reviewValid = reviewChecks.fileViewed && reviewChecks.legible && reviewChecks.documentAcceptable;

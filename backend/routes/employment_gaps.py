@@ -662,6 +662,8 @@ async def detect_employment_gaps(
     """
     Re-run gap detection on employee's employment history.
     Creates gap records for any new gaps found.
+    Merges applicant-supplied gap explanations if present.
+    Clears any prior gap_analysis_error state.
     """
     db = get_db()
     
@@ -672,6 +674,15 @@ async def detect_employment_gaps(
     employment_history = employee.get("employment_history", [])
     
     if not employment_history:
+        # Still clear error state so UI doesn't stay stuck
+        await db.employees.update_one(
+            {"id": employee_id},
+            {"$set": {
+                "gap_analysis_status": "completed",
+            }, "$unset": {
+                "gap_analysis_error": "",
+            }}
+        )
         return {
             "success": True,
             "message": "No employment history to analyze",
@@ -684,6 +695,19 @@ async def detect_employment_gaps(
     
     now = datetime.now(timezone.utc).isoformat()
     new_gaps = 0
+
+    # Merge applicant-supplied gap explanations (same logic as application submit)
+    applicant_explanations = employee.get("gap_explanations", [])
+    expl_by_id = {e.get("gap_id"): e for e in applicant_explanations if e.get("gap_id")}
+    for gap in detected_gaps:
+        match = expl_by_id.get(gap.get("gap_id"))
+        if match and match.get("explanation"):
+            gap["explanation"] = match["explanation"]
+            gap["reason_type"] = match.get("reason_type")
+            gap["explanation_provided_at"] = now
+            gap["explained_by"] = "applicant"
+            gap["explanation_source"] = "application_form"
+            gap["status"] = "explained"
     
     for gap in detected_gaps:
         normalized_detected_gap = _normalize_gap_record({
@@ -691,31 +715,51 @@ async def detect_employment_gaps(
             "id": gap.get("id") or gap.get("gap_id") or f"gap_{uuid.uuid4().hex[:12]}",
         })
 
-        # Check if gap already exists
+        # Check if gap already exists (by date range or gap_id)
         existing = await db.employment_gaps.find_one({
             "employee_id": employee_id,
-            "gap_start": normalized_detected_gap.get("gap_start"),
-            "gap_end": normalized_detected_gap.get("gap_end")
+            "$or": [
+                {"gap_start": normalized_detected_gap.get("gap_start"), "gap_end": normalized_detected_gap.get("gap_end")},
+                {"gap_id": normalized_detected_gap.get("gap_id")},
+            ]
         })
         
-        if not existing:
+        if existing:
+            # Update explanation fields if applicant provided one and existing is still pending
+            if normalized_detected_gap.get("explanation") and existing.get("status") in ("pending", None):
+                await db.employment_gaps.update_one(
+                    {"_id": existing["_id"]},
+                    {"$set": {
+                        "explanation": normalized_detected_gap["explanation"],
+                        "reason_type": normalized_detected_gap.get("reason_type"),
+                        "explanation_provided_at": now,
+                        "explained_by": "applicant",
+                        "explanation_source": "application_form",
+                        "status": "explained",
+                        **_build_gap_compatibility_fields("explained"),
+                    }}
+                )
+        else:
             gap_record = {
                 "employee_id": employee_id,
                 **normalized_detected_gap,
-                "status": "pending",
-                **_build_gap_compatibility_fields("pending"),
+                **_build_gap_compatibility_fields(normalized_detected_gap.get("status", "pending")),
                 "detected_at": now
             }
             await db.employment_gaps.insert_one(gap_record)
             new_gaps += 1
 
-    # Persist coverage summary on employee doc
+    # Persist coverage summary + clear failure state
     await db.employees.update_one(
         {"id": employee_id},
         {"$set": {
             "employment_coverage": coverage,
             "employment_gaps_detected_at": now,
             "has_employment_gaps": len(detected_gaps) > 0,
+            "employment_gaps": detected_gaps,
+            "gap_analysis_status": "completed",
+        }, "$unset": {
+            "gap_analysis_error": "",
         }}
     )
     

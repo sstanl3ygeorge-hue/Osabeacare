@@ -316,6 +316,7 @@ export default function EmployeeProfilePage() {
   const [cvRejectDialogOpen, setCvRejectDialogOpen] = useState(false);
   const [cvRejectReason, setCvRejectReason] = useState('');
   const [cvRejectLoading, setCvRejectLoading] = useState(false);
+  const [gapRerunLoading, setGapRerunLoading] = useState(false);
 
   // Inline document viewer state (replaces window.open / new-tab PDF viewing)
   const [inlineViewerOpen, setInlineViewerOpen] = useState(false);
@@ -5583,13 +5584,42 @@ export default function EmployeeProfilePage() {
               {employmentGapsCannotAssess && (
                 <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
                   <AlertCircle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
-                  <div>
+                  <div className="flex-1">
                     <p className="font-medium text-red-800">Cannot assess employment gaps</p>
                     <p className="text-sm text-red-600 mt-1">
-                      Employment gap analysis is failed, unavailable, or incomplete for this profile. Use "Review CV" to run gap detection before sign-off.
+                      {gapAnalysisFailed
+                        ? 'Gap analysis encountered an error during processing. Click "Re-run Gap Analysis" to retry.'
+                        : 'Employment gap analysis has not been run. Use "Review CV" to extract history, or click "Re-run Gap Analysis" if history is already on file.'}
                     </p>
                     {employee?.gap_analysis_error && (
                       <p className="text-xs text-red-500 mt-1 font-mono">{employee.gap_analysis_error}</p>
+                    )}
+                    {!isAuditor() && employmentHistoryExists && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="mt-3 border-red-300 text-red-700 hover:bg-red-100"
+                        disabled={gapRerunLoading}
+                        onClick={async () => {
+                          setGapRerunLoading(true);
+                          try {
+                            await axios.post(`${API}/employees/${employeeId}/detect-employment-gaps`, {}, {
+                              headers: { Authorization: `Bearer ${token}` }
+                            });
+                            toast.success('Gap analysis completed — refreshing…');
+                            await Promise.all([fetchEmployee(), fetchCompliance(), fetchComplianceFile()]);
+                          } catch (err) {
+                            toast.error(err?.response?.data?.detail || 'Gap analysis failed');
+                          } finally {
+                            setGapRerunLoading(false);
+                          }
+                        }}
+                      >
+                        {gapRerunLoading
+                          ? <Loader2 className="h-4 w-4 animate-spin mr-1" />
+                          : <RefreshCw className="h-4 w-4 mr-1" />}
+                        Re-run Gap Analysis
+                      </Button>
                     )}
                   </div>
                 </div>

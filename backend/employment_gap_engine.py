@@ -424,10 +424,8 @@ def detect_employment_gaps_with_coverage(
 
     valid_jobs = [j for j in (employment_history or []) if j.get("start_date")]
     if valid_jobs:
-        earliest_start = min(
-            (parse_employment_date(j["start_date"]) for j in valid_jobs),
-            default=None,
-        )
+        parsed_starts = [d for d in (parse_employment_date(j["start_date"]) for j in valid_jobs) if d is not None]
+        earliest_start = min(parsed_starts) if parsed_starts else None
         if earliest_start and (earliest_start - coverage_start).days >= MIN_GAP_DAYS:
             gap_days = (earliest_start - coverage_start).days
             gap_months = round(gap_days / 30, 1)

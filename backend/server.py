@@ -24602,14 +24602,47 @@ async def build_training_matrix_read_model():
     now = datetime.now(timezone.utc)
     columns = _training_matrix_columns()
 
+    active_record_query = {
+        "employee_id": {"$exists": True, "$nin": [None, ""]},
+        "record_status": {"$nin": ["deleted", "superseded"]},
+    }
+    all_active_records = await db.training_records.find(
+        active_record_query,
+        {"_id": 0},
+    ).to_list(5000)
+    record_employee_ids = {
+        record.get("employee_id")
+        for record in all_active_records
+        if record.get("employee_id")
+    }
+
+    matrix_statuses = [
+        "active",
+        "active_employee",
+        "onboarding",
+        "approved_for_onboarding",
+        "new",
+        "screening",
+        "interview",
+        "compliance_review",
+    ]
     employees = await db.employees.find(
-        {"status": {"$in": ["active", "onboarding"]}},
+        {
+            "status": {"$nin": ["archived", "deleted", "inactive"]},
+            "$or": [
+                {"status": {"$in": matrix_statuses}},
+                {"id": {"$in": list(record_employee_ids)}},
+            ],
+        },
         {
             "_id": 0,
             "id": 1,
             "first_name": 1,
             "last_name": 1,
             "employee_code": 1,
+            "applicant_reference": 1,
+            "person_stage": 1,
+            "status": 1,
             "role": 1,
             "start_date": 1,
             "probation_end_date": 1,
@@ -24618,15 +24651,11 @@ async def build_training_matrix_read_model():
     ).to_list(500)
 
     employee_ids = [emp.get("id") for emp in employees if emp.get("id")]
-    records = []
-    if employee_ids:
-        records = await db.training_records.find(
-            {
-                "employee_id": {"$in": employee_ids},
-                "record_status": {"$nin": ["deleted", "superseded"]},
-            },
-            {"_id": 0},
-        ).to_list(5000)
+    employee_id_set = set(employee_ids)
+    records = [
+        record for record in all_active_records
+        if record.get("employee_id") in employee_id_set
+    ]
 
     records_by_employee = {}
     for record in records:
@@ -24685,9 +24714,12 @@ async def build_training_matrix_read_model():
                     training_lookup[key] = {**record, "_score": score}
 
         row = {
+            "person_key": emp_id,
             "employee_id": emp_id,
-            "employee_code": emp.get("employee_code", ""),
-            "name": f"{emp.get('first_name', '')} {emp.get('last_name', '')}".strip(),
+            "employee_code": emp.get("employee_code") or emp.get("applicant_reference") or "",
+            "name": f"{emp.get('first_name', '')} {emp.get('last_name', '')}".strip() or emp.get("employee_code") or emp.get("applicant_reference") or emp_id,
+            "person_stage": emp.get("person_stage"),
+            "employee_status": emp.get("status"),
             "role": emp.get("role", ""),
             "start_date": _format_training_matrix_date(emp.get("start_date")),
             "probation_review": _format_training_matrix_date(emp.get("probation_end_date")),
@@ -24780,10 +24812,10 @@ async def build_training_matrix_read_model():
         rows.append(row)
 
     column_percentages = {
-        training_id: round((stats["in_date"] / stats["total"]) * 100) if stats["total"] else 100
+        training_id: round((stats["in_date"] / stats["total"]) * 100) if stats["total"] else 0
         for training_id, stats in column_stats.items()
     }
-    average_percentage = round(sum(column_percentages.values()) / len(column_percentages)) if column_percentages else 100
+    average_percentage = round(sum(column_percentages.values()) / len(column_percentages)) if column_percentages else 0
 
     return {
         "summary": summary,
@@ -24792,7 +24824,8 @@ async def build_training_matrix_read_model():
         "column_stats": column_stats,
         "column_percentages": column_percentages,
         "average_percentage": average_percentage,
-        "employee_status_filter": ["active", "onboarding"],
+        "employee_status_filter": matrix_statuses,
+        "included_record_employee_count": len(record_employee_ids),
     }
 
 @api_router.get("/training-matrix/export")

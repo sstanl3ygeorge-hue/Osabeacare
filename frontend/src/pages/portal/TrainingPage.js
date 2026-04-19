@@ -268,7 +268,7 @@ export default function TrainingPage() {
 
   const getEmployeeName = (employeeId) => {
     const emp = employees.find(e => e.id === employeeId);
-    return emp ? `${emp.first_name} ${emp.last_name}` : 'Unknown';
+    return emp ? `${emp.first_name} ${emp.last_name}` : null;
   };
 
   // Export training matrix - uses existing backend endpoint
@@ -690,7 +690,9 @@ export default function TrainingPage() {
                     
                     return (
                       <tr key={record.id} className="border-b border-[#E4E8EB] hover:bg-[#F8FAFA]" data-testid={`training-row-${record.id}`}>
-                        <td className="p-4 font-medium text-text-primary">{getEmployeeName(record.employee_id)}</td>
+                        <td className="p-4 font-medium text-text-primary">
+                          {record.employee_name || getEmployeeName(record.employee_id) || record.employee_id || 'Unknown'}
+                        </td>
                         <td className="p-4 text-text-primary">
                           <div>
                             {record.training_name}

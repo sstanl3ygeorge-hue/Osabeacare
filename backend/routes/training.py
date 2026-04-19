@@ -51,6 +51,10 @@ class TrainingRecordCreate(BaseModel):
 class TrainingRecordResponse(BaseModel):
     id: str
     employee_id: Optional[str] = None
+    person_key: Optional[str] = None
+    employee_name: Optional[str] = None
+    person_stage: Optional[str] = None
+    employee_status: Optional[str] = None
     requirement_id: Optional[str] = None
     training_name: Optional[str] = None
     training_type: Optional[str] = None
@@ -163,6 +167,33 @@ async def get_training_records(
         query["record_status"] = {"$ne": "superseded"}
     
     records = await db.training_records.find(query, {"_id": 0}).to_list(1000)
+
+    employee_ids = sorted({r.get("employee_id") for r in records if r.get("employee_id")})
+    employees_by_id = {}
+    if employee_ids:
+        employees = await db.employees.find(
+            {"id": {"$in": employee_ids}},
+            {
+                "_id": 0,
+                "id": 1,
+                "first_name": 1,
+                "last_name": 1,
+                "employee_code": 1,
+                "applicant_reference": 1,
+                "person_stage": 1,
+                "status": 1,
+            },
+        ).to_list(len(employee_ids))
+        employees_by_id = {emp.get("id"): emp for emp in employees}
+
+    for record in records:
+        emp = employees_by_id.get(record.get("employee_id"))
+        if emp:
+            name = f"{emp.get('first_name', '')} {emp.get('last_name', '')}".strip()
+            record["employee_name"] = name or emp.get("employee_code") or emp.get("applicant_reference") or record.get("employee_id")
+            record["person_key"] = emp.get("id")
+            record["person_stage"] = emp.get("person_stage")
+            record["employee_status"] = emp.get("status")
     
     return [TrainingRecordResponse(**r) for r in records]
 

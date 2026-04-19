@@ -798,7 +798,8 @@ async def signoff_induction_item(
 
     item_found = False
     for item in checklist["items"]:
-        if item.get("name") == item_name:
+        # Match by canonical id first (robust), then fall back to name string (legacy)
+        if item.get("id") == item_code or item.get("name") == item_name:
             item["status"] = "completed"
             item["completed_at"] = now
             item["completed_by"] = user["user_id"]
@@ -810,7 +811,28 @@ async def signoff_induction_item(
             break
 
     if not item_found:
-        raise HTTPException(status_code=404, detail=f"Item '{item_name}' not in checklist.")
+        # Item missing from persisted checklist (legacy record or partially-initialised checklist).
+        # Upsert the item rather than hard-failing — mirrors the behaviour of the generic update route.
+        logger.warning(
+            "signoff_induction_item: item_code=%r not found in checklist for employee=%r; upserting.",
+            item_code, employee_id,
+        )
+        from induction_definitions import _STANDARDS_BY_ID
+        std = _STANDARDS_BY_ID.get(item_code, {})
+        new_item = {
+            "id": item_code,
+            "name": item_name,
+            "mandatory": std.get("mandatory", True),
+            "order": std.get("num"),
+            "status": "completed",
+            "completed_at": now,
+            "completed_by": user["user_id"],
+            "completed_by_name": admin_name,
+            "notes": payload.notes,
+        }
+        if completion_type == "manual" and shadow_shift_details is not None:
+            new_item["shadow_shift_signoff"] = shadow_shift_details
+        checklist["items"].append(new_item)
 
     # Recalculate overall_status
     mandatory_completed = sum(1 for i in checklist["items"] if i.get("mandatory") and i["status"] == "completed")

@@ -48,29 +48,49 @@ function FormField({ field, value, onChange, disabled }) {
     'focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 ' +
     (disabled ? 'bg-slate-50 cursor-not-allowed opacity-70' : '');
 
+  // Soft word-count feedback for text/textarea fields
+  const wordCount = (typeof value === 'string') ? value.trim().split(/\s+/).filter(Boolean).length : 0;
+  const MIN_WORDS = 20;
+  const isTooShort = !disabled && typeof value === 'string' && value.trim().length > 0 && wordCount < MIN_WORDS;
+
   if (field.type === 'textarea') {
     return (
-      <textarea
-        className={baseClass}
-        rows={4}
-        disabled={disabled}
-        placeholder={field.hint || ''}
-        value={value || ''}
-        onChange={e => onChange(field.key, e.target.value)}
-      />
+      <div>
+        <textarea
+          className={baseClass}
+          rows={4}
+          maxLength={5000}
+          disabled={disabled}
+          placeholder={field.hint || ''}
+          value={value || ''}
+          onChange={e => onChange(field.key, e.target.value)}
+        />
+        <div className="flex items-center justify-between mt-1">
+          <span className="text-xs text-slate-400">Recommended: 2–4 sentences</span>
+          {isTooShort && (
+            <span className="text-xs text-amber-600">Try to add a little more detail</span>
+          )}
+        </div>
+      </div>
     );
   }
 
   if (field.type === 'text') {
     return (
-      <input
-        type="text"
-        className={baseClass}
-        disabled={disabled}
-        placeholder={field.hint || ''}
-        value={value || ''}
-        onChange={e => onChange(field.key, e.target.value)}
-      />
+      <div>
+        <input
+          type="text"
+          className={baseClass}
+          maxLength={2000}
+          disabled={disabled}
+          placeholder={field.hint || ''}
+          value={value || ''}
+          onChange={e => onChange(field.key, e.target.value)}
+        />
+        {isTooShort && (
+          <span className="text-xs text-amber-600 mt-1 block">Try to add a little more detail</span>
+        )}
+      </div>
     );
   }
 

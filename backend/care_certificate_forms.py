@@ -419,6 +419,9 @@ def validate_worker_form_submission(form_id: str, data: dict) -> list:
     """
     Validate submitted form data against the schema.
     Returns a list of error strings. Empty list = valid.
+
+    max_words is treated as soft guidance only — it is NOT enforced here.
+    Only required/empty checks are blocking.
     """
     schema = CC_WORKER_FORMS.get(form_id)
     if not schema:
@@ -435,14 +438,5 @@ def validate_worker_form_submission(form_id: str, data: dict) -> list:
                 errors.append(f"Field '{field['label']}' is required.")
             elif isinstance(value, list) and len(value) == 0:
                 errors.append(f"Field '{field['label']}' requires at least one selection.")
-
-        if value and isinstance(value, str):
-            max_words = field.get("max_words")
-            if max_words:
-                word_count = len(value.split())
-                if word_count > max_words:
-                    errors.append(
-                        f"Field '{field['label']}' exceeds {max_words} words ({word_count} used)."
-                    )
 
     return errors

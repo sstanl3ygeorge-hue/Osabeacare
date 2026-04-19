@@ -46,10 +46,57 @@ INDUCTION_TRAINING_MAP = {
 }
 
 
+class ShadowShiftDetailsPayload(BaseModel):
+    shift_date: str
+    location_unit: str
+    supervisor_name: str
+    summary_notes: str
+    ready_for_deployment: bool
+    follow_up_actions: Optional[str] = None
+
+
 class InductionItemUpdate(BaseModel):
     item_name: str
     status: str  # pending, completed
     notes: Optional[str] = None
+    shadow_shift_signoff: Optional[ShadowShiftDetailsPayload] = None
+
+
+def _normalise_shadow_shift_signoff(
+    details: ShadowShiftDetailsPayload,
+    user_id: str,
+    reviewer_name: str,
+    recorded_at: str,
+) -> dict:
+    required_values = {
+        "shift_date": details.shift_date,
+        "location_unit": details.location_unit,
+        "supervisor_name": details.supervisor_name,
+        "summary_notes": details.summary_notes,
+    }
+    missing = [label for label, value in required_values.items() if not str(value or "").strip()]
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Shadow Shift sign-off is missing required fields: {', '.join(missing)}",
+        )
+    if details.ready_for_deployment is False and not str(details.follow_up_actions or "").strip():
+        raise HTTPException(
+            status_code=422,
+            detail="Follow-up actions are required when the shadow shift outcome is not ready for deployment.",
+        )
+
+    return {
+        "shift_date": details.shift_date.strip(),
+        "location_unit": details.location_unit.strip(),
+        "supervisor_name": details.supervisor_name.strip(),
+        "summary_notes": details.summary_notes.strip(),
+        "ready_for_deployment": bool(details.ready_for_deployment),
+        "follow_up_actions": (details.follow_up_actions or "").strip(),
+        "recorded_by": user_id,
+        "recorded_by_name": reviewer_name,
+        "recorded_at": recorded_at,
+    }
 
 
 @router.get("/employees/{employee_id}/induction-checklist")
@@ -96,6 +143,8 @@ async def get_induction_checklist(
             "role_relevance": item.get("role_relevance"),
             "linked_evidence_ids": item.get("linked_evidence_ids", []),
             "linked_evidence": item.get("linked_evidence", []),
+            "notes": item.get("notes"),
+            "shadow_shift_signoff": item.get("shadow_shift_signoff"),
             "completed_at": item["completed_at"],
             "completed_by_name": item["completed_by_name"],
             "synced_from_training": item["synced_from_training"],
@@ -173,13 +222,26 @@ async def update_induction_checklist(
     # Normalise items to list format (handles legacy dict-format records from UCE)
     ensure_checklist_list_format(checklist)
     
-    # Enforce notes for Shadow Shift Completed manual sign-off
-    if payload.item_name == "Shadow Shift Completed" and payload.status == "completed":
-        if not payload.notes or not payload.notes.strip():
-            raise HTTPException(
-                status_code=422,
-                detail="Shadow Shift sign-off requires a supervisor/witness note (notes field cannot be empty)."
+    shadow_shift_details = None
+    if payload.item_name == "Shadow Shift Completed" and payload.status in ("completed", "pending"):
+        if payload.status == "completed" or payload.shadow_shift_signoff:
+            if not payload.shadow_shift_signoff:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Shadow Shift sign-off requires structured shift details.",
+                )
+            shadow_shift_details = _normalise_shadow_shift_signoff(
+                payload.shadow_shift_signoff,
+                user["user_id"],
+                reviewer_name,
+                now,
             )
+            if payload.status == "completed" and not shadow_shift_details["ready_for_deployment"]:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Shadow Shift cannot be completed unless the outcome confirms ready for deployment.",
+                )
+            payload.notes = shadow_shift_details["summary_notes"]
 
     rule_metadata = get_induction_rule_metadata_by_name(payload.item_name)
     if payload.status == "completed" and rule_metadata.get("completion_type") == "automatic":
@@ -194,6 +256,8 @@ async def update_induction_checklist(
         if item["name"] == payload.item_name:
             item["status"] = payload.status
             item["notes"] = payload.notes
+            if shadow_shift_details is not None:
+                item["shadow_shift_signoff"] = shadow_shift_details
             if payload.status == "completed":
                 item["completed_at"] = now
                 item["completed_by"] = user['user_id']
@@ -212,6 +276,7 @@ async def update_induction_checklist(
             "mandatory": False,
             "status": payload.status,
             "notes": payload.notes,
+            "shadow_shift_signoff": shadow_shift_details,
             "completed_at": now if payload.status == "completed" else None,
             "completed_by": user['user_id'] if payload.status == "completed" else None,
             "completed_by_name": reviewer_name if payload.status == "completed" else None
@@ -246,6 +311,9 @@ async def update_induction_checklist(
     await log_audit_action(user['user_id'], "induction_item_updated", "induction_checklist", employee_id, {
         "item_name": payload.item_name,
         "status": payload.status,
+        "shadow_shift_ready_for_deployment": (
+            shadow_shift_details.get("ready_for_deployment") if shadow_shift_details else None
+        ),
         "overall_status": checklist["overall_status"]
     })
     
@@ -562,7 +630,8 @@ class HybridReturnPayload(BaseModel):
 
 
 class ShadowShiftSignOffPayload(BaseModel):
-    notes: str  # required for manual items
+    notes: Optional[str] = None
+    shadow_shift_signoff: Optional[ShadowShiftDetailsPayload] = None
 
 
 @router.get("/employees/{employee_id}/induction/items/{item_code}/submission")
@@ -621,7 +690,7 @@ async def signoff_induction_item(
     Admin: sign off a hybrid or manual induction item.
 
     For hybrid items: requires submission status = 'submitted'.
-    For manual (shadow_shift): notes are required; no worker submission needed.
+    For manual (shadow_shift): structured shadow shift details are required; no worker submission needed.
     """
     db = get_db()
 
@@ -680,6 +749,8 @@ async def signoff_induction_item(
     ensure_checklist_list_format(checklist)
 
     # ── Hybrid items ──────────────────────────────────────────────────────────
+    shadow_shift_details = None
+
     if completion_type == "hybrid":
         form_id = cfg["worker_form_id"]
         submission = await db.induction_item_submissions.find_one(
@@ -705,11 +776,25 @@ async def signoff_induction_item(
 
     # ── Manual items (shadow_shift) ───────────────────────────────────────────
     elif completion_type == "manual":
-        if not payload.notes or not payload.notes.strip():
+        if not payload.shadow_shift_signoff:
             raise HTTPException(
                 status_code=422,
-                detail="Sign-off notes are required for manual items.",
+                detail="Structured Shadow Shift sign-off details are required for manual items.",
             )
+        shadow_shift_details = _normalise_shadow_shift_signoff(
+            payload.shadow_shift_signoff,
+            user["user_id"],
+            admin_name,
+            now,
+        )
+        if not shadow_shift_details["ready_for_deployment"]:
+            raise HTTPException(
+                status_code=422,
+                detail="Shadow Shift cannot be completed unless the outcome confirms ready for deployment.",
+            )
+        payload.notes = shadow_shift_details["summary_notes"]
+    else:
+        shadow_shift_details = None
 
     item_found = False
     for item in checklist["items"]:
@@ -719,6 +804,8 @@ async def signoff_induction_item(
             item["completed_by"] = user["user_id"]
             item["completed_by_name"] = admin_name
             item["notes"] = payload.notes
+            if completion_type == "manual" and shadow_shift_details is not None:
+                item["shadow_shift_signoff"] = shadow_shift_details
             item_found = True
             break
 
@@ -747,7 +834,14 @@ async def signoff_induction_item(
 
     await log_audit_action(
         user["user_id"], "induction_item_signed_off", "induction_checklist", employee_id,
-        {"item_code": item_code, "completion_type": completion_type, "admin_notes": payload.notes},
+        {
+            "item_code": item_code,
+            "completion_type": completion_type,
+            "admin_notes": payload.notes,
+            "shadow_shift_ready_for_deployment": (
+                shadow_shift_details.get("ready_for_deployment") if shadow_shift_details else None
+            ),
+        },
     )
 
     return {
@@ -867,6 +961,8 @@ async def get_care_certificate_status(
             "mandatory": item.get("mandatory", True),
             "completed_at": item.get("completed_at"),
             "completed_by_name": item.get("completed_by_name"),
+            "notes": item.get("notes"),
+            "shadow_shift_signoff": item.get("shadow_shift_signoff"),
             "synced_from_training": item.get("synced_from_training", False),
             "linked_evidence": item.get("linked_evidence", []),
         }

@@ -22,6 +22,7 @@ from care_certificate_config import (
     HYBRID_FORM_IDS,
     get_config_for_item,
     get_all_hybrid_forms,
+    get_learning_content_for_item,
 )
 from care_certificate_forms import (
     get_worker_form_schema,
@@ -202,12 +203,14 @@ async def get_worker_induction_form(
 
     role_normalized = worker.get("role_normalized") or worker.get("role") or ""
     schema = get_worker_form_schema(form_id, role_normalized)
+    learning_content = get_learning_content_for_item(schema.get("standard_code"))
 
     submission = await _get_submission(db, employee_id, form_id)
 
     return {
         "form_id": form_id,
         "schema": schema,
+        "learning_content": learning_content,
         "submission_status": submission.get("status") if submission else None,
         "draft_data": submission.get("draft_data") if submission else None,
         "submitted_data": (

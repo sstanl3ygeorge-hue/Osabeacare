@@ -14,30 +14,119 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 // ─── Shadow Shift notes dialog ───────────────────────────────────────────────
 
-function ShadowShiftDialog({ onConfirm, onCancel, saving }) {
-  const [notes, setNotes] = useState('');
+function ShadowShiftDialog({ existingDetails, onConfirm, onCancel, saving }) {
+  const [form, setForm] = useState({
+    shift_date: existingDetails?.shift_date || '',
+    location_unit: existingDetails?.location_unit || '',
+    supervisor_name: existingDetails?.supervisor_name || '',
+    summary_notes: existingDetails?.summary_notes || '',
+    ready_for_deployment: existingDetails?.ready_for_deployment === false ? 'no' : 'yes',
+    follow_up_actions: existingDetails?.follow_up_actions || '',
+  });
+
+  const setField = (key, value) => setForm(prev => ({ ...prev, [key]: value }));
+  const requiredComplete = form.shift_date &&
+    form.location_unit.trim() &&
+    form.supervisor_name.trim() &&
+    form.summary_notes.trim() &&
+    (form.ready_for_deployment === 'yes' || form.follow_up_actions.trim());
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-md">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl">
         <div className="px-6 py-4 border-b border-slate-200">
           <h3 className="text-sm font-semibold text-slate-900">Shadow Shift Sign-off</h3>
-          <p className="text-xs text-slate-500 mt-1">Enter supervisor / witness name and any relevant notes.</p>
+          <p className="text-xs text-slate-500 mt-1">Record the supervised shift details before this item can be completed.</p>
         </div>
-        <div className="px-6 py-4">
-          <textarea
-            rows={4}
-            className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
-            placeholder="e.g. Supervised by Jane Smith on ward 4. All tasks observed and completed satisfactorily."
-            value={notes}
-            onChange={e => setNotes(e.target.value)}
-            autoFocus
-          />
+        <div className="px-6 py-4 space-y-4">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="text-xs font-medium text-slate-700">
+              Shift date
+              <input
+                type="date"
+                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                value={form.shift_date}
+                onChange={e => setField('shift_date', e.target.value)}
+                autoFocus
+              />
+            </label>
+            <label className="text-xs font-medium text-slate-700">
+              Location / unit
+              <input
+                type="text"
+                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                value={form.location_unit}
+                onChange={e => setField('location_unit', e.target.value)}
+                placeholder="e.g. Ward 4 / community round"
+              />
+            </label>
+          </div>
+          <label className="block text-xs font-medium text-slate-700">
+            Supervisor name
+            <input
+              type="text"
+              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+              value={form.supervisor_name}
+              onChange={e => setField('supervisor_name', e.target.value)}
+              placeholder="Name of supervisor or witness"
+            />
+          </label>
+          <label className="block text-xs font-medium text-slate-700">
+            Summary notes
+            <textarea
+              rows={4}
+              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+              placeholder="What was observed, what the worker completed, and any concerns."
+              value={form.summary_notes}
+              onChange={e => setField('summary_notes', e.target.value)}
+            />
+          </label>
+          <div>
+            <p className="text-xs font-medium text-slate-700 mb-2">Outcome</p>
+            <div className="flex flex-wrap gap-3">
+              <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="radio"
+                  checked={form.ready_for_deployment === 'yes'}
+                  onChange={() => setField('ready_for_deployment', 'yes')}
+                />
+                Ready for deployment
+              </label>
+              <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="radio"
+                  checked={form.ready_for_deployment === 'no'}
+                  onChange={() => setField('ready_for_deployment', 'no')}
+                />
+                Follow-up required
+              </label>
+            </div>
+          </div>
+          {form.ready_for_deployment === 'no' && (
+            <label className="block text-xs font-medium text-slate-700">
+              Follow-up actions
+              <textarea
+                rows={3}
+                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                value={form.follow_up_actions}
+                onChange={e => setField('follow_up_actions', e.target.value)}
+                placeholder="What needs to happen before deployment?"
+              />
+            </label>
+          )}
         </div>
         <div className="flex justify-end gap-3 px-6 py-4 border-t border-slate-200 bg-slate-50 rounded-b-xl">
           <Button variant="outline" size="sm" onClick={onCancel} disabled={saving}>Cancel</Button>
-          <Button size="sm" onClick={() => onConfirm(notes)} disabled={!notes.trim() || saving}>
+          <Button
+            size="sm"
+            onClick={() => onConfirm({
+              ...form,
+              ready_for_deployment: form.ready_for_deployment === 'yes',
+            })}
+            disabled={!requiredComplete || saving}
+          >
             {saving ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
-            Sign off
+            {form.ready_for_deployment === 'yes' ? 'Complete sign-off' : 'Save follow-up'}
           </Button>
         </div>
       </div>
@@ -260,31 +349,36 @@ export default function InductionChecklistPanel({ employeeId, employeeName, isAu
     if (employeeId) fetchChecklist();
   }, [employeeId, fetchChecklist]);
 
-  const updateItem = async (itemName, newStatus, notes = '') => {
+  const updateItem = async (itemName, newStatus, notes = '', extraPayload = {}) => {
     setUpdating(itemName);
     try {
       const token = localStorage.getItem('token');
       const response = await axios.put(
         `${API}/employees/${employeeId}/induction-checklist`,
-        { item_name: itemName, status: newStatus, notes },
+        { item_name: itemName, status: newStatus, notes, ...extraPayload },
         { headers: { Authorization: `Bearer ${token}` } }
       );
       toast.success(`${itemName} marked as ${newStatus}`);
       fetchChecklist();
       if (onStatusChange) onStatusChange(response.data.overall_status);
+      return true;
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to update checklist');
+      return false;
     } finally {
       setUpdating(null);
     }
   };
 
-  const handleShadowShiftSignOff = async (notes) => {
+  const handleShadowShiftSignOff = async (details) => {
     if (!shadowShiftItem) return;
     setSavingNotes(true);
-    await updateItem(shadowShiftItem.name, 'completed', notes);
+    const nextStatus = details.ready_for_deployment ? 'completed' : 'pending';
+    const saved = await updateItem(shadowShiftItem.name, nextStatus, details.summary_notes, {
+      shadow_shift_signoff: details,
+    });
     setSavingNotes(false);
-    setShadowShiftItem(null);
+    if (saved) setShadowShiftItem(null);
   };
 
   const handleDownloadCertificate = async () => {
@@ -482,6 +576,21 @@ export default function InductionChecklistPanel({ employeeId, employeeName, isAu
                           {item.completed_by_name && <span>by {item.completed_by_name}</span>}
                         </div>
                       )}
+                      {item.shadow_shift_signoff && (
+                        <div className="text-xs text-slate-600 mt-2 rounded-md border border-slate-200 bg-slate-50 p-2">
+                          <p>
+                            Shadow shift: {item.shadow_shift_signoff.shift_date || 'date not recorded'}
+                            {item.shadow_shift_signoff.location_unit ? ` at ${item.shadow_shift_signoff.location_unit}` : ''}
+                          </p>
+                          <p>Supervisor: {item.shadow_shift_signoff.supervisor_name || 'not recorded'}</p>
+                          <p>
+                            Outcome: {item.shadow_shift_signoff.ready_for_deployment ? 'Ready for deployment' : 'Follow-up required'}
+                          </p>
+                          {!item.shadow_shift_signoff.ready_for_deployment && item.shadow_shift_signoff.follow_up_actions && (
+                            <p>Follow-up: {item.shadow_shift_signoff.follow_up_actions}</p>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -574,6 +683,7 @@ export default function InductionChecklistPanel({ employeeId, employeeName, isAu
       {/* Shadow shift dialog */}
       {shadowShiftItem && (
         <ShadowShiftDialog
+          existingDetails={shadowShiftItem.shadow_shift_signoff}
           onConfirm={handleShadowShiftSignOff}
           onCancel={() => setShadowShiftItem(null)}
           saving={savingNotes}
@@ -592,4 +702,4 @@ export default function InductionChecklistPanel({ employeeId, employeeName, isAu
       )}
     </>
   );
-}
+}

@@ -128,6 +128,8 @@ function FormField({ field, value, onChange, disabled }) {
 
 function HybridFormModal({ formEntry, onClose, onSaved, onSubmitted }) {
   const [schema, setSchema] = useState(null);
+  const [learningContent, setLearningContent] = useState(null);
+  const [step, setStep] = useState('learning');
   const [formData, setFormData] = useState({});
   const [subStatus, setSubStatus] = useState(null);
   const [returnReason, setReturnReason] = useState(null);
@@ -143,6 +145,7 @@ function HybridFormModal({ formEntry, onClose, onSaved, onSubmitted }) {
     axios.get(`${API}/worker/induction/forms/${formId}`, { headers: { Authorization: `Bearer ${token}` } })
       .then(res => {
         setSchema(res.data.schema);
+        setLearningContent(res.data.learning_content || null);
         setSubStatus(res.data.submission_status);
         setReturnReason(res.data.return_reason);
         const prefill = res.data.draft_data || res.data.submitted_data || {};
@@ -155,6 +158,14 @@ function HybridFormModal({ formEntry, onClose, onSaved, onSubmitted }) {
   const handleChange = useCallback((key, val) => {
     setFormData(prev => ({ ...prev, [key]: val }));
   }, []);
+
+  const hasLearningContent = learningContent && (
+    learningContent.overview ||
+    learningContent.expected_to_know?.length ||
+    learningContent.guidance?.length ||
+    learningContent.dos?.length ||
+    learningContent.donts?.length
+  );
 
   const handleSave = async () => {
     setSaving(true);
@@ -233,7 +244,62 @@ function HybridFormModal({ formEntry, onClose, onSaved, onSubmitted }) {
             </div>
           )}
 
-          {!loading && schema && schema.fields && schema.fields.map(field => (
+          {!loading && step === 'learning' && (
+            <div className="space-y-4">
+              {hasLearningContent ? (
+                <>
+                  {learningContent.overview && (
+                    <div className="rounded-lg bg-blue-50 border border-blue-100 p-4">
+                      <p className="text-sm font-semibold text-blue-900 mb-1">Before you answer</p>
+                      <p className="text-sm text-blue-800">{learningContent.overview}</p>
+                    </div>
+                  )}
+                  {learningContent.expected_to_know?.length > 0 && (
+                    <div>
+                      <h3 className="text-sm font-semibold text-slate-900 mb-2">What you are expected to know or do</h3>
+                      <ul className="list-disc pl-5 space-y-1 text-sm text-slate-700">
+                        {learningContent.expected_to_know.map((item, idx) => <li key={idx}>{item}</li>)}
+                      </ul>
+                    </div>
+                  )}
+                  {learningContent.guidance?.length > 0 && (
+                    <div>
+                      <h3 className="text-sm font-semibold text-slate-900 mb-2">Practical guidance</h3>
+                      <ul className="list-disc pl-5 space-y-1 text-sm text-slate-700">
+                        {learningContent.guidance.map((item, idx) => <li key={idx}>{item}</li>)}
+                      </ul>
+                    </div>
+                  )}
+                  {(learningContent.dos?.length > 0 || learningContent.donts?.length > 0) && (
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      {learningContent.dos?.length > 0 && (
+                        <div className="rounded-lg border border-green-100 bg-green-50 p-3">
+                          <h3 className="text-sm font-semibold text-green-800 mb-2">Do</h3>
+                          <ul className="list-disc pl-5 space-y-1 text-sm text-green-800">
+                            {learningContent.dos.map((item, idx) => <li key={idx}>{item}</li>)}
+                          </ul>
+                        </div>
+                      )}
+                      {learningContent.donts?.length > 0 && (
+                        <div className="rounded-lg border border-red-100 bg-red-50 p-3">
+                          <h3 className="text-sm font-semibold text-red-800 mb-2">Do not</h3>
+                          <ul className="list-disc pl-5 space-y-1 text-sm text-red-800">
+                            {learningContent.donts.map((item, idx) => <li key={idx}>{item}</li>)}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="rounded-lg bg-slate-50 border border-slate-200 p-4">
+                  <p className="text-sm text-slate-700">Read this standard carefully, then continue to the reflective questions.</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {!loading && step === 'form' && schema && schema.fields && schema.fields.map(field => (
             <div key={field.key}>
               <label className="block text-sm font-medium text-slate-900">
                 {field.label}
@@ -253,8 +319,24 @@ function HybridFormModal({ formEntry, onClose, onSaved, onSubmitted }) {
         </div>
 
         {/* Footer */}
-        {!loading && !isReadOnly && (
+        {!loading && step === 'learning' && (
           <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-200 bg-slate-50 rounded-b-xl">
+            <button
+              onClick={() => setStep('form')}
+              className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-blue-600 hover:bg-blue-700"
+            >
+              Continue to questions
+            </button>
+          </div>
+        )}
+        {!loading && step === 'form' && !isReadOnly && (
+          <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-200 bg-slate-50 rounded-b-xl">
+            <button
+              onClick={() => setStep('learning')}
+              className="px-4 py-2 rounded-lg text-sm font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50"
+            >
+              Back to guidance
+            </button>
             <button
               onClick={handleSave}
               disabled={saving}
@@ -271,8 +353,11 @@ function HybridFormModal({ formEntry, onClose, onSaved, onSubmitted }) {
             </button>
           </div>
         )}
-        {!loading && isReadOnly && (
-          <div className="flex justify-end px-6 py-4 border-t border-slate-200 bg-slate-50 rounded-b-xl">
+        {!loading && step === 'form' && isReadOnly && (
+          <div className="flex justify-end gap-3 px-6 py-4 border-t border-slate-200 bg-slate-50 rounded-b-xl">
+            <button onClick={() => setStep('learning')} className="px-4 py-2 rounded-lg text-sm font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50">
+              Back to guidance
+            </button>
             <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50">
               Close
             </button>

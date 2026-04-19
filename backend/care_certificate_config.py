@@ -86,6 +86,105 @@ def get_role_prompt(item_code: str, role_normalized: str) -> dict:
 # ─────────────────────────────────────────────────────
 # CARE CERTIFICATE CONFIGURATION (15 STANDARDS)
 # ─────────────────────────────────────────────────────
+HYBRID_LEARNING_CONTENT = {
+    "understand_your_role": {
+        "overview": "This standard confirms you understand your role, your limits, and who to ask for help.",
+        "expected_to_know": [
+            "Your day-to-day responsibilities.",
+            "What is outside your role or training.",
+            "Who you report concerns to.",
+        ],
+        "guidance": [
+            "Work within your job description, training, and local policies.",
+            "Ask a senior member of staff before doing tasks you have not been trained for.",
+            "Record and escalate concerns promptly.",
+        ],
+        "dos": ["Do ask for supervision when unsure.", "Do report unsafe practice."],
+        "donts": ["Do not perform clinical tasks outside your competence.", "Do not ignore concerns."],
+    },
+    "personal_development": {
+        "overview": "This standard confirms you understand supervision, learning, and development in your role.",
+        "expected_to_know": [
+            "How supervision and appraisal work.",
+            "What training you need for your role.",
+            "How to ask for support with learning needs.",
+        ],
+        "guidance": [
+            "Use supervision to discuss confidence, training, and support needs.",
+            "Keep your training current and tell your manager if a certificate is due to expire.",
+            "Reflect on feedback and agree practical development goals.",
+        ],
+        "dos": ["Do keep evidence of completed training.", "Do raise learning support needs early."],
+        "donts": ["Do not wait until training expires before asking for help.", "Do not work beyond your competence."],
+    },
+    "duty_of_care": {
+        "overview": "This standard confirms you understand your duty to act safely and in the person's best interests.",
+        "expected_to_know": [
+            "What duty of care means in practice.",
+            "How to handle dilemmas and refusals of care.",
+            "How to report incidents, near misses, and concerns.",
+        ],
+        "guidance": [
+            "Balance choice with safety and follow care plans, risk assessments, and escalation routes.",
+            "If someone refuses care, stay calm, respect their rights, and report concerns according to policy.",
+            "Document facts clearly and promptly.",
+        ],
+        "dos": ["Do escalate risks or safeguarding concerns.", "Do record what happened factually."],
+        "donts": ["Do not force care unless there is a lawful emergency reason.", "Do not hide mistakes or near misses."],
+    },
+    "work_person_centred": {
+        "overview": "This standard confirms you can support people in a way that respects their choices and needs.",
+        "expected_to_know": [
+            "How to find out a person's preferences.",
+            "How consent and choice affect daily care.",
+            "How to use care plans to support individual needs.",
+        ],
+        "guidance": [
+            "Read the care plan and ask the person how they prefer to be supported.",
+            "Offer choices wherever possible and involve family or advocates when appropriate.",
+            "Report changes in needs or preferences so records stay accurate.",
+        ],
+        "dos": ["Do ask before providing support.", "Do respect preferences and routines."],
+        "donts": ["Do not assume everyone wants care delivered the same way.", "Do not ignore changes in needs."],
+    },
+    "communication": {
+        "overview": "This standard confirms you can communicate clearly, respectfully, and safely.",
+        "expected_to_know": [
+            "How to communicate with people you support, families, and colleagues.",
+            "How to document care and concerns.",
+            "How to protect confidential information.",
+        ],
+        "guidance": [
+            "Use clear language, active listening, and communication aids where needed.",
+            "Share information only with people who need it for care or safeguarding.",
+            "Write records that are factual, timely, and respectful.",
+        ],
+        "dos": ["Do check understanding.", "Do record important information promptly."],
+        "donts": ["Do not discuss private information in public areas.", "Do not leave unclear handovers."],
+    },
+    "privacy_dignity": {
+        "overview": "This standard confirms you understand how to protect privacy, dignity, and respect.",
+        "expected_to_know": [
+            "How to maintain dignity during personal care.",
+            "How consent applies before care tasks.",
+            "How to protect private information and personal space.",
+        ],
+        "guidance": [
+            "Knock, explain what you are doing, and ask for consent before care.",
+            "Use curtains, doors, towels, or screens to protect privacy.",
+            "Speak respectfully and avoid exposing or embarrassing the person.",
+        ],
+        "dos": ["Do explain care before starting.", "Do protect privacy during personal care."],
+        "donts": ["Do not rush intimate care without consent.", "Do not talk over the person."],
+    },
+}
+
+
+def get_learning_content_for_item(code: str) -> dict:
+    """Return worker-facing teaching content for a hybrid induction item."""
+    return HYBRID_LEARNING_CONTENT.get(code, {})
+
+
 CARE_CERTIFICATE_CONFIG = [
     {
         "code": "understand_your_role",

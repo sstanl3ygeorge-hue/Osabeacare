@@ -351,6 +351,9 @@ def normalize_induction_items(raw_items) -> list:
                 "completed": is_complete,
                 "completed_at": item_data.get("completed_at"),
                 "completed_by_name": item_data.get("completed_by_name") or item_data.get("completed_by"),
+                "completed_by": item_data.get("completed_by"),
+                "notes": item_data.get("notes"),
+                "shadow_shift_signoff": item_data.get("shadow_shift_signoff"),
                 "auto_completed_from": item_data.get("auto_completed_from"),
             })
         return normalized
@@ -373,6 +376,9 @@ def normalize_induction_items(raw_items) -> list:
                 "completed": is_complete,
                 "completed_at": item.get("completed_at"),
                 "completed_by_name": item.get("completed_by_name"),
+                "completed_by": item.get("completed_by"),
+                "notes": item.get("notes"),
+                "shadow_shift_signoff": item.get("shadow_shift_signoff"),
                 "auto_completed_from": item.get("auto_completed_from"),
                 "synced_from_training": item.get("synced_from_training", False),
             })
@@ -597,6 +603,8 @@ async def get_employee_induction_status(
         manually_completed = record["completed"] if record else False
         completed_at = record.get("completed_at") if record else None
         completed_by = record.get("completed_by_name") if record else None
+        notes = record.get("notes") if record else None
+        shadow_shift_signoff = record.get("shadow_shift_signoff") if record else None
         synced_from_training = record.get("synced_from_training", False) if record else False
         linked_evidence = training_evidence_by_item.get(std_id, [])
         has_verified_training = bool(linked_evidence) or is_training_verified_for_item(std_name, verified_set)
@@ -633,8 +641,14 @@ async def get_employee_induction_status(
         else:
             if manually_completed:
                 rule_status = "complete"
-                completion_reason = "Completed by manager sign-off."
+                if std_id == "shadow_shift":
+                    completion_reason = "Shadow shift signed off by manager."
+                else:
+                    completion_reason = "Completed by manager sign-off."
                 status_reason = completion_reason
+            elif std_id == "shadow_shift" and shadow_shift_signoff:
+                rule_status = "pending_review"
+                status_reason = "Shadow shift was recorded, but follow-up is required before sign-off."
 
         # Backward-compatible auto-sync guard for older training-linked manual data.
         if completion_type == "automatic" and not manually_completed and has_verified_training:
@@ -668,6 +682,8 @@ async def get_employee_induction_status(
             "completed": is_completed,
             "completed_at": completed_at,
             "completed_by_name": completed_by,
+            "notes": notes,
+            "shadow_shift_signoff": shadow_shift_signoff,
             "synced_from_training": synced_from_training,
             "training_sync": training_sync,
             "manual_action_allowed": completion_type in ["manual", "hybrid"],

@@ -10500,6 +10500,7 @@ async def get_employee_training_matrix(
             "status": item.get('status', 'missing'),
             "detail": item.get('detail', ''),
             "blocker": item.get('blocker', False),
+            "is_currently_blocking": item.get('is_currently_blocking', False),
             "evidence_required": blocker_config.get('evidence_required', True),
             "completed_at": record.get('completion_date') or record.get('completed_at'),
             "expires_at": item.get('expires_at'),
@@ -10528,7 +10529,7 @@ async def get_employee_training_matrix(
         elif status in ['missing', 'expired', 'rejected', 'awaiting_review', 'completed']:
             total_missing += 1
         
-        if item.get('blocker') and status != 'verified':
+        if item.get('is_currently_blocking', False):
             total_blockers += 1
     
     # Build additional qualifications list using canonical status logic

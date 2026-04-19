@@ -487,15 +487,42 @@ def resolve_mandatory_training_code(training_name: str):
 # Async functions (require _db)
 # ---------------------------------------------------------------------------
 
+# Statuses that mean the requirement is currently satisfied (not blocking).
+_SATISFIED_STATUSES = frozenset({"verified", "due_soon"})
+
+
 async def get_required_training_for_employee(employee_id: str, role: str) -> List[dict]:
-    """Return merged list of required training for an employee."""
+    """Return merged list of required training for an employee.
+
+    For HCA / support-worker roles the default mandatory set is filtered to
+    only the 8 items that carry ``mandatory_for_compliance: True``.
+    Role-conditional items (safeguarding_l2/l3) are excluded unless the
+    employee's normalised role appears in the item's ``role_required`` list.
+
+    Nurses get the full generic set *plus* nurse-specific training.
+    """
     from server import MANDATORY_ITEMS, normalize_to_system_role, is_nurse_role, SystemRole
 
-    items = MANDATORY_ITEMS["training"].copy()
+    all_training = MANDATORY_ITEMS["training"]
     system_role = normalize_to_system_role(role) if role else SystemRole.UNKNOWN
+
     if is_nurse_role(system_role):
+        # Nurses: full generic list + nurse-specific training
+        items = all_training.copy()
         nurse_training = [i for i in MANDATORY_ITEMS["nurse_specific"] if i.get("type") == "training"]
         items.extend(nurse_training)
+    else:
+        # HCA / support-worker / unknown: only mandatory-for-compliance items,
+        # plus any item whose role_required list includes the raw role.
+        normalised_role = (role or "").strip().lower().replace(" ", "_")
+        items = []
+        for item in all_training:
+            if item.get("mandatory_for_compliance"):
+                items.append(item)
+            elif normalised_role and normalised_role in (item.get("role_required") or []):
+                items.append(item)
+            # else: skip — not mandatory and not role-required
+
     return items
 
 
@@ -539,6 +566,7 @@ async def evaluate_employee_training_status(employee_id: str, role: str = "") ->
                 "title": training_name,
                 "status": "missing",
                 "blocker": is_blocker,
+                "is_currently_blocking": is_blocker,  # missing → always blocking if can_block
                 "detail": f"{training_name} training not recorded",
                 "expires_at": None,
                 "verified": False,
@@ -609,6 +637,7 @@ async def evaluate_employee_training_status(employee_id: str, role: str = "") ->
             "title": training_name,
             "status": status,
             "blocker": is_blocker,
+            "is_currently_blocking": is_blocker and status not in _SATISFIED_STATUSES,
             "detail": detail,
             "expires_at": expiry_date,
             "verified": verified,

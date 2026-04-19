@@ -854,12 +854,12 @@ export default function AuditReadyTrainingMatrix({
                       >
                         <TableCell>
                           <div className="flex items-center gap-2">
-                            {item.blocker && (
+                            {item.is_currently_blocking && (
                               <AlertTriangle className="h-4 w-4 text-red-600 flex-shrink-0" />
                             )}
                             <div>
                               <p className="font-medium text-gray-900">{item.title}</p>
-                              {item.blocker && (
+                              {item.is_currently_blocking && (
                                 <p className="text-xs text-red-600">Work blocker</p>
                               )}
                               {pendingExtractedMatch && (

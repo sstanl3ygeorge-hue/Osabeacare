@@ -18,6 +18,8 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+from services.training_evaluator import normalize_training_text, normalize_training_key, resolve_mandatory_training_code
+
 # =====================================================
 # MANDATORY TRAINING BY ROLE
 # These are required for promotion and block work readiness if missing/expired
@@ -85,14 +87,16 @@ MANDATORY_TRAINING_BY_ROLE = {
 
 TRAINING_NAME_MAPPING = {
     # Safeguarding
-    "safeguarding adults": "safeguarding_adults",
-    "cstf. safeguarding adults": "safeguarding_adults",
-    "cstf safeguarding adults": "safeguarding_adults",
-    "safeguarding adults level": "safeguarding_adults",
-    "safeguarding children": "safeguarding_children",
-    "cstf. safeguarding children": "safeguarding_children",
-    "cstf safeguarding children": "safeguarding_children",
-    "safeguarding children level": "safeguarding_children",
+    "safeguarding adults": "safeguarding",
+    "cstf. safeguarding adults": "safeguarding",
+    "cstf safeguarding adults": "safeguarding",
+    "safeguarding adults level": "safeguarding",
+    "safeguarding adults levels 1 and 2": "safeguarding",
+    "cstf safeguarding adults levels 1 and 2": "safeguarding",
+    "safeguarding children": "safeguarding",
+    "cstf. safeguarding children": "safeguarding",
+    "cstf safeguarding children": "safeguarding",
+    "safeguarding children level": "safeguarding",
     
     # Manual Handling
     "manual handling": "manual_handling",
@@ -101,11 +105,17 @@ TRAINING_NAME_MAPPING = {
     "cstf - manual handling": "manual_handling",
     "cstf manual handling": "manual_handling",
     "cstf moving & handling": "manual_handling",
+    "cstf moving and handling": "manual_handling",
+    "moving and handling levels 1 and 2": "manual_handling",
+    "cstf moving and handling levels 1 and 2": "manual_handling",
     
     # Fire Safety
     "fire safety": "fire_safety",
     "cstf - fire safety": "fire_safety",
     "cstf fire safety": "fire_safety",
+    "cstf fire safety practical": "fire_safety",
+    "fire safety practical": "fire_safety",
+    "fire awareness": "fire_safety",
     
     # Health & Safety
     "health & safety": "health_safety",
@@ -113,6 +123,10 @@ TRAINING_NAME_MAPPING = {
     "cstf - health & safety": "health_safety",
     "cstf health, safety and welfare": "health_safety",
     "health, safety and welfare": "health_safety",
+    "cstf health safety and welfare": "health_safety",
+    "health safety and welfare": "health_safety",
+    "cstf health and safety and welfare": "health_safety",
+    "health and safety and welfare": "health_safety",
     
     # Basic Life Support / Resuscitation
     "basic life support": "basic_life_support",
@@ -121,6 +135,7 @@ TRAINING_NAME_MAPPING = {
     "cstf - adult basic life support": "basic_life_support",
     "resuscitation": "basic_life_support",
     "cstf resuscitation adults": "basic_life_support",
+    "resuscitation adults": "basic_life_support",
     "immediate life support": "immediate_life_support",
     "ils": "immediate_life_support",
     "cstf - adult immediate life support": "immediate_life_support",
@@ -131,6 +146,8 @@ TRAINING_NAME_MAPPING = {
     "infection prevention and control": "infection_control",
     "cstf - infection prevention and control": "infection_control",
     "cstf infection prevention & control": "infection_control",
+    "cstf infection prevention and control": "infection_control",
+    "infection prevention and control levels 1 and 2": "infection_control",
     
     # Medication
     "medication": "medication",
@@ -164,15 +181,19 @@ TRAINING_NAME_MAPPING = {
     "understanding and supporting adhd and autism": "autism_awareness",
     "conflict resolution": "conflict_resolution",
     "cstf nhs conflict resolution": "conflict_resolution",
-    "prevent": "prevent_radicalisation",
-    "preventing radicalisation": "prevent_radicalisation",
-    "cstf - preventing radicalisation": "prevent_radicalisation",
+    "prevent": "prevent",
+    "preventing radicalisation": "prevent",
+    "preventing radicalization": "prevent",
+    "cstf - preventing radicalisation": "prevent",
+    "cstf preventing radicalisation": "prevent",
     "equality": "equality_diversity",
     "diversity": "equality_diversity",
     "cstf - equality & diversity": "equality_diversity",
     "cstf equality, diversity and human rights": "equality_diversity",
     "information governance": "information_governance",
     "cstf - information governance": "information_governance",
+    "cstf information governance": "information_governance",
+    "information governance gdpr": "information_governance",
     "gdpr": "information_governance",
     "data security": "information_governance",
     "lone worker": "lone_worker",
@@ -218,22 +239,30 @@ def normalize_training_name(name: str) -> tuple:
     if not name:
         return (None, None, False)
     
-    name_lower = name.lower().strip()
+    name_lower = normalize_training_text(name)
+    name_key = normalize_training_key(name)
     
     # Direct mapping
     for pattern, standard_id in TRAINING_NAME_MAPPING.items():
-        if pattern in name_lower:
+        normalized_pattern = normalize_training_text(pattern)
+        if normalized_pattern and (normalized_pattern in name_lower or name_lower in normalized_pattern):
             # Check if this is a mandatory training type
             is_mandatory = any(
                 standard_id.startswith(m) 
                 for m in ["safeguarding", "manual_handling", "fire_safety", 
-                          "health_safety", "basic_life_support", "infection_control"]
+                          "health_safety", "basic_life_support", "infection_control",
+                          "information_governance", "prevent"]
             )
             return (standard_id, name.strip(), is_mandatory)
+
+    canonical_code = resolve_mandatory_training_code(name)
+    if canonical_code:
+        return (canonical_code, name.strip(), True)
     
     # No match - return as additional training
     # Create a slug from the name
-    slug = re.sub(r'[^a-z0-9]+', '_', name_lower).strip('_')
+    slug = re.sub(r'[^a-z0-9_]+', '', name_key).strip('_')
+    logger.info("[TRAINING_MAPPING_UNMAPPED] raw_title=%r normalized=%r", name, name_lower)
     return (slug, name.strip(), False)
 
 

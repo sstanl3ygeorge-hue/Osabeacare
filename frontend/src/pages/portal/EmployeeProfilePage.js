@@ -39,6 +39,7 @@ import DocumentVerificationModal from '../../components/admin/DocumentVerificati
 import DocumentViewerModal from '../../components/admin/DocumentViewerModal';
 import InlineDocumentViewer from '../../components/shared/InlineDocumentViewer';
 import ApplicationFormViewer from '../../components/compliance/ApplicationFormViewer';
+import EvidenceReviewViewerDialog from '../../components/compliance/EvidenceReviewViewerDialog';
 import { 
   InductionChecklistPanel, 
   CompetencyRecordsPanel, 
@@ -285,6 +286,7 @@ export default function EmployeeProfilePage() {
   const [formSubmissions, setFormSubmissions] = useState([]);
   const [formSubmissionsError, setFormSubmissionsError] = useState(false);
   const [viewFormSubmission, setViewFormSubmission] = useState(null);
+  const [formReviewViewer, setFormReviewViewer] = useState(null);
   const [isVerifyingTraining, setIsVerifyingTraining] = useState(false);
   
   // Training correction/history dialog states
@@ -3272,15 +3274,31 @@ export default function EmployeeProfilePage() {
       (employmentGapEvaluation?.needs_info_count || 0)
     : null;
   const employmentHistoryExists = Boolean(employee?.employment_history?.length > 0);
+  const employmentHistoryHasDatedRows = Boolean(
+    employee?.employment_history?.some((job) => job?.start_date)
+  );
   const employmentCoverage = employee?.employment_coverage || null;
-  const coverageMet = Boolean(employmentCoverage?.meets_10_year_requirement);
+  const coveragePercent = Number(employmentCoverage?.coverage_percent);
+  const coverageHasNumericPercent = Number.isFinite(coveragePercent);
+  const coverageDisplayPercent = coverageHasNumericPercent ? coveragePercent : 0;
+  const coverageLooksStaleOrUnusable = Boolean(
+    employmentCoverage &&
+    employmentHistoryHasDatedRows &&
+    coverageHasNumericPercent &&
+    coveragePercent === 0 &&
+    !employmentCoverage?.earliest_entry_date &&
+    !employmentCoverage?.latest_entry_date
+  );
+  const coverageMet = Boolean(
+    employmentCoverage?.meets_10_year_requirement && !coverageLooksStaleOrUnusable
+  );
   const employmentCannotAssess = !complianceFile;
   // Persisted sign-off: only true once an admin has explicitly signed off via the backend
   const employmentSignedOff = Boolean(employee?.employment_review_signed_off);
   const employmentSignedOffBy = employee?.employment_review_signed_off_by_name
     || employee?.employment_review_signed_off_by || null;
   const employmentSignedOffAt = employee?.employment_review_signed_off_at || null;
-  const coverageAssessed = Boolean(employmentCoverage);
+  const coverageAssessed = Boolean(employmentCoverage && !coverageLooksStaleOrUnusable);
   const gapAnalysisFailed = employee?.gap_analysis_status === 'failed';
   const employmentGapsCannotAssess = Boolean(
     employmentHistoryExists && (gapAnalysisFailed || !employmentHistoryGapRow || !gapAnalysisRun || !employmentGapEvaluation)
@@ -3367,7 +3385,8 @@ export default function EmployeeProfilePage() {
     !applicationAvailable ? 'Application evidence missing' : null,
     !declarationsAdequatelyReviewed ? 'Declarations not reviewed' : null,
     !employmentHistoryExists ? 'Employment history missing' : null,
-    !coverageAssessed ? '10-year coverage not assessed' : null,
+    (!coverageAssessed && !coverageLooksStaleOrUnusable) ? '10-year coverage not assessed' : null,
+    coverageLooksStaleOrUnusable ? 'Cannot assess 10-year coverage from current history' : null,
     (coverageAssessed && !coverageMet) ? '10-year coverage incomplete' : null,
     employmentGapsCannotAssess ? 'Cannot assess employment gaps' : null,
     (!employmentGapsCannotAssess && employmentHistoryExists && !allGapsResolved) ? 'Gaps unresolved' : null,
@@ -5041,37 +5060,18 @@ export default function EmployeeProfilePage() {
                                             </>
                                           )}
 
-                                          {/* Submitted → Review + Mark Reviewed */}
+                                          {/* Submitted → Review & Approve (forced viewing) */}
                                           {derived.status === 'submitted' && hasSubmission && (
-                                            <>
-                                              <Button size="sm" variant="outline"
-                                                onClick={() => setViewFormSubmission({
-                                                  isOpen: true, formType: form.key, formName: form.name,
-                                                  submissionId: submission?.id,
-                                                  data: submission?.data || submission?.form_data
-                                                })}
-                                                className="text-blue-600 border-blue-200 hover:bg-blue-50"
-                                                data-testid={`review-submission-${form.key}`}>
-                                                <Eye className="h-3.5 w-3.5 mr-1" />Review Submission
-                                              </Button>
-                                              {!isAuditor() && (
-                                                <Button size="sm" variant="outline"
-                                                  onClick={async () => {
-                                                    try {
-                                                      await axios.post(
-                                                        `${API}/form-submissions/${submission.id}/verify`, {},
-                                                        { headers: { Authorization: `Bearer ${token}` } }
-                                                      );
-                                                      toast.success('Form marked as reviewed');
-                                                      fetchFormSubmissions();
-                                                    } catch { toast.error('Failed to mark form reviewed'); }
-                                                  }}
-                                                  className="text-green-600 border-green-200 hover:bg-green-50"
-                                                  data-testid={`mark-reviewed-${form.key}`}>
-                                                  <CheckCircle className="h-3.5 w-3.5 mr-1" />Mark Reviewed
-                                                </Button>
-                                              )}
-                                            </>
+                                            <Button size="sm" variant="outline"
+                                              onClick={() => setFormReviewViewer({
+                                                isOpen: true,
+                                                formName: form.name,
+                                                submissionId: submission?.id,
+                                              })}
+                                              className="text-blue-600 border-blue-200 hover:bg-blue-50"
+                                              data-testid={`review-submission-${form.key}`}>
+                                              <Eye className="h-3.5 w-3.5 mr-1" />Review Submission
+                                            </Button>
                                           )}
 
                                           {/* Missing / in-progress → passive label */}
@@ -5186,6 +5186,19 @@ export default function EmployeeProfilePage() {
               </DialogFooter>
             </DialogContent>
           </Dialog>
+
+          {/* Form Review Viewer (PDF viewer with forced viewing + approve/reject) */}
+          <EvidenceReviewViewerDialog
+            isOpen={!!formReviewViewer?.isOpen}
+            onClose={() => { setFormReviewViewer(null); fetchFormSubmissions(); }}
+            mode="form-review"
+            formSubmissionId={formReviewViewer?.submissionId}
+            formName={formReviewViewer?.formName}
+            employeeId={employee?.id}
+            employeeName={employee ? `${employee.first_name} ${employee.last_name}` : ''}
+            onFormApproved={() => fetchFormSubmissions()}
+            onFormRejected={() => fetchFormSubmissions()}
+          />
         </TabsContent>
 
         {/* ========== TAB 6: EMPLOYMENT ========== */}
@@ -5284,7 +5297,7 @@ export default function EmployeeProfilePage() {
             </div>
 
             {/* 10-Year Coverage Card */}
-            {employmentCoverage && (
+            {employmentCoverage && !coverageLooksStaleOrUnusable && (
               <Card className={`shadow-sm ${coverageMet ? 'border-green-200 bg-green-50' : 'border-amber-200 bg-amber-50'}`}>
                 <CardContent className="py-4">
                   <div className="flex items-start gap-3">
@@ -5295,7 +5308,7 @@ export default function EmployeeProfilePage() {
                     )}
                     <div className="flex-1 space-y-2">
                       <p className={`text-sm font-medium ${coverageMet ? 'text-green-800' : 'text-amber-800'}`}>
-                        10-Year Employment Coverage: {employmentCoverage.coverage_percent}%
+                        10-Year Employment Coverage: {employmentCoverage.coverage_percent ?? 'Cannot assess'}%
                       </p>
                       <p className="text-xs text-slate-600">
                         Required: {employmentCoverage.coverage_start ? new Date(employmentCoverage.coverage_start + 'T00:00:00Z').toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }) : '?'} — Today
@@ -5303,13 +5316,28 @@ export default function EmployeeProfilePage() {
                       </p>
                       <div className="w-full bg-gray-200 rounded-full h-2">
                         <div
-                          className={`h-2 rounded-full transition-all ${coverageMet ? 'bg-green-500' : employmentCoverage.coverage_percent >= 60 ? 'bg-amber-500' : 'bg-red-500'}`}
-                          style={{ width: `${Math.min(employmentCoverage.coverage_percent, 100)}%` }}
+                          className={`h-2 rounded-full transition-all ${coverageMet ? 'bg-green-500' : coverageDisplayPercent >= 60 ? 'bg-amber-500' : 'bg-red-500'}`}
+                          style={{ width: `${Math.min(coverageDisplayPercent, 100)}%` }}
                         />
                       </div>
                       <p className="text-xs text-slate-500">
                         {employmentCoverage.total_days_covered} of {employmentCoverage.total_days_required} days covered
                         {employmentCoverage.earliest_entry_date && ` · Earliest entry: ${new Date(employmentCoverage.earliest_entry_date + 'T00:00:00Z').toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })}`}
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+            {coverageLooksStaleOrUnusable && (
+              <Card className="border-red-200 bg-red-50 shadow-sm">
+                <CardContent className="py-4">
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-medium text-red-800">Cannot assess 10-year coverage</p>
+                      <p className="mt-1 text-xs text-red-700">
+                        Dated employment history is present, but the stored coverage summary did not count any dated coverage. Re-run gap analysis or save the employment history again before sign-off.
                       </p>
                     </div>
                   </div>
@@ -5627,10 +5655,11 @@ export default function EmployeeProfilePage() {
                   </p>
                   <div className="space-y-2">
                     {employee.gap_explanations.map((expl, idx) => {
-                      const hasDateRange = expl.gap_start || expl.start_date;
+                      const hasDateRange = Boolean((expl.gap_start || expl.start_date) && (expl.gap_end || expl.end_date));
                       const gapStart = expl.gap_start || expl.start_date;
                       const gapEnd = expl.gap_end || expl.end_date;
                       const fmtDate = (d) => d ? new Date(d + 'T00:00:00Z').toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }) : '?';
+                      const explanationType = expl.reason_type || expl.type || expl.category || 'Applicant declaration';
                       return (
                         <div key={expl.gap_id || idx} className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
                           <div className="flex items-center gap-2 mb-1 flex-wrap">
@@ -5639,20 +5668,27 @@ export default function EmployeeProfilePage() {
                                 {fmtDate(gapStart)} — {fmtDate(gapEnd)}
                               </span>
                             ) : (
-                              <span className="text-xs font-medium text-blue-800">Gap {idx + 1}</span>
+                              <span className="text-xs font-medium text-blue-800">
+                                Applicant-declared gap explanation, date range not provided
+                              </span>
                             )}
-                            {expl.duration_days && (
+                            {(expl.duration_days || expl.duration_months) && (
                               <Badge variant="outline" className="text-[10px] bg-blue-100 text-blue-700 border-blue-200">
-                                {expl.duration_days} days
+                                {expl.duration_days ? `${expl.duration_days} days` : `${expl.duration_months} months`}
                               </Badge>
                             )}
-                            {expl.reason_type && (
+                            {explanationType && (
                               <Badge variant="outline" className="text-[10px] bg-blue-100 text-blue-600 border-blue-200 capitalize">
-                                {expl.reason_type.replace(/_/g, ' ')}
+                                {explanationType.replace(/_/g, ' ')}
                               </Badge>
                             )}
                           </div>
                           <p className="text-sm text-gray-700">{expl.explanation || 'No explanation text provided by applicant'}</p>
+                          {!hasDateRange && (
+                            <p className="mt-1 text-xs text-blue-700">
+                              This explanation is preserved as applicant evidence, but it does not prove dated 10-year coverage until it is matched to a detected employment gap.
+                            </p>
+                          )}
                         </div>
                       );
                     })}

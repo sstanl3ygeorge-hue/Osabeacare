@@ -60,6 +60,7 @@ import { cn } from '../../lib/utils';
 import { formatBackendDate } from '../../lib/dateUtils';
 import TrainingDetailDrawer from './TrainingDetailDrawer';
 import TrainingCertificateExtractor from './TrainingCertificateExtractor';
+import EvidenceReviewViewerDialog from '../compliance/EvidenceReviewViewerDialog';
 
 const API = process.env.REACT_APP_BACKEND_URL;
 
@@ -175,6 +176,8 @@ export default function AuditReadyTrainingMatrix({
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [extractorOpen, setExtractorOpen] = useState(false); // AI Certificate Extractor dialog
   const [editingItem, setEditingItem] = useState(null);
+  const [trainingReviewOpen, setTrainingReviewOpen] = useState(false);
+  const [trainingReviewItem, setTrainingReviewItem] = useState(null);
   
   // Delete training state
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -317,8 +320,33 @@ export default function AuditReadyTrainingMatrix({
     setEditDialogOpen(true);
   };
 
+  const getSourceCertificateFileForProposedItem = (item) => {
+    if (!item?.source_document_id) return null;
+    return {
+      id: item.source_document_id,
+      file_id: item.source_document_id,
+      file_url: item.source_document?.url,
+      file_name: item.source_document?.filename || 'Source training certificate',
+      name: item.source_document?.filename || 'Source training certificate',
+      uploaded_at: item.source_document?.uploaded_at,
+    };
+  };
+
+  const openTrainingEvidenceReview = (item) => {
+    if (sourceErrors.proposedItems) {
+      toast.error('Cannot assess pending reviews until training review data loads.');
+      return;
+    }
+    if (!getSourceCertificateFileForProposedItem(item)) {
+      toast.error('Source certificate is missing for this extracted item.');
+      return;
+    }
+    setTrainingReviewItem(item);
+    setTrainingReviewOpen(true);
+  };
+
   // Approve proposed item
-  const handleApproveProposed = async (item) => {
+  const handleApproveProposed = async (item, notes) => {
     if (sourceErrors.proposedItems) {
       toast.error('Cannot assess pending reviews until training review data loads.');
       return;
@@ -333,7 +361,8 @@ export default function AuditReadyTrainingMatrix({
             mapped_training_code: item.mapped_training_code,
             mapped_training_title: item.mapped_training_title,
             completed_at: item.completed_at,
-            expires_at: item.expires_at
+            expires_at: item.expires_at,
+            notes
           }]
         },
         { headers: { Authorization: `Bearer ${token}` } }
@@ -347,7 +376,7 @@ export default function AuditReadyTrainingMatrix({
   };
 
   // Reject proposed item
-  const handleRejectProposed = async (item) => {
+  const handleRejectProposed = async (item, notes = 'Rejected by admin') => {
     if (sourceErrors.proposedItems) {
       toast.error('Cannot assess pending reviews until training review data loads.');
       return;
@@ -359,7 +388,7 @@ export default function AuditReadyTrainingMatrix({
           items: [{
             item_id: item.id,
             approve: false,
-            notes: 'Rejected by admin'
+            notes
           }]
         },
         { headers: { Authorization: `Bearer ${token}` } }
@@ -1066,22 +1095,13 @@ export default function AuditReadyTrainingMatrix({
                               <Edit2 className="h-4 w-4" />
                             </Button>
                             <Button
+                              size="sm"
                               variant="outline"
-                              size="sm"
-                              className="text-red-600 border-red-200 hover:bg-red-50"
                               disabled={sourceErrors.proposedItems}
-                              onClick={() => handleRejectProposed(item)}
+                              onClick={() => openTrainingEvidenceReview(item)}
                             >
-                              <XCircle className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              size="sm"
-                              className="bg-green-600 hover:bg-green-700 text-white"
-                              disabled={sourceErrors.proposedItems}
-                              onClick={() => handleApproveProposed(item)}
-                            >
-                              <CheckCircle className="h-4 w-4 mr-1" />
-                              Mark reviewed
+                              <Eye className="h-4 w-4 mr-1" />
+                              Review evidence
                             </Button>
                           </div>
                         )}
@@ -1604,6 +1624,28 @@ export default function AuditReadyTrainingMatrix({
         onSuccess={() => {
           fetchTrainingData();
           onRefresh?.();
+        }}
+      />
+
+      <EvidenceReviewViewerDialog
+        isOpen={trainingReviewOpen}
+        onClose={() => {
+          setTrainingReviewOpen(false);
+          setTrainingReviewItem(null);
+        }}
+        file={getSourceCertificateFileForProposedItem(trainingReviewItem)}
+        employeeId={employeeId}
+        employeeName={employeeName}
+        requirementType="training_certificate"
+        mode="training-review"
+        trainingItem={trainingReviewItem}
+        onTrainingAccepted={async ({ notes }) => {
+          if (!trainingReviewItem) return;
+          await handleApproveProposed(trainingReviewItem, notes);
+        }}
+        onTrainingRejected={async ({ notes }) => {
+          if (!trainingReviewItem) return;
+          await handleRejectProposed(trainingReviewItem, notes);
         }}
       />
       

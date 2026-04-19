@@ -24,6 +24,7 @@ import { Button } from '../ui/button';
 import { Label } from '../ui/label';
 import { RadioGroup, RadioGroupItem } from '../ui/radio-group';
 import { Checkbox } from '../ui/checkbox';
+import { Textarea } from '../ui/textarea';
 import { toast } from 'sonner';
 import {
   Eye,
@@ -45,7 +46,8 @@ import {
   FileText,
   Image as ImageIcon,
   Clock,
-  X
+  X,
+  XCircle
 } from 'lucide-react';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
@@ -114,10 +116,20 @@ export default function EvidenceReviewViewerDialog({
   requirementType,
   aiValidation,
   onVerificationComplete,
-  mode = 'verify' // 'verify' = Identity/POA (checklist → verify & stamp), 'accept' = RTW/DBS (view → accept evidence)
+  mode = 'verify', // 'verify' = Identity/POA (checklist → verify & stamp), 'accept' = RTW/DBS (view → accept evidence), 'form-review' = Form submission (view PDF → approve/reject)
+  // form-review mode props
+  formSubmissionId,
+  formName,
+  onFormApproved,
+  onFormRejected,
+  trainingItem,
+  onTrainingAccepted,
+  onTrainingRejected,
 }) {
   const { token } = useAuth();
   const isAcceptMode = mode === 'accept';
+  const isFormReview = mode === 'form-review';
+  const isTrainingReview = mode === 'training-review';
 
   // Viewer state
   const [blobUrl, setBlobUrl] = useState(null);
@@ -150,7 +162,11 @@ export default function EvidenceReviewViewerDialog({
     frontPresent: false,
     backPresent: false,
     addressValid: false,
-    dateValid: false
+    dateValid: false,
+    trainingCourseTitleCorrect: false,
+    trainingMappingCorrect: false,
+    trainingCompletionDateCorrect: false,
+    trainingExpiryDateCorrect: false
   });
   const [checklistError, setChecklistError] = useState('');
 
@@ -163,24 +179,44 @@ export default function EvidenceReviewViewerDialog({
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Form-review mode state
+  const [formRejectReason, setFormRejectReason] = useState('');
+  const [showRejectInput, setShowRejectInput] = useState(false);
+  const [trainingReviewNotes, setTrainingReviewNotes] = useState('');
+
   const isIdentity = requirementType === 'identity';
   const isAddress = requirementType === 'proof_of_address';
   const methods = isIdentity ? IDENTITY_METHODS : ADDRESS_METHODS;
-  const fileName = file?.file_name || file?.name || 'Document';
+  const fileName = isFormReview ? `${(formName || 'Form').replace(/\s+/g, '_')}.pdf` : (file?.file_name || file?.name || 'Document');
   const docId = file?.id || file?.file_id;
   // Normalise file URL — backend evidence URLs are often relative (/api/...)
-  const rawFileUrl = file?.file_url || (docId ? `/api/employee-documents/${docId}/file` : null);
-  const fileUrl = rawFileUrl && rawFileUrl.startsWith('/api/')
+  const rawFileUrl = isFormReview
+    ? (formSubmissionId ? `${API}/form-submissions/${formSubmissionId}/download-pdf` : null)
+    : (file?.file_url || (docId ? `/api/employee-documents/${docId}/file` : null));
+  const fileUrl = (!isFormReview && rawFileUrl && rawFileUrl.startsWith('/api/'))
     ? `${API}${rawFileUrl.substring(4)}`
     : rawFileUrl;
-  const fileType = getFileType(contentType, fileName);
+  const fileType = isFormReview ? 'pdf' : getFileType(contentType, fileName);
   const hasMetMinViewTime = viewSeconds >= MIN_VIEW_SECONDS;
 
   // ------ Reset on open ------
   useEffect(() => {
     if (isOpen) {
       setStep('viewing');
-      setChecklist({ fileViewed: false, nameMatches: false, documentAcceptable: false, legible: false, frontPresent: false, backPresent: false, addressValid: false, dateValid: false });
+      setChecklist({
+        fileViewed: false,
+        nameMatches: false,
+        documentAcceptable: false,
+        legible: false,
+        frontPresent: false,
+        backPresent: false,
+        addressValid: false,
+        dateValid: false,
+        trainingCourseTitleCorrect: false,
+        trainingMappingCorrect: false,
+        trainingCompletionDateCorrect: false,
+        trainingExpiryDateCorrect: false
+      });
       setSelectedMethod('');
       setConfirmChecks({ documentGenuine: false, detailsMatch: false, dateValid: false });
       setChecklistError('');
@@ -190,6 +226,9 @@ export default function EvidenceReviewViewerDialog({
       setRotation(0);
       setViewingStamped(false);
       setStampedBlobUrl(null);
+      setFormRejectReason('');
+      setShowRejectInput(false);
+      setTrainingReviewNotes('');
       viewStartRef.current = Date.now();
     } else {
       if (timerRef.current) clearInterval(timerRef.current);
@@ -278,9 +317,19 @@ export default function EvidenceReviewViewerDialog({
       setChecklistError('Please confirm address is valid');
       return;
     }
+    if (isFormReview && !checklist.dateValid) {
+      setChecklistError('Please confirm the declaration is signed and dated');
+      return;
+    }
 
     setIsSubmitting(true);
     try {
+      if (isFormReview) {
+        // Form-review mode: approve the form submission directly
+        await handleFormApprove();
+        return;
+      }
+
       const docId = file.file_id || file.id;
       if (!docId) { setChecklistError('Document ID not found'); return; }
 
@@ -384,6 +433,99 @@ export default function EvidenceReviewViewerDialog({
     }
   };
 
+  // ------ Form Review: Approve ------
+  const handleFormApprove = async () => {
+    setIsSubmitting(true);
+    setChecklistError('');
+    try {
+      await axios.post(
+        `${API}/form-submissions/${formSubmissionId}/verify`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      setStep('complete');
+      toast.success('Form submission approved');
+      if (onFormApproved) onFormApproved();
+    } catch (err) {
+      setChecklistError(err.response?.data?.detail || 'Failed to approve form');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // ------ Form Review: Reject ------
+  const handleFormReject = async () => {
+    if (!formRejectReason.trim()) {
+      setChecklistError('Please provide a reason for rejection');
+      return;
+    }
+    setIsSubmitting(true);
+    setChecklistError('');
+    try {
+      await axios.post(
+        `${API}/form-submissions/${formSubmissionId}/reject`,
+        null,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          params: { reason: formRejectReason.trim() }
+        }
+      );
+      setStep('complete');
+      toast.success('Form submission rejected');
+      if (onFormRejected) onFormRejected();
+    } catch (err) {
+      setChecklistError(err.response?.data?.detail || 'Failed to reject form');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const trainingChecklistComplete = isTrainingReview && [
+    checklist.fileViewed,
+    checklist.nameMatches,
+    checklist.documentAcceptable,
+    checklist.legible,
+    checklist.trainingCourseTitleCorrect,
+    checklist.trainingMappingCorrect,
+    checklist.trainingCompletionDateCorrect,
+    checklist.trainingExpiryDateCorrect
+  ].every(Boolean);
+
+  const handleTrainingAccept = async () => {
+    setChecklistError('');
+    if (!trainingChecklistComplete) {
+      setChecklistError('Complete the training evidence checklist before accepting this extracted item.');
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      await onTrainingAccepted?.({
+        notes: trainingReviewNotes.trim() || `Accepted after evidence review (${viewSeconds}s viewing).`
+      });
+      setStep('complete');
+    } catch (err) {
+      setChecklistError(err.response?.data?.detail || err.message || 'Failed to accept extracted training item');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleTrainingReject = async () => {
+    setChecklistError('');
+    setIsSubmitting(true);
+    try {
+      await onTrainingRejected?.({
+        notes: trainingReviewNotes.trim() || `Rejected after evidence review (${viewSeconds}s viewing).`
+      });
+      setStep('complete');
+    } catch (err) {
+      setChecklistError(err.response?.data?.detail || err.message || 'Failed to reject extracted training item');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   const handleClose = () => {
     if (step === 'complete' && onVerificationComplete) {
       onVerificationComplete();
@@ -401,9 +543,13 @@ export default function EvidenceReviewViewerDialog({
         data-testid="evidence-review-viewer-dialog"
       >
         <DialogTitle className="sr-only">
-          {isAcceptMode
-            ? `Review ${requirementType === 'right_to_work' ? 'Right to Work' : requirementType === 'dbs' ? 'DBS Certificate' : requirementType} Evidence`
-            : `Review & Verify ${isIdentity ? 'Identity Document' : 'Proof of Address'}`}
+          {isFormReview
+            ? `Review ${formName || 'Form'} Submission`
+            : isTrainingReview
+              ? `Review Training Evidence for ${trainingItem?.mapped_training_title || trainingItem?.raw_course_title || 'Extracted Training Item'}`
+            : isAcceptMode
+              ? `Review ${requirementType === 'right_to_work' ? 'Right to Work' : requirementType === 'dbs' ? 'DBS Certificate' : requirementType} Evidence`
+              : `Review & Verify ${isIdentity ? 'Identity Document' : 'Proof of Address'}`}
         </DialogTitle>
         <DialogDescription className="sr-only">
           View the document and complete the verification checklist
@@ -519,12 +665,16 @@ export default function EvidenceReviewViewerDialog({
             {/* Header */}
             <div className="px-4 py-3 border-b bg-slate-50">
               <div className="flex items-center gap-2">
-                {isAcceptMode ? <Shield className="h-5 w-5 text-indigo-600" /> : isIdentity ? <User className="h-5 w-5 text-blue-600" /> : <MapPin className="h-5 w-5 text-purple-600" />}
+                {isFormReview ? <FileText className="h-5 w-5 text-teal-600" /> : isTrainingReview ? <FileCheck className="h-5 w-5 text-purple-600" /> : isAcceptMode ? <Shield className="h-5 w-5 text-indigo-600" /> : isIdentity ? <User className="h-5 w-5 text-blue-600" /> : <MapPin className="h-5 w-5 text-purple-600" />}
                 <div>
                   <h3 className="font-semibold text-sm">
-                    {isAcceptMode
-                      ? `Review ${requirementType === 'right_to_work' ? 'Right to Work' : requirementType === 'dbs' ? 'DBS Certificate' : requirementType.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())} Evidence`
-                      : `Verify ${isIdentity ? 'Identity Document' : 'Proof of Address'}`}
+                    {isFormReview
+                      ? `Review ${formName || 'Form'}`
+                      : isTrainingReview
+                        ? 'Review Training Evidence'
+                      : isAcceptMode
+                        ? `Review ${requirementType === 'right_to_work' ? 'Right to Work' : requirementType === 'dbs' ? 'DBS Certificate' : requirementType.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())} Evidence`
+                        : `Verify ${isIdentity ? 'Identity Document' : 'Proof of Address'}`}
                   </h3>
                   <p className="text-xs text-slate-500 truncate">{fileName} — {employeeName}</p>
                 </div>
@@ -532,7 +682,7 @@ export default function EvidenceReviewViewerDialog({
 
               {/* Progress steps */}
               <div className="flex items-center gap-2 mt-3">
-                {(isAcceptMode ? ['viewing', 'complete'] : ['viewing', 'verification', 'complete']).map((s, i, arr) => (
+                {(isFormReview || isAcceptMode || isTrainingReview ? ['viewing', 'complete'] : ['viewing', 'verification', 'complete']).map((s, i, arr) => (
                   <div key={s} className="flex items-center gap-1">
                     <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-medium ${
                       step === s ? 'bg-blue-600 text-white' :
@@ -560,6 +710,22 @@ export default function EvidenceReviewViewerDialog({
               {/* ---- STEP: VIEWING + CHECKLIST ---- */}
               {step === 'viewing' && (
                 <>
+                  {isTrainingReview && trainingItem && (
+                    <div className="space-y-3 p-3 bg-purple-50 rounded-lg border border-purple-200">
+                      <div className="flex items-center gap-2 text-purple-900">
+                        <FileCheck className="h-4 w-4" />
+                        <h4 className="font-semibold text-sm">Extracted training item</h4>
+                      </div>
+                      <div className="space-y-2 bg-white p-3 rounded border text-sm">
+                        <DetailRow label="Extracted title" value={trainingItem.raw_course_title} />
+                        <DetailRow label="Mapped qualification" value={trainingItem.mapped_training_title || trainingItem.mapped_training_code || 'Not mapped'} />
+                        <DetailRow label="Completed" value={trainingItem.completed_at || 'Not found'} />
+                        <DetailRow label="Expires" value={trainingItem.expires_at || 'Not applicable / not found'} />
+                        <DetailRow label="Certificate" value={fileName} />
+                      </div>
+                    </div>
+                  )}
+
                   {/* Timer notice */}
                   <div className={`p-3 rounded-lg border text-sm flex items-center gap-2 ${
                     hasMetMinViewTime ? 'bg-green-50 border-green-200 text-green-800' : 'bg-amber-50 border-amber-200 text-amber-800'
@@ -580,24 +746,60 @@ export default function EvidenceReviewViewerDialog({
                     </div>
 
                     <div className="space-y-2.5 bg-white p-3 rounded border">
-                      <CheckItem id="rv-fileViewed" checked={checklist.fileViewed} onChange={v => setChecklist(p => ({...p, fileViewed: v}))} label="File has been opened and viewed" />
-                      <CheckItem id="rv-nameMatches" checked={checklist.nameMatches} onChange={v => setChecklist(p => ({...p, nameMatches: v}))} label="Name/details match profile" />
-                      <CheckItem id="rv-documentAcceptable" checked={checklist.documentAcceptable} onChange={v => setChecklist(p => ({...p, documentAcceptable: v}))} label="Document type acceptable" />
-                      <CheckItem id="rv-legible" checked={checklist.legible} onChange={v => setChecklist(p => ({...p, legible: v}))} label="Document is legible and clear" />
+                      {isTrainingReview ? (
+                        <>
+                          <CheckItem id="rv-fileViewed" checked={checklist.fileViewed} onChange={v => setChecklist(p => ({...p, fileViewed: v}))} label="Source certificate has been opened and reviewed" />
+                          <CheckItem id="rv-nameMatches" checked={checklist.nameMatches} onChange={v => setChecklist(p => ({...p, nameMatches: v}))} label="Worker name matches certificate" />
+                          <CheckItem id="rv-courseTitle" checked={checklist.trainingCourseTitleCorrect} onChange={v => setChecklist(p => ({...p, trainingCourseTitleCorrect: v}))} label="Extracted course title is correct" />
+                          <CheckItem id="rv-mapping" checked={checklist.trainingMappingCorrect} onChange={v => setChecklist(p => ({...p, trainingMappingCorrect: v}))} label="Mapped qualification/requirement is correct" />
+                          <CheckItem id="rv-completed" checked={checklist.trainingCompletionDateCorrect} onChange={v => setChecklist(p => ({...p, trainingCompletionDateCorrect: v}))} label="Completed date is correct" />
+                          <CheckItem id="rv-expiry" checked={checklist.trainingExpiryDateCorrect} onChange={v => setChecklist(p => ({...p, trainingExpiryDateCorrect: v}))} label="Expiry date is correct or not applicable" />
+                          <CheckItem id="rv-documentAcceptable" checked={checklist.documentAcceptable} onChange={v => setChecklist(p => ({...p, documentAcceptable: v}))} label="Certificate is acceptable evidence" />
+                          <CheckItem id="rv-legible" checked={checklist.legible} onChange={v => setChecklist(p => ({...p, legible: v}))} label="Certificate is legible and clear" />
+                        </>
+                      ) : (
+                        <>
+                          <CheckItem id="rv-fileViewed" checked={checklist.fileViewed} onChange={v => setChecklist(p => ({...p, fileViewed: v}))} label="File has been opened and viewed" />
+                          <CheckItem id="rv-nameMatches" checked={checklist.nameMatches} onChange={v => setChecklist(p => ({...p, nameMatches: v}))} label="Name/details match profile" />
+                          {!isFormReview && (
+                            <CheckItem id="rv-documentAcceptable" checked={checklist.documentAcceptable} onChange={v => setChecklist(p => ({...p, documentAcceptable: v}))} label="Document type acceptable" />
+                          )}
+                          <CheckItem id="rv-legible" checked={checklist.legible} onChange={v => setChecklist(p => ({...p, legible: v}))} label={isFormReview ? 'All fields completed and readable' : 'Document is legible and clear'} />
+                        </>
+                      )}
 
-                      {isIdentity && (
+                      {isFormReview && !isTrainingReview && (
+                        <>
+                          <CheckItem id="rv-documentAcceptable" checked={checklist.documentAcceptable} onChange={v => setChecklist(p => ({...p, documentAcceptable: v}))} label="Answers appear consistent and reasonable" />
+                          <CheckItem id="rv-dateValid" checked={checklist.dateValid} onChange={v => setChecklist(p => ({...p, dateValid: v}))} label="Declaration signed and dated" />
+                        </>
+                      )}
+
+                      {isIdentity && !isTrainingReview && (
                         <>
                           <CheckItem id="rv-frontPresent" checked={checklist.frontPresent} onChange={v => setChecklist(p => ({...p, frontPresent: v}))} label="Front side present" />
                           <CheckItem id="rv-backPresent" checked={checklist.backPresent} onChange={v => setChecklist(p => ({...p, backPresent: v}))} label="Back side present" />
                         </>
                       )}
-                      {isAddress && (
+                      {isAddress && !isTrainingReview && (
                         <>
                           <CheckItem id="rv-addressValid" checked={checklist.addressValid} onChange={v => setChecklist(p => ({...p, addressValid: v}))} label="Address matches declared" />
                           <CheckItem id="rv-dateValid" checked={checklist.dateValid} onChange={v => setChecklist(p => ({...p, dateValid: v}))} label="Document within acceptable date range" />
                         </>
                       )}
                     </div>
+
+                    {isTrainingReview && (
+                      <div className="space-y-2">
+                        <Label className="text-sm font-medium">Review notes</Label>
+                        <Textarea
+                          value={trainingReviewNotes}
+                          onChange={(e) => setTrainingReviewNotes(e.target.value)}
+                          placeholder="Optional notes for accepting or rejecting this extracted item"
+                          rows={3}
+                        />
+                      </div>
+                    )}
 
                     {checklistError && (
                       <div className="text-sm text-red-600 bg-red-50 p-2 rounded flex items-start gap-2">
@@ -696,15 +898,23 @@ export default function EvidenceReviewViewerDialog({
                   <div className="p-4 bg-green-50 border border-green-200 rounded-lg text-center">
                     <ShieldCheck className="h-10 w-10 text-green-600 mx-auto mb-2" />
                     <h4 className="font-semibold text-green-800">
-                      {isAcceptMode ? 'Evidence Accepted' : 'Verification Complete'}
+                      {isFormReview
+                        ? (showRejectInput ? 'Form Rejected' : 'Form Approved')
+                        : isTrainingReview ? 'Training Review Recorded' : isAcceptMode ? 'Evidence Accepted' : 'Verification Complete'}
                     </h4>
                     <p className="text-sm text-green-700 mt-1">
-                      {isAcceptMode
+                      {isFormReview
+                        ? (showRejectInput
+                          ? `Form submission rejected after ${viewSeconds}s of review.`
+                          : `Form submission approved after ${viewSeconds}s of review. The audit trail records your viewing time and checklist.`)
+                        : isTrainingReview
+                        ? 'The extracted training item decision has been recorded. Verification remains a separate step on the canonical training record.'
+                        : isAcceptMode
                         ? `Evidence has been accepted after ${viewSeconds}s of review. You can now proceed to record the verification check.`
                         : `Document verified, stamped, and verification check auto-recorded. The audit trail records ${viewSeconds}s of viewing time.`}
                     </p>
                   </div>
-                  {!isAcceptMode && stampedBlobUrl && (
+                  {!isAcceptMode && !isFormReview && stampedBlobUrl && (
                     <div className="space-y-2">
                       <p className="text-xs text-slate-500 text-center">
                         Use the Original / Stamped toggle above to compare versions.
@@ -724,14 +934,90 @@ export default function EvidenceReviewViewerDialog({
                   <span className="text-xs font-medium">NHS Safer Recruitment Compliant</span>
                 </div>
                 <p className="text-xs text-slate-500 mt-1">
-                  Verification recorded with timestamp, viewing duration, verifier name, and method.
+                  {isTrainingReview
+                    ? 'Evidence review is recorded with timestamp, viewing duration, reviewer, and decision notes.'
+                    : 'Verification recorded with timestamp, viewing duration, verifier name, and method.'}
                 </p>
               </div>
             </div>
 
             {/* Footer buttons */}
             <div className="px-4 py-3 border-t bg-slate-50 flex items-center gap-2">
-              {step === 'viewing' && (
+              {step === 'viewing' && isTrainingReview && (
+                <>
+                  <Button variant="outline" size="sm" onClick={handleClose} className="flex-1">Cancel</Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleTrainingReject}
+                    disabled={isSubmitting || !hasMetMinViewTime || !checklist.fileViewed}
+                    className="flex-1 gap-1 text-red-700 border-red-200 hover:bg-red-50"
+                  >
+                    {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <XCircle className="h-4 w-4" />}
+                    Reject / needs correction
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={handleTrainingAccept}
+                    disabled={isSubmitting || !hasMetMinViewTime || !trainingChecklistComplete}
+                    className="flex-1 gap-1 bg-green-600 hover:bg-green-700"
+                  >
+                    {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
+                    Accept extracted item
+                  </Button>
+                </>
+              )}
+              {step === 'viewing' && isFormReview && !isTrainingReview && (
+                <>
+                  <Button variant="outline" size="sm" onClick={handleClose} className="flex-1">Cancel</Button>
+                  {!showRejectInput ? (
+                    <>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setShowRejectInput(true)}
+                        disabled={isSubmitting || !hasMetMinViewTime || !checklist.fileViewed}
+                        className="gap-1 text-red-700 border-red-200 hover:bg-red-50"
+                      >
+                        <XCircle className="h-4 w-4" />
+                        Reject
+                      </Button>
+                      <Button
+                        size="sm"
+                        onClick={handleProceedToVerification}
+                        disabled={isSubmitting || !hasMetMinViewTime || !checklist.fileViewed || !checklist.nameMatches}
+                        className="flex-1 gap-1 bg-green-600 hover:bg-green-700"
+                      >
+                        {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
+                        Approve
+                      </Button>
+                    </>
+                  ) : (
+                    <div className="flex-1 flex flex-col gap-2">
+                      <Textarea
+                        placeholder="Reason for rejection (required)"
+                        value={formRejectReason}
+                        onChange={(e) => setFormRejectReason(e.target.value)}
+                        rows={2}
+                        className="text-sm"
+                      />
+                      <div className="flex gap-2">
+                        <Button variant="outline" size="sm" onClick={() => { setShowRejectInput(false); setFormRejectReason(''); }} className="flex-1">Back</Button>
+                        <Button
+                          size="sm"
+                          onClick={handleFormReject}
+                          disabled={isSubmitting || !formRejectReason.trim()}
+                          className="flex-1 gap-1 bg-red-600 hover:bg-red-700"
+                        >
+                          {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <XCircle className="h-4 w-4" />}
+                          Confirm Reject
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+              {step === 'viewing' && !isTrainingReview && !isFormReview && (
                 <>
                   <Button variant="outline" size="sm" onClick={handleClose} className="flex-1">Cancel</Button>
                   <Button
@@ -779,6 +1065,15 @@ function CheckItem({ id, checked, onChange, label }) {
     <div className="flex items-start gap-2.5">
       <Checkbox id={id} checked={checked} onCheckedChange={onChange} />
       <label htmlFor={id} className="text-sm cursor-pointer leading-tight">{label}</label>
+    </div>
+  );
+}
+
+function DetailRow({ label, value }) {
+  return (
+    <div>
+      <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</p>
+      <p className="text-sm text-slate-900">{value || '-'}</p>
     </div>
   );
 }

@@ -6643,6 +6643,9 @@ from services.training_evaluator import (
     evaluate_employee_training_status,
     build_training_records_lookup,
     resolve_training_record,
+    normalize_training_text,
+    normalize_training_key,
+    resolve_mandatory_training_code,
 )
 # Keep module-level EXPIRY_WARNING_DAYS aligned (used in a few other places)
 EXPIRY_WARNING_DAYS = _TE_EXPIRY_WARNING_DAYS
@@ -11107,9 +11110,9 @@ MANDATORY_TRAININGS = [
 
 def get_expiry_months_for_training(training_name: str) -> int:
     """Return expiry period in months for a training type"""
-    name_lower = training_name.lower()
+    name_lower = normalize_training_text(training_name)
     for key, months in TRAINING_EXPIRY_MONTHS.items():
-        if key in name_lower:
+        if normalize_training_text(key) in name_lower:
             return months
     return 12  # Default 12 months
 
@@ -11118,18 +11121,22 @@ def is_mandatory_training(training_name: str) -> bool:
     Uses canonical mandatory training names derived from MANDATORY_ITEMS,
     plus the TRAINING_ALIASES table for variant names.
     """
-    from services.training_evaluator import TRAINING_ALIASES
-    name_lower = training_name.lower()
+    from services.training_evaluator import TRAINING_ALIASES, get_canonical_mandatory_training_ids
+    name_lower = normalize_training_text(training_name)
     # Direct substring match against mandatory names
-    if any(mandatory in name_lower for mandatory in MANDATORY_TRAININGS):
+    if any(normalize_training_text(mandatory) in name_lower for mandatory in MANDATORY_TRAININGS):
         return True
     # Check alias table — normalise name to underscore form and look up
-    normalised = name_lower.replace(" ", "_").replace("&", "and").replace("-", "_")
+    normalised = normalize_training_key(name_lower)
     canon = TRAINING_ALIASES.get(normalised)
     if canon:
         # Check if the canonical code is a mandatory training ID
-        from services.training_evaluator import get_canonical_mandatory_training_ids
-        return canon in get_canonical_mandatory_training_ids()
+        mandatory_ids = get_canonical_mandatory_training_ids()
+        return canon in mandatory_ids or any(TRAINING_ALIASES.get(req_id) == canon for req_id in mandatory_ids)
+    mapped_code, _ = map_training_title(training_name)
+    if mapped_code:
+        mandatory_ids = get_canonical_mandatory_training_ids()
+        return mapped_code in mandatory_ids or any(TRAINING_ALIASES.get(req_id) == mapped_code for req_id in mandatory_ids)
     return False
 
 async def extract_training_from_certificate(file_bytes: bytes, filename: str) -> List[dict]:
@@ -11178,7 +11185,7 @@ COMMON CSTF COURSES TO LOOK FOR (extract ALL that appear):
 - Safeguarding Adults (Levels 1, 2, 3)
 - Safeguarding Children (Levels 1, 2, 3) - Note: mark as optional
 - Infection Prevention and Control
-- Health & Safety / Health Safety Awareness
+- Health, Safety and Welfare / Health & Safety / Health Safety Awareness
 - Basic Life Support / BLS / Resuscitation
 - Information Governance / GDPR / Data Protection
 - Equality, Diversity and Human Rights / Equality & Diversity / EDI
@@ -11227,7 +11234,7 @@ If no trainings detected, return empty array: []"""
                 import fitz
                 try:
                     pdf_doc = fitz.open(stream=file_bytes, filetype="pdf")
-                    for page_num in range(min(pdf_doc.page_count, 3)):
+                    for page_num in range(min(pdf_doc.page_count, 8)):
                         page = pdf_doc[page_num]
                         pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
                         img_bytes = pix.tobytes("png")
@@ -11319,7 +11326,7 @@ If no trainings detected, return empty array: []"""
             "Safeguarding Children": r"Safeguarding.*Children|Child\s+Safeguarding|CSTF\s+Safeguarding\s+Children",
             "Manual Handling": r"Manual\s*Handling|Moving\s*(?:and|&)\s*Handling|CSTF\s+Moving\s*(?:and|&)\s*Handling",
             "Fire Safety": r"Fire\s*Safety|Fire\s*Awareness|Fire\s*Marshal|CSTF\s+Fire\s+Safety",
-            "Health & Safety": r"Health\s*(?:&|and)?\s*Safety|CSTF\s+Health\s+Safety|Health\s+Safety\s+Awareness",
+            "Health & Safety": r"Health\s*(?:,|&|and)?\s*Safety(?:\s*(?:and|&)\s*Welfare)?|Health\s+Safety\s+(?:and\s+)?Welfare|CSTF\s+Health(?:,|\s)+(?:&|and)?\s*Safety(?:\s*(?:and|&)\s*Welfare)?|Health\s+Safety\s+Awareness",
             "Infection Control": r"Infection\s*(?:Control|Prevention)|CSTF\s+Infection\s+(?:Prevention|Control)",
             "Basic Life Support": r"Basic\s*Life\s*Support|BLS|CPR|Resuscitation|CSTF\s+Resuscitation",
             "Medication Administration": r"Medication|Medicine\s*Administration|Medication\s*Awareness",
@@ -11733,11 +11740,7 @@ async def re_extract_training_from_existing_certificate(
     # Build normalised name set for dedup (alias-aware)
     def _normalise_training_name(name):
         """Normalise for dedup: lowercase, strip whitespace, collapse separators."""
-        n = name.lower().strip()
-        n = n.replace("&", "and").replace("-", " ").replace("_", " ")
-        # Collapse multiple spaces
-        n = " ".join(n.split())
-        return n
+        return normalize_training_text(name)
     
     existing_names = {}
     for r in existing_records:
@@ -11757,16 +11760,27 @@ async def re_extract_training_from_existing_certificate(
     for training in extracted:
         training_name = training.get("training_name", "Unknown Training")
         training_normalised = _normalise_training_name(training_name)
+        mapped_code, mapped_title = map_training_title(training_name)
+        if not mapped_code:
+            logger.info(
+                "[TRAINING_EXTRACTION_UNMAPPED] employee=%s document=%s title=%r normalized=%r",
+                employee_id,
+                doc_id_for_status,
+                training_name,
+                training_normalised,
+            )
         
         # Check if this training already exists as a canonical record
-        existing_id = existing_names.get(training_normalised)
+        existing_id = existing_names.get(mapped_title and _normalise_training_name(mapped_title)) or existing_names.get(training_normalised)
         is_update = existing_id is not None
         
         # Check if already pending in proposed items
-        already_proposed = training_normalised in proposed_names
+        already_proposed = training_normalised in proposed_names or (
+            mapped_title and _normalise_training_name(mapped_title) in proposed_names
+        )
         
         # Determine if mandatory
-        is_mandatory = is_mandatory_training(training_name)
+        is_mandatory = is_mandatory_training(mapped_title or training_name)
         
         # Calculate confidence based on extraction source
         extraction_source = training.get("extracted_by", "unknown")
@@ -11782,6 +11796,8 @@ async def re_extract_training_from_existing_certificate(
             "validity_period": training.get("validity_period"),
             "provider": training.get("provider", "Unknown"),
             "level": training.get("level"),
+            "mapped_training_code": mapped_code,
+            "mapped_training_title": mapped_title,
             "is_mandatory": is_mandatory,
             "is_optional": training.get("is_optional", False),
             "confidence": confidence,
@@ -11859,8 +11875,7 @@ async def bulk_save_training_records(
     }, {"_id": 0, "raw_course_title": 1, "mapped_training_title": 1, "status": 1}).to_list(200)
     
     def _norm(name):
-        n = name.lower().strip().replace("&", "and").replace("-", " ").replace("_", " ")
-        return " ".join(n.split())
+        return normalize_training_text(name)
     
     proposed_norms = set()
     for p in existing_proposed:
@@ -11873,13 +11888,29 @@ async def bulk_save_training_records(
         training_name = training.get("training_name", "").strip()
         if not training_name:
             continue
+        mapped_code = training.get("mapped_training_code")
+        mapped_title = training.get("mapped_training_title")
+        if not mapped_code:
+            mapped_code, mapped_title = map_training_title(training_name)
+        if mapped_code and not mapped_title:
+            mapped_title = TRAINING_TITLES.get(mapped_code, training_name)
+        if not mapped_code:
+            logger.info(
+                "[TRAINING_BULK_SAVE_UNMAPPED] employee=%s title=%r normalized=%r",
+                employee_id,
+                training_name,
+                _norm(training_name),
+            )
         
         # Skip if already pending in proposed items
         tn = _norm(training_name)
-        if tn in proposed_norms:
+        mapped_norm = _norm(mapped_title) if mapped_title else None
+        if tn in proposed_norms or (mapped_norm and mapped_norm in proposed_norms):
             skipped_duplicates.append(training_name)
             continue
         proposed_norms.add(tn)  # Prevent intra-batch duplicates too
+        if mapped_norm:
+            proposed_norms.add(mapped_norm)
         
         completion_date = training.get("completion_date")
         expiry_date = training.get("expiry_date")
@@ -11899,12 +11930,11 @@ async def bulk_save_training_records(
                 logger.warning(f"Expiry calculation failed for {training_name}: {e}")
         
         # Generate training ID — use canonical mandatory code when available (Fix E)
-        from services.training_evaluator import resolve_mandatory_training_code
-        canonical_code = resolve_mandatory_training_code(training_name)
-        training_id = canonical_code or training_name.lower().replace(" ", "_").replace("&", "and")[:30]
+        canonical_code = mapped_code or resolve_mandatory_training_code(training_name)
+        training_id = canonical_code or normalize_training_key(training_name)[:30]
         training_id = re.sub(r'[^a-z0-9_]', '', training_id)
         
-        is_mandatory = is_mandatory_training(training_name)
+        is_mandatory = is_mandatory_training(mapped_title or training_name)
         
         # Resolve source document ID (must be an employee_documents.id)
         document_id = training.get("document_id")
@@ -11920,7 +11950,7 @@ async def bulk_save_training_records(
             "employee_id": employee_id,
             "source_document_id": document_id,
             "raw_course_title": training_name,
-            "mapped_training_title": training_name,
+            "mapped_training_title": mapped_title or training_name,
             "mapped_training_code": training_id,
             "completion_date": completion_date,
             "completed_at": completion_date,
@@ -12284,20 +12314,67 @@ async def update_employment_history(
     # Convert to dict format
     history_data = [r.model_dump() for r in request.employment_history]
     
-    # Detect gaps automatically
-    gaps = detect_cv_gaps(history_data)
+    # Detect gaps and coverage from the same dated employment-history truth
+    gaps = detect_employment_gaps_with_coverage(history_data)
     
     now = datetime.now(timezone.utc).isoformat()
+
+    # Preserve applicant-submitted explanations only when they match a dated detected gap.
+    applicant_explanations = employee.get("gap_explanations", []) or []
+    for gap in gaps:
+        matched_expl = None
+        gap_start = gap.get("gap_start")
+        gap_end = gap.get("gap_end")
+        for expl in applicant_explanations:
+            expl_start = expl.get("gap_start") or expl.get("start_date")
+            expl_end = expl.get("gap_end") or expl.get("end_date")
+            if expl_start and expl_end and expl_start == gap_start and expl_end == gap_end:
+                matched_expl = expl
+                break
+        if not matched_expl:
+            expl_by_id = {e.get("gap_id"): e for e in applicant_explanations if e.get("gap_id")}
+            matched_expl = expl_by_id.get(gap.get("gap_id"))
+        if matched_expl and matched_expl.get("explanation"):
+            gap["explanation"] = matched_expl["explanation"]
+            gap["reason_type"] = matched_expl.get("reason_type")
+            gap["explanation_provided_at"] = now
+            gap["explained_by"] = "applicant"
+            gap["explanation_source"] = "application_form"
+            gap["status"] = "explained"
+
+    employment_coverage = compute_coverage_summary(history_data)
     
     # Update employee with history and detected gaps
     update_data = {
         "employment_history": history_data,
         "cv_gaps_detected": gaps,
         "cv_gaps_all_explained": all(g.get("explanation") and len(str(g.get("explanation", "")).strip()) >= 10 for g in gaps) if gaps else True,
+        "employment_gaps": gaps,
+        "employment_gaps_detected_at": now,
+        "has_employment_gaps": len(gaps) > 0,
+        "employment_coverage": employment_coverage,
+        "gap_analysis_status": "completed",
         "updated_at": now
     }
     
-    await db.employees.update_one({"id": employee_id}, {"$set": update_data})
+    await db.employees.update_one(
+        {"id": employee_id},
+        {"$set": update_data, "$unset": {"gap_analysis_error": ""}}
+    )
+
+    for gap in gaps:
+        gap_record = create_gap_record(employee_id, gap, created_by=user.get("user_id", "admin"))
+        existing_gap = await db.employment_gaps.find_one({
+            "employee_id": employee_id,
+            "gap_start": gap_record.get("gap_start"),
+            "gap_end": gap_record.get("gap_end"),
+        })
+        if not existing_gap:
+            await db.employment_gaps.update_one(
+                {"id": gap_record["id"]},
+                {"$setOnInsert": gap_record},
+                upsert=True,
+            )
 
     # Invalidate employment review sign-off if history changed after sign-off
     if employee.get("employment_review_signed_off"):
@@ -12332,6 +12409,7 @@ async def update_employment_history(
         "message": "Employment history updated",
         "employment_history": history_data,
         "gaps_detected": gaps,
+        "employment_coverage": employment_coverage,
         "gaps_all_explained": update_data["cv_gaps_all_explained"],
         "gaps_requiring_explanation": [g for g in gaps if not g.get("explanation") or len(str(g.get("explanation", "")).strip()) < 10]
     }
@@ -39149,33 +39227,79 @@ app.add_middleware(
 TRAINING_CODE_MAPPING = {
     # CSTF (Care Skills Training Framework) Mappings
     "cstf - fire safety": "fire_safety",
+    "cstf fire safety": "fire_safety",
+    "cstf fire safety practical": "fire_safety",
     "fire safety": "fire_safety",
+    "fire safety practical": "fire_safety",
+    "fire awareness": "fire_safety",
     "cstf - infection prevention and control": "infection_control",
+    "cstf infection prevention and control": "infection_control",
+    "cstf infection prevention and control levels 1 and 2": "infection_control",
     "infection prevention and control": "infection_control",
+    "infection prevention and control levels 1 and 2": "infection_control",
+    "infection prevention control": "infection_control",
     "infection control": "infection_control",
+    "ipc": "infection_control",
     "cstf - manual handling": "manual_handling",
+    "cstf manual handling": "manual_handling",
+    "cstf moving and handling": "manual_handling",
+    "cstf moving and handling levels 1 and 2": "manual_handling",
     "manual handling": "manual_handling",
     "moving and handling": "manual_handling",
+    "moving and handling levels 1 and 2": "manual_handling",
+    "manual handling people": "manual_handling",
     "cstf - safeguarding adults": "safeguarding",
+    "cstf safeguarding adults": "safeguarding",
+    "cstf safeguarding adults level 1": "safeguarding",
+    "cstf safeguarding adults level 2": "safeguarding",
+    "cstf safeguarding adults levels 1 and 2": "safeguarding",
     "safeguarding adults": "safeguarding",
+    "safeguarding adults level 1": "safeguarding",
+    "safeguarding adults level 2": "safeguarding",
+    "safeguarding adults levels 1 and 2": "safeguarding",
     "safeguarding": "safeguarding",
     "cstf - adult basic life support": "basic_life_support",
+    "cstf adult basic life support": "basic_life_support",
+    "cstf resuscitation adults": "basic_life_support",
+    "resuscitation adults": "basic_life_support",
+    "adult resuscitation": "basic_life_support",
     "basic life support": "basic_life_support",
+    "adult basic life support": "basic_life_support",
+    "resuscitation": "basic_life_support",
     "bls": "basic_life_support",
     "cstf - food hygiene": "food_hygiene",
     "food hygiene": "food_hygiene",
     "food safety": "food_hygiene",
     "cstf - equality diversity and human rights": "equality_diversity",
+    "cstf equality diversity and human rights": "equality_diversity",
+    "cstf equality and diversity and human rights": "equality_diversity",
+    "equality diversity and human rights": "equality_diversity",
+    "equality and diversity and human rights": "equality_diversity",
     "equality diversity": "equality_diversity",
     "cstf - health safety and welfare": "health_safety",
+    "cstf health safety and welfare": "health_safety",
+    "cstf health and safety and welfare": "health_safety",
+    "health safety and welfare": "health_safety",
+    "health and safety and welfare": "health_safety",
     "health and safety": "health_safety",
+    "health safety": "health_safety",
     "cstf - information governance": "information_governance",
+    "cstf information governance": "information_governance",
     "information governance": "information_governance",
+    "information governance gdpr": "information_governance",
+    "information governance and data security": "information_governance",
     "data protection": "information_governance",
     "gdpr": "information_governance",
     "cstf - preventing radicalisation": "prevent",
+    "cstf preventing radicalisation": "prevent",
+    "cstf preventing radicalization": "prevent",
+    "cstf prevent": "prevent",
     "prevent": "prevent",
     "preventing radicalisation": "prevent",
+    "preventing radicalization": "prevent",
+    "preventing radicalisation awareness": "prevent",
+    "preventing radicalization awareness": "prevent",
+    "counter terrorism": "prevent",
     "first aid": "first_aid",
     "first aid awareness": "first_aid",
     "medication administration": "medication_administration",
@@ -39190,6 +39314,9 @@ TRAINING_CODE_MAPPING = {
     "learning disabilities": "learning_disabilities",
     "end of life care": "end_of_life_care",
     "palliative care": "end_of_life_care",
+    "cstf nhs conflict resolution": "conflict_resolution",
+    "nhs conflict resolution": "conflict_resolution",
+    "conflict resolution": "conflict_resolution",
 }
 
 TRAINING_TITLES = {
@@ -39212,6 +39339,7 @@ TRAINING_TITLES = {
     "autism_awareness": "Autism Awareness",
     "learning_disabilities": "Learning Disabilities Awareness",
     "end_of_life_care": "End of Life Care",
+    "conflict_resolution": "Conflict Resolution",
 }
 
 
@@ -39225,14 +39353,14 @@ def map_training_title(raw_title: str) -> tuple:
     if not raw_title:
         return (None, None)
     
-    normalized = raw_title.lower().strip()
+    normalized = normalize_training_text(raw_title)
     
     # Remove common prefixes/suffixes
-    for prefix in ["cstf -", "cstf-", "e-learning:", "online:"]:
+    for prefix in ["cstf ", "e learning ", "online "]:
         if normalized.startswith(prefix):
             normalized = normalized[len(prefix):].strip()
     
-    for suffix in ["- online", "online module", "e-learning", "level 1", "level 2", "level 1&2", "level 1 & 2"]:
+    for suffix in ["online", "online module", "e learning", "level 1", "level 2", "level 1 2", "level 1 and 2"]:
         if normalized.endswith(suffix):
             normalized = normalized[:-len(suffix)].strip()
     
@@ -39243,9 +39371,16 @@ def map_training_title(raw_title: str) -> tuple:
     
     # Fuzzy matching - check if any mapping key is contained in the title
     for key, code in TRAINING_CODE_MAPPING.items():
-        if key in normalized or normalized in key:
+        normalized_key = normalize_training_text(key)
+        if normalized_key and (normalized_key in normalized or normalized in normalized_key):
             return (code, TRAINING_TITLES.get(code, raw_title))
+
+    # Canonical evaluator aliases are the final shared fallback.
+    alias_code = resolve_mandatory_training_code(raw_title)
+    if alias_code:
+        return (alias_code, TRAINING_TITLES.get(alias_code, raw_title))
     
+    logger.info("[TRAINING_MAPPING_UNMAPPED] raw_title=%r normalized=%r", raw_title, normalized)
     return (None, None)
 
 
@@ -39585,6 +39720,14 @@ Important:
             
             # Map to internal code
             mapped_code, mapped_title = map_training_title(raw_title)
+            if not mapped_code:
+                logger.info(
+                    "[TRAINING_INTAKE_UNMAPPED] employee=%s document=%s title=%r normalized=%r",
+                    employee_id,
+                    document_id,
+                    raw_title,
+                    normalize_training_text(raw_title),
+                )
             
             # Determine expiry
             completion_date = course.get("completion_date")
@@ -39645,7 +39788,7 @@ Important:
             
             # Build lookup of existing training names (normalized)
             def normalize_name(name):
-                return (name or "").lower().strip().replace("-", " ").replace("_", " ")
+                return normalize_training_text(name)
             
             existing_codes = set()
             existing_names = set()
@@ -39902,7 +40045,8 @@ Important:
                         "certificate_number": proposed.get("certificate_number"),
                         "provider_name": proposed.get("provider_name"),
                         "source_document_id": proposed.get("source_document_id"),
-                        "intake_item_id": item.item_id
+                        "intake_item_id": item.item_id,
+                        "intake_review_notes": item.notes
                     }
                     
                     # Add evidence file link
@@ -39945,6 +40089,7 @@ Important:
                         "provider_name": proposed.get("provider_name"),
                         "source_document_id": proposed.get("source_document_id"),
                         "intake_item_id": item.item_id,
+                        "intake_review_notes": item.notes,
                         "evidence_files": [{
                             "file_id": str(uuid.uuid4()),
                             "document_id": proposed.get("source_document_id"),
@@ -39972,6 +40117,7 @@ Important:
                             "mapped_training_title": training_title,
                             "completed_at": completed_at,
                             "expires_at": expires_at,
+                            "review_notes": item.notes,
                             "updated_at": now
                         }
                     }

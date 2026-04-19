@@ -12,6 +12,7 @@ import them lazily from ``server`` to avoid circular imports.
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -276,6 +277,22 @@ def get_training_blocker_config(requirement_id: str) -> dict:
     )
 
 
+def normalize_training_text(value: str) -> str:
+    """Normalize extracted training text for deterministic matching."""
+    if not value:
+        return ""
+    normalized = value.lower()
+    normalized = normalized.replace("&", " and ")
+    normalized = re.sub(r"[^a-z0-9]+", " ", normalized)
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    return normalized
+
+
+def normalize_training_key(value: str) -> str:
+    """Normalize extracted training text to the underscore-key alias format."""
+    return normalize_training_text(value).replace(" ", "_")
+
+
 # ---------------------------------------------------------------------------
 # Training name aliases — maps variant names to canonical requirement IDs.
 # Used by resolve_training_record to match extracted names to mandatory codes.
@@ -286,42 +303,85 @@ TRAINING_ALIASES = {
     "adult_bls": "basic_life_support",
     "resuscitation": "basic_life_support",
     "adult_basic_life_support": "basic_life_support",
+    "cstf_adult_basic_life_support": "basic_life_support",
     "cstf_resuscitation": "basic_life_support",
+    "cstf_resuscitation_adults": "basic_life_support",
+    "resuscitation_adults": "basic_life_support",
+    "adult_resuscitation": "basic_life_support",
     # Safeguarding
     "safeguarding_adults": "safeguarding",
+    "safeguarding_adults_level_1": "safeguarding",
+    "safeguarding_adults_level_2": "safeguarding",
+    "safeguarding_adults_levels_1_and_2": "safeguarding",
+    "cstf_safeguarding_adults": "safeguarding",
+    "cstf_safeguarding_adults_level_1": "safeguarding",
+    "cstf_safeguarding_adults_level_2": "safeguarding",
+    "cstf_safeguarding_adults_levels_1_and_2": "safeguarding",
     "safeguarding_children": "safeguarding",
+    "cstf_safeguarding_children": "safeguarding",
     "safeguarding_of_vulnerable_adults": "safeguarding",
     "safeguarding_vulnerable_adults": "safeguarding",
     # Manual handling
     "moving_and_handling": "manual_handling",
     "moving_&_handling": "manual_handling",
     "cstf_moving_and_handling": "manual_handling",
+    "moving_and_handling_levels_1_and_2": "manual_handling",
+    "cstf_moving_and_handling_levels_1_and_2": "manual_handling",
+    "manual_handling_people": "manual_handling",
+    "people_moving_and_handling": "manual_handling",
     # Fire safety
     "cstf_fire_safety": "fire_safety",
     "fire_safety_awareness": "fire_safety",
+    "fire_safety_practical": "fire_safety",
+    "cstf_fire_safety_practical": "fire_safety",
+    "fire_awareness": "fire_safety",
     # Infection control
     "infection_prevention_and_control": "infection_control",
     "infection_prevention_&_control": "infection_control",
     "cstf_infection_prevention_and_control": "infection_control",
+    "infection_prevention_and_control_levels_1_and_2": "infection_control",
+    "cstf_infection_prevention_and_control_levels_1_and_2": "infection_control",
+    "infection_prevention_control": "infection_control",
+    "ipc": "infection_control",
     # Health & Safety
     "health_and_safety": "health_safety",
     "health_safety_and_welfare": "health_safety",
     "health,_safety_and_welfare": "health_safety",
+    "health_and_safety_and_welfare": "health_safety",
+    "health_safety_welfare": "health_safety",
     "cstf_health_safety_and_welfare": "health_safety",
+    "cstf_health_and_safety_and_welfare": "health_safety",
+    "cstf_health_safety_welfare": "health_safety",
     # Information governance / GDPR
     "gdpr": "information_governance",
     "data_security": "information_governance",
     "data_protection": "information_governance",
     "data_security_awareness": "information_governance",
+    "cstf_information_governance": "information_governance",
+    "information_governance_and_data_security": "information_governance",
+    "information_governance_gdpr": "information_governance",
     # Prevent
+    "prevent": "prevent",
     "preventing_radicalisation": "prevent",
+    "preventing_radicalization": "prevent",
+    "preventing_radicalisation_awareness": "prevent",
+    "preventing_radicalization_awareness": "prevent",
     "counter_terrorism": "prevent",
     "counter-terrorism": "prevent",
     "cstf_preventing_radicalisation": "prevent",
+    "cstf_preventing_radicalization": "prevent",
+    "cstf_prevent": "prevent",
     # Medication
     "safe_handling_and_administration_of_medication": "medication_administration",
     "safe_handling_&_administration_of_medication": "medication_administration",
     "medication": "medication_administration",
+    # Common CSTF non-mandatory-but-trackable aliases
+    "cstf_equality_diversity_and_human_rights": "equality_diversity",
+    "equality_diversity_and_human_rights": "equality_diversity",
+    "equality_diversity": "equality_diversity",
+    "cstf_nhs_conflict_resolution": "conflict_resolution",
+    "nhs_conflict_resolution": "conflict_resolution",
+    "conflict_resolution": "conflict_resolution",
 }
 
 
@@ -368,7 +428,7 @@ def build_training_records_lookup(records: list) -> dict:
             keys.append(req_id.replace("_", "-"))
             keys.append(req_id.replace("-", "_"))
         if t_name:
-            normalised = t_name.lower().replace(" ", "_")
+            normalised = normalize_training_key(t_name)
             keys.append(normalised)
             keys.append(normalised.replace("&", "and"))
             # Add canonical alias if this name maps to one
@@ -410,7 +470,7 @@ def resolve_training_record(lookup: dict, req_id: str, training_name: str = None
         if record:
             return record
     if training_name:
-        alt = training_name.lower().replace(" ", "_")
+        alt = normalize_training_key(training_name)
         record = lookup.get(alt)
         if record:
             return record
@@ -453,7 +513,7 @@ _MANDATORY_KEYWORD_MAP = {
     "safeguarding": ["safeguarding", "safeguard", "protection of adults"],
     "manual_handling": ["manual handling", "moving and handling", "people handling", "moving & handling"],
     "fire_safety": ["fire safety", "fire awareness", "fire marshal", "fire warden"],
-    "health_safety": ["health and safety", "health & safety", "h&s awareness", "health safety"],
+    "health_safety": ["health and safety", "health safety", "health safety and welfare", "health and safety and welfare", "h s awareness"],
     "basic_life_support": ["basic life support", "bls", "first aid", "resuscitation", "cpr"],
     "infection_control": ["infection control", "infection prevention", "ipc"],
     "information_governance": ["information governance", "data protection", "gdpr", "confidentiality"],
@@ -470,13 +530,13 @@ def resolve_mandatory_training_code(training_name: str):
     """
     if not training_name:
         return None
-    name_lower = training_name.lower().strip()
+    name_lower = normalize_training_text(training_name)
     # Keyword match
     for code, keywords in _MANDATORY_KEYWORD_MAP.items():
         if any(kw in name_lower for kw in keywords):
             return code
     # Alias match
-    normalised = name_lower.replace(" ", "_").replace("&", "and").replace("-", "_")
+    normalised = normalize_training_key(name_lower)
     canon = TRAINING_ALIASES.get(normalised)
     if canon and canon in get_canonical_mandatory_training_ids():
         return canon

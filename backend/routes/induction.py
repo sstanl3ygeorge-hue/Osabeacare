@@ -540,3 +540,338 @@ async def download_induction_completion_pdf(
             "Content-Disposition": f'attachment; filename="{filename}"',
         }
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Care Certificate — Admin sign-off / return / submission-view endpoints
+# ─────────────────────────────────────────────────────────────────────────────
+
+from care_certificate_config import MANUAL_ITEM_CODES, HYBRID_ITEM_CODES, get_config_for_item
+
+
+class HybridSignOffPayload(BaseModel):
+    notes: Optional[str] = None
+
+
+class HybridReturnPayload(BaseModel):
+    return_reason: str
+
+
+class ShadowShiftSignOffPayload(BaseModel):
+    notes: str  # required for manual items
+
+
+@router.get("/employees/{employee_id}/induction/items/{item_code}/submission")
+async def get_item_submission(
+    employee_id: str,
+    item_code: str,
+    user: dict = Depends(require_manager_or_admin),
+):
+    """
+    Admin: view the worker's submitted form for a hybrid induction item.
+    Returns schema, submitted answers, and current submission status.
+    """
+    from care_certificate_forms import get_worker_form_schema
+    db = get_db()
+
+    cfg = get_config_for_item(item_code)
+    if not cfg:
+        raise HTTPException(status_code=404, detail=f"Unknown induction item code: {item_code}")
+    if cfg.get("completion_type") != "hybrid":
+        raise HTTPException(status_code=400, detail="This item is not a hybrid form item.")
+
+    form_id = cfg["worker_form_id"]
+
+    employee = await db.employees.find_one(
+        {"id": employee_id}, {"_id": 0, "role": 1, "role_normalized": 1}
+    )
+    role_normalized = (employee or {}).get("role_normalized") or (employee or {}).get("role") or ""
+
+    submission = await db.induction_item_submissions.find_one(
+        {"employee_id": employee_id, "form_id": form_id}, {"_id": 0}
+    )
+
+    schema = get_worker_form_schema(form_id, role_normalized)
+
+    return {
+        "item_code": item_code,
+        "form_id": form_id,
+        "schema": schema,
+        "submission": submission or {},
+        "submission_status": (submission or {}).get("status"),
+        "submitted_at": (submission or {}).get("submitted_at"),
+        "submitted_data": (submission or {}).get("submitted_data"),
+        "return_reason": (submission or {}).get("return_reason"),
+        "admin_notes": (submission or {}).get("admin_notes"),
+    }
+
+
+@router.post("/employees/{employee_id}/induction/items/{item_code}/signoff")
+async def signoff_induction_item(
+    employee_id: str,
+    item_code: str,
+    payload: HybridSignOffPayload,
+    user: dict = Depends(require_manager_or_admin),
+):
+    """
+    Admin: sign off a hybrid or manual induction item.
+
+    For hybrid items: requires submission status = 'submitted'.
+    For manual (shadow_shift): notes are required; no worker submission needed.
+    """
+    db = get_db()
+
+    cfg = get_config_for_item(item_code)
+    if not cfg:
+        raise HTTPException(status_code=404, detail=f"Unknown induction item code: {item_code}")
+
+    completion_type = cfg.get("completion_type")
+    if completion_type == "automatic":
+        raise HTTPException(status_code=400, detail="Automatic items cannot be manually signed off.")
+
+    now = datetime.now(timezone.utc).isoformat()
+
+    admin = await db.users.find_one(
+        {"$or": [{"user_id": user["user_id"]}, {"id": user["user_id"]}]},
+        {"_id": 0, "name": 1, "first_name": 1, "last_name": 1, "email": 1},
+    )
+    admin_name = (admin or {}).get("name") or ""
+    if not admin_name and admin:
+        admin_name = f"{admin.get('first_name','')} {admin.get('last_name','')}".strip() or admin.get("email", "Admin")
+
+    # ── Hybrid items ──────────────────────────────────────────────────────────
+    if completion_type == "hybrid":
+        form_id = cfg["worker_form_id"]
+        submission = await db.induction_item_submissions.find_one(
+            {"employee_id": employee_id, "form_id": form_id}, {"_id": 0}
+        )
+        if not submission or submission.get("status") != "submitted":
+            raise HTTPException(
+                status_code=409,
+                detail="Worker has not submitted this form yet. Cannot sign off.",
+            )
+
+        await db.induction_item_submissions.update_one(
+            {"employee_id": employee_id, "form_id": form_id},
+            {"$set": {
+                "status": "signed_off",
+                "signoff_by": user["user_id"],
+                "signoff_by_name": admin_name,
+                "signoff_at": now,
+                "admin_notes": payload.notes,
+                "updated_at": now,
+            }},
+        )
+
+    # ── Manual items (shadow_shift) ───────────────────────────────────────────
+    elif completion_type == "manual":
+        if not payload.notes or not payload.notes.strip():
+            raise HTTPException(
+                status_code=422,
+                detail="Sign-off notes are required for manual items.",
+            )
+
+    # Write completion to the induction checklist (shared source)
+    item_name = cfg["title"]
+    checklist = await db.induction_checklists.find_one({"employee_id": employee_id})
+
+    if not checklist:
+        raise HTTPException(
+            status_code=404,
+            detail="Induction checklist not found. Run /fix to initialise it first.",
+        )
+
+    item_found = False
+    for item in checklist["items"]:
+        if item.get("name") == item_name:
+            item["status"] = "completed"
+            item["completed_at"] = now
+            item["completed_by"] = user["user_id"]
+            item["completed_by_name"] = admin_name
+            item["notes"] = payload.notes
+            item_found = True
+            break
+
+    if not item_found:
+        raise HTTPException(status_code=404, detail=f"Item '{item_name}' not in checklist.")
+
+    # Recalculate overall_status
+    mandatory_completed = sum(1 for i in checklist["items"] if i.get("mandatory") and i["status"] == "completed")
+    mandatory_total = sum(1 for i in checklist["items"] if i.get("mandatory"))
+    any_completed = any(i["status"] == "completed" for i in checklist["items"])
+
+    if mandatory_completed >= mandatory_total:
+        checklist["overall_status"] = "completed"
+        checklist["completed_at"] = now
+    elif any_completed:
+        checklist["overall_status"] = "in_progress"
+        checklist.setdefault("started_at", now)
+    else:
+        checklist["overall_status"] = "pending"
+
+    checklist["updated_at"] = now
+
+    await db.induction_checklists.update_one(
+        {"employee_id": employee_id}, {"$set": checklist}
+    )
+
+    await log_audit_action(
+        user["user_id"], "induction_item_signed_off", "induction_checklist", employee_id,
+        {"item_code": item_code, "completion_type": completion_type, "admin_notes": payload.notes},
+    )
+
+    return {
+        "ok": True,
+        "item_code": item_code,
+        "signed_off_at": now,
+        "signed_off_by": admin_name,
+        "overall_status": checklist["overall_status"],
+    }
+
+
+@router.post("/employees/{employee_id}/induction/items/{item_code}/return")
+async def return_induction_item(
+    employee_id: str,
+    item_code: str,
+    payload: HybridReturnPayload,
+    user: dict = Depends(require_manager_or_admin),
+):
+    """
+    Admin: return a submitted hybrid induction form to the worker for correction.
+    A return_reason is required.
+    """
+    db = get_db()
+
+    cfg = get_config_for_item(item_code)
+    if not cfg:
+        raise HTTPException(status_code=404, detail=f"Unknown induction item code: {item_code}")
+    if cfg.get("completion_type") != "hybrid":
+        raise HTTPException(status_code=400, detail="Only hybrid items can be returned for correction.")
+
+    if not payload.return_reason.strip():
+        raise HTTPException(status_code=422, detail="return_reason cannot be empty.")
+
+    form_id = cfg["worker_form_id"]
+    now = datetime.now(timezone.utc).isoformat()
+
+    submission = await db.induction_item_submissions.find_one(
+        {"employee_id": employee_id, "form_id": form_id}, {"_id": 0}
+    )
+    if not submission or submission.get("status") not in ("submitted", "signed_off"):
+        raise HTTPException(
+            status_code=409,
+            detail="No submitted form found for this item. Cannot return.",
+        )
+
+    await db.induction_item_submissions.update_one(
+        {"employee_id": employee_id, "form_id": form_id},
+        {"$set": {
+            "status": "returned",
+            "return_reason": payload.return_reason,
+            "returned_at": now,
+            "updated_at": now,
+        }},
+    )
+
+    await log_audit_action(
+        user["user_id"], "induction_item_returned", "induction_checklist", employee_id,
+        {"item_code": item_code, "form_id": form_id, "return_reason": payload.return_reason},
+    )
+
+    return {
+        "ok": True,
+        "item_code": item_code,
+        "form_id": form_id,
+        "returned_at": now,
+        "return_reason": payload.return_reason,
+    }
+
+
+@router.get("/employees/{employee_id}/induction/care-certificate/status")
+async def get_care_certificate_status(
+    employee_id: str,
+    user: dict = Depends(require_manager_or_admin),
+):
+    """
+    Admin: full Care Certificate status for an employee.
+
+    Returns per-item detail including:
+    - automatic item evidence links
+    - hybrid item submission status and admin action required flag
+    - manual item completion state
+    - overall readiness (all 15 mandatory items complete)
+    """
+    from care_certificate_forms import get_worker_form_schema
+    db = get_db()
+
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    induction_status = await get_employee_induction_status(db, employee_id)
+    role_normalized = induction_status.get("role_normalized") or ""
+
+    # Load all submissions in one query
+    submission_map = {}
+    async for sub in db.induction_item_submissions.find(
+        {"employee_id": employee_id}, {"_id": 0}
+    ):
+        submission_map[sub["form_id"]] = sub
+
+    items = []
+    admin_action_required = 0
+
+    for item in induction_status.get("items", []):
+        code = item.get("code", "")
+        cfg = get_config_for_item(code)
+        form_id = cfg.get("worker_form_id") if cfg else None
+        sub = submission_map.get(form_id) if form_id else None
+
+        entry = {
+            "code": code,
+            "standard_number": cfg.get("standard_number") if cfg else None,
+            "title": item.get("title") or item.get("name"),
+            "completion_type": item.get("completion_type"),
+            "status": item.get("status"),
+            "rule_status": item.get("rule_status"),
+            "mandatory": item.get("mandatory", True),
+            "completed_at": item.get("completed_at"),
+            "completed_by_name": item.get("completed_by_name"),
+            "synced_from_training": item.get("synced_from_training", False),
+            "linked_evidence": item.get("linked_evidence", []),
+        }
+
+        if form_id and sub:
+            entry["submission_status"] = sub.get("status")
+            entry["submitted_at"] = sub.get("submitted_at")
+            entry["signoff_at"] = sub.get("signoff_at")
+            entry["signoff_by_name"] = sub.get("signoff_by_name")
+            entry["return_reason"] = sub.get("return_reason")
+            entry["admin_notes"] = sub.get("admin_notes")
+            # Flag items needing admin action
+            if sub.get("status") == "submitted":
+                entry["admin_action"] = "signoff_or_return"
+                admin_action_required += 1
+            else:
+                entry["admin_action"] = None
+        elif form_id:
+            entry["submission_status"] = None
+            entry["admin_action"] = None
+        
+        items.append(entry)
+
+    items.sort(key=lambda x: x.get("standard_number") or 99)
+
+    mandatory_done = sum(1 for i in items if i.get("mandatory") and i.get("status") == "completed")
+    mandatory_total = sum(1 for i in items if i.get("mandatory"))
+
+    return {
+        "employee_id": employee_id,
+        "employee_name": f"{employee.get('first_name','')} {employee.get('last_name','')}".strip(),
+        "role": induction_status.get("role"),
+        "overall_status": induction_status.get("overall_status"),
+        "mandatory_completed": mandatory_done,
+        "mandatory_total": mandatory_total,
+        "admin_action_required_count": admin_action_required,
+        "items": items,
+    }

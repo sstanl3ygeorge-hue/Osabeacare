@@ -22,6 +22,7 @@ import { Briefcase, GraduationCap, Sparkles, Edit3, Link2, MessageSquare } from 
 import { Textarea } from '../../components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
 import ProfileCompletionWizard from '../../components/worker/ProfileCompletionWizard';
+import CareCertificateInductionPanel from '../../components/worker/CareCertificateInductionPanel';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -2276,55 +2277,10 @@ export default function WorkerDashboard() {
         )}
 
         {/* ========== INDUCTION CHECKLIST (P1: Worker Dashboard Sync) ========== */}
-        {!isActiveEmployee && induction && (
-          <Card className="shadow-md border-0" data-testid="induction-section">
-            <CardHeader className="pb-2">
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle className="flex items-center gap-2 text-lg">
-                    <Shield className="h-5 w-5 text-cyan-500" />
-                    Induction Checklist ({induction.total} items)
-                  </CardTitle>
-                  <p className="text-xs text-slate-500 mt-1">
-                    Care Certificate standards - 15 NHS requirements
-                  </p>
-                </div>
-                <Badge className={`${
-                  induction.completed === induction.total 
-                    ? 'bg-green-100 text-green-700' 
-                    : 'bg-amber-100 text-amber-700'
-                }`}>
-                  {induction.completed}/{induction.total} Complete
-                </Badge>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="mb-4">
-                <Progress value={induction.total > 0 ? (induction.completed / induction.total) * 100 : 0} className="h-2" />
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                {induction.items?.map((item, idx) => (
-                  <div 
-                    key={idx} 
-                    className={`flex items-center gap-2 p-2 rounded-lg text-sm ${
-                      item.completed ? 'bg-green-50 text-green-800' : 'bg-slate-50 text-slate-600'
-                    }`}
-                    data-testid={`induction-item-${item.id}`}
-                  >
-                    {item.completed ? (
-                      <CheckCircle className="h-4 w-4 text-green-500 flex-shrink-0" />
-                    ) : (
-                      <div className="w-4 h-4 rounded-full border-2 border-slate-300 flex-shrink-0" />
-                    )}
-                    <span className="truncate">{item.name}</span>
-                  </div>
-                ))}
-              </div>
-              <p className="text-xs text-slate-400 mt-4 text-center">
-                Items are auto-completed when related training is verified. Some items require manual sign-off by Admin.
-              </p>
-            </CardContent>
-          </Card>
+        {!isActiveEmployee && (
+          <div data-testid="induction-section">
+            <CareCertificateInductionPanel />
+          </div>
         )}
 
         {/* ========== COMPETENCY ASSESSMENTS (P1: Worker Dashboard) ========== */}

@@ -149,6 +149,7 @@ from routes.feedback_complaints import router as feedback_complaints_router
 from routes.policies import router as policies_router
 from routes.referee_outreach import router as referee_outreach_router
 from routes.induction import router as induction_router, DEFAULT_INDUCTION_ITEMS, INDUCTION_TRAINING_MAP
+from routes.induction_worker import router as induction_worker_router
 from routes.competency import router as competency_router
 from routes.spot_checks import router as spot_checks_router
 from routes.task_queue import router as task_queue_router
@@ -40621,6 +40622,7 @@ api_router.include_router(feedback_complaints_router)
 api_router.include_router(policies_router)
 api_router.include_router(referee_outreach_router)
 api_router.include_router(induction_router)
+api_router.include_router(induction_worker_router)
 api_router.include_router(competency_router)
 api_router.include_router(spot_checks_router)
 api_router.include_router(task_queue_router)

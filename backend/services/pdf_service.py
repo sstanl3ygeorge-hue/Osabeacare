@@ -23,6 +23,7 @@ from reportlab.lib import colors
 from reportlab.lib.colors import HexColor
 import requests
 from typing import Dict, Any, Optional, List
+from xml.sax.saxutils import escape
 
 # Company logo URL - configurable via environment variable
 LOGO_URL = os.environ.get("COMPANY_LOGO_URL", None)
@@ -758,7 +759,7 @@ def generate_pre_interview_pdf(
         elements.append(Paragraph("Osabea Healthcare Solutions", styles['CompanyName']))
         elements.append(Spacer(1, 3*mm))
     
-    elements.append(Paragraph("Pre-Interview Questionnaire", styles['FormTitle']))
+    elements.append(Paragraph("Interview Questionnaire", styles['FormTitle']))
     elements.append(HRFlowable(width="100%", thickness=1, color=BORDER_COLOR, spaceAfter=5*mm))
     
     # Employee info
@@ -863,6 +864,132 @@ def generate_generic_pdf_content(form_data: Dict[str, Any], styles) -> list:
     return elements
 
 
+def _pdf_value(value: Any) -> str:
+    """Return a safe printable value for ReportLab Paragraph content."""
+    if value is None or value == "":
+        return "N/A"
+    if isinstance(value, bool):
+        value = "Yes" if value else "No"
+    elif isinstance(value, list):
+        value = ", ".join(str(v) for v in value)
+    elif isinstance(value, dict):
+        value = "; ".join(f"{k}: {v}" for k, v in value.items())
+    return escape(str(value)).replace("\n", "<br/>")
+
+
+def generate_scored_interview_pdf_content(form_data: Dict[str, Any], styles) -> list:
+    """Generate the current Osabea scored interview assessment PDF content."""
+    elements = []
+
+    elements.append(Paragraph("Interview Details", styles["SectionHeader"]))
+    details = [
+        ["Candidate Name", _pdf_value(form_data.get("candidate_name"))],
+        ["Job Title", _pdf_value(form_data.get("vacancy_job_title") or form_data.get("position_applied"))],
+        ["Interview Date", _pdf_value(form_data.get("interview_date"))],
+        ["Interview Method", _pdf_value(form_data.get("interview_method") or form_data.get("interview_type"))],
+        ["Interviewer", _pdf_value(form_data.get("interviewer_name"))],
+        ["Panel Members", _pdf_value(form_data.get("panel_members"))],
+    ]
+    details_table = Table(details, colWidths=[45 * mm, 125 * mm])
+    details_table.setStyle(TableStyle([
+        ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2 * mm),
+        ("LINEBELOW", (0, 0), (-1, -2), 0.25, BORDER_COLOR),
+    ]))
+    elements.append(details_table)
+    elements.append(Spacer(1, 4 * mm))
+
+    elements.append(Paragraph("Part 1 - Scored Interview Assessment", styles["SectionHeader"]))
+    assessment_items = form_data.get("assessment_items") or []
+    question_scores = form_data.get("question_scores") or {}
+    question_notes = form_data.get("question_notes") or {}
+
+    if assessment_items:
+        for index, item in enumerate(assessment_items, start=1):
+            question_id = item.get("question_id")
+            score = item.get("admin_score")
+            if score is None and question_id:
+                score = question_scores.get(question_id)
+            notes = item.get("admin_notes")
+            if notes is None and question_id:
+                notes = question_notes.get(question_id)
+
+            elements.append(Paragraph(
+                f"Q{index}. {_pdf_value(item.get('question_text'))}",
+                styles["FieldLabel"]
+            ))
+            meta = []
+            if item.get("category"):
+                meta.append(f"Category: {_pdf_value(item.get('category')).replace('_', ' ')}")
+            if item.get("skills_assessed"):
+                meta.append(f"Skills assessed: {_pdf_value(item.get('skills_assessed'))}")
+            if meta:
+                elements.append(Paragraph(" | ".join(meta), styles["Footer"]))
+            rows = [
+                [Paragraph("Worker answer", styles["FieldLabel"]), Paragraph(_pdf_value(item.get("worker_answer")), styles["FieldValue"])],
+                [Paragraph("Admin score", styles["FieldLabel"]), Paragraph(_pdf_value(score), styles["FieldValue"])],
+                [Paragraph("Admin notes", styles["FieldLabel"]), Paragraph(_pdf_value(notes), styles["FieldValue"])],
+            ]
+            table = Table(rows, colWidths=[35 * mm, 135 * mm])
+            table.setStyle(TableStyle([
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 2 * mm),
+                ("TOPPADDING", (0, 0), (-1, -1), 2 * mm),
+                ("LINEBELOW", (0, 0), (-1, -2), 0.25, BORDER_COLOR),
+            ]))
+            elements.append(table)
+            elements.append(Spacer(1, 3 * mm))
+    else:
+        elements.append(Paragraph("No scored question snapshot was saved for this interview record.", styles["Notes"]))
+
+    elements.append(Paragraph("Part 2 - Administrative Interview Fields", styles["SectionHeader"]))
+    admin_rows = [
+        ["Requires Work Permit", _pdf_value(form_data.get("requires_work_permit"))],
+        ["Right to Work proof taken", _pdf_value(form_data.get("rtw_proof_taken"))],
+        ["Hours wanted", _pdf_value(form_data.get("hours_wanted"))],
+        ["Flexible working", _pdf_value(form_data.get("flexible_working"))],
+        ["Driving licence", _pdf_value(form_data.get("has_driving_licence"))],
+        ["Annual leave booked", _pdf_value(form_data.get("annual_leave_booked"))],
+        ["Notice period", _pdf_value(form_data.get("notice_period"))],
+        ["Available start date", _pdf_value(form_data.get("start_date"))],
+    ]
+    admin_table = Table(admin_rows, colWidths=[55 * mm, 115 * mm])
+    admin_table.setStyle(TableStyle([
+        ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2 * mm),
+        ("LINEBELOW", (0, 0), (-1, -2), 0.25, BORDER_COLOR),
+    ]))
+    elements.append(admin_table)
+    elements.append(Spacer(1, 4 * mm))
+
+    elements.append(Paragraph("Decision and Final Score", styles["SectionHeader"]))
+    decision_rows = [
+        ["Total Score", f"{_pdf_value(form_data.get('total_score'))} / {_pdf_value(form_data.get('max_score'))}"],
+        ["Pass Threshold", _pdf_value(form_data.get("pass_score"))],
+        ["Percentage", f"{_pdf_value(form_data.get('percentage'))}%"],
+        ["Result", "Passed" if form_data.get("passed") else "Failed / further review"],
+        ["Decision", _pdf_value(form_data.get("decision"))],
+        ["Candidate Questions", _pdf_value(form_data.get("candidate_questions"))],
+        ["Overall Impression", _pdf_value(form_data.get("overall_impression"))],
+        ["Additional Notes", _pdf_value(form_data.get("notes"))],
+    ]
+    decision_table = Table(decision_rows, colWidths=[45 * mm, 125 * mm])
+    decision_table.setStyle(TableStyle([
+        ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2 * mm),
+        ("LINEBELOW", (0, 0), (-1, -2), 0.25, BORDER_COLOR),
+    ]))
+    elements.append(decision_table)
+
+    return elements
+
+
 def generate_structured_form_pdf(
     form_type: str,
     form_name: str,
@@ -943,7 +1070,11 @@ def generate_structured_form_pdf(
     elements.append(HRFlowable(width="100%", thickness=0.5, color=BORDER_COLOR, spaceAfter=6 * mm))
 
     # ── Body: structured sections or raw dump ───────────────────────────
-    if template_sections:
+    if form_type == "interview_record" and (
+        submission_data.get("format_version") == "v2_osabea" or submission_data.get("assessment_items")
+    ):
+        elements.extend(generate_scored_interview_pdf_content(submission_data, styles))
+    elif template_sections:
         for section in template_sections:
             section_title = section.get("title", "")
             if section_title:

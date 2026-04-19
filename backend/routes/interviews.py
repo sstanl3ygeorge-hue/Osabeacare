@@ -153,6 +153,33 @@ async def create_interview_record(
         # V2 Format: Osabea 0-3 scoring with individual question scores
         question_scores = payload.get("question_scores", {})
         question_notes = payload.get("question_notes", {})
+
+        role = employee.get("job_title") or employee.get("role") or "support_worker"
+        interview_config = get_role_interview_config(role)
+        interview_questions = interview_config.get("questions", [])
+        questionnaire = await db.form_submissions.find_one({
+            "employee_id": employee_id,
+            "$or": [
+                {"form_type": "pre_interview_questionnaire"},
+                {"requirement_id": "pre_interview_questionnaire"},
+                {"requirement_id": "interview"}
+            ]
+        }, {"_id": 0})
+        worker_answers = (questionnaire or {}).get("form_data") or (questionnaire or {}).get("data") or {}
+        assessment_items = []
+        for question in interview_questions:
+            question_id = question.get("id")
+            if not question_id:
+                continue
+            assessment_items.append({
+                "question_id": question_id,
+                "question_text": question.get("question"),
+                "category": question.get("category"),
+                "skills_assessed": question.get("skills_assessed"),
+                "worker_answer": worker_answers.get(question_id),
+                "admin_score": question_scores.get(question_id),
+                "admin_notes": question_notes.get(question_id),
+            })
         
         # Calculate total score
         total_score = sum(int(s) for s in question_scores.values() if s is not None)
@@ -170,6 +197,8 @@ async def create_interview_record(
             "panel_members": payload.get("panel_members"),
             "question_scores": question_scores,
             "question_notes": question_notes,
+            "assessment_items": assessment_items,
+            "worker_questionnaire_submission_id": (questionnaire or {}).get("id"),
             # Part 2 - Admin questions
             "requires_work_permit": payload.get("requires_work_permit"),
             "rtw_proof_taken": payload.get("rtw_proof_taken"),
@@ -291,7 +320,7 @@ async def get_pre_interview_questionnaire(
         return {
             "employee_id": employee_id,
             "stage": "worker_pre_screen",
-            "stage_label": "Pre-Interview Questionnaire (Worker)",
+            "stage_label": "Worker Interview Questionnaire",
             "status": "not_submitted",
             "form_data": None
         }
@@ -299,7 +328,7 @@ async def get_pre_interview_questionnaire(
     return {
         "employee_id": employee_id,
         "stage": "worker_pre_screen",
-        "stage_label": "Pre-Interview Questionnaire (Worker)",
+        "stage_label": "Worker Interview Questionnaire",
         "next_stage": "admin_final_assessment",
         "status": questionnaire.get("status", "submitted"),
         "form_data": questionnaire.get("form_data") or questionnaire.get("data"),

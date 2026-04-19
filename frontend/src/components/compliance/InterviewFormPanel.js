@@ -738,7 +738,7 @@ export default function InterviewFormPanel({ employeeId, employeeName, employeeR
           <div className="bg-violet-50 border border-violet-200 rounded-lg px-4 py-3 flex items-center gap-2">
             <Info className="h-4 w-4 text-violet-600 shrink-0" />
             <p className="text-sm text-violet-700">
-              <span className="font-medium">Prefilled from worker's pre-interview questionnaire.</span>
+              <span className="font-medium">Prefilled from the worker interview questionnaire.</span>
               {' '}Part 1 shows their written answers. Part 2 admin fields have been pre-populated. All fields remain editable.
             </p>
           </div>

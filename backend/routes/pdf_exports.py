@@ -31,6 +31,18 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["PDF Templates & Exports"])
 
 
+def _parse_iso_datetime(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed
+    except Exception:
+        return None
+
+
 # ==================== PYDANTIC MODELS ====================
 
 class PDFTemplateResponse(BaseModel):
@@ -319,6 +331,48 @@ async def generate_form_pdf(submission_id: str, user: dict = Depends(require_adm
     submission_data["_submitted_at"] = submission.get("submitted_at", "")
     submission_data["_verified"] = submission.get("verified", False)
     submission_data["_status"] = submission.get("status", "submitted")
+
+    if (
+        form_type == "interview_record"
+        and submission_data.get("format_version") == "v2_osabea"
+        and not submission_data.get("assessment_items")
+    ):
+        try:
+            from interview_questions import get_role_interview_config
+
+            role = employee.get("job_title") or employee.get("role") or "support_worker"
+            config = get_role_interview_config(role)
+            questions = config.get("questions", [])
+            questionnaire = await db.form_submissions.find_one({
+                "employee_id": employee_id,
+                "$or": [
+                    {"form_type": "pre_interview_questionnaire"},
+                    {"requirement_id": "pre_interview_questionnaire"},
+                    {"requirement_id": "interview"}
+                ]
+            }, {"_id": 0})
+            worker_answers = (questionnaire or {}).get("form_data") or (questionnaire or {}).get("data") or {}
+            question_scores = submission_data.get("question_scores") or {}
+            question_notes = submission_data.get("question_notes") or {}
+            submission_data["assessment_items"] = [
+                {
+                    "question_id": question.get("id"),
+                    "question_text": question.get("question"),
+                    "category": question.get("category"),
+                    "skills_assessed": question.get("skills_assessed"),
+                    "worker_answer": worker_answers.get(question.get("id")),
+                    "admin_score": question_scores.get(question.get("id")),
+                    "admin_notes": question_notes.get(question.get("id")),
+                }
+                for question in questions
+                if question.get("id")
+            ]
+        except Exception as snapshot_err:
+            logger.warning(
+                "Could not backfill interview assessment snapshot for PDF submission=%s: %s",
+                submission_id,
+                snapshot_err,
+            )
     
     # Generate PDF based on form type
     if form_type == "application_form":
@@ -367,6 +421,10 @@ async def generate_form_pdf(submission_id: str, user: dict = Depends(require_adm
         "created_by": user['user_id'],
         "created_by_name": user.get('name', 'Unknown')
     }
+    if form_type == "interview_record" and (
+        submission_data.get("format_version") == "v2_osabea" or submission_data.get("assessment_items")
+    ):
+        export_doc["pdf_generator_version"] = "interview_v2_snapshot_pdf_v1"
     
     await db.form_pdf_exports.insert_one(export_doc)
     
@@ -419,11 +477,34 @@ async def _get_or_generate_and_serve_pdf(
     db = get_db()
     retrieve_file_bytes = get_retrieve_file_bytes()
 
+    submission = None
+
     # --- 1. Try existing export ---
     export = await db.form_pdf_exports.find_one(
         {"submission_id": submission_id},
         sort=[("created_at", -1)]
     )
+
+    if export and export.get("form_type") == "interview_record":
+        submission = await db.form_submissions.find_one({"id": submission_id})
+        form_data = (submission or {}).get("data") or (submission or {}).get("form_data") or {}
+        is_scored_interview = (
+            form_data.get("format_version") == "v2_osabea" or bool(form_data.get("assessment_items"))
+        )
+        submission_changed_at = _parse_iso_datetime(
+            (submission or {}).get("updated_at") or (submission or {}).get("submitted_at")
+        )
+        export_created_at = _parse_iso_datetime(export.get("created_at"))
+        if (
+            (is_scored_interview and export.get("pdf_generator_version") != "interview_v2_snapshot_pdf_v1")
+            or (submission_changed_at and export_created_at and submission_changed_at > export_created_at)
+        ):
+            logger.info(
+                "Regenerating stale interview PDF export submission=%s export=%s",
+                submission_id,
+                export.get("id"),
+            )
+            export = None
 
     file_path = export.get("file_url") if export else None
     filename = (export.get("filename") if export else None) or "form.pdf"
@@ -453,7 +534,8 @@ async def _get_or_generate_and_serve_pdf(
     if user.get("role") not in ["admin", "super_admin"]:
         raise HTTPException(status_code=404, detail="No PDF export found. Admin can generate one.")
 
-    submission = await db.form_submissions.find_one({"id": submission_id})
+    if submission is None:
+        submission = await db.form_submissions.find_one({"id": submission_id})
     if not submission:
         raise HTTPException(status_code=404, detail="Form submission not found")
 

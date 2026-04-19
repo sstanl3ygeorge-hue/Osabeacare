@@ -337,8 +337,10 @@ export default function EmploymentGapPanel({
             <CheckCircle2 className="h-5 w-5 text-emerald-600" />
           </div>
           <div>
-            <p className="font-medium text-emerald-800">No Employment Gaps Detected</p>
-            <p className="text-sm text-emerald-600">Employment history is continuous</p>
+            <p className="font-medium text-emerald-800">No detected gaps in dated employment history</p>
+            <p className="text-sm text-emerald-600">
+              This confirms gap detection only. 10-year coverage is assessed separately.
+            </p>
           </div>
         </CardContent>
       </Card>
@@ -426,7 +428,7 @@ export default function EmploymentGapPanel({
                     </div>
                     <div>
                       <p className="font-medium text-gray-900">
-                        {gap.duration_months} month gap
+                        {gap.duration_months || 0} month gap
                       </p>
                       <p className="text-sm text-gray-600">
                         {gap.gap_start === 'present' 

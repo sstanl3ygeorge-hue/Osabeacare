@@ -192,6 +192,12 @@ export default function AuditReadyTrainingMatrix({
   
   const isAdmin = user?.role === 'admin' || user?.role === 'superadmin' || user?.role === 'super_admin';
 
+  const closeTrainingReview = useCallback(() => {
+    setTrainingReviewOpen(false);
+    setTrainingReviewItem(null);
+    setTrainingReviewPurpose('proposed');
+  }, []);
+
   // Fetch all training data
   const fetchTrainingData = useCallback(async () => {
     if (!employeeId) return;
@@ -350,6 +356,10 @@ export default function AuditReadyTrainingMatrix({
       toast.error('Cannot assess pending reviews until training review data loads.');
       return;
     }
+    if (item?.status !== 'proposed') {
+      toast.info('This extracted training item has already been reviewed.');
+      return;
+    }
     if (!getSourceCertificateFileForProposedItem(item)) {
       toast.error('Source certificate is missing for this extracted item.');
       return;
@@ -382,6 +392,7 @@ export default function AuditReadyTrainingMatrix({
         { headers: { Authorization: `Bearer ${token}` } }
       );
       toast.success('Training item approved');
+      closeTrainingReview();
       fetchTrainingData();
       onRefresh?.();
     } catch (err) {
@@ -408,6 +419,7 @@ export default function AuditReadyTrainingMatrix({
         { headers: { Authorization: `Bearer ${token}` } }
       );
       toast.success('Training item rejected');
+      closeTrainingReview();
       fetchTrainingData();
       onRefresh?.();
     } catch (err) {
@@ -461,6 +473,7 @@ export default function AuditReadyTrainingMatrix({
       { headers: { Authorization: `Bearer ${token}` } }
     );
     toast.success(`${item.title} verified`);
+    closeTrainingReview();
     fetchTrainingData();
     onRefresh?.();
   };
@@ -475,6 +488,10 @@ export default function AuditReadyTrainingMatrix({
   };
 
   const openTrainingVerifyReview = (item) => {
+    if (isTrainingVerified(item)) {
+      toast.info(`${item.title} is already verified`);
+      return;
+    }
     const sourceFile = getSourceCertificateFileForTrainingItem(item);
     if (!sourceFile) {
       handleVerifyTraining(item);
@@ -1658,11 +1675,7 @@ export default function AuditReadyTrainingMatrix({
 
       <EvidenceReviewViewerDialog
         isOpen={trainingReviewOpen}
-        onClose={() => {
-          setTrainingReviewOpen(false);
-          setTrainingReviewItem(null);
-          setTrainingReviewPurpose('proposed');
-        }}
+        onClose={closeTrainingReview}
         file={trainingReviewPurpose === 'verify'
           ? getSourceCertificateFileForTrainingItem(trainingReviewItem)
           : getSourceCertificateFileForProposedItem(trainingReviewItem)}

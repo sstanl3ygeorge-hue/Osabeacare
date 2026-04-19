@@ -4770,7 +4770,7 @@ export default function EmployeeProfilePage() {
                 label: 'Screening',
                 sensitive: true,
                 forms: [
-                  { key: 'pre_interview_questionnaire', name: 'Pre-Interview Questionnaire', description: 'Worker pre-interview/application intake responses', sensitive: true },
+                  { key: 'pre_interview_questionnaire', name: 'Interview Questionnaire', description: 'Worker interview/application intake responses', sensitive: true },
                 ]
               },
             ];
@@ -5321,7 +5321,7 @@ export default function EmployeeProfilePage() {
             </div>
 
             {/* 10-Year Coverage Card */}
-            {employmentCoverage && !coverageLooksStaleOrUnusable && (
+            {employmentCoverage && coverageAssessed && (
               <Card className={`shadow-sm ${coverageMet ? 'border-green-200 bg-green-50' : 'border-amber-200 bg-amber-50'}`}>
                 <CardContent className="py-4">
                   <div className="flex items-start gap-3">
@@ -5332,7 +5332,7 @@ export default function EmployeeProfilePage() {
                     )}
                     <div className="flex-1 space-y-2">
                       <p className={`text-sm font-medium ${coverageMet ? 'text-green-800' : 'text-amber-800'}`}>
-                        10-Year Employment Coverage: {employmentCoverage.coverage_percent ?? 'Cannot assess'}%
+                        10-Year Employment Coverage: {coveragePercent}%
                       </p>
                       <p className="text-xs text-slate-600">
                         Required: {employmentCoverage.coverage_start ? new Date(employmentCoverage.coverage_start + 'T00:00:00Z').toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }) : '?'} — Today
@@ -5345,6 +5345,9 @@ export default function EmployeeProfilePage() {
                         />
                       </div>
                       <p className="text-xs text-slate-500">
+                        Applicant gap explanations are supporting notes only; they do not add dated coverage unless linked to a detected employment gap.
+                      </p>
+                      <p className="text-xs text-slate-500">
                         {employmentCoverage.total_days_covered} of {employmentCoverage.total_days_required} days covered
                         {employmentCoverage.earliest_entry_date && ` · Earliest entry: ${new Date(employmentCoverage.earliest_entry_date + 'T00:00:00Z').toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })}`}
                       </p>
@@ -5353,7 +5356,7 @@ export default function EmployeeProfilePage() {
                 </CardContent>
               </Card>
             )}
-            {coverageLooksStaleOrUnusable && (
+            {employmentCoverage && !coverageAssessed && (
               <Card className="border-red-200 bg-red-50 shadow-sm">
                 <CardContent className="py-4">
                   <div className="flex items-start gap-3">
@@ -5361,7 +5364,13 @@ export default function EmployeeProfilePage() {
                     <div>
                       <p className="text-sm font-medium text-red-800">Cannot assess 10-year coverage</p>
                       <p className="mt-1 text-xs text-red-700">
-                        Dated employment history is present, but the stored coverage summary did not count any dated coverage. Re-run gap analysis or save the employment history again before sign-off.
+                        {coverageLooksStaleOrUnusable
+                          ? 'Dated employment history is present, but the stored coverage summary did not count any dated coverage.'
+                          : 'The stored coverage summary is missing usable coverage totals.'}
+                        {' '}Re-run gap analysis or save the employment history again before sign-off.
+                      </p>
+                      <p className="mt-1 text-xs text-red-700">
+                        Applicant gap explanations remain visible below as supporting notes, but they do not count as dated coverage by themselves.
                       </p>
                     </div>
                   </div>
@@ -5374,9 +5383,12 @@ export default function EmployeeProfilePage() {
                   <div className="flex items-start gap-3">
                     <AlertTriangle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
                     <div>
-                      <p className="text-sm font-medium text-red-800">10-year coverage not assessed</p>
+                      <p className="text-sm font-medium text-red-800">Cannot assess 10-year coverage</p>
                       <p className="mt-1 text-xs text-red-700">
                         Employment history exists, but the profile does not currently prove the required 10-year coverage period.
+                      </p>
+                      <p className="mt-1 text-xs text-red-700">
+                        Applicant gap explanations are supporting notes only; they do not create dated employment-history coverage.
                       </p>
                     </div>
                   </div>
@@ -5634,7 +5646,7 @@ export default function EmployeeProfilePage() {
                   </div>
                 </div>
               )}
-              {employmentHistoryExists && employmentHistoryGapRow && !employmentHistoryGapRow.has_gaps && employmentGapEvaluation && gapAnalysisRun && !coverageMet && (
+              {employmentHistoryExists && employmentHistoryGapRow && !employmentHistoryGapRow.has_gaps && employmentGapEvaluation && gapAnalysisRun && coverageAssessed && !coverageMet && (
                 <div className="mb-4 p-4 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-3">
                   <AlertTriangle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
                   <div>
@@ -5675,13 +5687,15 @@ export default function EmployeeProfilePage() {
                 <div className="mt-4 mb-4" data-testid="section-applicant-gap-explanations">
                   <h4 className="font-medium text-gray-800 mb-2">Applicant-Submitted Gap Explanations</h4>
                   <p className="mb-3 text-xs text-text-muted">
-                    These explanations were provided by the applicant during the application form. They are preserved regardless of whether automated gap detection succeeded.
+                    These explanations were provided by the applicant during the application form. They are preserved as supporting notes and do not add dated coverage unless matched to a detected employment gap.
                   </p>
                   <div className="space-y-2">
                     {employee.gap_explanations.map((expl, idx) => {
                       const hasDateRange = Boolean((expl.gap_start || expl.start_date) && (expl.gap_end || expl.end_date));
                       const gapStart = expl.gap_start || expl.start_date;
                       const gapEnd = expl.gap_end || expl.end_date;
+                      const durationDays = expl.duration_days || expl.gap_duration_days;
+                      const durationMonths = expl.duration_months || expl.gap_duration_months;
                       const fmtDate = (d) => d ? new Date(d + 'T00:00:00Z').toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }) : '?';
                       const explanationType = expl.reason_type || expl.type || expl.category || 'Applicant declaration';
                       return (
@@ -5693,12 +5707,12 @@ export default function EmployeeProfilePage() {
                               </span>
                             ) : (
                               <span className="text-xs font-medium text-blue-800">
-                                Applicant-declared gap explanation, date range not provided
+                                Undated applicant gap explanation
                               </span>
                             )}
-                            {(expl.duration_days || expl.duration_months) && (
+                            {(durationDays || durationMonths) && (
                               <Badge variant="outline" className="text-[10px] bg-blue-100 text-blue-700 border-blue-200">
-                                {expl.duration_days ? `${expl.duration_days} days` : `${expl.duration_months} months`}
+                                {durationDays ? `${durationDays} days` : `${durationMonths} months`}
                               </Badge>
                             )}
                             {explanationType && (

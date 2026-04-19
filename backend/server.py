@@ -8047,7 +8047,7 @@ WORKER_FORM_DEFINITIONS = {
         "admin_requirement_id": "emergency_contacts"
     },
     "pre_interview_questionnaire": {
-        "name": "Pre-Interview Questionnaire", 
+        "name": "Interview Questionnaire",
         "description": "Complete this questionnaire before your interview - your responses will be reviewed during the interview",
         "required": True,
         "admin_requirement_id": "interview",
@@ -8108,7 +8108,7 @@ async def get_pre_interview_questionnaire_data(employee_id: str, worker: dict):
     # Build form definition with role-specific questions (needed for all return paths)
     form_definition = {
         "id": "pre_interview_questionnaire",
-        "name": "Pre-Interview Questionnaire",
+        "name": "Interview Questionnaire",
         "description": f"Complete this questionnaire before your interview. Your written responses will be reviewed during the interview. ({len(questions)} questions for {job_title or role})",
         "role": job_title or role,
         "instructions": [

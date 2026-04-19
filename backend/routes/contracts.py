@@ -22,6 +22,7 @@ from fastapi import APIRouter, HTTPException, Depends, Request, Query
 from .dependencies import (
     get_db,
     get_current_user,
+    get_current_user_or_worker,
     get_current_worker,
     require_manager_or_admin,
     log_audit_action,
@@ -80,13 +81,16 @@ async def get_contract_template(
 @router.get("/employees/{employee_id}/can-sign-contract")
 async def check_can_sign_contract(
     employee_id: str,
-    user: dict = Depends(get_current_user)
+    user: dict = Depends(get_current_user_or_worker)
 ):
     """
     Check if an employee is eligible to sign their contract.
     Based on work readiness requirements.
     """
     db = get_db()
+    if user.get("is_worker") and user.get("employee_id") != employee_id:
+        raise HTTPException(status_code=403, detail="You can only check your own contract eligibility")
+
     employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")

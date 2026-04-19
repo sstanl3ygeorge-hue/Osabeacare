@@ -23,6 +23,7 @@ from pydantic import BaseModel
 from .dependencies import (
     get_db,
     get_current_user,
+    get_current_worker,
     require_admin,
     require_manager_or_admin,
     log_audit_action
@@ -232,7 +233,7 @@ async def link_cv_document(
 # ==================== WORKER CV ENDPOINTS ====================
 
 @router.get("/worker/cv-extraction-status")
-async def get_worker_cv_extraction_status(user: dict = Depends(get_current_user)):
+async def get_worker_cv_extraction_status(user: dict = Depends(get_current_worker)):
     """
     Get status of CV extraction including employment history and detected gaps.
     Shows worker what was extracted and what gaps need explanation.

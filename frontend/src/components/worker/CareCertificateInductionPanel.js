@@ -139,7 +139,7 @@ function HybridFormModal({ formEntry, onClose, onSaved, onSubmitted }) {
   const isReadOnly = subStatus === 'submitted' || subStatus === 'signed_off';
 
   useEffect(() => {
-    const token = localStorage.getItem('token');
+    const token = localStorage.getItem('workerToken');
     axios.get(`${API}/worker/induction/forms/${formId}`, { headers: { Authorization: `Bearer ${token}` } })
       .then(res => {
         setSchema(res.data.schema);
@@ -159,7 +159,7 @@ function HybridFormModal({ formEntry, onClose, onSaved, onSubmitted }) {
   const handleSave = async () => {
     setSaving(true);
     try {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('workerToken');
       await axios.post(`${API}/worker/induction/forms/${formId}/save`, {
         data: formData,
         is_draft: true,
@@ -177,7 +177,7 @@ function HybridFormModal({ formEntry, onClose, onSaved, onSubmitted }) {
   const handleSubmit = async () => {
     setSubmitting(true);
     try {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('workerToken');
       await axios.post(`${API}/worker/induction/forms/${formId}/submit`, {
         data: formData,
       }, { headers: { Authorization: `Bearer ${token}` } });
@@ -292,7 +292,7 @@ export default function CareCertificateInductionPanel() {
 
   const fetchOverview = useCallback(() => {
     setLoading(true);
-    const token = localStorage.getItem('token');
+    const token = localStorage.getItem('workerToken');
     axios.get(`${API}/worker/induction/overview`, { headers: { Authorization: `Bearer ${token}` } })
       .then(res => setOverview(res.data))
       .catch(() => toast.error('Could not load induction status.'))

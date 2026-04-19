@@ -406,6 +406,16 @@ function FormsSection() {
         return <Badge className="bg-blue-100 text-blue-700">Submitted</Badge>;
       case 'verified':
         return <Badge className="bg-green-100 text-green-700"><CheckCircle className="h-3 w-3 mr-1" />Verified</Badge>;
+      case 'signed_off':
+      case 'reviewed':
+      case 'approved':
+        return <Badge className="bg-green-100 text-green-700"><CheckCircle className="h-3 w-3 mr-1" />Signed off</Badge>;
+      case 'returned_for_correction':
+      case 'reopened_for_worker_correction':
+      case 'amendment_requested':
+        return <Badge className="bg-red-100 text-red-700"><AlertCircle className="h-3 w-3 mr-1" />Correction required</Badge>;
+      case 'rejected':
+        return <Badge className="bg-red-100 text-red-700"><AlertCircle className="h-3 w-3 mr-1" />Action required</Badge>;
       case 'in_progress':
         return <Badge className="bg-amber-100 text-amber-700"><Clock className="h-3 w-3 mr-1" />{form.progress_percentage}% Done</Badge>;
       default:
@@ -427,8 +437,9 @@ function FormsSection() {
     );
   }
 
-  const pendingForms = forms.filter(f => f.status !== 'submitted' && f.status !== 'verified');
-  const completedForms = forms.filter(f => f.status === 'submitted' || f.status === 'verified');
+  const lockedStatuses = ['submitted', 'verified', 'signed_off', 'reviewed', 'approved'];
+  const pendingForms = forms.filter(f => !lockedStatuses.includes(f.status));
+  const completedForms = forms.filter(f => lockedStatuses.includes(f.status));
 
   if (pendingForms.length === 0 && completedForms.length === 0) {
     return null;
@@ -457,14 +468,17 @@ function FormsSection() {
             >
               <div className="flex items-center gap-3">
                 <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
-                  form.status === 'in_progress' ? 'bg-amber-100' : 'bg-blue-100'
+                  ['returned_for_correction', 'reopened_for_worker_correction', 'amendment_requested', 'rejected'].includes(form.status) ? 'bg-red-100' : form.status === 'in_progress' ? 'bg-amber-100' : 'bg-blue-100'
                 }`}>
                   <FileText className={`h-5 w-5 ${
-                    form.status === 'in_progress' ? 'text-amber-600' : 'text-blue-600'
+                    ['returned_for_correction', 'reopened_for_worker_correction', 'amendment_requested', 'rejected'].includes(form.status) ? 'text-red-600' : form.status === 'in_progress' ? 'text-amber-600' : 'text-blue-600'
                   }`} />
                 </div>
                 <div>
                   <span className="font-medium text-slate-800">{form.name}</span>
+                  {['returned_for_correction', 'reopened_for_worker_correction', 'amendment_requested'].includes(form.status) && (
+                    <p className="text-xs text-red-600">Admin requested a correction. Please update and resubmit.</p>
+                  )}
                   {form.status === 'in_progress' && form.saved_at && (
                     <p className="text-xs text-slate-500">Last saved: {formatDate(form.saved_at)}</p>
                   )}
@@ -477,9 +491,9 @@ function FormsSection() {
                 {getStatusBadge(form)}
                 <Button 
                   size="sm"
-                  className={form.status === 'in_progress' ? 'bg-amber-600 hover:bg-amber-700' : 'bg-blue-600 hover:bg-blue-700'}
+                  className={['returned_for_correction', 'reopened_for_worker_correction', 'amendment_requested', 'rejected'].includes(form.status) ? 'bg-red-600 hover:bg-red-700' : form.status === 'in_progress' ? 'bg-amber-600 hover:bg-amber-700' : 'bg-blue-600 hover:bg-blue-700'}
                 >
-                  {form.status === 'in_progress' ? 'Continue' : 'Start'}
+                  {['returned_for_correction', 'reopened_for_worker_correction', 'amendment_requested', 'rejected'].includes(form.status) ? 'Correct' : form.status === 'in_progress' ? 'Continue' : 'Start'}
                 </Button>
               </div>
             </div>

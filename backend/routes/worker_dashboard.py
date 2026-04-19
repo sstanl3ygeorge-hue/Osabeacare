@@ -31,6 +31,9 @@ from induction_definitions import get_employee_induction_status
 
 logger = logging.getLogger(__name__)
 
+FORM_LOCKED_STATUSES = ["submitted", "verified", "signed_off", "reviewed", "approved"]
+FORM_CORRECTION_STATUSES = ["rejected", "amendment_requested", "returned_for_correction", "reopened_for_worker_correction"]
+
 # Live evidence statuses only (everything else is historical/non-counting)
 _LIVE_EXCLUDED_STATUSES = frozenset({
     "deleted", "superseded", "rejected", "amendment_requested",
@@ -1994,8 +1997,8 @@ async def get_worker_forms(worker: dict = Depends(get_current_worker)):
         submission = await db.form_submissions.find_one({
             "employee_id": employee_id,
             "form_type": form_id,
-            "status": {"$in": ["submitted", "verified", "rejected", "amendment_requested"]}
-        }, {"_id": 0})
+            "status": {"$in": FORM_LOCKED_STATUSES + FORM_CORRECTION_STATUSES}
+        }, {"_id": 0}, sort=[("updated_at", -1), ("submitted_at", -1), ("created_at", -1)])
         
         status = "not_started"
         saved_at = None
@@ -2063,9 +2066,9 @@ async def get_worker_form_data(form_id: str, worker: dict = Depends(get_current_
     submission = await db.form_submissions.find_one({
         "employee_id": employee_id,
         "form_type": form_id
-    }, {"_id": 0})
+    }, {"_id": 0}, sort=[("updated_at", -1), ("submitted_at", -1), ("created_at", -1)])
     
-    if submission and submission.get("status") in ["submitted", "verified"]:
+    if submission and submission.get("status") in FORM_LOCKED_STATUSES:
         return {
             "form_id": form_id,
             "form_definition": form_definition,
@@ -2075,13 +2078,17 @@ async def get_worker_form_data(form_id: str, worker: dict = Depends(get_current_
             "can_edit": False
         }
 
-    if submission and submission.get("status") in ["rejected", "amendment_requested"]:
+    if submission and submission.get("status") in FORM_CORRECTION_STATUSES:
         return {
             "form_id": form_id,
             "form_definition": form_definition,
             "status": submission.get("status"),
             "data": submission.get("form_data", {}),
             "submitted_at": submission.get("submitted_at"),
+            "correction_reason": submission.get("correction_reason") or submission.get("review_reason") or submission.get("rejection_reason"),
+            "returned_for_correction_at": submission.get("returned_for_correction_at"),
+            "returned_for_correction_by_name": submission.get("returned_for_correction_by_name"),
+            "last_saved": submission.get("correction_draft_saved_at") or submission.get("updated_at"),
             "can_edit": True
         }
     
@@ -2208,13 +2215,34 @@ async def save_form_progress(
     submission = await db.form_submissions.find_one({
         "employee_id": employee_id,
         "form_type": form_id,
-        "status": {"$in": ["submitted", "verified"]}
+        "status": {"$in": FORM_LOCKED_STATUSES}
     })
     
     if submission:
         raise HTTPException(status_code=400, detail="Form already submitted")
     
     now = datetime.now(timezone.utc).isoformat()
+    correction_submission = await db.form_submissions.find_one({
+        "employee_id": employee_id,
+        "form_type": form_id,
+        "status": {"$in": FORM_CORRECTION_STATUSES}
+    }, sort=[("updated_at", -1), ("submitted_at", -1), ("created_at", -1)])
+
+    if correction_submission:
+        await db.form_submissions.update_one(
+            {"id": correction_submission["id"]},
+            {"$set": {
+                "form_data": request.form_data,
+                "data": request.form_data,
+                "correction_draft_saved_at": now,
+                "updated_at": now,
+            }}
+        )
+        return {
+            "success": True,
+            "saved_at": now,
+            "message": "Correction saved. You can return and continue later."
+        }
     
     await db.form_progress.update_one(
         {
@@ -2274,7 +2302,7 @@ async def submit_worker_form(
     existing = await db.form_submissions.find_one({
         "employee_id": employee_id,
         "form_type": form_id,
-        "status": {"$in": ["submitted", "verified"]}
+        "status": {"$in": FORM_LOCKED_STATUSES}
     })
     
     if existing:
@@ -2284,6 +2312,77 @@ async def submit_worker_form(
     
     form_def = WORKER_FORM_DEFINITIONS[form_id]
     requirement_id = form_def.get("admin_requirement_id", form_id)
+    correction_submission = await db.form_submissions.find_one({
+        "employee_id": employee_id,
+        "form_type": form_id,
+        "status": {"$in": FORM_CORRECTION_STATUSES}
+    }, sort=[("updated_at", -1), ("submitted_at", -1), ("created_at", -1)])
+
+    if correction_submission:
+        next_version = int(correction_submission.get("version") or 1) + 1
+        resubmission_entry = {
+            "version": next_version,
+            "resubmitted_at": now,
+            "resubmitted_by": f"worker_{employee_id}",
+            "resubmitted_by_name": employee_name,
+            "previous_status": correction_submission.get("status"),
+            "correction_reason": correction_submission.get("correction_reason") or correction_submission.get("review_reason"),
+        }
+        await db.form_submissions.update_one(
+            {"id": correction_submission["id"]},
+            {
+                "$set": {
+                    "form_data": request.form_data,
+                    "data": request.form_data,
+                    "submitted_at": now,
+                    "submitted_by": f"worker_{employee_id}",
+                    "submitted_by_name": employee_name,
+                    "status": "submitted",
+                    "review_status": "pending",
+                    "review_reason": None,
+                    "awaiting_admin_review": True,
+                    "verified": False,
+                    "verified_by": None,
+                    "verified_by_name": None,
+                    "verified_at": None,
+                    "correction_required": False,
+                    "corrected_at": now,
+                    "corrected_by": f"worker_{employee_id}",
+                    "corrected_by_name": employee_name,
+                    "version": next_version,
+                    "updated_at": now,
+                },
+                "$push": {
+                    "correction_resubmissions": resubmission_entry
+                }
+            }
+        )
+
+        await db.form_progress.delete_one({
+            "employee_id": employee_id,
+            "form_id": form_id
+        })
+
+        await log_audit_action(
+            employee_id,
+            "worker_form_resubmitted_after_correction",
+            "form_submission",
+            correction_submission["id"],
+            {
+                "form_id": form_id,
+                "form_name": WORKER_FORM_DEFINITIONS[form_id]["name"],
+                "version": next_version,
+            }
+        )
+
+        await try_auto_promote_worker(employee_id)
+
+        return {
+            "success": True,
+            "submission_id": correction_submission["id"],
+            "submitted_at": now,
+            "message": f"{WORKER_FORM_DEFINITIONS[form_id]['name']} resubmitted successfully. Awaiting admin review."
+        }
     
     submission = {
         "id": f"form_{uuid.uuid4().hex[:12]}",

@@ -287,6 +287,9 @@ export default function EmployeeProfilePage() {
   const [formSubmissionsError, setFormSubmissionsError] = useState(false);
   const [viewFormSubmission, setViewFormSubmission] = useState(null);
   const [formReviewViewer, setFormReviewViewer] = useState(null);
+  const [formCorrectionDialog, setFormCorrectionDialog] = useState(null);
+  const [formCorrectionReason, setFormCorrectionReason] = useState('');
+  const [isReopeningFormCorrection, setIsReopeningFormCorrection] = useState(false);
   const [isVerifyingTraining, setIsVerifyingTraining] = useState(false);
   
   // Training correction/history dialog states
@@ -3208,6 +3211,31 @@ export default function EmployeeProfilePage() {
     setInlineViewerOpen(true);
   };
 
+  const handleReopenFormForCorrection = async () => {
+    const reason = formCorrectionReason.trim();
+    if (!formCorrectionDialog?.submission?.id || !reason) {
+      toast.error('Correction reason is required');
+      return;
+    }
+
+    setIsReopeningFormCorrection(true);
+    try {
+      await axios.post(
+        `${API}/form-submissions/${formCorrectionDialog.submission.id}/reopen-for-correction`,
+        { reason },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success('Form reopened for worker correction');
+      setFormCorrectionDialog(null);
+      setFormCorrectionReason('');
+      fetchFormSubmissions();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to reopen form for correction');
+    } finally {
+      setIsReopeningFormCorrection(false);
+    }
+  };
+
   const openFormSubmissionPdfViewer = (submission, form) => {
     if (!submission?.id) {
       setViewFormSubmission({
@@ -4783,6 +4811,7 @@ export default function EmployeeProfilePage() {
               );
               if (!submission) return { status: 'missing', submission: null };
               const raw = submission?.status || 'not_started';
+              if (['returned_for_correction', 'reopened_for_worker_correction', 'amendment_requested'].includes(raw)) return { status: 'returned_for_correction', submission };
               if (raw === 'verified' || raw === 'signed_off' || submission?.verified === true) return { status: 'signed_off', submission };
               if (raw === 'rejected') return { status: 'rejected', submission };
               if (raw === 'approved' || raw === 'reviewed') return { status: 'reviewed', submission };
@@ -4803,6 +4832,7 @@ export default function EmployeeProfilePage() {
             const reviewedCount = formStatuses.filter((f) => f.status === 'reviewed').length;
             const signedOffCount = formStatuses.filter((f) => f.status === 'signed_off').length;
             const rejectedCount = formStatuses.filter((f) => f.status === 'rejected').length;
+            const returnedForCorrectionCount = formStatuses.filter((f) => f.status === 'returned_for_correction').length;
             const totalForms = allFormDefinitions.length;
             const allSignedOff = signedOffCount === totalForms && !cannotAssessForms;
 
@@ -4821,14 +4851,14 @@ export default function EmployeeProfilePage() {
               ? 'border-red-200 bg-red-50'
               : allSignedOff
                 ? 'border-green-200 bg-green-50'
-                : (rejectedCount > 0)
+                : (rejectedCount > 0 || returnedForCorrectionCount > 0)
                   ? 'border-red-200 bg-red-50'
                   : 'border-amber-200 bg-amber-50';
             const summaryTextClass = cannotAssessForms
               ? 'text-red-800'
               : allSignedOff
                 ? 'text-green-800'
-                : (rejectedCount > 0)
+                : (rejectedCount > 0 || returnedForCorrectionCount > 0)
                   ? 'text-red-800'
                   : 'text-amber-800';
 
@@ -4840,6 +4870,7 @@ export default function EmployeeProfilePage() {
               reviewed:    { label: 'Reviewed',                        color: 'bg-indigo-100 text-indigo-700',icon: Eye,         iconColor: 'text-indigo-500', cardBorder: 'bg-indigo-50 border-indigo-200' },
               signed_off:  { label: 'Signed off',                      color: 'bg-green-100 text-green-700', icon: CheckCircle,  iconColor: 'text-green-600',  cardBorder: 'bg-green-50 border-green-200' },
               rejected:    { label: 'Rejected / action required',      color: 'bg-red-100 text-red-700',     icon: XCircle,     iconColor: 'text-red-500',    cardBorder: 'bg-red-50 border-red-200' },
+              returned_for_correction: { label: 'Returned for correction', color: 'bg-red-100 text-red-700', icon: RotateCcw, iconColor: 'text-red-500', cardBorder: 'bg-red-50 border-red-200' },
             };
 
             const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-GB', {
@@ -4872,6 +4903,7 @@ export default function EmployeeProfilePage() {
                           {inProgressCount > 0 && <p>Worker in progress: {inProgressCount}</p>}
                           {submittedCount > 0 && <p>Submitted, not reviewed: {submittedCount}</p>}
                           {reviewedCount > 0 && <p>Reviewed (not yet signed off): {reviewedCount}</p>}
+                          {returnedForCorrectionCount > 0 && <p className="text-red-700 font-medium">Returned for correction: {returnedForCorrectionCount}</p>}
                           {rejectedCount > 0 && <p className="text-red-700 font-medium">Rejected / action required: {rejectedCount}</p>}
                         </div>
                       )}
@@ -5042,6 +5074,11 @@ export default function EmployeeProfilePage() {
                                                 Reason: {submission.rejection_reason}
                                               </span>
                                             )}
+                                            {derived.status === 'returned_for_correction' && (
+                                              <span className="text-red-600">
+                                                Correction required: {submission?.correction_reason || submission?.review_reason || 'Worker correction requested'}
+                                              </span>
+                                            )}
                                           </div>
                                         </div>
                                       </div>
@@ -5051,12 +5088,25 @@ export default function EmployeeProfilePage() {
                                         <div className="flex gap-1">
                                           {/* Signed off → View */}
                                           {derived.status === 'signed_off' && hasSubmission && (
-                                            <Button size="sm" variant="outline"
-                                              onClick={() => openFormSubmissionPdfViewer(submission, form)}
-                                              className="text-green-700 border-green-200 hover:bg-green-50"
-                                              data-testid={`view-submission-${form.key}`}>
-                                              <Eye className="h-3.5 w-3.5 mr-1" />View
-                                            </Button>
+                                            <>
+                                              <Button size="sm" variant="outline"
+                                                onClick={() => openFormSubmissionPdfViewer(submission, form)}
+                                                className="text-green-700 border-green-200 hover:bg-green-50"
+                                                data-testid={`view-submission-${form.key}`}>
+                                                <Eye className="h-3.5 w-3.5 mr-1" />View
+                                              </Button>
+                                              {!isAuditor() && (
+                                                <Button size="sm" variant="outline"
+                                                  onClick={() => {
+                                                    setFormCorrectionDialog({ submission, form });
+                                                    setFormCorrectionReason('');
+                                                  }}
+                                                  className="text-red-600 border-red-200 hover:bg-red-50"
+                                                  data-testid={`reopen-correction-${form.key}`}>
+                                                  <RotateCcw className="h-3.5 w-3.5 mr-1" />Reopen for correction
+                                                </Button>
+                                              )}
+                                            </>
                                           )}
 
                                           {/* Reviewed → View + Sign Off */}
@@ -5069,21 +5119,32 @@ export default function EmployeeProfilePage() {
                                                 <Eye className="h-3.5 w-3.5 mr-1" />View
                                               </Button>
                                               {!isAuditor() && (
-                                                <Button size="sm" variant="outline"
-                                                  onClick={async () => {
-                                                    try {
-                                                      await axios.post(
-                                                        `${API}/form-submissions/${submission.id}/verify`, {},
-                                                        { headers: { Authorization: `Bearer ${token}` } }
-                                                      );
-                                                      toast.success('Form signed off');
-                                                      fetchFormSubmissions();
-                                                    } catch { toast.error('Failed to sign off form'); }
-                                                  }}
-                                                  className="text-green-600 border-green-200 hover:bg-green-50"
-                                                  data-testid={`sign-off-${form.key}`}>
-                                                  <CheckCircle className="h-3.5 w-3.5 mr-1" />Sign Off
-                                                </Button>
+                                                <>
+                                                  <Button size="sm" variant="outline"
+                                                    onClick={async () => {
+                                                      try {
+                                                        await axios.post(
+                                                          `${API}/form-submissions/${submission.id}/verify`, {},
+                                                          { headers: { Authorization: `Bearer ${token}` } }
+                                                        );
+                                                        toast.success('Form signed off');
+                                                        fetchFormSubmissions();
+                                                      } catch { toast.error('Failed to sign off form'); }
+                                                    }}
+                                                    className="text-green-600 border-green-200 hover:bg-green-50"
+                                                    data-testid={`sign-off-${form.key}`}>
+                                                    <CheckCircle className="h-3.5 w-3.5 mr-1" />Sign Off
+                                                  </Button>
+                                                  <Button size="sm" variant="outline"
+                                                    onClick={() => {
+                                                      setFormCorrectionDialog({ submission, form });
+                                                      setFormCorrectionReason('');
+                                                    }}
+                                                    className="text-red-600 border-red-200 hover:bg-red-50"
+                                                    data-testid={`reopen-correction-${form.key}`}>
+                                                    <RotateCcw className="h-3.5 w-3.5 mr-1" />Reopen for correction
+                                                  </Button>
+                                                </>
                                               )}
                                             </>
                                           )}
@@ -5114,6 +5175,15 @@ export default function EmployeeProfilePage() {
 
                                           {/* Rejected → View */}
                                           {derived.status === 'rejected' && hasSubmission && (
+                                            <Button size="sm" variant="outline"
+                                              onClick={() => openFormSubmissionPdfViewer(submission, form)}
+                                              className="text-red-600 border-red-200 hover:bg-red-50">
+                                              <Eye className="h-3.5 w-3.5 mr-1" />View
+                                            </Button>
+                                          )}
+
+                                          {/* Returned for correction → View only until worker resubmits */}
+                                          {derived.status === 'returned_for_correction' && hasSubmission && (
                                             <Button size="sm" variant="outline"
                                               onClick={() => openFormSubmissionPdfViewer(submission, form)}
                                               className="text-red-600 border-red-200 hover:bg-red-50">
@@ -5206,6 +5276,57 @@ export default function EmployeeProfilePage() {
                 )}
                 <Button variant="outline" onClick={() => setViewFormSubmission(null)}>
                   Close
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          {/* Reopen signed-off/reviewed form for worker correction */}
+          <Dialog open={!!formCorrectionDialog} onOpenChange={(open) => {
+            if (!open) {
+              setFormCorrectionDialog(null);
+              setFormCorrectionReason('');
+            }
+          }}>
+            <DialogContent className="max-w-lg">
+              <DialogHeader>
+                <DialogTitle>Reopen for correction</DialogTitle>
+                <DialogDescription>
+                  Return {formCorrectionDialog?.form?.name || 'this form'} to the worker for correction. The previous signed-off version is kept in the audit history.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-2 py-2">
+                <Label htmlFor="form-correction-reason">Correction reason</Label>
+                <Textarea
+                  id="form-correction-reason"
+                  value={formCorrectionReason}
+                  onChange={(event) => setFormCorrectionReason(event.target.value)}
+                  placeholder="Explain exactly what the worker needs to correct."
+                  rows={4}
+                  disabled={isReopeningFormCorrection}
+                />
+                <p className="text-xs text-text-muted">
+                  The worker will be able to edit and resubmit this form. Admin sign-off will be required again.
+                </p>
+              </div>
+              <DialogFooter>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setFormCorrectionDialog(null);
+                    setFormCorrectionReason('');
+                  }}
+                  disabled={isReopeningFormCorrection}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={handleReopenFormForCorrection}
+                  disabled={isReopeningFormCorrection || !formCorrectionReason.trim()}
+                  className="bg-red-600 hover:bg-red-700"
+                >
+                  {isReopeningFormCorrection ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RotateCcw className="h-4 w-4 mr-2" />}
+                  Reopen for correction
                 </Button>
               </DialogFooter>
             </DialogContent>

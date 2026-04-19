@@ -49,6 +49,10 @@ class FormSubmissionUpdate(BaseModel):
     notes: Optional[str] = None
 
 
+class FormCorrectionRequest(BaseModel):
+    reason: str
+
+
 class FormSubmissionResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str
@@ -480,6 +484,93 @@ async def unverify_form_submission(
     )
     
     return {"message": "Verification removed", "id": submission_id}
+
+
+@router.post("/form-submissions/{submission_id}/reopen-for-correction")
+async def reopen_form_submission_for_correction(
+    submission_id: str,
+    request: FormCorrectionRequest,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """Return a signed-off/reviewed form to the worker for correction with an audit snapshot."""
+    db = get_db()
+    reason = (request.reason or "").strip()
+    if not reason:
+        raise HTTPException(status_code=400, detail="Correction reason is required")
+
+    submission = await db.form_submissions.find_one({"id": submission_id})
+    if not submission:
+        raise HTTPException(status_code=404, detail="Submission not found")
+
+    current_status = (submission.get("status") or "").lower()
+    review_status = (submission.get("review_status") or "").lower()
+    is_signed_or_reviewed = (
+        submission.get("verified") is True
+        or current_status in {"verified", "signed_off", "reviewed", "approved"}
+        or review_status in {"verified", "signed_off", "reviewed", "approved"}
+    )
+    if not is_signed_or_reviewed:
+        raise HTTPException(
+            status_code=400,
+            detail="Only signed-off or reviewed forms can be reopened for correction"
+        )
+
+    now = datetime.now(timezone.utc).isoformat()
+    signed_snapshot = {k: v for k, v in submission.items() if k != "_id"}
+    signed_snapshot.update({
+        "snapshot_type": "signed_off_before_correction",
+        "snapshot_taken_at": now,
+        "reopened_by": user.get("user_id"),
+        "reopened_by_name": user.get("name"),
+        "reopen_reason": reason,
+    })
+
+    await db.form_submissions.update_one(
+        {"id": submission_id},
+        {
+            "$set": {
+                "status": "returned_for_correction",
+                "review_status": "returned_for_correction",
+                "review_reason": reason,
+                "correction_required": True,
+                "correction_reason": reason,
+                "returned_for_correction_by": user.get("user_id"),
+                "returned_for_correction_by_name": user.get("name"),
+                "returned_for_correction_at": now,
+                "awaiting_admin_review": False,
+                "verified": False,
+                "verified_by": None,
+                "verified_by_name": None,
+                "verified_at": None,
+                "updated_at": now,
+            },
+            "$push": {
+                "correction_history": signed_snapshot
+            }
+        }
+    )
+
+    await log_audit_action(
+        user["user_id"],
+        "reopen_form_for_correction",
+        "form_submission",
+        submission_id,
+        {
+            "employee_id": submission.get("employee_id"),
+            "form_type": submission.get("form_type"),
+            "reason": reason,
+            "previous_status": submission.get("status"),
+            "previous_review_status": submission.get("review_status"),
+        }
+    )
+
+    return {
+        "message": "Form reopened for worker correction",
+        "id": submission_id,
+        "status": "returned_for_correction",
+        "reason": reason,
+        "returned_for_correction_at": now,
+    }
 
 
 @router.post("/form-submissions/{submission_id}/reject")

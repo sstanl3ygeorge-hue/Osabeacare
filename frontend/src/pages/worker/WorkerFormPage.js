@@ -11,7 +11,7 @@ import { RadioGroup, RadioGroupItem } from '../../components/ui/radio-group';
 import { toast } from 'sonner';
 import { 
   ArrowLeft, Save, Send, Loader2, CheckCircle, Clock,
-  FileText, Heart, User, Briefcase, Info
+  FileText, Heart, User, Briefcase, Info, AlertCircle
 } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -36,6 +36,8 @@ export default function WorkerFormPage() {
   const [autoFillData, setAutoFillData] = useState({});
   const [lastSaved, setLastSaved] = useState(null);
   const [canEdit, setCanEdit] = useState(true);
+  const [formStatus, setFormStatus] = useState(null);
+  const [correctionReason, setCorrectionReason] = useState('');
 
   useEffect(() => {
     fetchFormData();
@@ -52,6 +54,8 @@ export default function WorkerFormPage() {
       setAutoFillData(response.data.auto_fill_data || {});
       setLastSaved(response.data.last_saved);
       setCanEdit(response.data.can_edit !== false);
+      setFormStatus(response.data.status || null);
+      setCorrectionReason(response.data.correction_reason || '');
     } catch (error) {
       toast.error('Failed to load form');
       navigate('/worker/dashboard');
@@ -280,6 +284,7 @@ export default function WorkerFormPage() {
   const FormIcon = FORM_ICONS[formId] || FileText;
   const autoFillCount = Object.keys(autoFillData).filter(k => formData[k] === autoFillData[k]).length;
   const totalFields = formMeta.sections.reduce((n, s) => n + s.fields.length, 0);
+  const isCorrectionRequired = ['returned_for_correction', 'reopened_for_worker_correction', 'amendment_requested', 'rejected'].includes(formStatus);
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -328,6 +333,18 @@ export default function WorkerFormPage() {
           </div>
         )}
 
+        {canEdit && isCorrectionRequired && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3">
+            <AlertCircle className="h-5 w-5 text-red-600 mt-0.5 shrink-0" />
+            <div>
+              <p className="text-sm font-medium text-red-800">Correction required</p>
+              <p className="text-sm text-red-700 mt-1">
+                {correctionReason || 'Admin has reopened this form for correction. Please update it and submit again.'}
+              </p>
+            </div>
+          </div>
+        )}
+
         {canEdit && autoFillCount > 0 && (
           <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-start gap-3">
             <Info className="h-5 w-5 text-green-600 mt-0.5 shrink-0" />
@@ -370,7 +387,7 @@ export default function WorkerFormPage() {
         {canEdit && (
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
             <p className="text-sm text-blue-800 mb-3">
-              <strong>Ready to submit?</strong> Once submitted, this form cannot be edited and will be sent to the admin for review.
+              <strong>{isCorrectionRequired ? 'Ready to resubmit?' : 'Ready to submit?'}</strong> Once submitted, this form cannot be edited and will be sent to the admin for review.
             </p>
             <div className="flex justify-end gap-3">
               <Button variant="outline" onClick={handleSave} disabled={saving}>

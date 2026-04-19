@@ -27,6 +27,7 @@ from induction_definitions import (
     get_induction_rule_metadata_by_name,
     get_employee_induction_status,
     is_training_verified_for_item,
+    ensure_checklist_list_format,
 )
 
 router = APIRouter(tags=["Induction Checklist"])
@@ -168,6 +169,9 @@ async def update_induction_checklist(
             "created_at": now,
             "updated_at": now
         }
+
+    # Normalise items to list format (handles legacy dict-format records from UCE)
+    ensure_checklist_list_format(checklist)
     
     # Enforce notes for Shadow Shift Completed manual sign-off
     if payload.item_name == "Shadow Shift Completed" and payload.status == "completed":
@@ -671,6 +675,9 @@ async def signoff_induction_item(
             "updated_at": now_init,
         }
         await db.induction_checklists.insert_one({k: v for k, v in checklist.items() if k != "_id"})
+
+    # Normalise items to list format (handles legacy dict-format records from UCE)
+    ensure_checklist_list_format(checklist)
 
     # ── Hybrid items ──────────────────────────────────────────────────────────
     if completion_type == "hybrid":

@@ -298,6 +298,29 @@ def get_induction_item_for_training(training_id: str, training_name: str = None)
     return None
 
 
+def ensure_checklist_list_format(checklist: dict) -> dict:
+    """
+    Ensure a checklist document has its ``items`` field in list format.
+
+    Some records were historically created by unified_compliance_engine with
+    items as a dict keyed by standard ID::
+
+        {"understand_your_role": {"completed": True, ...}, ...}
+
+    This function converts that to the canonical list format expected by all
+    write paths::
+
+        [{"id": "understand_your_role", "name": "...", "status": "completed", ...}]
+
+    Safe to call on already-list-format records (no-op).
+    Returns the same dict object (mutated in place) for convenience.
+    """
+    items = checklist.get("items", [])
+    if isinstance(items, dict):
+        checklist["items"] = normalize_induction_items(items)
+    return checklist
+
+
 def normalize_induction_items(raw_items) -> list:
     """
     Normalize both list-format and dict-format induction items to a canonical list.

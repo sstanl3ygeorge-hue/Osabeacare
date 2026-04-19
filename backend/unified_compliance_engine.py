@@ -355,22 +355,36 @@ async def auto_complete_induction_from_training(
     now = datetime.now(timezone.utc).isoformat()
     
     if not checklist:
-        # Create new checklist with this item completed
-        completed_items = {
-            induction_item_id: {
-                "completed": True,
-                "completed_at": now,
-                "completed_by": verified_by,
-                "completed_by_name": verified_by_name or verified_by,
-                "auto_completed_from": f"training:{training_id}",
-                "training_name": training_name
+        # Create new checklist in list format (canonical format for all write paths)
+        from induction_definitions import CARE_CERTIFICATE_STANDARDS as _STDS
+        new_items = []
+        for std in _STDS:
+            entry = {
+                "id": std["id"],
+                "name": std["name"],
+                "mandatory": True,
+                "status": "pending",
+                "completed_at": None,
+                "completed_by": None,
+                "completed_by_name": None,
+                "notes": None,
             }
-        }
-        
+            if std["id"] == induction_item_id:
+                entry.update({
+                    "status": "completed",
+                    "completed": True,
+                    "completed_at": now,
+                    "completed_by": verified_by,
+                    "completed_by_name": verified_by_name or verified_by,
+                    "auto_completed_from": f"training:{training_id}",
+                    "training_name": training_name,
+                })
+            new_items.append(entry)
+
         await db.induction_checklists.insert_one({
             "id": f"induction_{employee_id}",
             "employee_id": employee_id,
-            "items": completed_items,
+            "items": new_items,
             "overall_status": "in_progress",
             "total_items": 15,
             "created_at": now,
@@ -380,65 +394,45 @@ async def auto_complete_induction_from_training(
         result["auto_completed"] = True
         result["message"] = f"Created induction checklist and auto-completed '{induction_item['name']}' from {training_name} training"
     else:
-        # Update existing checklist
-        items = checklist.get("items", [])
-        
-        # Handle both list and dict formats
-        # P0 FIX: items can be a list of objects or a dict keyed by ID
-        if isinstance(items, list):
-            # Find the item in the list by matching standard number or name
-            item_found = False
-            for i, item in enumerate(items):
-                item_num = item.get("standard_number") or item.get("num")
-                item_name = item.get("name", "").lower()
-                if (item_num == induction_item.get("num") or 
-                    induction_item_id.lower() in item_name or
-                    induction_item.get("name", "").lower() in item_name):
-                    if item.get("completed") or item.get("status") == "completed":
-                        result["message"] = f"Induction item '{induction_item['name']}' already completed"
-                        return result
-                    # Mark as completed
-                    items[i]["completed"] = True
-                    items[i]["status"] = "completed"
-                    items[i]["completed_at"] = now
-                    items[i]["completed_by"] = verified_by
-                    items[i]["completed_by_name"] = verified_by_name or verified_by
-                    items[i]["auto_completed_from"] = f"training:{training_id}"
-                    items[i]["training_name"] = training_name
-                    item_found = True
-                    break
-            
-            if not item_found:
-                result["message"] = f"Induction item for '{induction_item['name']}' not found in checklist"
-                return result
-        else:
-            # Dict format (legacy)
-            if items.get(induction_item_id, {}).get("completed"):
-                result["message"] = f"Induction item '{induction_item['name']}' already completed"
-                return result
-            # Mark as completed
-            items[induction_item_id] = {
-                "completed": True,
-                "completed_at": now,
-                "completed_by": verified_by,
-                "completed_by_name": verified_by_name or verified_by,
-                "auto_completed_from": f"training:{training_id}",
-                "training_name": training_name
-            }
-        
+        # Update existing checklist — normalise to list format first
+        from induction_definitions import ensure_checklist_list_format
+        ensure_checklist_list_format(checklist)
+        items = checklist["items"]  # guaranteed list after normalisation
+
+        item_found = False
+        for i, item in enumerate(items):
+            item_name_lower = item.get("name", "").lower()
+            target_lower = induction_item.get("name", "").lower()
+            if item.get("id") == induction_item_id or item_name_lower == target_lower:
+                if item.get("status") == "completed" or item.get("completed"):
+                    result["message"] = f"Induction item '{induction_item['name']}' already completed"
+                    return result
+                items[i].update({
+                    "status": "completed",
+                    "completed": True,
+                    "completed_at": now,
+                    "completed_by": verified_by,
+                    "completed_by_name": verified_by_name or verified_by,
+                    "auto_completed_from": f"training:{training_id}",
+                    "training_name": training_name,
+                })
+                item_found = True
+                break
+
+        if not item_found:
+            result["message"] = f"Induction item for '{induction_item['name']}' not found in checklist"
+            return result
+
         # Recalculate overall_status after item update
-        if isinstance(items, list):
-            completed_count = sum(1 for it in items if it.get("status") == "completed" or it.get("completed"))
-        else:
-            completed_count = sum(1 for v in items.values() if isinstance(v, dict) and v.get("completed"))
-        
+        completed_count = sum(1 for it in items if it.get("status") == "completed" or it.get("completed"))
+
         if completed_count >= 15:
             overall_status = "completed"
         elif completed_count > 0:
             overall_status = "in_progress"
         else:
             overall_status = "pending"
-        
+
         update_fields = {
             "items": items,
             "overall_status": overall_status,
@@ -446,12 +440,12 @@ async def auto_complete_induction_from_training(
         }
         if overall_status == "completed":
             update_fields["completed_at"] = now
-        
+
         await db.induction_checklists.update_one(
             {"employee_id": employee_id},
             {"$set": update_fields}
         )
-        
+
         result["auto_completed"] = True
         result["message"] = f"Auto-completed induction item '{induction_item['name']}' from {training_name} training"
     

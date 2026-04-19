@@ -35,6 +35,7 @@ from employment_gap_engine import (
     evaluate_gaps_compliance,
     detect_employment_gaps_with_coverage,
     compute_coverage_summary,
+    match_gap_explanations_to_canonical_gaps,
 )
 
 # Legacy wrapper kept for callers that still reference it
@@ -695,31 +696,14 @@ async def detect_employment_gaps(
     now = datetime.now(timezone.utc).isoformat()
     new_gaps = 0
 
-    # Merge applicant-supplied gap explanations (same logic as application submit)
-    applicant_explanations = employee.get("gap_explanations", [])
-    # Match by date range first, then fall back to sequential gap_id
-    for gap in detected_gaps:
-        matched_expl = None
-        gap_start = gap.get("gap_start")
-        gap_end = gap.get("gap_end")
-        # Date-range match (robust against reordering)
-        for expl in applicant_explanations:
-            expl_start = expl.get("gap_start") or expl.get("start_date")
-            expl_end = expl.get("gap_end") or expl.get("end_date")
-            if expl_start and expl_end and expl_start == gap_start and expl_end == gap_end:
-                matched_expl = expl
-                break
-        # Fallback: sequential gap_id match
-        if not matched_expl:
-            expl_by_id = {e.get("gap_id"): e for e in applicant_explanations if e.get("gap_id")}
-            matched_expl = expl_by_id.get(gap.get("gap_id"))
-        if matched_expl and matched_expl.get("explanation"):
-            gap["explanation"] = matched_expl["explanation"]
-            gap["reason_type"] = matched_expl.get("reason_type")
-            gap["explanation_provided_at"] = now
-            gap["explained_by"] = "applicant"
-            gap["explanation_source"] = "application_form"
-            gap["status"] = "explained"
+    match_result = match_gap_explanations_to_canonical_gaps(
+        detected_gaps,
+        employee.get("gap_explanations", []),
+        provided_at=now,
+        explanation_source="application_form",
+        apply_to_gaps=True,
+    )
+    detected_gaps = match_result["gaps"]
     
     for gap in detected_gaps:
         normalized_detected_gap = _normalize_gap_record({
@@ -747,6 +731,10 @@ async def detect_employment_gaps(
                         "explanation_provided_at": now,
                         "explained_by": "applicant",
                         "explanation_source": "application_form",
+                        "applicant_explanation": normalized_detected_gap.get("applicant_explanation"),
+                        "applicant_explanation_match": normalized_detected_gap.get("applicant_explanation_match"),
+                        "matched_by": (normalized_detected_gap.get("applicant_explanation_match") or {}).get("matched_by"),
+                        "source_gap_id": (normalized_detected_gap.get("applicant_explanation_match") or {}).get("source_gap_id"),
                         "status": "explained",
                         **_build_gap_compatibility_fields("explained"),
                     }}
@@ -775,6 +763,7 @@ async def detect_employment_gaps(
             "employment_gaps_detected_at": now,
             "has_employment_gaps": len(detected_gaps) > 0,
             "employment_gaps": detected_gaps,
+            "gap_explanations": match_result["normalised_applicant_explanations"],
             "gap_analysis_status": "completed",
         }, "$unset": {
             "gap_analysis_error": "",

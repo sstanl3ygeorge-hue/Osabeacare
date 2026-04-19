@@ -26,8 +26,8 @@ Gap Record Structure:
 }
 """
 
-from typing import List, Dict, Optional
-from datetime import datetime, timezone
+from typing import List, Dict, Optional, Tuple
+from datetime import date, datetime, timezone
 from enum import Enum
 
 # =============================================================================
@@ -61,9 +61,16 @@ def parse_employment_date(date_str) -> Optional[datetime]:
         return None
 
     if not isinstance(date_str, str):
-        return date_str if date_str.tzinfo else date_str.replace(tzinfo=timezone.utc)
+        if isinstance(date_str, datetime):
+            return date_str if date_str.tzinfo else date_str.replace(tzinfo=timezone.utc)
+        if isinstance(date_str, date):
+            return datetime(date_str.year, date_str.month, date_str.day, tzinfo=timezone.utc)
+        return None
 
     date_str = date_str.strip()
+
+    if date_str.lower() in {"present", "current", "ongoing", "now", "to date"}:
+        return None
 
     # Month-only ISO from browser <input type="month">.
     # Interpret as first day of the month for coverage/gap calculations.
@@ -109,6 +116,63 @@ def parse_employment_date(date_str) -> Optional[datetime]:
         return None
 
 
+def _normalise_employment_history_entries(employment_history: List[Dict]) -> Tuple[List[Dict], List[Dict]]:
+    """
+    Return calculation-safe employment rows and invalid-row diagnostics.
+
+    Invalid or undated rows are not counted as coverage. They are surfaced in
+    coverage metadata so the UI can fail closed instead of showing a misleading
+    zero or a Python comparison error.
+    """
+    valid_jobs = []
+    invalid_entries = []
+
+    for idx, raw_job in enumerate(employment_history or []):
+        if not isinstance(raw_job, dict):
+            invalid_entries.append({
+                "index": idx,
+                "reason": "Employment row is not an object",
+            })
+            continue
+
+        start_value = raw_job.get("start_date") or raw_job.get("from_date")
+        end_value = raw_job.get("end_date") or raw_job.get("to_date")
+        parsed_start = parse_employment_date(start_value)
+
+        if not parsed_start:
+            invalid_entries.append({
+                "index": idx,
+                "reason": "Missing or invalid start date",
+                "start_date": start_value,
+                "end_date": end_value,
+                "employer": raw_job.get("company") or raw_job.get("employer_name"),
+                "role": raw_job.get("role") or raw_job.get("job_title"),
+            })
+            continue
+
+        parsed_end = parse_employment_date(end_value)
+        if end_value and not parsed_end and str(end_value).strip().lower() not in {"present", "current", "ongoing", "now", "to date"}:
+            invalid_entries.append({
+                "index": idx,
+                "reason": "Invalid end date",
+                "start_date": start_value,
+                "end_date": end_value,
+                "employer": raw_job.get("company") or raw_job.get("employer_name"),
+                "role": raw_job.get("role") or raw_job.get("job_title"),
+            })
+            continue
+
+        valid_jobs.append({
+            **raw_job,
+            "start_date": start_value,
+            "end_date": end_value,
+            "_parsed_start_date": parsed_start,
+            "_parsed_end_date": parsed_end,
+        })
+
+    return valid_jobs, invalid_entries
+
+
 def detect_employment_gaps(employment_history: List[Dict]) -> List[Dict]:
     """
     Detect gaps in employment history.
@@ -132,8 +196,8 @@ def detect_employment_gaps(employment_history: List[Dict]) -> List[Dict]:
     if not employment_history or len(employment_history) < 1:
         return []
     
-    # Filter jobs with valid start dates
-    valid_jobs = [j for j in employment_history if j.get("start_date")]
+    # Filter to calculation-safe jobs with parseable start dates.
+    valid_jobs, _invalid_entries = _normalise_employment_history_entries(employment_history)
     
     if len(valid_jobs) < 1:
         return []
@@ -141,7 +205,7 @@ def detect_employment_gaps(employment_history: List[Dict]) -> List[Dict]:
     # Sort by start date ascending (oldest first)
     sorted_jobs = sorted(
         valid_jobs,
-        key=lambda x: parse_employment_date(x.get("start_date")) or datetime.min.replace(tzinfo=timezone.utc)
+        key=lambda x: x.get("_parsed_start_date") or datetime.min.replace(tzinfo=timezone.utc)
     )
     
     gaps = []
@@ -152,13 +216,13 @@ def detect_employment_gaps(employment_history: List[Dict]) -> List[Dict]:
         next_job = sorted_jobs[i + 1]
         
         # Current job's end date
-        current_end = parse_employment_date(current_job.get("end_date"))
+        current_end = current_job.get("_parsed_end_date")
         if not current_end:
             # If no end date, assume it's ongoing - skip gap check for this pair
             continue
         
         # Next job's start date
-        next_start = parse_employment_date(next_job.get("start_date"))
+        next_start = next_job.get("_parsed_start_date")
         if not next_start:
             continue
         
@@ -198,7 +262,7 @@ def detect_employment_gaps(employment_history: List[Dict]) -> List[Dict]:
     # Also check for gap from last job to present
     if sorted_jobs:
         most_recent = sorted_jobs[-1]
-        recent_end = parse_employment_date(most_recent.get("end_date"))
+        recent_end = most_recent.get("_parsed_end_date")
         
         # If most recent job has an end date (not currently employed)
         if recent_end:
@@ -427,6 +491,10 @@ def create_gap_record(
         "verified_by": gap_data.get("verified_by"),
         "verified_at": gap_data.get("verified_at"),
         "rejection_reason": gap_data.get("rejection_reason"),
+        "applicant_explanation": gap_data.get("applicant_explanation"),
+        "applicant_explanation_match": gap_data.get("applicant_explanation_match"),
+        "matched_by": (gap_data.get("applicant_explanation_match") or {}).get("matched_by"),
+        "source_gap_id": (gap_data.get("applicant_explanation_match") or {}).get("source_gap_id"),
         "notes": gap_data.get("notes", []),
         "created_at": now,
         "created_by": created_by,
@@ -465,9 +533,9 @@ def detect_employment_gaps_with_coverage(
     now = datetime.now(timezone.utc)
     coverage_start = now - timedelta(days=365 * coverage_years)
 
-    valid_jobs = [j for j in (employment_history or []) if j.get("start_date")]
+    valid_jobs, _invalid_entries = _normalise_employment_history_entries(employment_history)
     if valid_jobs:
-        parsed_starts = [d for d in (parse_employment_date(j["start_date"]) for j in valid_jobs) if d is not None]
+        parsed_starts = [j.get("_parsed_start_date") for j in valid_jobs if j.get("_parsed_start_date") is not None]
         earliest_start = min(parsed_starts) if parsed_starts else None
         if earliest_start and (earliest_start - coverage_start).days >= MIN_GAP_DAYS:
             gap_days = (earliest_start - coverage_start).days
@@ -484,7 +552,7 @@ def detect_employment_gaps_with_coverage(
 
             earliest_job = min(
                 valid_jobs,
-                key=lambda j: parse_employment_date(j["start_date"]) or datetime.max.replace(tzinfo=timezone.utc),
+                key=lambda j: j.get("_parsed_start_date") or datetime.max.replace(tzinfo=timezone.utc),
             )
 
             gaps.append({
@@ -536,7 +604,7 @@ def compute_coverage_summary(
     coverage_end = now
     total_days_required = (coverage_end - coverage_start).days
 
-    valid_jobs = [j for j in (employment_history or []) if j.get("start_date")]
+    valid_jobs, invalid_entries = _normalise_employment_history_entries(employment_history)
 
     if not valid_jobs:
         return {
@@ -549,25 +617,29 @@ def compute_coverage_summary(
             "latest_entry_date": None,
             "has_current_employment": False,
             "meets_10_year_requirement": False,
+            "can_assess_coverage": False,
+            "invalid_entry_count": len(invalid_entries),
+            "invalid_entries": invalid_entries,
+            "status_reason": "No employment rows with valid start dates were available for coverage calculation.",
         }
 
     # Sort ascending
     sorted_jobs = sorted(
         valid_jobs,
-        key=lambda j: parse_employment_date(j["start_date"]) or datetime.min.replace(tzinfo=timezone.utc),
+        key=lambda j: j.get("_parsed_start_date") or datetime.min.replace(tzinfo=timezone.utc),
     )
 
-    earliest_date = parse_employment_date(sorted_jobs[0]["start_date"])
+    earliest_date = sorted_jobs[0].get("_parsed_start_date")
     latest_end = None
     has_current = False
 
     # Merge overlapping intervals to compute total covered days within window
     intervals = []
     for j in sorted_jobs:
-        s = parse_employment_date(j["start_date"])
+        s = j.get("_parsed_start_date")
         if not s:
             continue
-        e = parse_employment_date(j.get("end_date"))
+        e = j.get("_parsed_end_date")
         if not e:
             e = now
             has_current = True
@@ -577,7 +649,7 @@ def compute_coverage_summary(
         if s < e:
             intervals.append((s, e))
         # Track latest end for display
-        raw_end = parse_employment_date(j.get("end_date")) or now
+        raw_end = j.get("_parsed_end_date") or now
         if latest_end is None or raw_end > latest_end:
             latest_end = raw_end
 
@@ -611,7 +683,8 @@ def compute_coverage_summary(
 
     # Cannot meet the requirement if no days were actually covered
     # (e.g. all dates failed to parse, or all entries fall outside the window).
-    requirement_met = (not has_unresolved) and (total_covered > 0)
+    can_assess_coverage = len(invalid_entries) == 0
+    requirement_met = can_assess_coverage and (not has_unresolved) and (total_covered > 0)
 
     return {
         "coverage_start": coverage_start.strftime("%Y-%m-%d"),
@@ -623,6 +696,137 @@ def compute_coverage_summary(
         "latest_entry_date": latest_end.strftime("%Y-%m-%d") if latest_end else None,
         "has_current_employment": has_current,
         "meets_10_year_requirement": requirement_met,
+        "can_assess_coverage": can_assess_coverage,
+        "invalid_entry_count": len(invalid_entries),
+        "invalid_entries": invalid_entries,
+        "status_reason": (
+            "Coverage cannot be fully assessed because one or more employment rows have missing or invalid dates."
+            if invalid_entries else None
+        ),
+    }
+
+
+def _normalise_gap_boundary(value) -> Optional[str]:
+    """Return a stable YYYY-MM-DD-ish boundary for explanation matching."""
+    if value is None:
+        return None
+    if isinstance(value, str) and value.strip().lower() == "present":
+        return "present"
+    parsed = parse_employment_date(value)
+    if parsed:
+        return parsed.strftime("%Y-%m-%d")
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
+
+
+def match_gap_explanations_to_canonical_gaps(
+    gaps: List[Dict],
+    applicant_explanations: List[Dict],
+    *,
+    provided_at: Optional[str] = None,
+    explanation_source: str = "application_form",
+    apply_to_gaps: bool = False,
+) -> Dict:
+    """
+    Match applicant-submitted explanations to detected canonical gaps.
+
+    Date-range matching is preferred. Legacy gap_id/order matching is retained
+    only as a weaker backwards-compatible match. Unmatched explanations are
+    returned separately and must not be treated as canonical detected gaps.
+    """
+    canonical_gaps = [dict(gap) for gap in (gaps or []) if isinstance(gap, dict)]
+    explanations = [dict(expl) for expl in (applicant_explanations or []) if isinstance(expl, dict)]
+    normalised_explanations = []
+
+    for idx, expl in enumerate(explanations):
+        source_gap_id = expl.get("gap_id") or expl.get("source_gap_id") or f"applicant_gap_{idx + 1}"
+        normalised_explanations.append({
+            **expl,
+            "source_gap_id": source_gap_id,
+            "gap_start": _normalise_gap_boundary(expl.get("gap_start") or expl.get("start_date")),
+            "gap_end": _normalise_gap_boundary(expl.get("gap_end") or expl.get("end_date")),
+            "matched_gap_id": None,
+            "matched_by": "unmatched",
+        })
+
+    used_explanation_indexes = set()
+    matched_explanations = []
+
+    for gap in canonical_gaps:
+        gap_id = gap.get("gap_id") or gap.get("id")
+        gap_start = _normalise_gap_boundary(gap.get("gap_start") or gap.get("start_date"))
+        gap_end = _normalise_gap_boundary(gap.get("gap_end") or gap.get("end_date"))
+        matched_index = None
+        matched_by = None
+
+        for idx, expl in enumerate(normalised_explanations):
+            if idx in used_explanation_indexes:
+                continue
+            if expl.get("gap_start") and expl.get("gap_end") and expl.get("gap_start") == gap_start and expl.get("gap_end") == gap_end:
+                matched_index = idx
+                matched_by = "date_range"
+                break
+
+        if matched_index is None and gap_id:
+            for idx, expl in enumerate(normalised_explanations):
+                if idx in used_explanation_indexes:
+                    continue
+                if expl.get("source_gap_id") == gap_id:
+                    matched_index = idx
+                    matched_by = "legacy_gap_id"
+                    break
+
+        if matched_index is None:
+            continue
+
+        used_explanation_indexes.add(matched_index)
+        matched_expl = {
+            **normalised_explanations[matched_index],
+            "matched_gap_id": gap_id,
+            "matched_by": matched_by,
+            "gap_start": gap_start,
+            "gap_end": gap_end,
+        }
+        normalised_explanations[matched_index] = matched_expl
+        matched_explanations.append(matched_expl)
+
+        match_metadata = {
+            "matched_gap_id": gap_id,
+            "matched_by": matched_by,
+            "source_gap_id": matched_expl.get("source_gap_id"),
+            "gap_start": gap_start,
+            "gap_end": gap_end,
+        }
+        gap["applicant_explanation"] = matched_expl
+        gap["applicant_explanation_match"] = match_metadata
+
+        if apply_to_gaps and matched_expl.get("explanation"):
+            gap["explanation"] = matched_expl.get("explanation")
+            gap["reason_type"] = matched_expl.get("reason_type")
+            gap["explanation_provided_at"] = provided_at or matched_expl.get("explanation_provided_at")
+            gap["explained_by"] = matched_expl.get("explained_by") or "applicant"
+            gap["explanation_source"] = matched_expl.get("explanation_source") or explanation_source
+            if gap.get("status") in (None, GapStatus.PENDING.value):
+                gap["status"] = GapStatus.EXPLAINED.value
+
+    unmatched_explanations = [
+        expl for idx, expl in enumerate(normalised_explanations)
+        if idx not in used_explanation_indexes
+    ]
+
+    return {
+        "gaps": canonical_gaps,
+        "matched_applicant_explanations": matched_explanations,
+        "unmatched_applicant_explanations": unmatched_explanations,
+        "normalised_applicant_explanations": normalised_explanations,
+        "explanation_match_summary": {
+            "total_applicant_explanations": len(normalised_explanations),
+            "matched_count": len(matched_explanations),
+            "matched_by_date_range": sum(1 for expl in matched_explanations if expl.get("matched_by") == "date_range"),
+            "matched_by_legacy_gap_id": sum(1 for expl in matched_explanations if expl.get("matched_by") == "legacy_gap_id"),
+            "unmatched_count": len(unmatched_explanations),
+        },
     }
 
 

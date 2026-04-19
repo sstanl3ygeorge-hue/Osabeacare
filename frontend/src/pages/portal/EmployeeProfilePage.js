@@ -3305,6 +3305,19 @@ export default function EmployeeProfilePage() {
   const cvDocumentIdIsSet = Boolean(employee?.cv_document_id);
   const cvDocument = activeCvDocument || (cvDocumentIdIsSet ? null : cvDocuments[0] || null);
   const employmentHistoryGapRow = complianceFile?.sections?.employment_history?.rows?.[0] || null;
+  const canonicalEmploymentRecords = Array.isArray(employmentHistoryGapRow?.employment_records)
+    ? employmentHistoryGapRow.employment_records
+    : (employee?.employment_history || []);
+  const canonicalEmploymentGaps = Array.isArray(employmentHistoryGapRow?.canonical_gaps)
+    ? employmentHistoryGapRow.canonical_gaps
+    : (employmentHistoryGapRow?.gaps || []);
+  const matchedApplicantGapExplanations = employmentHistoryGapRow?.matched_applicant_explanations || [];
+  const unmatchedApplicantGapExplanations = employmentHistoryGapRow?.unmatched_applicant_explanations || [];
+  const applicantGapExplanationsFromComplianceFile = [
+    ...matchedApplicantGapExplanations,
+    ...unmatchedApplicantGapExplanations
+  ];
+  const invalidEmploymentEntries = employmentHistoryGapRow?.invalid_employment_entries || [];
   const employmentGapEvaluation = employmentHistoryGapRow?.gap_evaluation || null;
   const gapAnalysisRun = Boolean(employmentHistoryGapRow?.gap_analysis_run);
   const applicationAvailable = Boolean(applicationSubmission || applicationPdfDocument);
@@ -3328,11 +3341,11 @@ export default function EmployeeProfilePage() {
       (employmentGapEvaluation?.rejected_count || 0) +
       (employmentGapEvaluation?.needs_info_count || 0)
     : null;
-  const employmentHistoryExists = Boolean(employee?.employment_history?.length > 0);
+  const employmentHistoryExists = Boolean(canonicalEmploymentRecords.length > 0);
   const employmentHistoryHasDatedRows = Boolean(
-    employee?.employment_history?.some((job) => job?.start_date)
+    canonicalEmploymentRecords.some((job) => job?.start_date)
   );
-  const employmentCoverage = employee?.employment_coverage || null;
+  const employmentCoverage = employmentHistoryGapRow?.employment_coverage || null;
   const coveragePercent = Number(employmentCoverage?.coverage_percent);
   const coverageHasNumericPercent = Number.isFinite(coveragePercent);
   const coverageTotalDaysRequired = Number(employmentCoverage?.total_days_required);
@@ -3363,7 +3376,8 @@ export default function EmployeeProfilePage() {
   const employmentSignedOffBy = employee?.employment_review_signed_off_by_name
     || employee?.employment_review_signed_off_by || null;
   const employmentSignedOffAt = employee?.employment_review_signed_off_at || null;
-  const gapAnalysisFailed = employee?.gap_analysis_status === 'failed';
+  const gapAnalysisFailed = employmentHistoryGapRow?.gap_analysis_status === 'failed';
+  const gapAnalysisError = employmentHistoryGapRow?.gap_analysis_error;
   const employmentGapsCannotAssess = Boolean(
     employmentHistoryExists && (gapAnalysisFailed || !employmentHistoryGapRow || !gapAnalysisRun || !employmentGapEvaluation)
   );
@@ -5717,8 +5731,8 @@ export default function EmployeeProfilePage() {
                         ? 'Gap analysis encountered an error during processing. Click "Re-run Gap Analysis" to retry.'
                         : 'Employment gap analysis has not been run yet. Click "Re-run Gap Analysis" to detect gaps from the application form employment history.'}
                     </p>
-                    {employee?.gap_analysis_error && (
-                      <p className="text-xs text-red-500 mt-1 font-mono">{employee.gap_analysis_error}</p>
+                    {gapAnalysisError && (
+                      <p className="text-xs text-red-500 mt-1 font-mono">{gapAnalysisError}</p>
                     )}
                     {!isAuditor() && employmentHistoryExists && (
                       <Button
@@ -5784,7 +5798,7 @@ export default function EmployeeProfilePage() {
                     employeeName={`${employee?.first_name} ${employee?.last_name}`}
                     initialData={{
                       has_gaps: true,
-                      gaps: employmentHistoryGapRow.gaps,
+                      gaps: canonicalEmploymentGaps,
                       evaluation: employmentHistoryGapRow.gap_evaluation
                     }}
                     isAdmin={!isAuditor() && (user?.role === 'admin' || user?.role === 'super_admin')}
@@ -5797,14 +5811,14 @@ export default function EmployeeProfilePage() {
               )}
               
               {/* Applicant-Submitted Gap Explanations — always shown if present */}
-              {employee?.gap_explanations?.length > 0 && (
+              {applicantGapExplanationsFromComplianceFile.length > 0 && (
                 <div className="mt-4 mb-4" data-testid="section-applicant-gap-explanations">
                   <h4 className="font-medium text-gray-800 mb-2">Applicant-Submitted Gap Explanations</h4>
                   <p className="mb-3 text-xs text-text-muted">
-                    These explanations were provided by the applicant during the application form. They are preserved as supporting notes and do not add dated coverage unless matched to a detected employment gap.
+                    These explanations come from the compliance-file employment review payload. Matched explanations support a detected gap; unmatched explanations remain supporting notes only.
                   </p>
                   <div className="space-y-2">
-                    {employee.gap_explanations.map((expl, idx) => {
+                    {applicantGapExplanationsFromComplianceFile.map((expl, idx) => {
                       const hasDateRange = Boolean((expl.gap_start || expl.start_date) && (expl.gap_end || expl.end_date));
                       const gapStart = expl.gap_start || expl.start_date;
                       const gapEnd = expl.gap_end || expl.end_date;
@@ -5812,6 +5826,7 @@ export default function EmployeeProfilePage() {
                       const durationMonths = expl.duration_months || expl.gap_duration_months;
                       const fmtDate = (d) => d ? new Date(d + 'T00:00:00Z').toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }) : '?';
                       const explanationType = expl.reason_type || expl.type || expl.category || 'Applicant declaration';
+                      const isMatched = expl.matched_by && expl.matched_by !== 'unmatched';
                       return (
                         <div key={expl.gap_id || idx} className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
                           <div className="flex items-center gap-2 mb-1 flex-wrap">
@@ -5834,9 +5849,12 @@ export default function EmployeeProfilePage() {
                                 {explanationType.replace(/_/g, ' ')}
                               </Badge>
                             )}
+                            <Badge variant="outline" className={`text-[10px] ${isMatched ? 'bg-green-100 text-green-700 border-green-200' : 'bg-amber-100 text-amber-700 border-amber-200'}`}>
+                              {isMatched ? `Matched to ${expl.matched_gap_id || 'detected gap'}` : 'Not attached to detected gap'}
+                            </Badge>
                           </div>
                           <p className="text-sm text-gray-700">{expl.explanation || 'No explanation text provided by applicant'}</p>
-                          {!hasDateRange && (
+                          {!isMatched && (
                             <p className="mt-1 text-xs text-blue-700">
                               This explanation is preserved as applicant evidence, but it does not prove dated 10-year coverage until it is matched to a detected employment gap.
                             </p>
@@ -5849,14 +5867,14 @@ export default function EmployeeProfilePage() {
               )}
 
               {/* Employment History from Application */}
-              {employee?.employment_history?.length > 0 && (
+              {canonicalEmploymentRecords.length > 0 && (
                 <div className="mt-6" data-testid="section-employment-history">
                   <h4 className="font-medium text-gray-800 mb-3">Employment Records</h4>
                   <p className="mb-3 text-xs text-text-muted">
-                    Structured roles shown here are the current employment-history record on file.
+                    Structured roles shown here come from the compliance-file employment review payload.
                   </p>
                   <div className="space-y-3">
-                    {employee.employment_history.map((job, idx) => (
+                    {canonicalEmploymentRecords.map((job, idx) => (
                       <div key={idx} className="p-4 bg-gray-50 rounded-lg border border-gray-200">
                         <div className="flex justify-between items-start">
                           <div>
@@ -5893,7 +5911,22 @@ export default function EmployeeProfilePage() {
                 </div>
               )}
               
-              {!employee?.employment_history?.length && !complianceFile?.sections?.employment_history?.rows?.[0]?.has_gaps && (
+              {invalidEmploymentEntries.length > 0 && (
+                <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg" data-testid="section-employment-invalid-entries">
+                  <h4 className="font-medium text-red-800 mb-2">Invalid employment entries</h4>
+                  <p className="mb-2 text-xs text-red-700">These rows were not counted toward 10-year coverage.</p>
+                  <div className="space-y-2">
+                    {invalidEmploymentEntries.map((entry, idx) => (
+                      <div key={idx} className="text-xs text-red-700">
+                        Row {Number.isFinite(entry?.index) ? entry.index + 1 : idx + 1}: {entry?.reason || 'Invalid employment row'}
+                        {entry?.employer ? ` (${entry.employer})` : ''}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {!canonicalEmploymentRecords.length && !complianceFile?.sections?.employment_history?.rows?.[0]?.has_gaps && (
                 <div className="text-center py-8 text-gray-500">
                   <Briefcase className="h-12 w-12 mx-auto mb-3 opacity-50" />
                   <p>No employment history recorded</p>

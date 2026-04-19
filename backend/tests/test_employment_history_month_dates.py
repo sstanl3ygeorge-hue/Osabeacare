@@ -100,3 +100,25 @@ def test_coverage_uses_supplied_canonical_gap_statuses():
 
     assert coverage["total_days_covered"] > 0
     assert coverage["meets_10_year_requirement"] is True
+
+
+def test_gap_analysis_handles_rows_with_missing_dates_without_crashing():
+    history = [
+        {"employer_name": "Missing Dates Ltd", "job_title": "Care Assistant", "start_date": None, "end_date": None},
+        {"employer_name": "Bad Date Ltd", "job_title": "Support Worker", "start_date": "not-a-date", "end_date": None},
+        {"employer_name": "Valid Care", "job_title": "HCA", "start_date": "2020-01", "end_date": None},
+    ]
+
+    gaps = detect_employment_gaps_with_coverage(history)
+    coverage = compute_coverage_summary(history, gap_records=gaps)
+
+    assert isinstance(gaps, list)
+    assert coverage["total_days_covered"] > 0
+    assert coverage["can_assess_coverage"] is False
+    assert coverage["invalid_entry_count"] == 2
+    assert coverage["meets_10_year_requirement"] is False
+
+
+def test_parse_employment_date_treats_present_as_open_ended():
+    assert parse_employment_date("Present") is None
+    assert parse_employment_date("current") is None

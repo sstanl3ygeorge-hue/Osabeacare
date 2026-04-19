@@ -217,6 +217,7 @@ from employment_gap_engine import (
     detect_employment_gaps_with_coverage,
     compute_coverage_summary,
     evaluate_gaps_compliance,
+    match_gap_explanations_to_canonical_gaps,
     get_gap_blocker_for_approval,
     create_gap_record,
     format_gap_summary,
@@ -2504,7 +2505,7 @@ async def calculate_work_readiness_3tier(
     if not emp_coverage:
         emp_history = employee_data.get("employment_history", [])
         if emp_history:
-            emp_coverage = compute_coverage_summary(emp_history)
+            emp_coverage = compute_coverage_summary(emp_history, gap_records=gap_records)
     if emp_coverage and not emp_coverage.get("meets_10_year_requirement", False):
         hard_block_reasons.append({
             "type": "hard_block",
@@ -12320,29 +12321,16 @@ async def update_employment_history(
     now = datetime.now(timezone.utc).isoformat()
 
     # Preserve applicant-submitted explanations only when they match a dated detected gap.
-    applicant_explanations = employee.get("gap_explanations", []) or []
-    for gap in gaps:
-        matched_expl = None
-        gap_start = gap.get("gap_start")
-        gap_end = gap.get("gap_end")
-        for expl in applicant_explanations:
-            expl_start = expl.get("gap_start") or expl.get("start_date")
-            expl_end = expl.get("gap_end") or expl.get("end_date")
-            if expl_start and expl_end and expl_start == gap_start and expl_end == gap_end:
-                matched_expl = expl
-                break
-        if not matched_expl:
-            expl_by_id = {e.get("gap_id"): e for e in applicant_explanations if e.get("gap_id")}
-            matched_expl = expl_by_id.get(gap.get("gap_id"))
-        if matched_expl and matched_expl.get("explanation"):
-            gap["explanation"] = matched_expl["explanation"]
-            gap["reason_type"] = matched_expl.get("reason_type")
-            gap["explanation_provided_at"] = now
-            gap["explained_by"] = "applicant"
-            gap["explanation_source"] = "application_form"
-            gap["status"] = "explained"
+    match_result = match_gap_explanations_to_canonical_gaps(
+        gaps,
+        employee.get("gap_explanations", []) or [],
+        provided_at=now,
+        explanation_source="application_form",
+        apply_to_gaps=True,
+    )
+    gaps = match_result["gaps"]
 
-    employment_coverage = compute_coverage_summary(history_data)
+    employment_coverage = compute_coverage_summary(history_data, gap_records=gaps)
     
     # Update employee with history and detected gaps
     update_data = {
@@ -12350,6 +12338,7 @@ async def update_employment_history(
         "cv_gaps_detected": gaps,
         "cv_gaps_all_explained": all(g.get("explanation") and len(str(g.get("explanation", "")).strip()) >= 10 for g in gaps) if gaps else True,
         "employment_gaps": gaps,
+        "gap_explanations": match_result["normalised_applicant_explanations"],
         "employment_gaps_detected_at": now,
         "has_employment_gaps": len(gaps) > 0,
         "employment_coverage": employment_coverage,
@@ -25670,7 +25659,7 @@ async def submit_structured_application(form: StructuredApplicationForm):
     try:
         employment_history_list = [eh.model_dump() for eh in form.employment_history]
         detected_gaps = detect_employment_gaps_with_coverage(employment_history_list)
-        employment_coverage = compute_coverage_summary(employment_history_list)
+        employment_coverage = compute_coverage_summary(employment_history_list, gap_records=detected_gaps)
 
         # Structured diagnostic log
         logger.info(
@@ -25688,29 +25677,16 @@ async def submit_structured_application(form: StructuredApplicationForm):
         # Store detected gaps in employee record and create gap records
         if detected_gaps:
             # --- Merge applicant-supplied gap explanations into detected gaps ---
-            applicant_explanations = form.gap_explanations or []
-            for gap in detected_gaps:
-                matched_expl = None
-                gap_start = gap.get("gap_start")
-                gap_end = gap.get("gap_end")
-                # Date-range match (robust against reordering)
-                for expl in applicant_explanations:
-                    expl_start = expl.get("gap_start") or expl.get("start_date")
-                    expl_end = expl.get("gap_end") or expl.get("end_date")
-                    if expl_start and expl_end and expl_start == gap_start and expl_end == gap_end:
-                        matched_expl = expl
-                        break
-                # Fallback: sequential gap_id match
-                if not matched_expl:
-                    expl_by_id = {e.get("gap_id"): e for e in applicant_explanations if e.get("gap_id")}
-                    matched_expl = expl_by_id.get(gap.get("gap_id"))
-                if matched_expl and matched_expl.get("explanation"):
-                    gap["explanation"] = matched_expl["explanation"]
-                    gap["reason_type"] = matched_expl.get("reason_type")
-                    gap["explanation_provided_at"] = now
-                    gap["explained_by"] = "applicant"
-                    gap["explanation_source"] = "application_form"
-                    gap["status"] = "explained"
+            match_result = match_gap_explanations_to_canonical_gaps(
+                detected_gaps,
+                form.gap_explanations or [],
+                provided_at=now,
+                explanation_source="application_form",
+                apply_to_gaps=True,
+            )
+            detected_gaps = match_result["gaps"]
+
+            employment_coverage = compute_coverage_summary(employment_history_list, gap_records=detected_gaps)
 
             # Update employee with gaps + coverage summary
             await db.employees.update_one(
@@ -25720,6 +25696,7 @@ async def submit_structured_application(form: StructuredApplicationForm):
                     "employment_gaps_detected_at": now,
                     "has_employment_gaps": True,
                     "employment_coverage": employment_coverage,
+                    "gap_explanations": match_result["normalised_applicant_explanations"],
                     "gap_analysis_status": "completed",
                 }}
             )
@@ -34273,6 +34250,155 @@ def _normalise_gap_records_for_compliance_file(raw_gaps, employee_id: str, sourc
     return gap_records
 
 
+async def _build_employment_history_compliance_row(employee_id: str, employee: dict) -> dict:
+    """Build the canonical Employment Review row for compliance-file consumers."""
+    employment_records = employee.get("employment_history") or []
+    raw_gap_records = await db.employment_gaps.find(
+        {"employee_id": employee_id}
+    ).sort("gap_start", 1).to_list(50)
+    gap_records = _normalise_gap_records_for_compliance_file(
+        raw_gap_records,
+        employee_id,
+        "employment_gaps",
+    )
+
+    if not gap_records and employee.get("employment_gaps"):
+        gap_records = _normalise_gap_records_for_compliance_file(
+            employee.get("employment_gaps", []),
+            employee_id,
+            "employee.employment_gaps",
+        )
+
+    explanation_match = match_gap_explanations_to_canonical_gaps(
+        gap_records,
+        employee.get("gap_explanations", []) or [],
+        apply_to_gaps=False,
+    )
+    canonical_gaps = explanation_match["gaps"]
+    gap_evaluation = evaluate_gaps_compliance(canonical_gaps)
+
+    try:
+        employment_coverage = compute_coverage_summary(
+            employment_records,
+            gap_records=canonical_gaps,
+        ) if employment_records else (employee.get("employment_coverage") or None)
+    except Exception as coverage_err:
+        logger.warning(
+            "Compliance file could not compute employment coverage for employee %s: %s",
+            employee_id,
+            coverage_err,
+        )
+        employment_coverage = employee.get("employment_coverage") or {
+            "can_assess_coverage": False,
+            "status_reason": "Coverage calculation failed while building compliance file.",
+        }
+
+    invalid_entries = []
+    if isinstance(employment_coverage, dict):
+        invalid_entries = employment_coverage.get("invalid_entries") or []
+
+    gap_analysis_status = employee.get("gap_analysis_status")
+    gap_analysis_error = employee.get("gap_analysis_error")
+    gap_analysis_run = bool(
+        gap_analysis_status in ("completed", "failed")
+        or canonical_gaps
+        or employee.get("cv_extraction_status") == "reviewed"
+        or employee.get("cv_reviewed_at")
+        or employee.get("cv_extracted_at")
+        or employee.get("employment_gaps_detected_at")
+    )
+
+    if not gap_analysis_status:
+        gap_analysis_status = "completed" if gap_analysis_run else "not_run"
+
+    has_gaps = gap_evaluation.get("has_gaps", False)
+    all_verified = gap_evaluation.get("all_verified", True)
+    is_complete = gap_evaluation.get("is_complete", True)
+
+    if gap_analysis_status == "failed":
+        gap_status = "cannot_assess"
+        gap_status_summary = "Gap analysis failed"
+        is_verified = False
+        blocker_text = "Employment history gap analysis failed"
+    elif not gap_analysis_run:
+        gap_status = "not_run"
+        gap_status_summary = "Gap analysis not yet run"
+        is_verified = False
+        blocker_text = "Employment history gap analysis has not been run"
+    elif invalid_entries:
+        gap_status = "cannot_assess"
+        gap_status_summary = "Employment history contains invalid or missing dates"
+        is_verified = False
+        blocker_text = "Employment history has invalid or missing dates"
+    elif not has_gaps:
+        gap_status = "no_gaps"
+        gap_status_summary = "No employment gaps detected"
+        is_verified = True
+        blocker_text = None
+    elif is_complete and all_verified:
+        gap_status = "verified"
+        gap_status_summary = f"All {gap_evaluation.get('total_gaps', 0)} gap(s) verified"
+        is_verified = True
+        blocker_text = None
+    elif gap_evaluation.get("pending_count", 0) > 0:
+        gap_status = "pending"
+        gap_status_summary = f"{gap_evaluation.get('pending_count', 0)} gap(s) need explanation"
+        is_verified = False
+        blocker_text = f"Employment gaps: {gap_evaluation.get('pending_count', 0)} gap(s) require explanation"
+    elif gap_evaluation.get("explained_count", 0) > 0:
+        gap_status = "awaiting_verification"
+        gap_status_summary = f"{gap_evaluation.get('explained_count', 0)} explanation(s) awaiting verification"
+        is_verified = False
+        blocker_text = f"Employment gaps: {gap_evaluation.get('explained_count', 0)} explanation(s) awaiting verification"
+    elif gap_evaluation.get("rejected_count", 0) > 0:
+        gap_status = "rejected"
+        gap_status_summary = f"{gap_evaluation.get('rejected_count', 0)} explanation(s) rejected"
+        is_verified = False
+        blocker_text = f"Employment gaps: {gap_evaluation.get('rejected_count', 0)} explanation(s) rejected - revision needed"
+    else:
+        gap_status = "incomplete"
+        gap_status_summary = "Gap verification incomplete"
+        is_verified = False
+        blocker_text = "Employment history verification incomplete"
+
+    return {
+        "key": "employment_history_verification",
+        "title": "Employment Gap Review",
+        "row_type": "employment_gap",
+        "affects_readiness": True,
+        "is_supporting_evidence": False,
+        "blocker_text": blocker_text,
+        "has_gaps": has_gaps,
+        "is_verified": is_verified,
+        "status": gap_status,
+        "status_summary": gap_status_summary,
+        "employment_records": employment_records,
+        "employment_coverage": employment_coverage,
+        "gap_analysis_status": gap_analysis_status,
+        "gap_analysis_error": gap_analysis_error,
+        "gap_analysis_run": gap_analysis_run,
+        "canonical_gaps": canonical_gaps,
+        "gaps": canonical_gaps,
+        "gap_evaluation": gap_evaluation,
+        "matched_applicant_explanations": explanation_match["matched_applicant_explanations"],
+        "unmatched_applicant_explanations": explanation_match["unmatched_applicant_explanations"],
+        "invalid_employment_entries": invalid_entries,
+        "explanation_match_summary": explanation_match["explanation_match_summary"],
+        "counts": {
+            "total_gaps": gap_evaluation.get("total_gaps", 0),
+            "verified": gap_evaluation.get("verified_count", 0),
+            "explained": gap_evaluation.get("explained_count", 0),
+            "pending": gap_evaluation.get("pending_count", 0),
+            "rejected": gap_evaluation.get("rejected_count", 0),
+            "needs_info": gap_evaluation.get("needs_info_count", 0),
+            "matched_applicant_explanations": explanation_match["explanation_match_summary"].get("matched_count", 0),
+            "unmatched_applicant_explanations": explanation_match["explanation_match_summary"].get("unmatched_count", 0),
+            "invalid_employment_entries": len(invalid_entries),
+        },
+        "allowed_actions": ["view_gaps", "verify_gap", "reject_gap", "request_info"] if has_gaps else ["view_gaps"],
+    }
+
+
 async def get_compliance_file_data(employee_id: str, employee: dict) -> dict:
     """
     Internal helper to get compliance file data for approval evaluation.
@@ -34513,42 +34639,9 @@ async def get_compliance_file_data(employee_id: str, employee: dict) -> dict:
         "rows": agreement_rows
     }
     
-    # ---- Employment History Verification ----
-    # Get gap records from database
-    raw_gap_records = await db.employment_gaps.find(
-        {"employee_id": employee_id}
-    ).to_list(50)
-    gap_records = _normalise_gap_records_for_compliance_file(
-        raw_gap_records,
-        employee_id,
-        "employment_gaps",
-    )
-    
-    # If no records, check employee.employment_gaps
-    if not gap_records and employee.get("employment_gaps"):
-        gap_records = _normalise_gap_records_for_compliance_file(
-            employee.get("employment_gaps", []),
-            employee_id,
-            "employee.employment_gaps",
-        )
-    
-    # Evaluate
-    gap_evaluation = evaluate_gaps_compliance(gap_records)
-    
-    has_gaps = gap_evaluation.get("has_gaps", False)
-    is_complete = gap_evaluation.get("is_complete", True)
-    
     sections["employment_history"] = {
         "title": "Employment History Verification",
-        "rows": [{
-            "key": "employment_history_verification",
-            "row_type": "employment_gap",
-            "has_gaps": has_gaps,
-            "is_verified": is_complete or not has_gaps,
-            "status": "verified" if (is_complete or not has_gaps) else "pending",
-            "gap_evaluation": gap_evaluation,
-            "gaps": gap_records
-        }]
+        "rows": [await _build_employment_history_compliance_row(employee_id, employee)]
     }
     
     return {"sections": sections}
@@ -36278,109 +36371,9 @@ async def get_compliance_file(
         }
     }
     
-    # =========================================================================
-    # ADD EMPLOYMENT GAP VERIFICATION SECTION
-    # =========================================================================
-    raw_gap_records = await db.employment_gaps.find(
-        {"employee_id": employee_id}
-    ).sort("gap_start", 1).to_list(50)
-    gap_records = _normalise_gap_records_for_compliance_file(
-        raw_gap_records,
-        employee_id,
-        "employment_gaps",
-    )
-    
-    # If no gap records but employee has employment_gaps field, use that
-    if not gap_records and employee.get("employment_gaps"):
-        gap_records = _normalise_gap_records_for_compliance_file(
-            employee.get("employment_gaps", []),
-            employee_id,
-            "employee.employment_gaps",
-        )
-    
-    # Evaluate gap compliance
-    gap_evaluation = evaluate_gaps_compliance(gap_records)
-    gap_analysis_run = bool(
-        gap_records
-        or employee.get("cv_extraction_status") == "reviewed"
-        or employee.get("cv_reviewed_at")
-        or employee.get("cv_extracted_at")
-        or employee.get("employment_gaps_detected_at")
-    )
-    
-    # Build employment history verification section
-    has_gaps = gap_evaluation.get("has_gaps", False)
-    all_verified = gap_evaluation.get("all_verified", True)
-    is_complete = gap_evaluation.get("is_complete", True)
-    
-    # Determine status
-    if not gap_analysis_run:
-        gap_status = "not_run"
-        gap_status_summary = "Gap analysis not yet run"
-        is_verified = False
-        blocker_text = "Employment history gap analysis has not been run"
-    elif not has_gaps:
-        gap_status = "no_gaps"
-        gap_status_summary = "No employment gaps detected"
-        is_verified = True
-        blocker_text = None
-    elif is_complete:
-        gap_status = "verified"
-        gap_status_summary = f"All {gap_evaluation.get('total_gaps', 0)} gap(s) verified"
-        is_verified = True
-        blocker_text = None
-    elif gap_evaluation.get("pending_count", 0) > 0:
-        gap_status = "pending"
-        gap_status_summary = f"{gap_evaluation.get('pending_count', 0)} gap(s) need explanation"
-        is_verified = False
-        blocker_text = f"Employment gaps: {gap_evaluation.get('pending_count', 0)} gap(s) require explanation"
-    elif gap_evaluation.get("explained_count", 0) > 0:
-        gap_status = "awaiting_verification"
-        gap_status_summary = f"{gap_evaluation.get('explained_count', 0)} explanation(s) awaiting verification"
-        is_verified = False
-        blocker_text = f"Employment gaps: {gap_evaluation.get('explained_count', 0)} explanation(s) awaiting verification"
-    elif gap_evaluation.get("rejected_count", 0) > 0:
-        gap_status = "rejected"
-        gap_status_summary = f"{gap_evaluation.get('rejected_count', 0)} explanation(s) rejected"
-        is_verified = False
-        blocker_text = f"Employment gaps: {gap_evaluation.get('rejected_count', 0)} explanation(s) rejected - revision needed"
-    else:
-        gap_status = "incomplete"
-        gap_status_summary = f"Gap verification incomplete"
-        is_verified = False
-        blocker_text = "Employment history verification incomplete"
-    
     sections["employment_history"] = {
         "title": "Employment History Verification",
-        "rows": [{
-            "key": "employment_history_verification",
-            "title": "Employment Gap Review",
-            "row_type": "employment_gap",
-            
-            "affects_readiness": True,
-            "is_supporting_evidence": False,
-            "blocker_text": blocker_text,
-            
-            "has_gaps": has_gaps,
-            "is_verified": is_verified,
-            "status": gap_status,
-            "status_summary": gap_status_summary,
-            "gap_analysis_run": gap_analysis_run,
-            
-            "gap_evaluation": gap_evaluation,
-            "gaps": gap_records,
-            
-            "counts": {
-                "total_gaps": gap_evaluation.get("total_gaps", 0),
-                "verified": gap_evaluation.get("verified_count", 0),
-                "explained": gap_evaluation.get("explained_count", 0),
-                "pending": gap_evaluation.get("pending_count", 0),
-                "rejected": gap_evaluation.get("rejected_count", 0),
-                "needs_info": gap_evaluation.get("needs_info_count", 0)
-            },
-            
-            "allowed_actions": ["view_gaps", "verify_gap", "reject_gap", "request_info"] if has_gaps else ["view_gaps"]
-        }]
+        "rows": [await _build_employment_history_compliance_row(employee_id, employee)]
     }
     
     # =========================================================================

@@ -10,6 +10,7 @@ This module handles:
 
 import io
 import uuid
+import logging
 from datetime import datetime, timezone
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Depends
@@ -31,6 +32,7 @@ from induction_definitions import (
 )
 
 router = APIRouter(tags=["Induction Checklist"])
+logger = logging.getLogger(__name__)
 
 # DEFAULT_INDUCTION_ITEMS, INDUCTION_NAME_TO_TRAINING_PATTERNS imported from induction_definitions
 
@@ -60,6 +62,11 @@ class InductionItemUpdate(BaseModel):
     status: str  # pending, completed
     notes: Optional[str] = None
     shadow_shift_signoff: Optional[ShadowShiftDetailsPayload] = None
+
+
+def _without_mongo_id(document: dict) -> dict:
+    """Return a shallow copy safe for Mongo $set updates."""
+    return {k: v for k, v in (document or {}).items() if k != "_id"}
 
 
 def _normalise_shadow_shift_signoff(
@@ -303,7 +310,7 @@ async def update_induction_checklist(
     # Upsert
     await db.induction_checklists.update_one(
         {"employee_id": employee_id},
-        {"$set": checklist},
+        {"$set": _without_mongo_id(checklist)},
         upsert=True
     )
     
@@ -618,7 +625,7 @@ async def download_induction_completion_pdf(
 # Care Certificate — Admin sign-off / return / submission-view endpoints
 # ─────────────────────────────────────────────────────────────────────────────
 
-from care_certificate_config import MANUAL_ITEM_CODES, HYBRID_ITEM_CODES, get_config_for_item
+from care_certificate_config import MANUAL_ITEM_CODES, HYBRID_ITEM_CODES, get_all_hybrid_forms, get_config_for_item
 
 
 class HybridSignOffPayload(BaseModel):
@@ -634,6 +641,37 @@ class ShadowShiftSignOffPayload(BaseModel):
     shadow_shift_signoff: Optional[ShadowShiftDetailsPayload] = None
 
 
+def _resolve_induction_item_target(item_identifier: str, submission: dict = None) -> dict:
+    """
+    Resolve canonical UI ids to the persisted induction submission/checklist target.
+
+    Accepts the canonical item code used by the checklist UI, the worker form id
+    used by worker submissions, or an existing submission id for compatibility.
+    """
+    cfg = get_config_for_item(item_identifier)
+    resolved_by = "item_code" if cfg else None
+
+    if not cfg:
+        for hybrid in get_all_hybrid_forms():
+            if hybrid.get("form_id") == item_identifier:
+                cfg = get_config_for_item(hybrid.get("code"))
+                resolved_by = "worker_form_id"
+                break
+
+    if not cfg and submission:
+        submission_code = submission.get("item_code")
+        if submission_code:
+            cfg = get_config_for_item(submission_code)
+            resolved_by = "submission_id"
+
+    return {
+        "cfg": cfg,
+        "item_code": cfg.get("code") if cfg else item_identifier,
+        "form_id": cfg.get("worker_form_id") if cfg else None,
+        "resolved_by": resolved_by or "unresolved",
+    }
+
+
 @router.get("/employees/{employee_id}/induction/items/{item_code}/submission")
 async def get_item_submission(
     employee_id: str,
@@ -647,28 +685,33 @@ async def get_item_submission(
     from care_certificate_forms import get_worker_form_schema
     db = get_db()
 
-    cfg = get_config_for_item(item_code)
+    submission_by_id = await db.induction_item_submissions.find_one(
+        {"employee_id": employee_id, "id": item_code}, {"_id": 0}
+    )
+    target = _resolve_induction_item_target(item_code, submission_by_id)
+    cfg = target["cfg"]
     if not cfg:
         raise HTTPException(status_code=404, detail=f"Unknown induction item code: {item_code}")
     if cfg.get("completion_type") != "hybrid":
         raise HTTPException(status_code=400, detail="This item is not a hybrid form item.")
 
-    form_id = cfg["worker_form_id"]
+    form_id = target["form_id"]
 
     employee = await db.employees.find_one(
         {"id": employee_id}, {"_id": 0, "role": 1, "role_normalized": 1}
     )
     role_normalized = (employee or {}).get("role_normalized") or (employee or {}).get("role") or ""
 
-    submission = await db.induction_item_submissions.find_one(
+    submission = submission_by_id or await db.induction_item_submissions.find_one(
         {"employee_id": employee_id, "form_id": form_id}, {"_id": 0}
     )
 
     schema = get_worker_form_schema(form_id, role_normalized)
 
     return {
-        "item_code": item_code,
+        "item_code": target["item_code"],
         "form_id": form_id,
+        "resolved_by": target["resolved_by"],
         "schema": schema,
         "submission": submission or {},
         "submission_status": (submission or {}).get("status"),
@@ -694,10 +737,15 @@ async def signoff_induction_item(
     """
     db = get_db()
 
-    cfg = get_config_for_item(item_code)
+    submission_by_id = await db.induction_item_submissions.find_one(
+        {"employee_id": employee_id, "id": item_code}, {"_id": 0}
+    )
+    target = _resolve_induction_item_target(item_code, submission_by_id)
+    cfg = target["cfg"]
     if not cfg:
         raise HTTPException(status_code=404, detail=f"Unknown induction item code: {item_code}")
 
+    resolved_item_code = target["item_code"]
     completion_type = cfg.get("completion_type")
     if completion_type == "automatic":
         raise HTTPException(status_code=400, detail="Automatic items cannot be manually signed off.")
@@ -715,6 +763,15 @@ async def signoff_induction_item(
     # ── Pre-flight: load checklist BEFORE writing anything ────────────────────
     # Fetched here so that a missing checklist fails atomically before any DB write.
     item_name = cfg["title"]
+    logger.info(
+        "induction signoff requested employee_id=%s input_item=%s resolved_item=%s form_id=%s resolved_by=%s payload_keys=%s",
+        employee_id,
+        item_code,
+        resolved_item_code,
+        target.get("form_id"),
+        target.get("resolved_by"),
+        list((payload.model_dump(exclude_none=True) or {}).keys()),
+    )
     checklist = await db.induction_checklists.find_one({"employee_id": employee_id})
 
     if not checklist:
@@ -752,8 +809,8 @@ async def signoff_induction_item(
     shadow_shift_details = None
 
     if completion_type == "hybrid":
-        form_id = cfg["worker_form_id"]
-        submission = await db.induction_item_submissions.find_one(
+        form_id = target["form_id"]
+        submission = submission_by_id or await db.induction_item_submissions.find_one(
             {"employee_id": employee_id, "form_id": form_id}, {"_id": 0}
         )
         if not submission or submission.get("status") != "submitted":
@@ -762,8 +819,13 @@ async def signoff_induction_item(
                 detail="Worker has not submitted this form yet. Cannot sign off.",
             )
 
+        submission_filter = (
+            {"employee_id": employee_id, "id": submission.get("id")}
+            if submission.get("id")
+            else {"employee_id": employee_id, "form_id": form_id}
+        )
         await db.induction_item_submissions.update_one(
-            {"employee_id": employee_id, "form_id": form_id},
+            submission_filter,
             {"$set": {
                 "status": "signed_off",
                 "signoff_by": user["user_id"],
@@ -799,7 +861,7 @@ async def signoff_induction_item(
     item_found = False
     for item in checklist["items"]:
         # Match by canonical id first (robust), then fall back to name string (legacy)
-        if item.get("id") == item_code or item.get("name") == item_name:
+        if item.get("id") == resolved_item_code or item.get("id") == item_code or item.get("name") == item_name:
             item["status"] = "completed"
             item["completed_at"] = now
             item["completed_by"] = user["user_id"]
@@ -815,12 +877,12 @@ async def signoff_induction_item(
         # Upsert the item rather than hard-failing — mirrors the behaviour of the generic update route.
         logger.warning(
             "signoff_induction_item: item_code=%r not found in checklist for employee=%r; upserting.",
-            item_code, employee_id,
+            resolved_item_code, employee_id,
         )
         from induction_definitions import _STANDARDS_BY_ID
-        std = _STANDARDS_BY_ID.get(item_code, {})
+        std = _STANDARDS_BY_ID.get(resolved_item_code, {})
         new_item = {
-            "id": item_code,
+            "id": resolved_item_code,
             "name": item_name,
             "mandatory": std.get("mandatory", True),
             "order": std.get("num"),
@@ -851,14 +913,16 @@ async def signoff_induction_item(
     checklist["updated_at"] = now
 
     await db.induction_checklists.update_one(
-        {"employee_id": employee_id}, {"$set": checklist}
+        {"employee_id": employee_id}, {"$set": _without_mongo_id(checklist)}
     )
 
     await log_audit_action(
         user["user_id"], "induction_item_signed_off", "induction_checklist", employee_id,
         {
-            "item_code": item_code,
+            "item_code": resolved_item_code,
             "completion_type": completion_type,
+            "resolved_from": item_code,
+            "resolved_by": target.get("resolved_by"),
             "admin_notes": payload.notes,
             "shadow_shift_ready_for_deployment": (
                 shadow_shift_details.get("ready_for_deployment") if shadow_shift_details else None
@@ -868,7 +932,9 @@ async def signoff_induction_item(
 
     return {
         "ok": True,
-        "item_code": item_code,
+        "item_code": resolved_item_code,
+        "resolved_from": item_code,
+        "resolved_by": target.get("resolved_by"),
         "signed_off_at": now,
         "signed_off_by": admin_name,
         "overall_status": checklist["overall_status"],
@@ -888,7 +954,11 @@ async def return_induction_item(
     """
     db = get_db()
 
-    cfg = get_config_for_item(item_code)
+    submission_by_id = await db.induction_item_submissions.find_one(
+        {"employee_id": employee_id, "id": item_code}, {"_id": 0}
+    )
+    target = _resolve_induction_item_target(item_code, submission_by_id)
+    cfg = target["cfg"]
     if not cfg:
         raise HTTPException(status_code=404, detail=f"Unknown induction item code: {item_code}")
     if cfg.get("completion_type") != "hybrid":
@@ -897,10 +967,10 @@ async def return_induction_item(
     if not payload.return_reason.strip():
         raise HTTPException(status_code=422, detail="return_reason cannot be empty.")
 
-    form_id = cfg["worker_form_id"]
+    form_id = target["form_id"]
     now = datetime.now(timezone.utc).isoformat()
 
-    submission = await db.induction_item_submissions.find_one(
+    submission = submission_by_id or await db.induction_item_submissions.find_one(
         {"employee_id": employee_id, "form_id": form_id}, {"_id": 0}
     )
     if not submission or submission.get("status") not in ("submitted", "signed_off"):
@@ -909,8 +979,21 @@ async def return_induction_item(
             detail="No submitted form found for this item. Cannot return.",
         )
 
+    logger.info(
+        "induction return requested employee_id=%s input_item=%s resolved_item=%s form_id=%s resolved_by=%s",
+        employee_id,
+        item_code,
+        target.get("item_code"),
+        form_id,
+        target.get("resolved_by"),
+    )
+    submission_filter = (
+        {"employee_id": employee_id, "id": submission.get("id")}
+        if submission.get("id")
+        else {"employee_id": employee_id, "form_id": form_id}
+    )
     await db.induction_item_submissions.update_one(
-        {"employee_id": employee_id, "form_id": form_id},
+        submission_filter,
         {"$set": {
             "status": "returned",
             "return_reason": payload.return_reason,
@@ -921,13 +1004,21 @@ async def return_induction_item(
 
     await log_audit_action(
         user["user_id"], "induction_item_returned", "induction_checklist", employee_id,
-        {"item_code": item_code, "form_id": form_id, "return_reason": payload.return_reason},
+        {
+            "item_code": target.get("item_code"),
+            "form_id": form_id,
+            "resolved_from": item_code,
+            "resolved_by": target.get("resolved_by"),
+            "return_reason": payload.return_reason,
+        },
     )
 
     return {
         "ok": True,
-        "item_code": item_code,
+        "item_code": target.get("item_code"),
         "form_id": form_id,
+        "resolved_from": item_code,
+        "resolved_by": target.get("resolved_by"),
         "returned_at": now,
         "return_reason": payload.return_reason,
     }

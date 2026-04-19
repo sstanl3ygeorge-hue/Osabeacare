@@ -164,15 +164,19 @@ async def get_training_records(
     if verified is not None:
         query["verified"] = verified
     if not include_superseded:
-        query["record_status"] = {"$ne": "superseded"}
+        query["record_status"] = {"$nin": ["deleted", "superseded"]}
     
     records = await db.training_records.find(query, {"_id": 0}).to_list(1000)
 
     employee_ids = sorted({r.get("employee_id") for r in records if r.get("employee_id")})
     employees_by_id = {}
     if employee_ids:
+        employee_query = {"id": {"$in": employee_ids}}
+        if not employee_id:
+            employee_query["status"] = {"$nin": ["archived", "deleted", "inactive"]}
+
         employees = await db.employees.find(
-            {"id": {"$in": employee_ids}},
+            employee_query,
             {
                 "_id": 0,
                 "id": 1,
@@ -186,6 +190,7 @@ async def get_training_records(
         ).to_list(len(employee_ids))
         employees_by_id = {emp.get("id"): emp for emp in employees}
 
+    filtered_records = []
     for record in records:
         emp = employees_by_id.get(record.get("employee_id"))
         if emp:
@@ -194,8 +199,11 @@ async def get_training_records(
             record["person_key"] = emp.get("id")
             record["person_stage"] = emp.get("person_stage")
             record["employee_status"] = emp.get("status")
+        elif not employee_id:
+            continue
+        filtered_records.append(record)
     
-    return [TrainingRecordResponse(**r) for r in records]
+    return [TrainingRecordResponse(**r) for r in filtered_records]
 
 
 @router.get("/training-records/{record_id}", response_model=TrainingRecordResponse)

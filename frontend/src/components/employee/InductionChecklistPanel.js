@@ -208,6 +208,13 @@ function SubmissionViewModal({ employeeId, item, onClose, onSignOff, onReturn })
   const [acting, setActing] = useState(false);
   const [adminNotes, setAdminNotes] = useState('');
 
+  const getErrorMessage = (err, fallback) => {
+    const detail = err?.response?.data?.detail;
+    if (typeof detail === 'string') return detail;
+    if (detail?.message) return detail.message;
+    return err?.message || fallback;
+  };
+
   useEffect(() => {
     const token = localStorage.getItem('token');
     axios.get(`${API}/employees/${employeeId}/induction/items/${item.code}/submission`, {
@@ -230,7 +237,14 @@ function SubmissionViewModal({ employeeId, item, onClose, onSignOff, onReturn })
       toast.success(`${item.name} signed off.`);
       onSignOff && onSignOff();
     } catch (err) {
-      toast.error(err.response?.data?.detail || 'Sign-off failed.');
+      console.error('Induction sign-off failed', {
+        employeeId,
+        itemCode: item.code,
+        itemName: item.name,
+        status: err?.response?.status,
+        detail: err?.response?.data,
+      });
+      toast.error(getErrorMessage(err, 'Sign-off failed.'));
     } finally {
       setActing(false);
     }
@@ -249,7 +263,14 @@ function SubmissionViewModal({ employeeId, item, onClose, onSignOff, onReturn })
       toast.success('Form returned to worker for correction.');
       onReturn && onReturn();
     } catch (err) {
-      toast.error(err.response?.data?.detail || 'Return failed.');
+      console.error('Induction return failed', {
+        employeeId,
+        itemCode: item.code,
+        itemName: item.name,
+        status: err?.response?.status,
+        detail: err?.response?.data,
+      });
+      toast.error(getErrorMessage(err, 'Return failed.'));
     } finally {
       setActing(false);
     }

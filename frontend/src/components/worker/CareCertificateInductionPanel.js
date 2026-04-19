@@ -334,6 +334,9 @@ function HybridFormModal({ formEntry, onClose, onSaved, onSubmitted }) {
                 onChange={handleChange}
                 disabled={isReadOnly}
               />
+              {field.helper_text && (
+                <p className="text-xs text-slate-400 mt-1.5 italic">{field.helper_text}</p>
+              )}
             </div>
           ))}
         </div>

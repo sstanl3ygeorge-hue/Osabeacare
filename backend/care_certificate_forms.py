@@ -37,8 +37,9 @@ CC_WORKER_FORMS = {
         "fields": [
             {
                 "key": "main_responsibilities",
-                "label": "Describe your main job responsibilities.",
+                "label": "In your own words, describe your main job responsibilities.",
                 "hint": "Include the tasks you will do day-to-day.",
+                "helper_text": "Tip: Think about the people you support, the tasks you carry out, and any specific duties mentioned in your job description.",
                 "type": "textarea",
                 "required": True,
                 "max_words": 80,
@@ -48,14 +49,16 @@ CC_WORKER_FORMS = {
                 "key": "reporting_line",
                 "label": "Who do you report to if you have a concern at work?",
                 "hint": "Name the role or person you would go to first.",
+                "helper_text": "Tip: This might be your line manager, senior carer, or a named person from your induction.",
                 "type": "text",
                 "required": True,
                 "max_words": 30,
             },
             {
                 "key": "scope_of_practice",
-                "label": "Name one task that is outside your scope of practice and explain why.",
+                "label": "Describe one task that is outside your scope of practice and explain why.",
                 "hint": "Think about tasks that require a qualified or senior member of staff.",
+                "helper_text": "Tip: For example, you might not be trained to administer medication or carry out clinical procedures. Explain what you would do instead.",
                 "type": "textarea",
                 "required": True,
                 "max_words": 60,
@@ -97,6 +100,7 @@ CC_WORKER_FORMS = {
                 "key": "development_plan",
                 "label": "Describe how you plan to develop in your role over the next 6 months.",
                 "hint": "Include any training, skills, or knowledge you want to improve.",
+                "helper_text": "Tip: Think about areas where you feel less confident, any qualifications you'd like to work towards, or feedback you've been given so far.",
                 "type": "textarea",
                 "required": True,
                 "max_words": 80,
@@ -115,8 +119,9 @@ CC_WORKER_FORMS = {
             },
             {
                 "key": "training_agreed",
-                "label": "List any training courses you agreed at induction (if any).",
+                "label": "List any training courses agreed during your induction (if any).",
                 "hint": "Leave blank if no courses were agreed yet.",
+                "helper_text": "Tip: Include the name of the course and roughly when it is expected to take place, if known.",
                 "type": "text",
                 "required": False,
                 "max_words": 50,
@@ -134,6 +139,7 @@ CC_WORKER_FORMS = {
             {
                 "key": "support_details",
                 "label": "Describe any support needs (if applicable).",
+                "helper_text": "Tip: For example, dyslexia, English as a second language, or needing more time during training.",
                 "type": "text",
                 "required": False,
                 "max_words": 60,
@@ -155,6 +161,7 @@ CC_WORKER_FORMS = {
             {
                 "key": "duty_definition",
                 "label": "In your own words, explain what 'duty of care' means in your role.",
+                "helper_text": "Tip: Think about your responsibility to act in the best interests of the people you support — keeping them safe, treating them with respect, and reporting concerns.",
                 "type": "textarea",
                 "required": True,
                 "max_words": 80,
@@ -164,17 +171,19 @@ CC_WORKER_FORMS = {
                 "key": "dilemma_scenario",
                 "label": (
                     "Describe a situation where your duty of care might conflict with "
-                    "a service user's wishes. What would you do?"
+                    "a service user's wishes. How would you handle it?"
                 ),
                 "hint": "For example, a service user refusing care or wanting to do something risky.",
+                "helper_text": "Tip: There is no single right answer here. Describe what you would do step by step — who you would involve and how you would keep the person safe while respecting their choices.",
                 "type": "textarea",
                 "required": True,
                 "max_words": 100,
             },
             {
                 "key": "escalation_steps",
-                "label": "What are the first three steps you would take when raising a concern?",
+                "label": "Explain how you would raise a concern at work.",
                 "hint": "Think about who you tell, what you document, and what happens next.",
+                "helper_text": "Tip: Walk through what you would actually do — for example, telling your supervisor, writing in the incident log, and following up if nothing is done.",
                 "type": "textarea",
                 "required": True,
                 "max_words": 80,
@@ -205,7 +214,8 @@ CC_WORKER_FORMS = {
         "fields": [
             {
                 "key": "person_centred_definition",
-                "label": "What does person-centred care mean to you?",
+                "label": "In your own words, explain what person-centred care means to you.",
+                "helper_text": "Tip: Think about what it means to put the individual first — their preferences, routines, and what matters to them personally.",
                 "type": "textarea",
                 "required": True,
                 "max_words": 80,
@@ -213,8 +223,9 @@ CC_WORKER_FORMS = {
             },
             {
                 "key": "preference_example",
-                "label": "Give one example of how you would find out a service user's preferences.",
+                "label": "Describe how you would find out about a service user's preferences and wishes.",
                 "hint": "For example, reading their care plan, asking them directly, or involving family.",
+                "helper_text": "Tip: Think about what you would do on your first shift with someone new — how would you learn what they like and how they want to be supported?",
                 "type": "textarea",
                 "required": True,
                 "max_words": 60,
@@ -232,7 +243,8 @@ CC_WORKER_FORMS = {
             },
             {
                 "key": "consent_understanding",
-                "label": "What would you do if a service user withdrew consent for a care task?",
+                "label": "Explain what you would do if a service user withdrew consent for a care task.",
+                "helper_text": "Tip: Describe how you would respond in the moment — what you would say, what you would stop doing, and who you would inform.",
                 "type": "textarea",
                 "required": True,
                 "max_words": 60,
@@ -266,8 +278,9 @@ CC_WORKER_FORMS = {
         "fields": [
             {
                 "key": "effective_communication",
-                "label": "Describe how you communicate clearly with someone in your care.",
+                "label": "Describe how you communicate clearly and effectively with someone in your care.",
                 "hint": "Think about verbal, written, and non-verbal communication.",
+                "helper_text": "Tip: Think about tone of voice, using plain language, checking understanding, and adapting your approach based on the person's needs.",
                 "type": "textarea",
                 "required": True,
                 "max_words": 80,
@@ -275,8 +288,9 @@ CC_WORKER_FORMS = {
             },
             {
                 "key": "barrier_example",
-                "label": "Give an example of a communication barrier and how you would overcome it.",
+                "label": "Describe a communication barrier you might encounter and how you would handle it.",
                 "hint": "For example, language differences, hearing impairment, cognitive impairment.",
+                "helper_text": "Tip: Describe a specific situation — what the challenge would be and what practical steps you would take to communicate effectively anyway.",
                 "type": "textarea",
                 "required": True,
                 "max_words": 80,
@@ -294,7 +308,8 @@ CC_WORKER_FORMS = {
             },
             {
                 "key": "confidentiality",
-                "label": "Describe what information about service users is confidential and who you can share it with.",
+                "label": "Explain what information about service users is confidential and who you can share it with.",
+                "helper_text": "Tip: Think about what you can and cannot say to family members, other staff members, or people outside the organisation.",
                 "type": "textarea",
                 "required": True,
                 "max_words": 60,
@@ -328,8 +343,9 @@ CC_WORKER_FORMS = {
         "fields": [
             {
                 "key": "privacy_example",
-                "label": "Give a practical example of how you protect a service user's privacy.",
+                "label": "Describe a practical example of how you protect a service user\u2019s privacy.",
                 "hint": "Think about personal care, conversations, or information handling.",
+                "helper_text": "Tip: This could be something like closing a door before assisting with personal care, or not discussing a resident by name in a shared area.",
                 "type": "textarea",
                 "required": True,
                 "max_words": 80,
@@ -337,7 +353,8 @@ CC_WORKER_FORMS = {
             },
             {
                 "key": "dignity_in_care",
-                "label": "How do you make sure a service user feels respected during personal care?",
+                "label": "Explain how you make sure a service user feels respected during personal care.",
+                "helper_text": "Tip: Think about how you communicate, what you do before starting, how you involve the person, and what you do to preserve their dignity throughout.",
                 "type": "textarea",
                 "required": True,
                 "max_words": 80,
@@ -355,8 +372,9 @@ CC_WORKER_FORMS = {
             },
             {
                 "key": "information_privacy",
-                "label": "Give an example of how you keep information about a service user private.",
+                "label": "Describe how you keep information about a service user private in your day-to-day work.",
                 "hint": "For example, not discussing their care in public areas, locking records.",
+                "helper_text": "Tip: Include both digital information (records, systems) and spoken information (conversations with colleagues or visitors).",
                 "type": "textarea",
                 "required": True,
                 "max_words": 60,

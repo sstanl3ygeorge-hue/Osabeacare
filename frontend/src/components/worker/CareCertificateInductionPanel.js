@@ -139,7 +139,8 @@ function HybridFormModal({ formEntry, onClose, onSaved, onSubmitted }) {
   const isReadOnly = subStatus === 'submitted' || subStatus === 'signed_off';
 
   useEffect(() => {
-    axios.get(`${API}/worker/induction/forms/${formId}`)
+    const token = localStorage.getItem('token');
+    axios.get(`${API}/worker/induction/forms/${formId}`, { headers: { Authorization: `Bearer ${token}` } })
       .then(res => {
         setSchema(res.data.schema);
         setSubStatus(res.data.submission_status);
@@ -158,10 +159,11 @@ function HybridFormModal({ formEntry, onClose, onSaved, onSubmitted }) {
   const handleSave = async () => {
     setSaving(true);
     try {
+      const token = localStorage.getItem('token');
       await axios.post(`${API}/worker/induction/forms/${formId}/save`, {
         data: formData,
         is_draft: true,
-      });
+      }, { headers: { Authorization: `Bearer ${token}` } });
       toast.success('Draft saved.');
       setSubStatus('draft');
       onSaved && onSaved(formId);
@@ -175,9 +177,10 @@ function HybridFormModal({ formEntry, onClose, onSaved, onSubmitted }) {
   const handleSubmit = async () => {
     setSubmitting(true);
     try {
+      const token = localStorage.getItem('token');
       await axios.post(`${API}/worker/induction/forms/${formId}/submit`, {
         data: formData,
-      });
+      }, { headers: { Authorization: `Bearer ${token}` } });
       toast.success('Form submitted for manager review.');
       setSubStatus('submitted');
       onSubmitted && onSubmitted(formId);
@@ -289,7 +292,8 @@ export default function CareCertificateInductionPanel() {
 
   const fetchOverview = useCallback(() => {
     setLoading(true);
-    axios.get(`${API}/worker/induction/overview`)
+    const token = localStorage.getItem('token');
+    axios.get(`${API}/worker/induction/overview`, { headers: { Authorization: `Bearer ${token}` } })
       .then(res => setOverview(res.data))
       .catch(() => toast.error('Could not load induction status.'))
       .finally(() => setLoading(false));

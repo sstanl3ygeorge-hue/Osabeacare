@@ -95,6 +95,8 @@ function EmploymentGapsSection() {
   const [submitting, setSubmitting] = useState(false);
   const [coverage, setCoverage] = useState(null);
   const [employmentEntries, setEmploymentEntries] = useState([]);
+  const [invalidEntries, setInvalidEntries] = useState([]);
+  const [unmatchedNotes, setUnmatchedNotes] = useState([]);
 
   useEffect(() => {
     fetchGaps();
@@ -103,7 +105,7 @@ function EmploymentGapsSection() {
   const fetchGaps = async () => {
     try {
       const token = localStorage.getItem('workerToken');
-      const res = await axios.get(`${API}/worker/employment-gaps`, {
+      const res = await axios.get(`${API}/worker/employment-review`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setGaps(res.data.gaps || []);
@@ -112,6 +114,8 @@ function EmploymentGapsSection() {
       setReasonTypes(res.data.reason_types || []);
       setCoverage(res.data.coverage || null);
       setEmploymentEntries(res.data.employment_entries || []);
+      setInvalidEntries(res.data.invalid_entries || []);
+      setUnmatchedNotes(res.data.unmatched_notes || []);
     } catch {
       // No gaps or endpoint not available — silently hide section
     } finally {
@@ -145,15 +149,17 @@ function EmploymentGapsSection() {
   };
 
   if (loading) return null;
-  if (!hasGaps && !coverage) return null;
+  if (!hasGaps && !coverage && !invalidEntries.length && !unmatchedNotes.length) return null;
 
   const unresolvedGaps = gaps.filter(g => {
+    const state = g.worker_state || '';
     const s = (g.status || g.verification_status || '').toLowerCase();
-    return !['verified'].includes(s);
+    return state !== 'reviewed' && s !== 'verified';
   });
   const verifiedGaps = gaps.filter(g => {
+    const state = g.worker_state || '';
     const s = (g.status || g.verification_status || '').toLowerCase();
-    return s === 'verified';
+    return state === 'reviewed' || s === 'verified';
   });
 
   const formatGapDate = (d) => {
@@ -162,6 +168,13 @@ function EmploymentGapsSection() {
   };
 
   const statusBadge = (gap) => {
+    // Prefer worker_state from canonical review; fall back to raw status for legacy gaps
+    const workerState = gap.worker_state;
+    if (workerState === 'reviewed') return <Badge className="bg-green-100 text-green-700 text-xs"><CheckCircle className="h-3 w-3 mr-1" />Verified</Badge>;
+    if (workerState === 'awaiting_admin_review') return <Badge className="bg-blue-100 text-blue-700 text-xs"><Clock className="h-3 w-3 mr-1" />Awaiting review</Badge>;
+    if (workerState === 'update_needed') return <Badge className="bg-red-100 text-red-700 text-xs"><AlertCircle className="h-3 w-3 mr-1" />Update needed</Badge>;
+    if (workerState === 'action_required') return <Badge className="bg-slate-100 text-slate-600 text-xs">Action required</Badge>;
+    // Legacy fallback
     const s = (gap.status || gap.verification_status || 'pending').toLowerCase();
     if (s === 'verified') return <Badge className="bg-green-100 text-green-700 text-xs"><CheckCircle className="h-3 w-3 mr-1" />Verified</Badge>;
     if (s === 'explained') return <Badge className="bg-blue-100 text-blue-700 text-xs"><Clock className="h-3 w-3 mr-1" />Awaiting review</Badge>;
@@ -371,6 +384,57 @@ function EmploymentGapsSection() {
         )}
       </CardContent>
     </Card>
+      )}
+
+      {/* Invalid Employment Entries */}
+      {invalidEntries.length > 0 && (
+        <Card className="shadow-md border-0 border-l-4 border-l-red-400" data-testid="invalid-entries-section">
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <AlertCircle className="h-5 w-5 text-red-500" />
+              Employment Entry Issues
+            </CardTitle>
+            <p className="text-xs text-slate-500 mt-1">
+              {invalidEntries.length} employment record{invalidEntries.length !== 1 ? 's have' : ' has'} missing or invalid dates. Please contact your recruiter to correct these.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {invalidEntries.map((entry, i) => (
+              <div key={entry.id || i} className="py-2 px-3 bg-red-50 border border-red-200 rounded-lg text-sm">
+                <div className="flex items-center gap-2">
+                  <Badge className="bg-red-100 text-red-700 text-xs">Correction required</Badge>
+                  <span className="font-medium text-slate-800">{entry.employer_name || entry.organisation || 'Unknown employer'}</span>
+                </div>
+                {entry.validation_error && (
+                  <p className="text-xs text-red-700 mt-1">{entry.validation_error}</p>
+                )}
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Unmatched Applicant Notes */}
+      {unmatchedNotes.length > 0 && (
+        <Card className="shadow-md border-0 bg-slate-50" data-testid="unmatched-notes-section">
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Clock className="h-5 w-5 text-slate-500" />
+              Supporting Notes
+            </CardTitle>
+            <p className="text-xs text-slate-500 mt-1">
+              {unmatchedNotes.length} note{unmatchedNotes.length !== 1 ? 's were' : ' was'} submitted during your application but could not be matched to a specific gap. These are kept as supporting context.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {unmatchedNotes.map((note, i) => (
+              <div key={note.id || i} className="py-2 px-3 bg-white border border-slate-200 rounded-lg text-sm">
+                <Badge className="bg-slate-100 text-slate-600 text-xs mb-1">Supporting note · not counted as accepted coverage</Badge>
+                <p className="text-slate-700">{note.explanation || note.text}</p>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
       )}
 
     </div>

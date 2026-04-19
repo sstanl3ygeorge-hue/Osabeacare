@@ -28,6 +28,7 @@ from .dependencies import (
     SENDER_EMAIL
 )
 from induction_definitions import get_employee_induction_status
+from employment_review_persistence import upsert_employment_review
 
 logger = logging.getLogger(__name__)
 
@@ -2645,9 +2646,162 @@ GAP_REASON_TYPES = [
 ]
 
 
+def _worker_actor_id(employee_id: str) -> str:
+    return f"worker_{employee_id}"
+
+
+def _gap_status_for_worker(segment: dict) -> str:
+    status = (segment.get("status") or segment.get("raw_status") or "missing").lower()
+    return {
+        "missing": "pending",
+        "explained": "explained",
+        "verified": "verified",
+        "rejected": "rejected",
+        "reopened": "needs_more_info",
+    }.get(status, status)
+
+
+def _worker_state_for_gap(status: str) -> str:
+    normalized = (status or "pending").lower()
+    if normalized == "verified":
+        return "reviewed"
+    if normalized == "explained":
+        return "awaiting_admin_review"
+    if normalized in {"rejected", "needs_more_info", "reopened"}:
+        return "update_needed"
+    return "action_required"
+
+
+def _employment_review_to_worker_payload(review: dict, reason_types: list[str]) -> dict:
+    segments = review.get("segments") or []
+    employment_segments = [segment for segment in segments if segment.get("type") == "employment"]
+    gap_segments = [segment for segment in segments if segment.get("type") == "gap"]
+    coverage = review.get("coverage") or {}
+    if "coverage_percent" not in coverage and "percent" in coverage:
+        coverage = {**coverage, "coverage_percent": coverage.get("percent")}
+
+    gaps = []
+    for segment in gap_segments:
+        worker_status = _gap_status_for_worker(segment)
+        explanation = segment.get("explanation") or {}
+        admin_review = segment.get("admin_review") or {}
+        gaps.append({
+            "id": segment.get("gap_id") or segment.get("id"),
+            "gap_id": segment.get("gap_id") or segment.get("id"),
+            "gap_start": segment.get("start_date"),
+            "gap_end": segment.get("end_date"),
+            "duration_days": segment.get("duration_days"),
+            "duration_months": segment.get("duration_months"),
+            "status": worker_status,
+            "verification_status": worker_status,
+            "worker_state": _worker_state_for_gap(worker_status),
+            "explanation": explanation.get("text") or explanation.get("explanation"),
+            "reason_type": explanation.get("reason_type"),
+            "explanation_source": explanation.get("source"),
+            "matched_by": explanation.get("matched_by"),
+            "admin_notes": admin_review.get("notes"),
+            "verification_notes": admin_review.get("notes"),
+            "rejection_reason": admin_review.get("rejection_reason"),
+            "verified": worker_status == "verified",
+            "verified_at": admin_review.get("reviewed_at") if worker_status == "verified" else None,
+            "verified_by": admin_review.get("reviewed_by") if worker_status == "verified" else None,
+            "source": "canonical_employment_review",
+        })
+
+    employment_entries = []
+    for segment in employment_segments:
+        raw = segment.get("raw_record") or {}
+        employment_entries.append({
+            "id": raw.get("id") or segment.get("id"),
+            "employer_name": segment.get("organisation") or segment.get("employer") or raw.get("employer_name") or "Unknown",
+            "job_title": segment.get("title") or raw.get("job_title") or raw.get("position") or "",
+            "start_date": segment.get("start_date"),
+            "end_date": None if segment.get("end_date") == "present" else segment.get("end_date"),
+            "is_current": segment.get("end_date") == "present",
+            "duties": raw.get("duties", ""),
+            "reason_for_leaving": raw.get("reason_for_leaving", ""),
+            "employer_address": raw.get("employer_address", ""),
+            "employer_phone": raw.get("employer_phone", ""),
+            "can_contact": raw.get("can_contact", True),
+        })
+
+    summary = review.get("top_summary") or {}
+    return {
+        "employment_review": review,
+        "canonical_source": "employment_reviews",
+        "gaps": gaps,
+        "has_gaps": bool(gaps),
+        "total_gaps": len(gaps),
+        "all_explained": bool(gaps) and not any(g["status"] in {"pending", "rejected", "needs_more_info"} for g in gaps),
+        "reason_types": reason_types,
+        "coverage": coverage,
+        "employment_entries": employment_entries,
+        "invalid_entries": review.get("invalid_entries") or [],
+        "unmatched_notes": review.get("unmatched_applicant_notes") or [],
+        "gap_counts": {
+            "missing": summary.get("missing_gaps", 0),
+            "explained_awaiting_review": summary.get("explained_gaps", 0),
+            "verified": summary.get("verified_gaps", 0),
+            "rejected_or_action_required": summary.get("rejected_gaps", 0),
+        },
+        "blocked_reasons": (review.get("gap_actions") or {}).get("blocked_sign_off_reasons") or [],
+    }
+
+
+async def _sync_worker_employment_review(db, employee_id: str, reason: str) -> dict:
+    try:
+        return await upsert_employment_review(
+            db,
+            employee_id,
+            actor_id=_worker_actor_id(employee_id),
+            reason=reason,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Failed to refresh worker canonical employment review for %s after %s", employee_id, reason)
+        raise HTTPException(
+            status_code=500,
+            detail="Employment information was updated, but canonical employment review refresh failed.",
+        ) from exc
+
+
 class WorkerGapExplanation(BaseModel):
     explanation: str
     reason_type: Optional[str] = None
+
+
+@router.get("/worker/employment-review")
+async def get_worker_employment_review(worker: dict = Depends(get_current_worker)):
+    """
+    Read the canonical Employment Review for the current worker.
+
+    Returns the persisted review from employment_reviews if available,
+    falling back to a live-built (non-persisted) snapshot when no record exists yet.
+    The response is shaped for the worker dashboard: per-gap states, coverage,
+    employment entries, invalid entries, and unmatched applicant notes.
+    Worker remains read-only for sign-off; admin is the sole verifier.
+    """
+    db = get_db()
+    employee_id = worker.get("employee_id")
+    if not employee_id:
+        raise HTTPException(status_code=400, detail="No employee linked to account")
+
+    # Try the persisted canonical review first
+    review = await db.employment_reviews.find_one(
+        {"employee_id": employee_id, "current": True},
+        {"_id": 0},
+    )
+
+    if not review:
+        # Live-build a snapshot without persisting (employee may not have triggered a rebuild yet)
+        from employment_review_persistence import build_persistable_employment_review
+        try:
+            review = await build_persistable_employment_review(db, employee_id)
+        except ValueError:
+            raise HTTPException(status_code=404, detail="Employee not found")
+
+    return _employment_review_to_worker_payload(review, GAP_REASON_TYPES)
 
 
 @router.get("/worker/employment-gaps")
@@ -2777,6 +2931,9 @@ async def worker_explain_gap(
         record_id,
         {"reason_type": request.reason_type, "source": "worker_dashboard"},
     )
+
+    # Synchronously rebuild and upsert canonical review so worker sees updated state
+    await _sync_worker_employment_review(db, employee_id, "worker_gap_explanation")
 
     return {"success": True, "message": "Gap explanation submitted"}
 
@@ -3070,6 +3227,9 @@ async def worker_amend_employment_history(
     except Exception as e:
         logger.warning(f"Failed to create admin notification for employment amendment: {e}")
 
+    # Synchronously rebuild and upsert canonical review so worker + admin see updated state
+    await _sync_worker_employment_review(db, employee_id, "worker_employment_history_amended")
+
     return {
         "success": True,
         "message": "Employment entry saved. Gaps and coverage have been recalculated.",
@@ -3152,6 +3312,9 @@ async def worker_delete_employment_entry(
         })
     except Exception as e:
         logger.warning(f"Failed to create admin notification for employment deletion: {e}")
+
+    # Synchronously rebuild and upsert canonical review so worker + admin see updated state
+    await _sync_worker_employment_review(db, employee_id, "worker_employment_entry_removed")
 
     return {
         "success": True,

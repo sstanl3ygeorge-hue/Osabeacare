@@ -324,13 +324,43 @@ async def generate_form_pdf(submission_id: str, user: dict = Depends(require_adm
     # Prepare submission data with metadata.
     # Application forms store the richer structured source of truth in form_data,
     # while older submissions may still rely on data or flatter legacy values.
-    if form_type == "application_form":
-        submission_data = submission.get("form_data", {}) or submission.get("data", {})
+    form_data = submission.get("form_data") or {}
+    legacy_data = submission.get("data") or {}
+    if isinstance(form_data, dict) and isinstance(legacy_data, dict):
+        submission_data = {**legacy_data, **form_data}
+    elif isinstance(form_data, dict):
+        submission_data = form_data
+    elif isinstance(legacy_data, dict):
+        submission_data = legacy_data
     else:
-        submission_data = submission.get("data", {}) or submission.get("form_data", {})
+        submission_data = {}
     submission_data["_submitted_at"] = submission.get("submitted_at", "")
     submission_data["_verified"] = submission.get("verified", False)
     submission_data["_status"] = submission.get("status", "submitted")
+
+    if form_type == "staff_health_questionnaire" and mapping_config:
+        def _mapped_field_ids(config: dict) -> set:
+            ids = set()
+            for section in (config or {}).get("sections", []):
+                for field in section.get("fields", []):
+                    field_id = field.get("field_id") or field.get("id")
+                    if field_id:
+                        ids.add(field_id)
+                    details_field = field.get("details_field")
+                    if details_field:
+                        ids.add(details_field)
+            return ids
+
+        mapped_ids = _mapped_field_ids(mapping_config)
+        submitted_ids = {key for key, value in submission_data.items() if not key.startswith("_") and value not in (None, "")}
+        if mapped_ids and submitted_ids and not (mapped_ids & submitted_ids):
+            logger.warning(
+                "Active staff health PDF mapping has no overlap with submission keys; using default mapping. submission=%s mapped=%s submitted=%s",
+                submission_id,
+                sorted(mapped_ids),
+                sorted(submitted_ids),
+            )
+            mapping_config = PDF_FIELD_MAPPINGS.get(form_type)
 
     if (
         form_type == "interview_record"
@@ -485,19 +515,27 @@ async def _get_or_generate_and_serve_pdf(
         sort=[("created_at", -1)]
     )
 
-    if export and export.get("form_type") == "interview_record":
+    if export:
         submission = await db.form_submissions.find_one({"id": submission_id})
-        form_data = (submission or {}).get("data") or (submission or {}).get("form_data") or {}
-        is_scored_interview = (
-            form_data.get("format_version") == "v2_osabea" or bool(form_data.get("assessment_items"))
-        )
         submission_changed_at = _parse_iso_datetime(
             (submission or {}).get("updated_at") or (submission or {}).get("submitted_at")
         )
         export_created_at = _parse_iso_datetime(export.get("created_at"))
+        if submission_changed_at and export_created_at and submission_changed_at > export_created_at:
+            logger.info(
+                "Regenerating stale form PDF export submission=%s export=%s",
+                submission_id,
+                export.get("id"),
+            )
+            export = None
+
+    if export and export.get("form_type") == "interview_record":
+        form_data = (submission or {}).get("data") or (submission or {}).get("form_data") or {}
+        is_scored_interview = (
+            form_data.get("format_version") == "v2_osabea" or bool(form_data.get("assessment_items"))
+        )
         if (
             (is_scored_interview and export.get("pdf_generator_version") != "interview_v2_snapshot_pdf_v1")
-            or (submission_changed_at and export_created_at and submission_changed_at > export_created_at)
         ):
             logger.info(
                 "Regenerating stale interview PDF export submission=%s export=%s",

@@ -1086,6 +1086,9 @@ def generate_structured_form_pdf(
 
             table_rows = []
             for field in fields:
+                if field.get("type") == "info":
+                    continue
+
                 field_id = field.get("id", "")
                 label = field.get("label", field_id.replace("_", " ").title())
                 raw = submission_data.get(field_id)

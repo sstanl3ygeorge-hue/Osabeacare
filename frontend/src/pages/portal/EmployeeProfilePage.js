@@ -4794,13 +4794,6 @@ export default function EmployeeProfilePage() {
                   ...(/manager|director/i.test(employee?.role || '') ? [{ key: 'fit_proper_persons', name: 'Fit and Proper Persons Declaration', description: 'CQC Regulation 5 — managers and directors only', sensitive: true }] : []),
                 ]
               },
-              {
-                label: 'Screening',
-                sensitive: true,
-                forms: [
-                  { key: 'pre_interview_questionnaire', name: 'Interview Questionnaire', description: 'Worker interview/application intake responses', sensitive: true },
-                ]
-              },
             ];
             const allFormDefinitions = FORM_GROUPS.flatMap((g) => g.forms);
 

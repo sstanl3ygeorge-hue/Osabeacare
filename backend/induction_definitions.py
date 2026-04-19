@@ -421,8 +421,26 @@ def _build_verified_training_set(training_records: list, training_docs: list = N
 
 
 def _build_training_evidence_by_induction(training_records: list, training_docs: list = None) -> dict:
-    """Build linked evidence records keyed by induction item id."""
+    """Build linked evidence records keyed by induction item id.
+
+    Each evidence entry includes:
+        id, title, code, document_id, view_route,
+        source, source_label,
+        file_name, document_type,
+        verified, verified_at, verified_by,
+        uploaded_at
+    """
     evidence_by_item = {}
+
+    def _source_label(source: str) -> str:
+        return {
+            "worker_submission": "Worker submission",
+            "admin_upload": "Admin upload",
+            "application_upload": "Application upload",
+            "training_record": "Training record",
+            "training_document": "Training document",
+            "hr_upload": "HR upload",
+        }.get((source or "").lower(), source.replace("_", " ").title() if source else "Verified record")
 
     for tr in (training_records or []):
         training_name = tr.get("training_name") or tr.get("name") or ""
@@ -430,30 +448,48 @@ def _build_training_evidence_by_induction(training_records: list, training_docs:
         induction_id = get_induction_item_for_training(training_code, training_name)
         if not induction_id:
             continue
+        doc_id = tr.get("source_document_id") or tr.get("certificate_document_id") or tr.get("document_id")
+        raw_source = tr.get("upload_source") or tr.get("source") or "training_record"
         evidence_by_item.setdefault(induction_id, []).append({
             "type": "training_record",
             "id": tr.get("id") or tr.get("training_id") or tr.get("record_id"),
             "title": training_name or training_code,
             "code": training_code,
+            "document_id": doc_id,
+            "view_route": f"/employee-documents/{doc_id}/file" if doc_id else None,
+            "source": "training_record",
+            "source_label": _source_label(raw_source),
+            "document_type": "training_certificate",
+            "file_name": tr.get("original_filename") or tr.get("file_name"),
+            "verified": True,
             "verified_at": tr.get("verified_at") or tr.get("updated_at"),
-            "verified_by": tr.get("verified_by") or tr.get("verified_by_name"),
-            "document_id": tr.get("source_document_id") or tr.get("certificate_document_id") or tr.get("document_id"),
+            "verified_by": tr.get("verified_by_name") or tr.get("verified_by"),
+            "uploaded_at": tr.get("created_at") or tr.get("updated_at"),
         })
 
     for doc in (training_docs or []):
         req_id = doc.get("requirement_id") or ""
-        title = doc.get("file_name") or doc.get("document_name") or req_id
+        title = doc.get("file_name") or doc.get("original_filename") or doc.get("document_name") or req_id
         induction_id = get_induction_item_for_training(req_id, title)
         if not induction_id:
             continue
+        doc_id = doc.get("id") or doc.get("file_id") or doc.get("document_id")
+        raw_source = doc.get("upload_source") or doc.get("source") or "admin_upload"
         evidence_by_item.setdefault(induction_id, []).append({
             "type": "training_document",
-            "id": doc.get("id") or doc.get("file_id") or doc.get("document_id"),
+            "id": doc_id,
             "title": title,
             "code": req_id,
+            "document_id": doc_id,
+            "view_route": f"/employee-documents/{doc_id}/file" if doc_id else None,
+            "source": raw_source,
+            "source_label": _source_label(raw_source),
+            "document_type": "training_document",
+            "file_name": doc.get("original_filename") or doc.get("file_name"),
+            "verified": True,
             "verified_at": doc.get("verified_at") or doc.get("updated_at"),
-            "verified_by": doc.get("verified_by") or doc.get("verified_by_name"),
-            "document_id": doc.get("id") or doc.get("file_id") or doc.get("document_id"),
+            "verified_by": doc.get("verified_by_name") or doc.get("verified_by"),
+            "uploaded_at": doc.get("uploaded_at") or doc.get("created_at") or doc.get("updated_at"),
         })
 
     return evidence_by_item
@@ -547,9 +583,14 @@ async def get_employee_induction_status(
         "verified_by": 1,
         "verified_by_name": 1,
         "updated_at": 1,
+        "created_at": 1,
         "source_document_id": 1,
         "certificate_document_id": 1,
         "document_id": 1,
+        "file_name": 1,
+        "original_filename": 1,
+        "source": 1,
+        "upload_source": 1,
     }).to_list(100)
 
     training_docs = await db.employee_documents.find({
@@ -562,12 +603,18 @@ async def get_employee_induction_status(
         "file_id": 1,
         "document_id": 1,
         "file_name": 1,
+        "original_filename": 1,
         "document_name": 1,
         "requirement_id": 1,
         "verified_at": 1,
         "verified_by": 1,
         "verified_by_name": 1,
         "updated_at": 1,
+        "created_at": 1,
+        "uploaded_at": 1,
+        "source": 1,
+        "upload_source": 1,
+        "uploaded_by_name": 1,
     }).to_list(50)
 
     verified_set = _build_verified_training_set(training_records, training_docs)

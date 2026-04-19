@@ -12,6 +12,70 @@ import { formatBackendDate } from '../../lib/dateUtils';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
+// ─── Evidence detail modal ──────────────────────────────────────────────────
+
+function EvidenceModal({ item, onClose }) {
+  const evidence = item.linked_evidence || [];
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-lg max-h-[80vh] flex flex-col">
+        <div className="flex items-center justify-between px-5 py-4 border-b">
+          <h2 className="font-semibold text-sm text-slate-800">
+            Evidence — {item.label || item.name}
+          </h2>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
+        </div>
+        <div className="overflow-y-auto flex-1 px-5 py-4 space-y-3">
+          {evidence.length === 0 && (
+            <p className="text-sm text-slate-500">No evidence records found for this item.</p>
+          )}
+          {evidence.map((ev, i) => (
+            <div key={i} className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-1.5">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex items-center gap-1.5">
+                  <FileText className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />
+                  <span className="text-xs font-medium text-slate-700 break-all">
+                    {ev.file_name || ev.title || ev.code || 'Unnamed file'}
+                  </span>
+                </div>
+                {ev.verified && (
+                  <span className="flex-shrink-0 text-[10px] font-semibold bg-green-100 text-green-700 rounded-full px-2 py-0.5">Verified</span>
+                )}
+              </div>
+              <div className="text-[11px] text-slate-500 space-y-0.5 pl-5">
+                {ev.source_label && <p>Source: {ev.source_label}</p>}
+                {ev.verified_at && <p>Verified: {formatBackendDate(ev.verified_at)}{ev.verified_by ? ` by ${ev.verified_by}` : ''}</p>}
+                {ev.uploaded_at && <p>Uploaded: {formatBackendDate(ev.uploaded_at)}</p>}
+              </div>
+              {ev.view_route && (
+                <div className="pl-5">
+                  <a
+                    href={`${API}${ev.view_route}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-[11px] text-blue-600 hover:text-blue-800 hover:underline"
+                  >
+                    <Eye className="h-3 w-3" /> Open file
+                  </a>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+        <div className="px-5 py-3 border-t flex justify-end">
+          <Button size="sm" variant="outline" onClick={onClose} className="h-8 px-4 text-xs">
+            Close
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Shadow Shift notes dialog ───────────────────────────────────────────────
 
 function ShadowShiftDialog({ existingDetails, onConfirm, onCancel, saving }) {
@@ -327,6 +391,7 @@ export default function InductionChecklistPanel({ employeeId, employeeName, isAu
   const [shadowShiftItem, setShadowShiftItem] = useState(null); // item to show notes dialog for
   const [savingNotes, setSavingNotes] = useState(false);
   const [viewSubmissionItem, setViewSubmissionItem] = useState(null); // item to view submission for
+  const [viewEvidenceItem, setViewEvidenceItem] = useState(null); // item to view evidence for
 
   const fetchChecklist = useCallback(async () => {
     try {
@@ -564,10 +629,19 @@ export default function InductionChecklistPanel({ employeeId, employeeName, isAu
                         </p>
                       )}
                       {item.linked_evidence?.length > 0 && (
-                        <p className="text-xs text-gray-500 mt-1">
-                          Evidence: {item.linked_evidence.map(e => e.title || e.code || e.id).filter(Boolean).slice(0, 2).join(', ')}
-                          {item.linked_evidence.length > 2 ? ` +${item.linked_evidence.length - 2} more` : ''}
-                        </p>
+                        <button
+                          onClick={() => setViewEvidenceItem(item)}
+                          className="mt-1 flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-700 group"
+                        >
+                          <FileText className="h-3 w-3 text-slate-400 group-hover:text-slate-600" />
+                          <span>
+                            {item.linked_evidence.length} evidence file{item.linked_evidence.length !== 1 ? 's' : ''}
+                          </span>
+                          {item.linked_evidence[0]?.source_label && (
+                            <><span className="text-slate-300">·</span><span>{item.linked_evidence[0].source_label}</span></>
+                          )}
+                          <Eye className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+                        </button>
                       )}
                       {item.completed_at && (
                         <div className="text-xs text-gray-500 mt-0.5 flex items-center gap-1">
@@ -644,7 +718,14 @@ export default function InductionChecklistPanel({ employeeId, employeeName, isAu
                         </Button>
                       )}
 
-                      {/* Automatic evidenced item — no action */}
+                      {/* Automatic evidenced item — view evidence if available, else disabled hint */}
+                      {isAutomatic && isComplete && item.linked_evidence?.length > 0 && (
+                        <Button size="sm" variant="ghost"
+                          onClick={() => setViewEvidenceItem(item)}
+                          className="h-8 px-3 text-xs rounded-lg text-slate-400 hover:text-slate-600">
+                          <Eye className="h-3 w-3 mr-1" /> Evidence
+                        </Button>
+                      )}
                       {isAutomatic && !isComplete && (
                         <Button size="sm" variant="outline" disabled className="h-8 px-3 text-xs rounded-lg text-gray-400"
                           title={item.next_action || 'Evidence required'}>
@@ -699,6 +780,11 @@ export default function InductionChecklistPanel({ employeeId, employeeName, isAu
           onSignOff={() => { setViewSubmissionItem(null); fetchChecklist(); }}
           onReturn={() => { setViewSubmissionItem(null); fetchChecklist(); }}
         />
+      )}
+
+      {/* Evidence detail modal */}
+      {viewEvidenceItem && (
+        <EvidenceModal item={viewEvidenceItem} onClose={() => setViewEvidenceItem(null)} />
       )}
     </>
   );

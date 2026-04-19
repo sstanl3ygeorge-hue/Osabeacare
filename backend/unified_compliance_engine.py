@@ -51,8 +51,8 @@ logger = logging.getLogger(__name__)
 # NHS Employment Check Standards + CQC Requirements
 MANDATORY_TRAINING_HCA = [
     {"id": "safeguarding_adults", "name": "Safeguarding Adults", "induction_sync": "safeguarding_adults"},
-    {"id": "manual_handling", "name": "Manual Handling / Moving & Handling", "induction_sync": None},  # No matching Care Certificate standard for moving & handling
-    {"id": "fire_safety", "name": "Fire Safety", "induction_sync": "fire_safety"},
+    {"id": "manual_handling", "name": "Manual Handling / Moving & Handling", "induction_sync": "health_safety"},
+    {"id": "fire_safety", "name": "Fire Safety", "induction_sync": "health_safety"},
     {"id": "health_safety", "name": "Health & Safety", "induction_sync": "health_safety"},
     {"id": "basic_life_support", "name": "Basic Life Support (BLS)", "induction_sync": "basic_life_support"},
     {"id": "infection_control", "name": "Infection Prevention & Control", "induction_sync": "infection_control"},

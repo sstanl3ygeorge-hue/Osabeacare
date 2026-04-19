@@ -193,10 +193,10 @@ TRAINING_TO_INDUCTION_MAP = {
     "mental_health": "awareness_mental_health",
     "dementia": "awareness_mental_health",
     "learning_disabilities": "awareness_mental_health",
-    # No induction mapping
-    "fire_safety": None,
-    "manual_handling": None,
-    "moving_handling": None,
+    # Health & Safety (Care Certificate Standard 12) — fire safety and moving & handling are sub-topics
+    "fire_safety": "health_safety",
+    "manual_handling": "health_safety",
+    "moving_handling": "health_safety",
     "medication_administration": None,
     "medication_awareness": None,
     "prevent": None,

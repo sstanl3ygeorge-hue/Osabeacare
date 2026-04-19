@@ -639,6 +639,39 @@ async def signoff_induction_item(
     if not admin_name and admin:
         admin_name = f"{admin.get('first_name','')} {admin.get('last_name','')}".strip() or admin.get("email", "Admin")
 
+    # ── Pre-flight: load checklist BEFORE writing anything ────────────────────
+    # Fetched here so that a missing checklist fails atomically before any DB write.
+    item_name = cfg["title"]
+    checklist = await db.induction_checklists.find_one({"employee_id": employee_id})
+
+    if not checklist:
+        # Auto-initialise on first sign-off rather than requiring a separate /fix call.
+        from induction_definitions import DEFAULT_INDUCTION_ITEMS
+        now_init = now
+        checklist = {
+            "id": str(uuid.uuid4()),
+            "employee_id": employee_id,
+            "items": [
+                {
+                    "id": item_def["id"],
+                    "name": item_def["name"],
+                    "mandatory": item_def["mandatory"],
+                    "status": "pending",
+                    "completed_at": None,
+                    "completed_by": None,
+                    "completed_by_name": None,
+                    "notes": None,
+                }
+                for item_def in DEFAULT_INDUCTION_ITEMS
+            ],
+            "overall_status": "pending",
+            "started_at": None,
+            "completed_at": None,
+            "created_at": now_init,
+            "updated_at": now_init,
+        }
+        await db.induction_checklists.insert_one({k: v for k, v in checklist.items() if k != "_id"})
+
     # ── Hybrid items ──────────────────────────────────────────────────────────
     if completion_type == "hybrid":
         form_id = cfg["worker_form_id"]
@@ -670,16 +703,6 @@ async def signoff_induction_item(
                 status_code=422,
                 detail="Sign-off notes are required for manual items.",
             )
-
-    # Write completion to the induction checklist (shared source)
-    item_name = cfg["title"]
-    checklist = await db.induction_checklists.find_one({"employee_id": employee_id})
-
-    if not checklist:
-        raise HTTPException(
-            status_code=404,
-            detail="Induction checklist not found. Run /fix to initialise it first.",
-        )
 
     item_found = False
     for item in checklist["items"]:

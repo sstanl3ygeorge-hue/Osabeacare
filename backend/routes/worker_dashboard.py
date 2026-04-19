@@ -29,6 +29,7 @@ from .dependencies import (
 )
 from induction_definitions import get_employee_induction_status
 from employment_review_persistence import upsert_employment_review
+from .employment_gaps import _ensure_gap_record
 
 logger = logging.getLogger(__name__)
 
@@ -2889,13 +2890,14 @@ async def worker_explain_gap(
     db = get_db()
     employee_id = worker.get("employee_id")
 
-    gap = await db.employment_gaps.find_one(
-        {"employee_id": employee_id, "$or": [{"id": gap_id}, {"gap_id": gap_id}]},
-    )
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "employment_gaps": 1})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    gap = await _ensure_gap_record(db, employee, employee_id, gap_id)
     if not gap:
         raise HTTPException(status_code=404, detail="Gap not found")
 
-    gap.pop("_id", None)
     record_id = gap.get("id") or gap.get("gap_id")
 
     now = datetime.now(timezone.utc).isoformat()

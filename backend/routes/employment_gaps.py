@@ -130,6 +130,7 @@ def _normalize_gap_record(gap: dict) -> dict:
     record_id = normalized_gap.get("id") or normalized_gap.get("gap_id")
     if not record_id:
         record_id = f"gap_{uuid.uuid4().hex[:12]}"
+    legacy_gap_id = normalized_gap.get("gap_id") or record_id
 
     status = _canonicalize_gap_status(
         normalized_gap.get("status"),
@@ -138,24 +139,236 @@ def _normalize_gap_record(gap: dict) -> dict:
     )
 
     normalized_gap["id"] = record_id
-    normalized_gap["gap_id"] = record_id
+    normalized_gap["gap_id"] = legacy_gap_id
     normalized_gap["status"] = status
     normalized_gap.update(_build_gap_compatibility_fields(status))
 
     return normalized_gap
 
 
-async def _get_gap_record(db, employee_id: str, gap_id: str) -> Optional[dict]:
-    gap = await db.employment_gaps.find_one(
-        {
-            "employee_id": employee_id,
-            "$or": [{"id": gap_id}, {"gap_id": gap_id}],
-        }
-    )
+def _missing_identity_backfill(gap: dict, normalized_gap: dict) -> dict:
+    """Only fill absent legacy identity fields; never rewrite populated IDs."""
+    update_data = {}
+    if not gap.get("id") and normalized_gap.get("id"):
+        update_data["id"] = normalized_gap["id"]
+    if not gap.get("gap_id") and normalized_gap.get("gap_id"):
+        update_data["gap_id"] = normalized_gap["gap_id"]
+    return update_data
 
-    if gap:
-        gap.pop("_id", None)
-        return _normalize_gap_record(gap)
+
+def _legacy_status_from_review_segment(status: Optional[str]) -> str:
+    normalized = (status or "").strip().lower()
+    return {
+        "missing": "pending",
+        "explained": "explained",
+        "verified": "verified",
+        "rejected": "rejected",
+        "needs_more_info": "needs_more_info",
+        "reopened": "reopened",
+    }.get(normalized, "pending")
+
+
+def _canonical_gap_linkage_from_segment(segment: dict) -> dict:
+    explanation = segment.get("explanation") or {}
+    source_gap_id = (
+        segment.get("source_gap_id")
+        or explanation.get("source_gap_id")
+        or explanation.get("matched_gap_id")
+    )
+    return {
+        "canonical_review_segment_id": segment.get("id"),
+        "canonical_review_gap_id": segment.get("gap_id"),
+        "canonical_review_source_gap_id": source_gap_id,
+        "canonical_review_gap_start": segment.get("start_date") or segment.get("gap_start"),
+        "canonical_review_gap_end": segment.get("end_date") or segment.get("gap_end"),
+    }
+
+
+def _non_empty_dict(data: dict) -> dict:
+    return {key: value for key, value in data.items() if value is not None}
+
+
+def _gap_record_from_review_segment(employee_id: str, segment: dict) -> dict:
+    explanation = segment.get("explanation") or {}
+    admin_review = segment.get("admin_review") or {}
+    status = _legacy_status_from_review_segment(segment.get("status") or segment.get("raw_status"))
+    record_id = segment.get("id") or segment.get("gap_id") or f"gap_{uuid.uuid4().hex[:12]}"
+    gap_id = segment.get("gap_id") or record_id
+
+    return _normalize_gap_record({
+        "id": record_id,
+        "gap_id": gap_id,
+        "employee_id": employee_id,
+        "gap_start": segment.get("start_date") or segment.get("gap_start"),
+        "gap_end": segment.get("end_date") or segment.get("gap_end"),
+        "start_date": segment.get("start_date") or segment.get("gap_start"),
+        "end_date": segment.get("end_date") or segment.get("gap_end"),
+        "duration_days": segment.get("duration_days"),
+        "duration_months": segment.get("duration_months"),
+        "gap_type": segment.get("gap_type"),
+        "previous_employment": segment.get("previous_employment"),
+        "next_employment": segment.get("next_employment"),
+        "status": status,
+        "explanation": explanation.get("text") or explanation.get("explanation"),
+        "reason_type": explanation.get("reason_type"),
+        "explained_by": explanation.get("submitted_by"),
+        "explanation_source": explanation.get("source") or "canonical_employment_review",
+        "matched_by": explanation.get("matched_by"),
+        "source_gap_id": explanation.get("source_gap_id"),
+        "verified_by": admin_review.get("reviewed_by"),
+        "verified_by_name": admin_review.get("reviewed_by_name"),
+        "verified_at": admin_review.get("reviewed_at"),
+        "admin_notes": admin_review.get("notes"),
+        "rejection_reason": admin_review.get("rejection_reason"),
+        "source": "canonical_employment_review",
+        **_non_empty_dict(_canonical_gap_linkage_from_segment(segment)),
+    })
+
+
+async def _get_canonical_review_gap_segment(db, employee_id: str, gap_id: str) -> Optional[dict]:
+    review = await db.employment_reviews.find_one(
+        {"employee_id": employee_id, "current": True},
+        {"_id": 0, "segments": 1},
+    )
+    for segment in (review or {}).get("segments", []) or []:
+        if not isinstance(segment, dict) or segment.get("type") != "gap":
+            continue
+        candidate_ids = {
+            str(value)
+            for value in [
+                segment.get("id"),
+                segment.get("gap_id"),
+                segment.get("source_gap_id"),
+            ]
+            if value is not None
+        }
+        explanation = segment.get("explanation") or {}
+        for value in [
+            explanation.get("matched_gap_id"),
+            explanation.get("source_gap_id"),
+        ]:
+            if value is not None:
+                candidate_ids.add(str(value))
+        if str(gap_id) in candidate_ids:
+            return segment
+    return None
+
+
+async def _normalise_existing_gap_identity(db, gap: dict) -> dict:
+    mongo_id = gap.get("_id")
+    gap_without_mongo = dict(gap)
+    gap_without_mongo.pop("_id", None)
+    normalized_gap = _normalize_gap_record(gap_without_mongo)
+    backfill = _missing_identity_backfill(gap_without_mongo, normalized_gap)
+    if mongo_id and backfill:
+        await db.employment_gaps.update_one({"_id": mongo_id}, {"$set": backfill})
+    return {**normalized_gap, **backfill}
+
+
+async def _apply_canonical_linkage(db, gap: dict, segment: dict, resolution_method: str) -> dict:
+    mongo_id = gap.get("_id")
+    normalized_gap = await _normalise_existing_gap_identity(db, gap)
+    linkage = _non_empty_dict(_canonical_gap_linkage_from_segment(segment))
+    update_data = {
+        **linkage,
+        "canonical_gap_resolution_method": resolution_method,
+        "canonical_gap_linked_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if mongo_id:
+        await db.employment_gaps.update_one({"_id": mongo_id}, {"$set": update_data})
+    return {**normalized_gap, **update_data}
+
+
+async def _find_gap_by_exact_term(db, employee_id: str, term: dict) -> Optional[dict]:
+    if not term or not all(term.values()):
+        return None
+    return await db.employment_gaps.find_one({"employee_id": employee_id, **term})
+
+
+async def _materialize_gap_record_from_review_segment(db, employee_id: str, segment: dict) -> Optional[dict]:
+    normalized_gap = _gap_record_from_review_segment(employee_id, segment)
+    gap_start = normalized_gap.get("gap_start") or normalized_gap.get("start_date")
+    gap_end = normalized_gap.get("gap_end") or normalized_gap.get("end_date")
+    linkage = _non_empty_dict(_canonical_gap_linkage_from_segment(segment))
+
+    # Re-check deterministic canonical links first so repeated actions against
+    # the same canonical segment cannot materialize duplicate legacy rows.
+    query_terms = [
+        {"canonical_review_segment_id": linkage.get("canonical_review_segment_id")},
+        {"canonical_review_gap_id": linkage.get("canonical_review_gap_id")},
+        {"canonical_review_source_gap_id": linkage.get("canonical_review_source_gap_id")},
+        {"id": normalized_gap.get("id")},
+        {"gap_id": normalized_gap.get("gap_id")},
+        {"source_gap_id": linkage.get("canonical_review_source_gap_id")},
+    ]
+    if gap_start and gap_end:
+        query_terms.extend([
+            {"gap_start": gap_start, "gap_end": gap_end},
+            {"start_date": gap_start, "end_date": gap_end},
+        ])
+
+    for term in query_terms:
+        existing = await _find_gap_by_exact_term(db, employee_id, term)
+        if existing:
+            logger.info(
+                "Resolved employment gap via canonical materialization recheck: employee_id=%s input=%s method=%s legacy_id=%s",
+                employee_id,
+                normalized_gap.get("id"),
+                next(iter(term.keys())),
+                existing.get("id") or existing.get("gap_id"),
+            )
+            return await _apply_canonical_linkage(db, existing, segment, f"existing_{next(iter(term.keys()))}")
+
+    now = datetime.now(timezone.utc).isoformat()
+    normalized_gap["created_at"] = now
+    normalized_gap["updated_at"] = now
+    normalized_gap["materialized_from_canonical_review"] = True
+    normalized_gap["canonical_gap_resolution_method"] = "materialized_new_row"
+    await db.employment_gaps.insert_one(normalized_gap)
+    logger.info(
+        "Materialized employment gap from canonical segment: employee_id=%s canonical_segment_id=%s canonical_gap_id=%s legacy_id=%s",
+        employee_id,
+        linkage.get("canonical_review_segment_id"),
+        linkage.get("canonical_review_gap_id"),
+        normalized_gap.get("id"),
+    )
+    return normalized_gap
+
+
+async def _get_gap_record(db, employee_id: str, gap_id: str) -> Optional[dict]:
+    lookup_order = [
+        ("direct legacy id", {"id": gap_id}),
+        ("direct legacy gap_id", {"gap_id": gap_id}),
+        ("canonical segment id", {"canonical_review_segment_id": gap_id}),
+        ("canonical gap id", {"canonical_review_gap_id": gap_id}),
+        ("source gap id", {"canonical_review_source_gap_id": gap_id}),
+        ("source gap id", {"source_gap_id": gap_id}),
+    ]
+
+    for resolution_method, term in lookup_order:
+        gap = await _find_gap_by_exact_term(db, employee_id, term)
+        if gap:
+            normalized_gap = await _normalise_existing_gap_identity(db, gap)
+            logger.info(
+                "Resolved employment gap via %s: employee_id=%s input_gap_id=%s legacy_id=%s legacy_gap_id=%s",
+                resolution_method,
+                employee_id,
+                gap_id,
+                normalized_gap.get("id"),
+                normalized_gap.get("gap_id"),
+            )
+            return normalized_gap
+
+    canonical_segment = await _get_canonical_review_gap_segment(db, employee_id, gap_id)
+    if canonical_segment:
+        logger.info(
+            "Resolved employment gap via canonical segment id: employee_id=%s input_gap_id=%s canonical_segment_id=%s canonical_gap_id=%s",
+            employee_id,
+            gap_id,
+            canonical_segment.get("id"),
+            canonical_segment.get("gap_id"),
+        )
+        return await _materialize_gap_record_from_review_segment(db, employee_id, canonical_segment)
 
     return None
 
@@ -178,7 +391,16 @@ async def _ensure_gap_record(db, employee: dict, employee_id: str, gap_id: str) 
         return None
 
     normalized_gap = _normalize_gap_record({**legacy_gap, "employee_id": employee_id})
+    existing = await _get_gap_record(db, employee_id, normalized_gap["id"])
+    if existing:
+        return existing
     await db.employment_gaps.insert_one(normalized_gap)
+    logger.info(
+        "Materialized employment gap from legacy employee.employment_gaps: employee_id=%s input_gap_id=%s legacy_id=%s",
+        employee_id,
+        gap_id,
+        normalized_gap.get("id"),
+    )
     return normalized_gap
 
 
@@ -319,11 +541,20 @@ async def explain_employment_gap(
         {"employee_id": employee_id, "id": gap["id"]},
         {"_id": 0}
     )
+
+    review = await _sync_employment_review_after_gap_write(
+        db,
+        employee_id,
+        user,
+        "employment_gap_explained",
+    )
     
     return {
         "success": True,
         "message": "Gap explanation submitted",
-        "gap": _normalize_gap_record(updated_gap)
+        "gap": _normalize_gap_record(updated_gap),
+        "employment_review_synced": not review.get("_stale"),
+        "employment_review_status": review.get("status"),
     }
 
 
@@ -344,6 +575,10 @@ async def upload_gap_document(
     employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
+
+    normalized_gap = await _get_gap_record(db, employee_id, gap_id)
+    if not normalized_gap:
+        raise HTTPException(status_code=404, detail="Gap not found")
     
     # Validate file type
     allowed_types = ["application/pdf", "image/jpeg", "image/png", "application/msword", 
@@ -381,21 +616,26 @@ async def upload_gap_document(
     await db.gap_documents.insert_one(doc_record)
     
     # Update gap with document reference
-    normalized_gap = await _get_gap_record(db, employee_id, gap_id)
-    if not normalized_gap:
-        raise HTTPException(status_code=404, detail="Gap not found")
-
     doc_record["gap_id"] = normalized_gap["id"]
 
     await db.employment_gaps.update_one(
         {"employee_id": employee_id, "id": normalized_gap["id"]},
         {"$set": {"evidence_document_id": doc_record["id"], "updated_at": now}}
     )
+
+    review = await _sync_employment_review_after_gap_write(
+        db,
+        employee_id,
+        user,
+        "employment_gap_evidence_uploaded",
+    )
     
     doc_record.pop("_id", None)
     return {
         "success": True,
-        "document": doc_record
+        "document": doc_record,
+        "employment_review_synced": not review.get("_stale"),
+        "employment_review_status": review.get("status"),
     }
 
 
@@ -424,18 +664,19 @@ async def verify_employment_gap(
     employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
-    
-    gap = await _get_gap_record(db, employee_id, gap_id)
-    if not gap:
-        raise HTTPException(status_code=404, detail="Gap not found")
-    
-    now = datetime.now(timezone.utc).isoformat()
+
     resolved_verified = verified if verified is not None else approved
     resolved_notes = verification_notes if verification_notes is not None else notes
 
     if resolved_verified is None and not requires_further_info:
         raise HTTPException(status_code=400, detail="Either verified or approved must be provided")
-    
+
+    gap = await _get_gap_record(db, employee_id, gap_id)
+    if not gap:
+        raise HTTPException(status_code=404, detail="Gap not found")
+
+    now = datetime.now(timezone.utc).isoformat()
+
     if requires_further_info:
         status = "needs_more_info"
     elif resolved_verified:

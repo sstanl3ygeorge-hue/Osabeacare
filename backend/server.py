@@ -225,6 +225,7 @@ from employment_gap_engine import (
     GapStatus,
     MIN_GAP_DAYS
 )
+from employment_review_engine import build_employment_review_from_employee
 
 # Unified Compliance Engine - CQC Audit Trail, Status, and Health Services
 from compliance_engine import (
@@ -9171,6 +9172,59 @@ async def get_employee(employee_id: str, user: dict = Depends(get_current_user))
     log_source_served("GET /employees/{id}", "employees", source, 1, employee_id=employee_id, fallback_used=fallback_used, latency_ms=latency_ms)
     
     return EmployeeResponse(**employee)
+
+
+@api_router.get("/employees/{employee_id}/employment-review-preview")
+async def get_employment_review_preview(
+    employee_id: str,
+    user: dict = Depends(require_manager_or_admin),
+):
+    """
+    Read-only canonical Employment Review preview.
+
+    This endpoint intentionally does not write an employment_reviews document,
+    update legacy employee fields, update employment_gaps, or affect existing UI
+    behaviour. It is for controlled real-data comparison before migration.
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    existing_gap_records = await db.employment_gaps.find(
+        {"employee_id": employee_id},
+        {"_id": 0},
+    ).sort("gap_start", 1).to_list(200)
+
+    if not existing_gap_records and employee.get("employment_gaps"):
+        existing_gap_records = [
+            gap for gap in employee.get("employment_gaps", [])
+            if isinstance(gap, dict)
+        ]
+
+    preview = build_employment_review_from_employee(
+        employee=employee,
+        existing_gap_records=existing_gap_records,
+        applicant_explanations=employee.get("gap_explanations") or [],
+    )
+
+    return {
+        "employee_id": employee_id,
+        "preview_only": True,
+        "writes_performed": False,
+        "source_counts": {
+            "employment_history_rows": len(employee.get("employment_history") or []),
+            "existing_gap_records": len(existing_gap_records or []),
+            "applicant_explanations": len(employee.get("gap_explanations") or []),
+            "legacy_employee_gap_rows": len(employee.get("employment_gaps") or []),
+        },
+        "legacy_metadata": {
+            "gap_analysis_status": employee.get("gap_analysis_status"),
+            "gap_analysis_error": employee.get("gap_analysis_error"),
+            "employment_review_signed_off": employee.get("employment_review_signed_off"),
+            "employment_review_signed_off_at": employee.get("employment_review_signed_off_at"),
+        },
+        "employment_review": preview,
+    }
 
 
 @api_router.get("/staff/employees/{employee_id}", response_model=EmployeeResponse)

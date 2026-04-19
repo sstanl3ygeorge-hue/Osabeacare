@@ -54,8 +54,8 @@ class GapStatus(str, Enum):
 def parse_employment_date(date_str) -> Optional[datetime]:
     """Parse employment date string to datetime.
 
-    Handles ISO (YYYY-MM-DD), DD/MM/YYYY, DD-MM-YYYY and 2-digit year
-    variants (DD/MM/YY, DD-MM-YY).
+    Handles ISO (YYYY-MM-DD), month-only ISO (YYYY-MM), DD/MM/YYYY,
+    DD-MM-YYYY and 2-digit year variants (DD/MM/YY, DD-MM-YY).
     """
     if not date_str:
         return None
@@ -65,6 +65,17 @@ def parse_employment_date(date_str) -> Optional[datetime]:
 
     date_str = date_str.strip()
 
+    # Month-only ISO from browser <input type="month">.
+    # Interpret as first day of the month for coverage/gap calculations.
+    import re
+    m = re.match(r'^(\d{4})-(\d{1,2})$', date_str)
+    if m:
+        try:
+            year, month = int(m.group(1)), int(m.group(2))
+            return datetime(year, month, 1, tzinfo=timezone.utc)
+        except Exception:
+            pass
+
     # ISO with time component
     if 'T' in date_str:
         try:
@@ -73,7 +84,6 @@ def parse_employment_date(date_str) -> Optional[datetime]:
             pass
 
     # DD/MM/YYYY or DD-MM-YYYY (4-digit year)
-    import re
     m = re.match(r'^(\d{1,2})[/\-](\d{1,2})[/\-](\d{4})$', date_str)
     if m:
         try:

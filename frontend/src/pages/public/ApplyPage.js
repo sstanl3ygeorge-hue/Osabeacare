@@ -654,11 +654,19 @@ export default function ApplyPage() {
       const payload = {
         ...formData,
         cv_file_id: cvFileId,
-        gap_explanations: Object.entries(gapExplanations).map(([gapId, data]) => ({
-          gap_id: gapId,
-          reason_type: data.reason_type || null,
-          explanation: data.explanation || '',
-        })),
+        gap_explanations: Object.entries(gapExplanations).map(([gapId, data]) => {
+          const gap = detectedGaps.find(g => g.gap_id === gapId) || {};
+          return {
+            gap_id: gapId,
+            gap_start: gap.gap_start || null,
+            gap_end: gap.gap_end || null,
+            duration_days: gap.duration_days ?? null,
+            duration_months: gap.duration_months ?? null,
+            gap_type: gap.gap_type || null,
+            reason_type: data.reason_type || null,
+            explanation: data.explanation || '',
+          };
+        }),
       };
       
       const response = await axios.post(`${API}/applications/structured`, payload);

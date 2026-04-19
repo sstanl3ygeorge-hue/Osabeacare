@@ -2673,11 +2673,11 @@ async def get_worker_employment_gaps(worker: dict = Depends(get_current_worker))
     from employment_gap_engine import evaluate_gaps_compliance, compute_coverage_summary
     evaluation = evaluate_gaps_compliance(gap_records)
 
-    # Compute 10-year coverage summary — always compute fresh so stale
-    # cached values (e.g. meets_10_year_requirement written before the
-    # total_covered > 0 guard) don't produce misleading badges.
+    # Compute 10-year coverage summary from current history, but use the
+    # canonical gap records so verified/explained/pending state is not isolated
+    # from the worker-side coverage view.
     employment_history = (employee or {}).get("employment_history", [])
-    coverage = compute_coverage_summary(employment_history)
+    coverage = compute_coverage_summary(employment_history, gap_records=gap_records)
 
     # Lazily assign stable IDs to any legacy entries without one
     if _ensure_entry_ids(employment_history):
@@ -2844,9 +2844,8 @@ async def _reconcile_employment_after_amendment(employee_id: str, employment_his
 
     now = datetime.now(timezone.utc).isoformat()
 
-    # 1-2. Detect new gaps and compute coverage
+    # 1. Detect new gaps
     new_gaps = detect_employment_gaps_with_coverage(employment_history)
-    coverage = compute_coverage_summary(employment_history)
 
     # 3. Reconcile: load existing gap records, match by date range, preserve status
     existing_gap_records = await db.employment_gaps.find(
@@ -2911,6 +2910,15 @@ async def _reconcile_employment_after_amendment(employee_id: str, employment_his
     for key, eg in existing_by_range.items():
         if key not in new_gap_keys:
             await db.employment_gaps.delete_one({"id": eg["id"]})
+
+    # 2. Compute coverage after reconciliation so persisted coverage follows
+    # canonical gap state rather than freshly detected pending-only gaps.
+    final_gap_records = await db.employment_gaps.find(
+        {"employee_id": employee_id}
+    ).to_list(100)
+    for eg in final_gap_records:
+        eg.pop("_id", None)
+    coverage = compute_coverage_summary(employment_history, gap_records=final_gap_records)
 
     # Ensure all entries have stable IDs before saving
     _ensure_entry_ids(employment_history)

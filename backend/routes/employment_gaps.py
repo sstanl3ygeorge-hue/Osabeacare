@@ -51,6 +51,14 @@ def _get_put_object():
 
 
 async def _sync_employment_review_after_gap_write(db, employee_id: str, user: dict, reason: str) -> dict:
+    """
+    Rebuild and upsert the canonical Employment Review after an admin gap write.
+
+    Soft-fail: the underlying gap write has already committed. If the rebuild
+    itself fails we log the error and return a sentinel so callers can include
+    ``canonical_review_stale: True`` in their response. Admins can recover via
+    GET /api/employees/{id}/employment-review?rebuild=true.
+    """
     try:
         return await upsert_employment_review(
             db,
@@ -58,14 +66,12 @@ async def _sync_employment_review_after_gap_write(db, employee_id: str, user: di
             actor_id=user.get("user_id") or user.get("id"),
             reason=reason,
         )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
-        logger.exception("Failed to refresh canonical employment review for %s after %s", employee_id, reason)
-        raise HTTPException(
-            status_code=500,
-            detail="Employment gap was updated, but canonical employment review refresh failed.",
-        ) from exc
+        logger.warning(
+            "Canonical employment review rebuild soft-failed for %s after %s: %s",
+            employee_id, reason, exc,
+        )
+        return {"_stale": True, "status": None}
 
 logger = logging.getLogger(__name__)
 
@@ -506,7 +512,7 @@ async def verify_employment_gap(
         "message": f"Gap marked as {status}",
         "gap_id": gap["id"],
         "status": status,
-        "employment_review_synced": True,
+        "employment_review_synced": not review.get("_stale"),
         "employment_review_status": review.get("status"),
     }
 
@@ -602,7 +608,7 @@ async def request_gap_info(
         "success": True,
         "message": "Information request sent",
         "notification_id": notification_id,
-        "employment_review_synced": True,
+        "employment_review_synced": not review.get("_stale"),
         "employment_review_status": review.get("status"),
     }
 
@@ -696,7 +702,7 @@ async def reopen_employment_gap(
         "success": True,
         "message": "Gap reopened",
         "gap": _normalize_gap_record(updated_gap),
-        "employment_review_synced": True,
+        "employment_review_synced": not review.get("_stale"),
         "employment_review_status": review.get("status"),
     }
 
@@ -740,7 +746,7 @@ async def detect_employment_gaps(
             "success": True,
             "message": "No employment history to analyze",
             "gaps_found": 0,
-            "employment_review_synced": True,
+            "employment_review_synced": not review.get("_stale"),
             "employment_review_status": review.get("status"),
         }
     
@@ -837,6 +843,6 @@ async def detect_employment_gaps(
         "new_gaps_created": new_gaps,
         "gaps": [_normalize_gap_record(gap) for gap in detected_gaps],
         "coverage": coverage,
-        "employment_review_synced": True,
+        "employment_review_synced": not review.get("_stale"),
         "employment_review_status": review.get("status"),
     }

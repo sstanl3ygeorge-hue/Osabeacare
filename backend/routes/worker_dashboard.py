@@ -2749,6 +2749,14 @@ def _employment_review_to_worker_payload(review: dict, reason_types: list[str]) 
 
 
 async def _sync_worker_employment_review(db, employee_id: str, reason: str) -> dict:
+    """
+    Rebuild and upsert the canonical Employment Review after a worker write.
+
+    Soft-fail: the underlying write has already committed. If the rebuild fails
+    we log a warning and return a sentinel so callers can include
+    ``canonical_review_stale: True`` in their response. Admins can recover via
+    GET /api/employees/{id}/employment-review?rebuild=true.
+    """
     try:
         return await upsert_employment_review(
             db,
@@ -2756,14 +2764,12 @@ async def _sync_worker_employment_review(db, employee_id: str, reason: str) -> d
             actor_id=_worker_actor_id(employee_id),
             reason=reason,
         )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
-        logger.exception("Failed to refresh worker canonical employment review for %s after %s", employee_id, reason)
-        raise HTTPException(
-            status_code=500,
-            detail="Employment information was updated, but canonical employment review refresh failed.",
-        ) from exc
+        logger.warning(
+            "Canonical employment review rebuild soft-failed for worker %s after %s: %s",
+            employee_id, reason, exc,
+        )
+        return {"_stale": True, "status": None}
 
 
 class WorkerGapExplanation(BaseModel):
@@ -2933,9 +2939,9 @@ async def worker_explain_gap(
     )
 
     # Synchronously rebuild and upsert canonical review so worker sees updated state
-    await _sync_worker_employment_review(db, employee_id, "worker_gap_explanation")
+    _review = await _sync_worker_employment_review(db, employee_id, "worker_gap_explanation")
 
-    return {"success": True, "message": "Gap explanation submitted"}
+    return {"success": True, "message": "Gap explanation submitted", "canonical_review_stale": _review.get("_stale", False)}
 
 
 # =============================================================================
@@ -3228,7 +3234,7 @@ async def worker_amend_employment_history(
         logger.warning(f"Failed to create admin notification for employment amendment: {e}")
 
     # Synchronously rebuild and upsert canonical review so worker + admin see updated state
-    await _sync_worker_employment_review(db, employee_id, "worker_employment_history_amended")
+    _review = await _sync_worker_employment_review(db, employee_id, "worker_employment_history_amended")
 
     return {
         "success": True,
@@ -3236,6 +3242,7 @@ async def worker_amend_employment_history(
         "entry_id": entry_data.get("id"),
         "gaps_count": len(new_gaps),
         "coverage": coverage,
+        "canonical_review_stale": _review.get("_stale", False),
     }
 
 
@@ -3314,11 +3321,12 @@ async def worker_delete_employment_entry(
         logger.warning(f"Failed to create admin notification for employment deletion: {e}")
 
     # Synchronously rebuild and upsert canonical review so worker + admin see updated state
-    await _sync_worker_employment_review(db, employee_id, "worker_employment_entry_removed")
+    _review = await _sync_worker_employment_review(db, employee_id, "worker_employment_entry_removed")
 
     return {
         "success": True,
         "message": "Employment entry removed. Gaps and coverage recalculated.",
         "gaps_count": len(new_gaps),
         "coverage": coverage,
+        "canonical_review_stale": _review.get("_stale", False),
     }

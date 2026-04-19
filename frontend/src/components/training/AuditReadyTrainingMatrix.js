@@ -126,6 +126,34 @@ const isEvidenceOnFile = (item) => Boolean(
   item?.evidence?.length
 );
 
+const normaliseCanonicalTrainingRecord = (record) => {
+  const expiryDate = record?.expiry_date || record?.expires_at;
+  const verified = Boolean(record?.verified || record?.is_verified || record?.verification_status === 'verified');
+  const timingStatus = isExpiryDatePast(expiryDate) ? 'expired' : 'valid';
+  const status = record?.verification_status === 'rejected'
+    ? 'rejected'
+    : verified
+      ? (timingStatus === 'expired' ? 'expired' : 'verified')
+      : (record?.status || 'completed');
+
+  return {
+    ...record,
+    id: record?.id,
+    record_id: record?.id,
+    code: record?.requirement_id || record?.mapped_training_code || record?.id,
+    title: record?.training_name || record?.mapped_training_title || 'Training record',
+    status,
+    completed_at: record?.completion_date || record?.completed_at,
+    expires_at: expiryDate,
+    is_verified: verified,
+    verified,
+    is_required: Boolean(record?.mandatory || record?.is_mandatory),
+    is_mandatory: Boolean(record?.mandatory || record?.is_mandatory),
+    provider: record?.provider_name || record?.provider,
+    source_document_id: record?.source_document_id || record?.certificate_document_id,
+  };
+};
+
 /**
  * AuditReadyTrainingMatrix - Comprehensive training management for CQC audit readiness
  * 
@@ -150,12 +178,13 @@ export default function AuditReadyTrainingMatrix({
     matrix: false,
     certificates: false,
     proposedItems: false,
+    trainingRecords: false,
   });
   const [activeTab, setActiveTab] = useState('mandatory');
   
   // Data states
   const [mandatoryTraining, setMandatoryTraining] = useState([]);
-  const [additionalTraining, setAdditionalTraining] = useState([]);
+  const [canonicalTrainingRecords, setCanonicalTrainingRecords] = useState([]);
   const [certificates, setCertificates] = useState([]);
   const [proposedItems, setProposedItems] = useState([]);
   const [summary, setSummary] = useState({
@@ -205,9 +234,9 @@ export default function AuditReadyTrainingMatrix({
     setLoading(true);
     try {
       setLoadError(false);
-      setSourceErrors({ matrix: false, certificates: false, proposedItems: false });
+      setSourceErrors({ matrix: false, certificates: false, proposedItems: false, trainingRecords: false });
       // Fetch training matrix data
-      const [matrixResult, proposedResult, docsResult] = await Promise.allSettled([
+      const [matrixResult, proposedResult, docsResult, recordsResult] = await Promise.allSettled([
         axios.get(`${API}/api/employees/${employeeId}/training/matrix`, {
           headers: { Authorization: `Bearer ${token}` }
         }),
@@ -216,23 +245,30 @@ export default function AuditReadyTrainingMatrix({
         }),
         axios.get(`${API}/api/employees/${employeeId}/training/certificates`, {
           headers: { Authorization: `Bearer ${token}` }
+        }),
+        axios.get(`${API}/api/training-records`, {
+          headers: { Authorization: `Bearer ${token}` },
+          params: { employee_id: employeeId }
         })
       ]);
 
       if (matrixResult.status !== 'fulfilled') {
-        setSourceErrors({ matrix: true, certificates: docsResult.status !== 'fulfilled', proposedItems: proposedResult.status !== 'fulfilled' });
+        setSourceErrors({
+          matrix: true,
+          certificates: docsResult.status !== 'fulfilled',
+          proposedItems: proposedResult.status !== 'fulfilled',
+          trainingRecords: recordsResult.status !== 'fulfilled',
+        });
         throw new Error('Training matrix unavailable');
       }
       
       // Process matrix data
       const matrixData = matrixResult.value?.data || {};
       const allItems = matrixData.items || [];
-      const additionalFromMatrix = matrixData.additional_items || [];
       
       // All items from the main matrix endpoint are mandatory (8 mandatory items)
       // They may have blocker=true/false but are all required
       setMandatoryTraining(allItems);
-      setAdditionalTraining(additionalFromMatrix);
       
       // Handle proposed items - ensure it's an array
       const proposedFailed = proposedResult.status !== 'fulfilled';
@@ -240,13 +276,25 @@ export default function AuditReadyTrainingMatrix({
       const proposedArray = Array.isArray(proposedData) ? proposedData : 
                            proposedData?.items || proposedData?.proposed_items || [];
       setProposedItems(proposedArray);
+
+      const recordsFailed = recordsResult.status !== 'fulfilled';
+      const recordsData = recordsFailed ? [] : recordsResult.value?.data;
+      const canonicalRecords = Array.isArray(recordsData)
+        ? recordsData.map(normaliseCanonicalTrainingRecord)
+        : [];
+      setCanonicalTrainingRecords(canonicalRecords);
       
       // Get training certificates from merged endpoint (canonical + legacy)
       const certificatesFailed = docsResult.status !== 'fulfilled';
       const docsData = certificatesFailed ? null : docsResult.value?.data;
       const trainingCerts = docsData?.certificates || [];
       setCertificates(trainingCerts);
-      setSourceErrors({ matrix: false, certificates: certificatesFailed, proposedItems: proposedFailed });
+      setSourceErrors({
+        matrix: false,
+        certificates: certificatesFailed,
+        proposedItems: proposedFailed,
+        trainingRecords: recordsFailed,
+      });
       
       // Use the summary from API which already has correct calculations
       const apiSummary = matrixData.summary || {};
@@ -258,45 +306,11 @@ export default function AuditReadyTrainingMatrix({
         needsRenewal: allItems.filter(isTrainingDueSoon).length,
         missing: allItems.filter(item => item.status === 'missing').length,
         blockers: apiSummary.blockers || 0,
-        additionalQualifications: apiSummary.additional_count || additionalFromMatrix.length,
+        additionalQualifications: recordsFailed ? null : canonicalRecords.length,
         certificatesUploaded: certificatesFailed ? null : trainingCerts.length,
         needsReview: pendingReview
       });
 
-      // Auto-backfill: if proposed items exist but mandatory tab shows
-      // missing for those same trainings, create preliminary records.
-      if (pendingReview > 0 && allItems.filter(item => item.status === 'missing').length > 0) {
-        try {
-          const backfillRes = await axios.post(
-            `${API}/api/employees/${employeeId}/training/backfill-from-proposed`,
-            {},
-            { headers: { Authorization: `Bearer ${token}` } }
-          );
-          if (backfillRes.data?.created > 0) {
-            // Re-fetch matrix to pick up the new records
-            const refreshedMatrix = await axios.get(
-              `${API}/api/employees/${employeeId}/training/matrix`,
-              { headers: { Authorization: `Bearer ${token}` } }
-            );
-            const refreshedData = refreshedMatrix.data || {};
-            const refreshedItems = refreshedData.items || [];
-            setMandatoryTraining(refreshedItems);
-            setAdditionalTraining(refreshedData.additional_items || []);
-            const refreshedSummary = refreshedData.summary || {};
-            setSummary(prev => ({
-              ...prev,
-              totalRequired: refreshedSummary.total || refreshedItems.length,
-              current: refreshedItems.filter(isMandatoryTrainingSatisfied).length,
-              missing: refreshedItems.filter(item => item.status === 'missing').length,
-              blockers: refreshedSummary.blockers || 0,
-            }));
-          }
-        } catch (backfillErr) {
-          // Non-critical — silently ignore
-          console.debug('Auto-backfill skipped:', backfillErr?.message);
-        }
-      }
-      
     } catch (err) {
       console.error('Error fetching training data:', err);
       setLoadError(true);
@@ -671,7 +685,7 @@ export default function AuditReadyTrainingMatrix({
     const key = normalizeTrainingKey(item?.code || item?.title || item?.id);
     return Boolean(item?.is_required || item?.is_mandatory || item?.required || item?.mandatory || mandatoryKeys.has(key));
   };
-  const cannotAssessCount = (sourceErrors.certificates ? 1 : 0) + (sourceErrors.proposedItems ? 1 : 0);
+  const cannotAssessCount = (sourceErrors.certificates ? 1 : 0) + (sourceErrors.proposedItems ? 1 : 0) + (sourceErrors.trainingRecords ? 1 : 0);
   const trainingDecisionState = sourceErrors.matrix || loadError
     ? 'Cannot assess'
     : mandatoryBlockers.length > 0
@@ -788,8 +802,10 @@ export default function AuditReadyTrainingMatrix({
           <p className="text-xs text-red-600">Missing</p>
         </div>
         <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
-          <p className="text-2xl font-bold text-blue-700">{summary.additionalQualifications}</p>
-          <p className="text-xs text-blue-600">Additional</p>
+          <p className={cn('font-bold text-blue-700', sourceErrors.trainingRecords ? 'text-sm' : 'text-2xl')}>
+            {sourceErrors.trainingRecords ? 'Cannot assess' : summary.additionalQualifications}
+          </p>
+          <p className="text-xs text-blue-600">Approved</p>
         </div>
         <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg">
           <p className={cn('font-bold text-slate-700', sourceErrors.certificates ? 'text-sm' : 'text-2xl')}>
@@ -825,6 +841,7 @@ export default function AuditReadyTrainingMatrix({
         <span className="font-medium">Verified/current:</span> {mandatoryVerifiedCurrent.length}/{summary.totalRequired}
         {sourceErrors.certificates && <span> | Cannot assess certificates</span>}
         {sourceErrors.proposedItems && <span> | Cannot assess pending reviews</span>}
+        {sourceErrors.trainingRecords && <span> | Cannot assess approved qualifications</span>}
       </div>
 
       {/* Progress Bar */}
@@ -863,7 +880,7 @@ export default function AuditReadyTrainingMatrix({
           </TabsTrigger>
           <TabsTrigger value="library" className="flex items-center gap-2">
             <Book className="h-4 w-4" />
-            All Qualifications ({summary.additionalQualifications + summary.totalRequired})
+            All Qualifications ({sourceErrors.trainingRecords ? 'Cannot assess' : canonicalTrainingRecords.length})
           </TabsTrigger>
           <TabsTrigger value="certificates" className="flex items-center gap-2">
             <Award className="h-4 w-4" />
@@ -1158,6 +1175,11 @@ export default function AuditReadyTrainingMatrix({
               )}
 
               {/* All Training Records */}
+              {sourceErrors.trainingRecords && (
+                <div className="mb-6 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                  <span className="font-medium">Cannot assess approved qualifications.</span> Canonical training records did not load, so the approved list is unavailable.
+                </div>
+              )}
               <div className="mb-3">
                 <h4 className="text-sm font-medium text-gray-900">Approved/canonical qualifications</h4>
                 <p className="text-sm text-gray-500">
@@ -1181,7 +1203,7 @@ export default function AuditReadyTrainingMatrix({
                   {(() => {
                     // Deduplicate: one row per canonical training code/title
                     const seen = new Set();
-                    return [...mandatoryTraining, ...additionalTraining]
+                    return canonicalTrainingRecords
                       .filter(item => {
                         const key = (item.code || item.title || item.id || '').toLowerCase().replace(/[\s&_-]+/g, ' ').trim();
                         if (seen.has(key)) return false;

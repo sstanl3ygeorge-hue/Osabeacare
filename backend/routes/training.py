@@ -54,9 +54,21 @@ class TrainingRecordResponse(BaseModel):
     requirement_id: Optional[str] = None
     training_name: Optional[str] = None
     training_type: Optional[str] = None
+    mandatory: Optional[bool] = None
+    is_mandatory: Optional[bool] = None
+    status: Optional[str] = None
     completion_date: Optional[str] = None
     expiry_date: Optional[str] = None
     certificate_url: Optional[str] = None
+    source_document_id: Optional[str] = None
+    certificate_document_id: Optional[str] = None
+    original_filename: Optional[str] = None
+    uploaded_at: Optional[str] = None
+    provider_name: Optional[str] = None
+    provider: Optional[str] = None
+    mapped_training_code: Optional[str] = None
+    mapped_training_title: Optional[str] = None
+    evidence_files: Optional[List[Dict[str, Any]]] = None
     verified: bool = False
     verified_by: Optional[str] = None
     verified_at: Optional[str] = None
@@ -116,77 +128,16 @@ async def backfill_training_records_from_proposed(
     user: dict = Depends(require_manager_or_admin)
 ):
     """
-    Backfill: create preliminary training_records for mandatory proposed items
-    that don't yet have a corresponding training_record.
+    Compatibility endpoint retained for older clients.
 
-    Fixes the state where proposed items exist (from extraction) but the
-    Mandatory tab shows 'Missing' because the evaluator only queries
-    training_records.
+    Premature promotion is intentionally disabled: extracted certificate items
+    remain in proposed_training_items until an admin explicitly approves them.
     """
-    db = get_db()
-    from services.training_evaluator import resolve_mandatory_training_code
-    now = datetime.now(timezone.utc).isoformat()
-
-    proposed = await db.proposed_training_items.find(
-        {"employee_id": employee_id, "status": {"$in": ["proposed", "approved"]}},
-        {"_id": 0},
-    ).to_list(200)
-
-    if not proposed:
-        return {"success": True, "created": 0, "message": "No proposed items to backfill"}
-
-    created = 0
-    for item in proposed:
-        name = item.get("raw_course_title") or item.get("mapped_training_title") or ""
-        code = resolve_mandatory_training_code(name)
-        if not code:
-            code = item.get("mapped_training_code")
-            if not code:
-                continue
-
-        existing = await db.training_records.find_one({
-            "employee_id": employee_id,
-            "requirement_id": code,
-            "record_status": "active",
-        })
-        if existing:
-            continue
-
-        await db.training_records.insert_one({
-            "id": str(uuid.uuid4()),
-            "employee_id": employee_id,
-            "training_name": name,
-            "requirement_id": code,
-            "mandatory": True,
-            "completion_date": item.get("completion_date") or item.get("completed_at"),
-            "expiry_date": item.get("expiry_date") or item.get("expires_at"),
-            "status": "completed",
-            "certificate_url": None,
-            "verified": False,
-            "completion_method": "certificate",
-            "record_status": "active",
-            "source_document_id": item.get("source_document_id"),
-            "intake_item_id": item.get("id"),
-            "ai_extracted": True,
-            "created_at": now,
-            "updated_at": now,
-        })
-        created += 1
-
-    if created:
-        await log_audit_action(
-            user.get("user_id"),
-            "training_backfill_from_proposed",
-            "employee",
-            employee_id,
-            {"created_count": created},
-        )
-        logger.info(f"Backfilled {created} training_records from proposed items for employee {employee_id}")
-
     return {
         "success": True,
-        "created": created,
-        "message": f"Created {created} preliminary training record(s) from proposed items",
+        "created": 0,
+        "disabled": True,
+        "message": "Backfill disabled: approve extracted items to create canonical training records",
     }
 
 

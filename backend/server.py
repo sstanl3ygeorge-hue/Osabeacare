@@ -12087,41 +12087,6 @@ async def bulk_save_training_records(
             "expiry_date": expiry_date,
         })
 
-    # Fix A: Create preliminary training_records for mandatory items so the
-    # evaluator returns "awaiting_review" instead of "missing" immediately.
-    preliminary_records = []
-    for rec in saved_records:
-        if rec.get("canonical_code"):
-            # Check if a training_record already exists for this requirement
-            existing_tr = await db.training_records.find_one({
-                "employee_id": employee_id,
-                "requirement_id": rec["canonical_code"],
-                "record_status": "active",
-            })
-            if not existing_tr:
-                preliminary_records.append({
-                    "id": str(uuid.uuid4()),
-                    "employee_id": employee_id,
-                    "training_name": rec["training_name"],
-                    "requirement_id": rec["canonical_code"],
-                    "mandatory": True,
-                    "completion_date": rec.get("completion_date"),
-                    "expiry_date": rec.get("expiry_date"),
-                    "status": "completed",
-                    "certificate_url": None,
-                    "verified": False,
-                    "completion_method": "certificate",
-                    "record_status": "active",
-                    "source_document_id": rec.get("document_id"),
-                    "intake_item_id": rec["id"],
-                    "ai_extracted": True,
-                    "created_at": now,
-                    "updated_at": now,
-                })
-    if preliminary_records:
-        await db.training_records.insert_many(preliminary_records)
-        logger.info(f"[bulk-save] Created {len(preliminary_records)} preliminary training_records for mandatory items (awaiting verification)")
-
     if touched_document_ids:
         await db.employee_documents.update_many(
             {"id": {"$in": list(touched_document_ids)}, "employee_id": employee_id},
@@ -24591,6 +24556,245 @@ async def auto_generate_form_pdf(form_id: str, user: dict):
 # New: Export endpoint returning CSV or PDF
 # ============================================================================
 
+def _training_matrix_columns():
+    """Single column definition used by visible matrix, summary, and exports."""
+    return [
+        {"id": "induction", "name": "Induction", "has_refresher": False},
+        {"id": "manual_handling", "name": "Moving & Handling", "has_refresher": True},
+        {"id": "medication", "name": "Medication", "has_refresher": True},
+        {"id": "health_safety", "name": "Health and Safety", "has_refresher": True},
+        {"id": "food_hygiene", "name": "Food Hygiene", "has_refresher": True},
+        {"id": "basic_life_support", "name": "First Aid", "has_refresher": True},
+        {"id": "safeguarding", "name": "Safeguarding Adults & Child", "has_refresher": True},
+        {"id": "mca_dols", "name": "MCA and DoLs", "has_refresher": True},
+        {"id": "dementia", "name": "Dementia", "has_refresher": True},
+        {"id": "fire_safety", "name": "Fire", "has_refresher": True},
+        {"id": "autism", "name": "Autism Awareness", "has_refresher": True},
+        {"id": "infection_control", "name": "Infection Control", "has_refresher": True},
+        {"id": "information_governance", "name": "Info Governance", "has_refresher": True},
+        {"id": "prevent", "name": "Prevent", "has_refresher": True},
+    ]
+
+
+def _format_training_matrix_date(date_val):
+    if not date_val:
+        return ""
+    try:
+        if isinstance(date_val, str):
+            if "T" in date_val:
+                dt = datetime.fromisoformat(date_val.replace("Z", "+00:00"))
+            else:
+                dt = datetime.fromisoformat(f"{date_val}T00:00:00+00:00")
+        else:
+            dt = date_val
+        return dt.strftime("%d/%m/%Y")
+    except Exception:
+        return ""
+
+
+async def build_training_matrix_read_model():
+    """
+    Shared read model for the visible training matrix, summary, and export.
+
+    Rows are employee-driven, not training-record-driven, so archived/orphaned
+    training rows cannot appear as normal staff with an Unknown name.
+    """
+    now = datetime.now(timezone.utc)
+    columns = _training_matrix_columns()
+
+    employees = await db.employees.find(
+        {"status": {"$in": ["active", "onboarding"]}},
+        {
+            "_id": 0,
+            "id": 1,
+            "first_name": 1,
+            "last_name": 1,
+            "employee_code": 1,
+            "role": 1,
+            "start_date": 1,
+            "probation_end_date": 1,
+            "next_appraisal_date": 1,
+        },
+    ).to_list(500)
+
+    employee_ids = [emp.get("id") for emp in employees if emp.get("id")]
+    records = []
+    if employee_ids:
+        records = await db.training_records.find(
+            {
+                "employee_id": {"$in": employee_ids},
+                "record_status": {"$nin": ["deleted", "superseded"]},
+            },
+            {"_id": 0},
+        ).to_list(5000)
+
+    records_by_employee = {}
+    for record in records:
+        records_by_employee.setdefault(record.get("employee_id"), []).append(record)
+
+    pending_proposed = await db.proposed_training_items.find(
+        {"employee_id": {"$in": employee_ids}, "status": "proposed"},
+        {"_id": 0, "employee_id": 1},
+    ).to_list(5000) if employee_ids else []
+    pending_by_employee = {}
+    for item in pending_proposed:
+        emp_id = item.get("employee_id")
+        if emp_id:
+            pending_by_employee[emp_id] = pending_by_employee.get(emp_id, 0) + 1
+
+    summary = {
+        "total_employees": len(employees),
+        "total_training_types": len(columns),
+        "completed": 0,
+        "verified": 0,
+        "needs_renewal": 0,
+        "expired": 0,
+        "missing": 0,
+        "awaiting_review": 0,
+        "awaiting_extraction_review": 0,
+        "awaiting_verification": 0,
+    }
+    column_stats = {col["id"]: {"in_date": 0, "out_of_date": 0, "total": 0} for col in columns}
+
+    alt_keys = {
+        "manual_handling": ["moving_handling", "moving_and_handling"],
+        "basic_life_support": ["bls", "first_aid"],
+        "safeguarding": ["safeguarding_adults", "safeguarding_children"],
+        "mca_dols": ["mca", "dols", "mental_capacity", "mental_capacity_act"],
+        "dementia": ["dementia_awareness"],
+        "autism": ["autism_awareness"],
+        "food_hygiene": ["food_safety"],
+        "health_safety": ["health_and_safety"],
+    }
+
+    rows = []
+    for emp in employees:
+        emp_id = emp.get("id")
+        training_records = records_by_employee.get(emp_id, [])
+        training_lookup = {}
+        for record in training_records:
+            keys = {
+                record.get("requirement_id"),
+                record.get("mapped_training_code"),
+                normalize_training_key(record.get("training_name", "")),
+            }
+            score = 0 if record.get("verified") or record.get("verification_status") == "verified" else 1
+            for key in [k for k in keys if k]:
+                current = training_lookup.get(key)
+                if not current or score < current.get("_score", 99):
+                    training_lookup[key] = {**record, "_score": score}
+
+        row = {
+            "employee_id": emp_id,
+            "employee_code": emp.get("employee_code", ""),
+            "name": f"{emp.get('first_name', '')} {emp.get('last_name', '')}".strip(),
+            "role": emp.get("role", ""),
+            "start_date": _format_training_matrix_date(emp.get("start_date")),
+            "probation_review": _format_training_matrix_date(emp.get("probation_end_date")),
+            "appraisal": _format_training_matrix_date(emp.get("next_appraisal_date")),
+            "pending_extraction_count": pending_by_employee.get(emp_id, 0),
+            "training": {},
+        }
+
+        for col in columns:
+            training_id = col["id"]
+            record = training_lookup.get(training_id)
+            if not record:
+                for alt_key in alt_keys.get(training_id, []):
+                    record = training_lookup.get(alt_key)
+                    if record:
+                        break
+
+            column_stats[training_id]["total"] += 1
+            if not record:
+                summary["missing"] += 1
+                column_stats[training_id]["out_of_date"] += 1
+                row["training"][training_id] = {
+                    "status": "missing",
+                    "verified": False,
+                    "completion_date": "",
+                    "expiry_date": "",
+                    "days_until_expiry": None,
+                }
+                continue
+
+            expiry_date = record.get("expiry_date") or record.get("expires_at")
+            completion_date = record.get("completion_date") or record.get("completed_at")
+            verified = record.get("verification_status") == "verified" or bool(record.get("verified"))
+            status = "in_date" if verified else "completed"
+            days_until_expiry = None
+            if record.get("verification_status") == "awaiting_review" or not verified:
+                summary["awaiting_review"] += 1
+                summary["awaiting_verification"] += 1
+
+            if expiry_date:
+                try:
+                    if isinstance(expiry_date, str):
+                        exp = datetime.fromisoformat(expiry_date.replace("Z", "+00:00")) if "T" in expiry_date else datetime.fromisoformat(f"{expiry_date}T00:00:00+00:00")
+                    else:
+                        exp = expiry_date if expiry_date.tzinfo else expiry_date.replace(tzinfo=timezone.utc)
+                    days_until_expiry = (exp - now).days
+                    if days_until_expiry < 0:
+                        status = "expired"
+                        summary["expired"] += 1
+                        column_stats[training_id]["out_of_date"] += 1
+                    elif days_until_expiry <= 30:
+                        status = "expiring"
+                        summary["needs_renewal"] += 1
+                        column_stats[training_id]["in_date"] += 1
+                    elif verified:
+                        summary["verified"] += 1
+                        column_stats[training_id]["in_date"] += 1
+                    else:
+                        summary["completed"] += 1
+                        column_stats[training_id]["out_of_date"] += 1
+                except Exception:
+                    if verified:
+                        summary["verified"] += 1
+                        column_stats[training_id]["in_date"] += 1
+                    else:
+                        summary["completed"] += 1
+                        column_stats[training_id]["out_of_date"] += 1
+            else:
+                if verified:
+                    summary["verified"] += 1
+                    column_stats[training_id]["in_date"] += 1
+                else:
+                    summary["completed"] += 1
+                    column_stats[training_id]["out_of_date"] += 1
+
+            row["training"][training_id] = {
+                "status": status,
+                "verified": verified,
+                "completion_date": _format_training_matrix_date(completion_date),
+                "raw_completion_date": completion_date,
+                "expiry_date": _format_training_matrix_date(expiry_date),
+                "raw_expiry_date": expiry_date,
+                "days_until_expiry": days_until_expiry,
+                "verification_status": record.get("verification_status"),
+                "provider": record.get("provider_name") or record.get("provider"),
+            }
+
+        if row["pending_extraction_count"] > 0:
+            summary["awaiting_extraction_review"] += row["pending_extraction_count"]
+        rows.append(row)
+
+    column_percentages = {
+        training_id: round((stats["in_date"] / stats["total"]) * 100) if stats["total"] else 100
+        for training_id, stats in column_stats.items()
+    }
+    average_percentage = round(sum(column_percentages.values()) / len(column_percentages)) if column_percentages else 100
+
+    return {
+        "summary": summary,
+        "columns": columns,
+        "rows": rows,
+        "column_stats": column_stats,
+        "column_percentages": column_percentages,
+        "average_percentage": average_percentage,
+        "employee_status_filter": ["active", "onboarding"],
+    }
+
 @api_router.get("/training-matrix/export")
 async def export_training_matrix(
     format: str = "csv",  # csv or pdf
@@ -24609,166 +24813,12 @@ async def export_training_matrix(
     import io
     
     now = datetime.now(timezone.utc)
-    
-    # CQC Standard Training Types in order (matching Excel format)
-    # Each training has an initial and optional refresher tracking
-    cqc_training_order = [
-        {"id": "induction", "name": "Induction", "has_refresher": False},
-        {"id": "manual_handling", "name": "Moving & Handling", "has_refresher": True},
-        {"id": "medication", "name": "Medication", "has_refresher": True},
-        {"id": "health_safety", "name": "Health and Safety", "has_refresher": True},
-        {"id": "food_hygiene", "name": "Food Hygiene", "has_refresher": True},
-        {"id": "bls", "name": "First Aid", "has_refresher": True},  # BLS maps to First Aid
-        {"id": "safeguarding", "name": "Safeguarding Adults & Child", "has_refresher": True},
-        {"id": "mca_dols", "name": "MCA and DoLs", "has_refresher": True},
-        {"id": "dementia", "name": "Dementia", "has_refresher": True},
-        {"id": "fire_safety", "name": "Fire", "has_refresher": True},
-        {"id": "autism", "name": "Autism Awareness", "has_refresher": True},
-        # Additional trainings not in standard matrix but required
-        {"id": "infection_control", "name": "Infection Control", "has_refresher": True},
-        {"id": "information_governance", "name": "Info Governance", "has_refresher": True},
-        {"id": "prevent", "name": "Prevent", "has_refresher": True},
-    ]
-    
-    # Get all active employees with additional fields
-    employees = await db.employees.find(
-        {"status": {"$in": ["active", "onboarding"]}},
-        {"_id": 0, "id": 1, "first_name": 1, "last_name": 1, "employee_code": 1, 
-         "role": 1, "start_date": 1, "probation_end_date": 1, "next_appraisal_date": 1}
-    ).to_list(500)
-    
-    # Build matrix data
-    matrix_data = []
-    column_stats = {t["id"]: {"in_date": 0, "out_of_date": 0, "total": 0} for t in cqc_training_order}
-    
-    for emp in employees:
-        # Get employee's training records
-        training_records = await db.training_records.find(
-            {"employee_id": emp["id"], "record_status": {"$nin": ["deleted", "superseded"]}},
-            {"_id": 0}
-        ).to_list(100)
-        
-        # Create lookup by training name/id
-        training_lookup = {}
-        for record in training_records:
-            key = record.get("requirement_id") or record.get("training_name", "").lower().replace(" ", "_")
-            # Keep the most recent completed record
-            if key not in training_lookup or (record.get("completion_date") and 
-                (not training_lookup[key].get("completion_date") or 
-                 record.get("completion_date") > training_lookup[key].get("completion_date"))):
-                training_lookup[key] = record
-        
-        # Format dates helper
-        def format_date(date_val):
-            if not date_val:
-                return ""
-            try:
-                if isinstance(date_val, str):
-                    if 'T' in date_val:
-                        dt = datetime.fromisoformat(date_val.replace('Z', '+00:00'))
-                    else:
-                        dt = datetime.fromisoformat(f"{date_val}T00:00:00+00:00")
-                else:
-                    dt = date_val
-                return dt.strftime("%d/%m/%Y")
-            except:
-                return ""
-        
-        # Build row
-        row = {
-            "name": f"{emp['first_name']} {emp['last_name']}",
-            "employee_code": emp.get("employee_code", ""),
-            "start_date": format_date(emp.get("start_date")),
-            "probation_review": format_date(emp.get("probation_end_date")),
-            "appraisal": format_date(emp.get("next_appraisal_date")),
-            "training": {}
-        }
-        
-        for training_type in cqc_training_order:
-            training_id = training_type["id"]
-            
-            # Try to find matching record
-            record = training_lookup.get(training_id)
-            if not record:
-                # Try alternative keys
-                alt_keys = {
-                    "manual_handling": ["moving_handling", "moving_and_handling"],
-                    "bls": ["first_aid", "basic_life_support"],
-                    "safeguarding": ["safeguarding_adults", "safeguarding_children"],
-                    "mca_dols": ["mca", "dols", "mental_capacity"],
-                    "dementia": ["dementia_awareness"],
-                    "autism": ["autism_awareness"],
-                    "food_hygiene": ["food_safety"],
-                }
-                for alt_key in alt_keys.get(training_id, []):
-                    record = training_lookup.get(alt_key)
-                    if record:
-                        break
-            
-            column_stats[training_id]["total"] += 1
-            
-            if record and record.get("status") == "completed":
-                completion_date = record.get("completion_date")
-                expiry_date = record.get("expiry_date")
-                
-                # Determine status
-                status = "in_date"  # Blue
-                completion_display = format_date(completion_date)
-                expiry_display = format_date(expiry_date)
-                
-                if expiry_date:
-                    try:
-                        if isinstance(expiry_date, str):
-                            if 'T' in expiry_date:
-                                exp = datetime.fromisoformat(expiry_date.replace('Z', '+00:00'))
-                            else:
-                                exp = datetime.fromisoformat(f"{expiry_date}T00:00:00+00:00")
-                        else:
-                            exp = expiry_date if expiry_date.tzinfo else expiry_date.replace(tzinfo=timezone.utc)
-                        
-                        days_until = (exp - now).days
-                        
-                        if days_until < 0:
-                            status = "expired"  # Red
-                            column_stats[training_id]["out_of_date"] += 1
-                        elif days_until <= 30:
-                            status = "expiring"  # Yellow/Orange
-                            column_stats[training_id]["in_date"] += 1
-                        else:
-                            column_stats[training_id]["in_date"] += 1
-                    except:
-                        column_stats[training_id]["in_date"] += 1
-                else:
-                    # No expiry = always in date
-                    column_stats[training_id]["in_date"] += 1
-                
-                row["training"][training_id] = {
-                    "status": status,
-                    "completion_date": completion_display,
-                    "expiry_date": expiry_display,
-                    "verified": record.get("verified", False)
-                }
-            else:
-                # Missing training
-                row["training"][training_id] = {
-                    "status": "missing",
-                    "completion_date": "",
-                    "expiry_date": "",
-                    "verified": False
-                }
-                column_stats[training_id]["out_of_date"] += 1
-        
-        matrix_data.append(row)
-    
-    # Calculate percentages
-    column_percentages = {}
-    for training_id, stats in column_stats.items():
-        if stats["total"] > 0:
-            column_percentages[training_id] = round((stats["in_date"] / stats["total"]) * 100)
-        else:
-            column_percentages[training_id] = 100
-    
-    average_percentage = round(sum(column_percentages.values()) / len(column_percentages)) if column_percentages else 100
+    matrix_model = await build_training_matrix_read_model()
+    cqc_training_order = matrix_model["columns"]
+    matrix_data = matrix_model["rows"]
+    column_stats = matrix_model["column_stats"]
+    column_percentages = matrix_model["column_percentages"]
+    average_percentage = matrix_model["average_percentage"]
     
     # Generate export based on format
     if format.lower() == "csv":
@@ -33642,159 +33692,7 @@ async def get_training_matrix(
     - Expired
     - Awaiting Review (pending extraction or verification)
     """
-    now = datetime.now(timezone.utc)
-    
-    # Get all training types from MANDATORY_ITEMS
-    training_types = MANDATORY_ITEMS.get("training", [])
-    nurse_training = [t for t in MANDATORY_ITEMS.get("nurse_specific", []) if t.get("type") == "training"]
-    all_training_types = training_types + nurse_training
-    
-    training_columns = [{"id": t["id"], "name": t.get("training_name", t["name"])} for t in all_training_types]
-    
-    # Get active employees
-    employees = await EmployeesRepository.list_employees(
-        filter_dict={"status": {"$in": ["active", "onboarding"]}},
-        projection={"_id": 0, "id": 1, "first_name": 1, "last_name": 1, "employee_code": 1, "role": 1}
-    )
-    
-    # Summary counters
-    summary = {
-        "total_employees": len(employees),
-        "total_training_types": len(training_columns),
-        "completed": 0,
-        "verified": 0,
-        "needs_renewal": 0,
-        "expired": 0,
-        "missing": 0,
-        "awaiting_extraction_review": 0,
-        "awaiting_verification": 0
-    }
-    
-    # Get pending extraction reviews for training certificates
-    pending_extractions = await db.document_extractions.find({
-        "document_type": "training_certificate",
-        "review_status": "awaiting_review"
-    }, {"_id": 0, "employee_id": 1}).to_list(500)
-    
-    pending_extraction_by_employee = {}
-    for ext in pending_extractions:
-        emp_id = ext.get("employee_id")
-        if emp_id:
-            pending_extraction_by_employee[emp_id] = pending_extraction_by_employee.get(emp_id, 0) + 1
-    
-    # Build matrix rows
-    rows = []
-    for emp in employees:
-        emp_id = emp["id"]
-        
-        # Get canonical training records ONLY
-        training_records = await db.training_records.find(
-            {"employee_id": emp_id, "record_status": {"$nin": ["deleted", "superseded"]}},
-            {"_id": 0}
-        ).to_list(100)
-        
-        # Create lookup
-        training_lookup = {}
-        for record in training_records:
-            key = record.get("requirement_id") or record.get("training_name", "").lower().replace(" ", "_")
-            # Keep most recent/best record
-            if key not in training_lookup or (record.get("verified") and not training_lookup[key].get("verified")):
-                training_lookup[key] = record
-        
-        row = {
-            "employee_id": emp_id,
-            "employee_code": emp.get("employee_code", ""),
-            "name": f"{emp.get('first_name', '')} {emp.get('last_name', '')}".strip(),
-            "role": emp.get("role", ""),
-            "pending_extraction_count": pending_extraction_by_employee.get(emp_id, 0),
-            "training": {}
-        }
-        
-        for col in training_columns:
-            training_id = col["id"]
-            training_name = col["name"]
-            
-            # Find matching record
-            record = training_lookup.get(training_id)
-            if not record:
-                for key, rec in training_lookup.items():
-                    if rec.get("training_name", "").lower() == training_name.lower():
-                        record = rec
-                        break
-            
-            if record:
-                # Compute status from canonical record
-                expiry_date = record.get("expiry_date")
-                completion_date = record.get("completed_at") or record.get("completion_date")
-                verified = record.get("verification_status") == "verified" or record.get("verified")
-                
-                status = "completed"
-                days_until_expiry = None
-                
-                if expiry_date:
-                    try:
-                        if isinstance(expiry_date, str):
-                            exp = datetime.fromisoformat(expiry_date.replace('Z', '+00:00'))
-                        else:
-                            exp = expiry_date if expiry_date.tzinfo else expiry_date.replace(tzinfo=timezone.utc)
-                        
-                        days_until_expiry = (exp - now).days
-                        
-                        if days_until_expiry < 0:
-                            status = "expired"
-                            summary["expired"] += 1
-                        elif days_until_expiry <= 30:
-                            status = "needs_renewal"
-                            summary["needs_renewal"] += 1
-                        else:
-                            if verified:
-                                summary["verified"] += 1
-                            else:
-                                summary["completed"] += 1
-                    except:
-                        if verified:
-                            summary["verified"] += 1
-                        else:
-                            summary["completed"] += 1
-                else:
-                    if verified:
-                        summary["verified"] += 1
-                    else:
-                        summary["completed"] += 1
-                
-                # Check if awaiting verification
-                if record.get("verification_status") == "awaiting_review":
-                    summary["awaiting_verification"] += 1
-                
-                row["training"][training_id] = {
-                    "status": status,
-                    "verified": verified,
-                    "completion_date": completion_date,
-                    "expiry_date": expiry_date,
-                    "days_until_expiry": days_until_expiry,
-                    "verification_status": record.get("verification_status"),
-                    "provider": record.get("provider_name")
-                }
-            else:
-                summary["missing"] += 1
-                row["training"][training_id] = {
-                    "status": "missing",
-                    "verified": False,
-                    "completion_date": None,
-                    "expiry_date": None
-                }
-        
-        # Add pending extraction count to summary
-        if row["pending_extraction_count"] > 0:
-            summary["awaiting_extraction_review"] += row["pending_extraction_count"]
-        
-        rows.append(row)
-    
-    return {
-        "summary": summary,
-        "columns": training_columns,
-        "rows": rows
-    }
+    return await build_training_matrix_read_model()
 
 
 @api_router.get("/training/matrix/summary")
@@ -33804,66 +33702,8 @@ async def get_training_matrix_summary(
     """
     Get Training Matrix summary cards only (for dashboard).
     """
-    now = datetime.now(timezone.utc)
-    
-    summary = {
-        "completed": 0,
-        "verified": 0,
-        "needs_renewal": 0,
-        "expired": 0,
-        "awaiting_review": 0,
-        "awaiting_extraction_review": 0
-    }
-    
-    # Count from canonical training_records
-    training_records = await db.training_records.find(
-        {"record_status": {"$nin": ["deleted", "superseded"]}},
-        {"_id": 0, "expiry_date": 1, "verification_status": 1, "verified": 1}
-    ).to_list(5000)
-    
-    for record in training_records:
-        verified = record.get("verification_status") == "verified" or record.get("verified")
-        expiry_date = record.get("expiry_date")
-        
-        if record.get("verification_status") == "awaiting_review":
-            summary["awaiting_review"] += 1
-            continue
-        
-        if expiry_date:
-            try:
-                if isinstance(expiry_date, str):
-                    exp = datetime.fromisoformat(expiry_date.replace('Z', '+00:00'))
-                else:
-                    exp = expiry_date if expiry_date.tzinfo else expiry_date.replace(tzinfo=timezone.utc)
-                
-                days = (exp - now).days
-                if days < 0:
-                    summary["expired"] += 1
-                elif days <= 30:
-                    summary["needs_renewal"] += 1
-                elif verified:
-                    summary["verified"] += 1
-                else:
-                    summary["completed"] += 1
-            except:
-                if verified:
-                    summary["verified"] += 1
-                else:
-                    summary["completed"] += 1
-        else:
-            if verified:
-                summary["verified"] += 1
-            else:
-                summary["completed"] += 1
-    
-    # Count pending extractions
-    pending_count = await db.document_extractions.count_documents({
-        "document_type": "training_certificate",
-        "review_status": "awaiting_review"
-    })
-    summary["awaiting_extraction_review"] = pending_count
-    
-    return summary
+    matrix_model = await build_training_matrix_read_model()
+    return matrix_model["summary"]
 
 
 # ==================== DOCUMENT CORRECTION ENDPOINTS ====================
@@ -40113,8 +39953,22 @@ Important:
             
             if item.approve:
                 # Create canonical training record
+                raw_title = proposed.get("raw_course_title") or ""
                 training_code = item.mapped_training_code or proposed.get("mapped_training_code")
-                training_title = item.mapped_training_title or proposed.get("mapped_training_title") or proposed.get("raw_course_title")
+                training_title = item.mapped_training_title or proposed.get("mapped_training_title") or raw_title
+                if not training_code:
+                    mapped_code, mapped_title = map_training_title(training_title or raw_title)
+                    training_code = mapped_code
+                    if mapped_title and not item.mapped_training_title:
+                        training_title = mapped_title
+                if not training_code:
+                    fallback_key = normalize_training_key(training_title or raw_title)[:60]
+                    fallback_key = re.sub(r"[^a-z0-9_]", "", fallback_key) or f"training_{uuid.uuid4().hex[:8]}"
+                    training_code = f"additional_{fallback_key}"
+                is_mandatory_record = bool(
+                    training_code in get_canonical_mandatory_training_ids()
+                    or is_mandatory_training(training_title or raw_title)
+                )
                 completed_at = item.completed_at or proposed.get("completed_at")
                 expires_at = item.expires_at or proposed.get("expires_at")
                 
@@ -40145,6 +39999,9 @@ Important:
                     # Update existing record
                     record_id = existing_record.get("id")
                     update_data = {
+                        "training_name": training_title,
+                        "requirement_id": training_code,
+                        "mandatory": is_mandatory_record,
                         "completion_date": completed_at,
                         "expiry_date": expires_at,
                         "status": "completed",
@@ -40158,7 +40015,9 @@ Important:
                         "provider_name": proposed.get("provider_name"),
                         "source_document_id": proposed.get("source_document_id"),
                         "intake_item_id": item.item_id,
-                        "intake_review_notes": item.notes
+                        "intake_review_notes": item.notes,
+                        "mapped_training_code": training_code,
+                        "mapped_training_title": training_title,
                     }
                     
                     # Add evidence file link
@@ -40186,7 +40045,7 @@ Important:
                         "employee_id": employee_id,
                         "training_name": training_title,
                         "requirement_id": training_code,
-                        "mandatory": True,
+                        "mandatory": is_mandatory_record,
                         "completion_date": completed_at,
                         "expiry_date": expires_at,
                         "status": "completed",
@@ -40202,6 +40061,9 @@ Important:
                         "source_document_id": proposed.get("source_document_id"),
                         "intake_item_id": item.item_id,
                         "intake_review_notes": item.notes,
+                        "mapped_training_code": training_code,
+                        "mapped_training_title": training_title,
+                        "source_type": "certificate_extraction",
                         "evidence_files": [{
                             "file_id": str(uuid.uuid4()),
                             "document_id": proposed.get("source_document_id"),

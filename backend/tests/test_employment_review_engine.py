@@ -180,6 +180,8 @@ def test_explanation_matches_gap_by_date_range():
     assert matched_gap["status"] == "explained"
     assert matched_gap["explanation"]["matched_by"] == "date_range"
     assert review["top_summary"]["explained_gaps"] == 1
+    assert review["can_sign_off"] is False
+    assert "require admin verification" in review["gap_actions"]["blocked_sign_off_reasons"][0]
 
 
 def test_explanation_matches_gap_by_legacy_gap_id():

@@ -359,6 +359,7 @@ def build_employment_review_from_employee(
         gap_segments,
     )
     sign_off = _build_sign_off(employee, version, timeline_fingerprint, status_without_signoff)
+    status_reason_without_signoff = status_reason
     status = REVIEW_STATUS_FULLY_ACCOUNTED if sign_off.get("signed_off") else status_without_signoff
     if status == REVIEW_STATUS_FULLY_ACCOUNTED:
         status_reason = "Employment review was signed off for this review version and timeline."
@@ -387,6 +388,25 @@ def build_employment_review_from_employee(
     if top_summary["rejected_gaps"]:
         blocked_sign_off_reasons.append(f"{top_summary['rejected_gaps']} gap explanation(s) rejected or need action")
 
+    if sign_off.get("signed_off") and blocked_sign_off_reasons:
+        sign_off = {
+            **sign_off,
+            "signed_off": False,
+            "previous_signed_off": True,
+            "version_signed": None,
+            "decision": None,
+            "invalidated": True,
+            "invalidated_reason": "Current review still has blockers and cannot remain signed off.",
+        }
+        status = status_without_signoff
+        status_reason = status_reason_without_signoff
+
+    can_sign_off = (
+        status_without_signoff == REVIEW_STATUS_AWAITING_ADMIN_REVIEW
+        and not sign_off.get("signed_off")
+        and not blocked_sign_off_reasons
+    )
+
     return {
         "id": f"employment_review_{employee_id}" if employee_id else None,
         "employee_id": employee_id,
@@ -401,7 +421,7 @@ def build_employment_review_from_employee(
             REVIEW_STATUS_CANNOT_ASSESS: "Cannot assess",
         }.get(status, "Cannot assess"),
         "status_reason": status_reason,
-        "can_sign_off": status_without_signoff == REVIEW_STATUS_AWAITING_ADMIN_REVIEW and not sign_off.get("signed_off"),
+        "can_sign_off": can_sign_off,
         "cannot_assess": status_without_signoff == REVIEW_STATUS_CANNOT_ASSESS,
         "review_window": {
             "start_date": coverage_start.strftime("%Y-%m-%d"),
@@ -425,7 +445,7 @@ def build_employment_review_from_employee(
         "gap_actions": {
             "can_rerun_analysis": bool(employment_history),
             "can_edit_history": True,
-            "can_sign_off": status_without_signoff == REVIEW_STATUS_AWAITING_ADMIN_REVIEW and not sign_off.get("signed_off"),
+            "can_sign_off": can_sign_off,
             "blocked_sign_off_reasons": blocked_sign_off_reasons,
         },
         "sign_off": sign_off,

@@ -228,6 +228,9 @@ export default function EmployeeProfilePage() {
   const [templates, setTemplates] = useState([]);
   const [compliance, setCompliance] = useState(null);
   const [complianceFile, setComplianceFile] = useState(null);
+  const [employmentReview, setEmploymentReview] = useState(null);
+  const [employmentReviewPersisted, setEmploymentReviewPersisted] = useState(false);
+  const [employmentReviewError, setEmploymentReviewError] = useState(false);
   const [loading, setLoading] = useState(true);
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
   const [bulkUploadOpen, setBulkUploadOpen] = useState(false);
@@ -332,6 +335,7 @@ export default function EmployeeProfilePage() {
 
   // Employment Review sign-off state
   const [employmentSignOffLoading, setEmploymentSignOffLoading] = useState(false);
+  const [employmentReviewRebuildLoading, setEmploymentReviewRebuildLoading] = useState(false);
   
   // Delete training record states
   const [deleteTrainingDialogOpen, setDeleteTrainingDialogOpen] = useState(false);
@@ -728,7 +732,8 @@ export default function EmployeeProfilePage() {
         fetchEmployee(),
         fetchRecruitmentStatus(),
         fetchCompliance(),
-        fetchComplianceFile()
+        fetchComplianceFile(),
+        fetchEmploymentReview()
       ]);
     } catch (err) {
       const detail = err.response?.data?.detail;
@@ -763,7 +768,7 @@ export default function EmployeeProfilePage() {
         { headers: { Authorization: `Bearer ${token}` } }
       );
       toast.success('CV linked as review document');
-      await Promise.all([fetchEmployee(), fetchCompliance(), fetchComplianceFile()]);
+      await Promise.all([fetchEmployee(), fetchCompliance(), fetchComplianceFile(), fetchEmploymentReview()]);
     } catch (err) {
       toast.error(err?.response?.data?.detail || 'Failed to link CV');
     } finally {
@@ -810,6 +815,7 @@ export default function EmployeeProfilePage() {
       );
       toast.success('Employment review signed off.');
       fetchEmployee();
+      fetchEmploymentReview();
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Sign-off failed. Check all gaps are resolved.');
     } finally {
@@ -1231,6 +1237,43 @@ export default function EmployeeProfilePage() {
     }
   };
 
+  const fetchEmploymentReview = async ({ rebuild = false, showToast = false } = {}) => {
+    if (!employeeId || !token) {
+      console.debug('Skipping employment-review fetch until employeeId and auth token are available');
+      return;
+    }
+
+    try {
+      setEmploymentReviewError(false);
+      const response = await axios.get(`${API}/employees/${employeeId}/employment-review`, {
+        headers: { Authorization: `Bearer ${token}` },
+        params: rebuild ? { rebuild: true } : {}
+      });
+      setEmploymentReview(response.data?.employment_review || null);
+      setEmploymentReviewPersisted(Boolean(response.data?.persisted && response.data?.employment_review));
+      if (showToast && response.data?.rebuilt) {
+        toast.success('Canonical employment review rebuilt.');
+      }
+    } catch (error) {
+      console.error('Failed to fetch employment review:', error);
+      setEmploymentReview(null);
+      setEmploymentReviewPersisted(false);
+      setEmploymentReviewError(true);
+      if (showToast) {
+        toast.error(error?.response?.data?.detail || 'Failed to rebuild employment review');
+      }
+    }
+  };
+
+  const handleRebuildEmploymentReview = async () => {
+    setEmploymentReviewRebuildLoading(true);
+    try {
+      await fetchEmploymentReview({ rebuild: true, showToast: true });
+    } finally {
+      setEmploymentReviewRebuildLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (!employeeId || !token) {
       console.debug('Skipping employee profile protected fetches until employeeId and auth token are available');
@@ -1240,6 +1283,7 @@ export default function EmployeeProfilePage() {
     fetchData();
     fetchCompliance();
     fetchComplianceFile();
+    fetchEmploymentReview();
     fetchRecruitmentStatus();
     fetchReferenceStatus();
     fetchEmploymentMismatch();
@@ -3304,20 +3348,91 @@ export default function EmployeeProfilePage() {
   // Opening the wrong file would silently mismatch what the backend's Review CV operates on.
   const cvDocumentIdIsSet = Boolean(employee?.cv_document_id);
   const cvDocument = activeCvDocument || (cvDocumentIdIsSet ? null : cvDocuments[0] || null);
-  const employmentHistoryGapRow = complianceFile?.sections?.employment_history?.rows?.[0] || null;
-  // Canonical: always read from compliance-file employment row.
-  // No fallback to employee.employment_history — that would mix data sources.
-  const canonicalEmploymentRecords = Array.isArray(employmentHistoryGapRow?.employment_records)
-    ? employmentHistoryGapRow.employment_records
+  const complianceEmploymentHistoryGapRow = complianceFile?.sections?.employment_history?.rows?.[0] || null;
+  // Canonical admin read source: persisted employment_review first, compliance-file row fallback during rollout.
+  const hasPersistedEmploymentReview = Boolean(employmentReviewPersisted && employmentReview?.id);
+  const employmentReviewSegments = Array.isArray(employmentReview?.segments) ? employmentReview.segments : [];
+  const persistedEmploymentSegments = employmentReviewSegments.filter((segment) => segment?.type === 'employment');
+  const persistedGapSegments = employmentReviewSegments.filter((segment) => segment?.type === 'gap');
+  const canonicalEmploymentRecords = hasPersistedEmploymentReview
+    ? persistedEmploymentSegments.map((segment) => ({
+        ...(segment.raw_record || {}),
+        id: segment.id,
+        employer: segment.employer || segment.organisation,
+        employer_name: segment.employer || segment.organisation,
+        company: segment.organisation || segment.employer,
+        job_title: segment.title || segment.role,
+        role: segment.role || segment.title,
+        start_date: segment.start_date,
+        end_date: segment.end_date === 'present' ? null : segment.end_date,
+        source: segment.source,
+      }))
+    : Array.isArray(complianceEmploymentHistoryGapRow?.employment_records)
+      ? complianceEmploymentHistoryGapRow.employment_records
     : [];
-  const canonicalEmploymentGaps = Array.isArray(employmentHistoryGapRow?.canonical_gaps)
-    ? employmentHistoryGapRow.canonical_gaps
-    : (employmentHistoryGapRow?.gaps || []);
-  const matchedApplicantGapExplanations = employmentHistoryGapRow?.matched_applicant_explanations || [];
-  const unmatchedApplicantGapExplanations = employmentHistoryGapRow?.unmatched_applicant_explanations || [];
-  const invalidEmploymentEntries = employmentHistoryGapRow?.invalid_employment_entries || [];
-  const employmentGapEvaluation = employmentHistoryGapRow?.gap_evaluation || null;
-  const gapAnalysisRun = Boolean(employmentHistoryGapRow?.gap_analysis_run);
+  const canonicalEmploymentGaps = hasPersistedEmploymentReview
+    ? persistedGapSegments.map((gap) => ({
+        ...gap,
+        gap_id: gap.gap_id || gap.id,
+        gap_start: gap.start_date,
+        gap_end: gap.end_date,
+        status: gap.raw_status || (gap.status === 'missing' ? 'pending' : gap.status),
+        explanation: gap.explanation?.text || gap.explanation?.explanation,
+        reason_type: gap.explanation?.reason_type,
+        explanation_provided_at: gap.explanation?.submitted_at,
+        verified_by: gap.admin_review?.reviewed_by,
+        verified_by_name: gap.admin_review?.reviewed_by_name,
+        verified_at: gap.admin_review?.reviewed_at,
+        rejection_reason: gap.admin_review?.rejection_reason,
+      }))
+    : Array.isArray(complianceEmploymentHistoryGapRow?.canonical_gaps)
+      ? complianceEmploymentHistoryGapRow.canonical_gaps
+      : (complianceEmploymentHistoryGapRow?.gaps || []);
+  const matchedApplicantGapExplanations = hasPersistedEmploymentReview
+    ? persistedGapSegments
+        .filter((gap) => gap?.explanation)
+        .map((gap) => ({
+          ...(gap.explanation || {}),
+          explanation: gap.explanation?.text || gap.explanation?.explanation,
+          reason_type: gap.explanation?.reason_type,
+          gap_id: gap.gap_id || gap.id,
+          matched_gap_id: gap.gap_id || gap.id,
+          gap_start: gap.start_date,
+          gap_end: gap.end_date,
+          duration_days: gap.duration_days,
+          duration_months: gap.duration_months,
+          matched_by: gap.explanation?.matched_by,
+        }))
+    : (complianceEmploymentHistoryGapRow?.matched_applicant_explanations || []);
+  const unmatchedApplicantGapExplanations = hasPersistedEmploymentReview
+    ? (employmentReview?.unmatched_applicant_notes || [])
+    : (complianceEmploymentHistoryGapRow?.unmatched_applicant_explanations || []);
+  const invalidEmploymentEntries = hasPersistedEmploymentReview
+    ? (employmentReview?.invalid_entries || [])
+    : (complianceEmploymentHistoryGapRow?.invalid_employment_entries || []);
+  const employmentGapEvaluation = hasPersistedEmploymentReview
+    ? {
+        has_gaps: (employmentReview?.top_summary?.gap_segments || 0) > 0,
+        total_gaps: employmentReview?.top_summary?.gap_segments || 0,
+        verified_count: employmentReview?.top_summary?.verified_gaps || 0,
+        pending_count: employmentReview?.top_summary?.missing_gaps || 0,
+        explained_count: employmentReview?.top_summary?.explained_gaps || 0,
+        rejected_count: employmentReview?.top_summary?.rejected_gaps || 0,
+        needs_info_count: 0,
+        is_complete: (employmentReview?.top_summary?.gap_segments || 0) === (employmentReview?.top_summary?.verified_gaps || 0),
+      }
+    : (complianceEmploymentHistoryGapRow?.gap_evaluation || null);
+  const gapAnalysisRun = hasPersistedEmploymentReview || Boolean(complianceEmploymentHistoryGapRow?.gap_analysis_run);
+  const employmentHistoryGapRow = hasPersistedEmploymentReview
+    ? {
+        has_gaps: persistedGapSegments.length > 0,
+        status_summary: employmentReview?.status_reason,
+        gap_evaluation: employmentGapEvaluation,
+        gap_analysis_run: true,
+        gap_analysis_status: employmentReview?.diagnostics?.analysis_status,
+        gap_analysis_error: employmentReview?.diagnostics?.analysis_error,
+      }
+    : complianceEmploymentHistoryGapRow;
   const applicationAvailable = Boolean(applicationSubmission || applicationPdfDocument);
   const cvFileExists = Boolean(cvDocument);
   const cvDocumentName = cvDocument?.original_filename || cvDocument?.file_name || cvDocument?.file_url || '';
@@ -3343,8 +3458,10 @@ export default function EmployeeProfilePage() {
   const employmentHistoryHasDatedRows = Boolean(
     canonicalEmploymentRecords.some((job) => job?.start_date)
   );
-  const employmentCoverage = employmentHistoryGapRow?.employment_coverage || null;
-  const coveragePercent = Number(employmentCoverage?.coverage_percent);
+  const employmentCoverage = hasPersistedEmploymentReview
+    ? (employmentReview?.coverage || null)
+    : (employmentHistoryGapRow?.employment_coverage || null);
+  const coveragePercent = Number(employmentCoverage?.coverage_percent ?? employmentCoverage?.percent);
   const coverageHasNumericPercent = Number.isFinite(coveragePercent);
   const coverageTotalDaysRequired = Number(employmentCoverage?.total_days_required);
   const coverageTotalDaysCovered = Number(employmentCoverage?.total_days_covered);
@@ -3368,23 +3485,33 @@ export default function EmployeeProfilePage() {
   const coverageMet = Boolean(
     employmentCoverage?.meets_10_year_requirement && coverageAssessed
   );
-  const employmentCannotAssess = !complianceFile;
-  // Persisted sign-off: only true once an admin has explicitly signed off via the backend
-  const employmentSignedOff = Boolean(employee?.employment_review_signed_off);
-  const employmentSignedOffBy = employee?.employment_review_signed_off_by_name
-    || employee?.employment_review_signed_off_by || null;
-  const employmentSignedOffAt = employee?.employment_review_signed_off_at || null;
-  const gapAnalysisFailed = employmentHistoryGapRow?.gap_analysis_status === 'failed';
+  const employmentCannotAssess = !hasPersistedEmploymentReview && !complianceFile;
+  const employmentSignedOff = hasPersistedEmploymentReview
+    ? Boolean(employmentReview?.sign_off?.signed_off)
+    : Boolean(employee?.employment_review_signed_off);
+  const employmentSignedOffBy = hasPersistedEmploymentReview
+    ? (employmentReview?.sign_off?.signed_off_by_name || employmentReview?.sign_off?.signed_off_by || null)
+    : (employee?.employment_review_signed_off_by_name || employee?.employment_review_signed_off_by || null);
+  const employmentSignedOffAt = hasPersistedEmploymentReview
+    ? employmentReview?.sign_off?.signed_off_at
+    : employee?.employment_review_signed_off_at || null;
+  const gapAnalysisFailed = hasPersistedEmploymentReview
+    ? employmentReview?.status === 'cannot_assess'
+    : employmentHistoryGapRow?.gap_analysis_status === 'failed';
   const gapAnalysisError = employmentHistoryGapRow?.gap_analysis_error;
   const employmentGapsCannotAssess = Boolean(
-    employmentHistoryExists && (gapAnalysisFailed || !employmentHistoryGapRow || !gapAnalysisRun || !employmentGapEvaluation)
+    hasPersistedEmploymentReview
+      ? employmentReview?.status === 'cannot_assess'
+      : employmentHistoryExists && (gapAnalysisFailed || !employmentHistoryGapRow || !gapAnalysisRun || !employmentGapEvaluation)
   );
   const allGapsResolved = Boolean(
-    employmentHistoryExists &&
-    gapAnalysisRun &&
-    employmentGapEvaluation &&
-    employmentGapEvaluation.is_complete &&
-    gapNeedsReviewCount === 0
+    hasPersistedEmploymentReview
+      ? employmentGapEvaluation?.is_complete
+      : employmentHistoryExists &&
+        gapAnalysisRun &&
+        employmentGapEvaluation &&
+        employmentGapEvaluation.is_complete &&
+        gapNeedsReviewCount === 0
   );
   // declarationsOnFile: true once EditDeclarationsDialog has been saved (dbs_consent_given is always written)
   const declarationsOnFile = Boolean(
@@ -3409,22 +3536,32 @@ export default function EmployeeProfilePage() {
   const cvLinkBlocksReview = Boolean(cvFileExists && !cvReviewReady && employee?.cv_status !== 'approved');
   // Pre-conditions gate: all data requirements satisfied, ready for admin sign-off
   // Coverage must be met AND all gaps resolved
-  const employmentReadyForSignOff = Boolean(
-    !employmentSignedOff &&
-    !employmentCannotAssess &&
-    applicationAvailable &&
-    declarationsAdequatelyReviewed &&
-    employmentHistoryExists &&
-    coverageAssessed &&
-    coverageMet &&
-    !employmentGapsCannotAssess &&
-    allGapsResolved
-  );
+  const employmentReadyForSignOff = hasPersistedEmploymentReview
+    ? Boolean(
+        !employmentSignedOff &&
+        !employmentCannotAssess &&
+        applicationAvailable &&
+        declarationsAdequatelyReviewed &&
+        employmentHistoryExists &&
+        !employmentGapsCannotAssess &&
+        employmentReview?.gap_actions?.can_sign_off
+      )
+    : Boolean(
+        !employmentSignedOff &&
+        !employmentCannotAssess &&
+        applicationAvailable &&
+        declarationsAdequatelyReviewed &&
+        employmentHistoryExists &&
+        coverageAssessed &&
+        coverageMet &&
+        !employmentGapsCannotAssess &&
+        allGapsResolved
+      );
   // Final "Complete" requires the persisted sign-off, not just derived conditions
   const employmentComplete = employmentSignedOff;
   const employmentDecisionState = employmentComplete
     ? 'Signed off'
-    : employmentCannotAssess || employmentGapsCannotAssess || !coverageAssessed
+    : employmentCannotAssess || employmentGapsCannotAssess || (!hasPersistedEmploymentReview && !coverageAssessed)
       ? 'Cannot assess'
       : employmentReadyForSignOff
         ? 'Ready for sign-off'
@@ -3456,7 +3593,7 @@ export default function EmployeeProfilePage() {
             text: 'text-amber-800',
             subtext: 'text-amber-700',
           };
-  const employmentStatusBlockers = [
+  const legacyEmploymentStatusBlockers = [
     employmentCannotAssess ? 'Compliance file unavailable' : null,
     !applicationAvailable ? 'Application evidence missing' : null,
     !declarationsAdequatelyReviewed ? 'Declarations not reviewed' : null,
@@ -3467,6 +3604,19 @@ export default function EmployeeProfilePage() {
     employmentGapsCannotAssess ? 'Cannot assess employment gaps' : null,
     (!employmentGapsCannotAssess && employmentHistoryExists && !allGapsResolved) ? 'Detected gaps unresolved' : null,
   ].filter(Boolean);
+  const canonicalReviewBlockers = hasPersistedEmploymentReview
+    ? (employmentReview?.gap_actions?.blocked_sign_off_reasons || [])
+    : [];
+  const employmentStatusBlockers = hasPersistedEmploymentReview
+    ? [
+        employmentReviewError ? 'Canonical employment review unavailable' : null,
+        !applicationAvailable ? 'Application evidence missing' : null,
+        !declarationsAdequatelyReviewed ? 'Declarations not reviewed' : null,
+        !employmentHistoryExists ? 'Employment history missing' : null,
+        employmentGapsCannotAssess ? 'Cannot assess employment gaps' : null,
+        ...canonicalReviewBlockers,
+      ].filter(Boolean)
+    : legacyEmploymentStatusBlockers;
   // CV is supporting evidence only — it does not block sign-off.
   // Employment history comes from the application form.
   const employmentStatusWarnings = [].filter(Boolean);
@@ -5364,6 +5514,10 @@ export default function EmployeeProfilePage() {
                   <p className={`font-medium ${employmentDecisionClasses.text}`}>
                     Employment Status: {employmentDecisionState}
                   </p>
+                  <p className={`mt-1 text-xs ${employmentDecisionClasses.subtext}`}>
+                    Source: {hasPersistedEmploymentReview ? `Canonical employment review v${employmentReview?.version || 1}` : 'Compliance-file fallback'}
+                    {employmentReviewError ? ' - canonical review unavailable' : ''}
+                  </p>
                   {employmentComplete && (
                     <p className="mt-1 text-xs text-green-700">
                       ✓ Signed off by {employmentSignedOffBy || 'admin'}
@@ -5705,6 +5859,20 @@ export default function EmployeeProfilePage() {
                   </p>
                 </div>
                 <div className="flex gap-2">
+                  {!isAuditor() && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleRebuildEmploymentReview}
+                      disabled={employmentReviewRebuildLoading}
+                      data-testid="rebuild-employment-review-btn"
+                    >
+                      {employmentReviewRebuildLoading
+                        ? <Loader2 className="h-4 w-4 animate-spin mr-1" />
+                        : <RefreshCw className="h-4 w-4 mr-1" />}
+                      Rebuild canonical review
+                    </Button>
+                  )}
                   <Button 
                     variant="outline" 
                     size="sm" 
@@ -5745,7 +5913,12 @@ export default function EmployeeProfilePage() {
                               headers: { Authorization: `Bearer ${token}` }
                             });
                             toast.success('Gap analysis completed — refreshing…');
-                            await Promise.all([fetchEmployee(), fetchCompliance(), fetchComplianceFile()]);
+                            await Promise.all([
+                              fetchEmployee(),
+                              fetchCompliance(),
+                              fetchComplianceFile(),
+                              fetchEmploymentReview({ rebuild: true })
+                            ]);
                           } catch (err) {
                             toast.error(err?.response?.data?.detail || 'Gap analysis failed');
                           } finally {
@@ -5803,6 +5976,7 @@ export default function EmployeeProfilePage() {
                     onGapUpdate={() => {
                       fetchCompliance();
                       fetchComplianceFile();
+                      fetchEmploymentReview();
                     }}
                   />
                 </div>
@@ -5952,7 +6126,7 @@ export default function EmployeeProfilePage() {
                 </div>
               )}
 
-              {!canonicalEmploymentRecords.length && !complianceFile?.sections?.employment_history?.rows?.[0]?.has_gaps && (
+              {!canonicalEmploymentRecords.length && !employmentHistoryGapRow?.has_gaps && (
                 <div className="text-center py-8 text-gray-500">
                   <Briefcase className="h-12 w-12 mx-auto mb-3 opacity-50" />
                   <p>No employment history recorded</p>
@@ -8966,6 +9140,7 @@ export default function EmployeeProfilePage() {
         onSuccess={() => {
           fetchEmployee();
           fetchComplianceFile();
+          fetchEmploymentReview();
         }}
       />
       

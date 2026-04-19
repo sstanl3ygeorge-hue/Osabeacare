@@ -226,6 +226,7 @@ from employment_gap_engine import (
     MIN_GAP_DAYS
 )
 from employment_review_engine import build_employment_review_from_employee
+from employment_review_persistence import upsert_employment_review
 
 # Unified Compliance Engine - CQC Audit Trail, Status, and Health Services
 from compliance_engine import (
@@ -9227,6 +9228,60 @@ async def get_employment_review_preview(
     }
 
 
+@api_router.get("/employees/{employee_id}/employment-review")
+async def get_persisted_employment_review(
+    employee_id: str,
+    rebuild: bool = Query(False, description="Rebuild and upsert the canonical employment review before returning it."),
+    user: dict = Depends(require_manager_or_admin),
+):
+    """
+    Read the persisted canonical Employment Review record.
+
+    If rebuild=true, this upserts only the employment_reviews record. It does
+    not update compliance-file, employee legacy fields, worker dashboard state,
+    or any existing gap write paths.
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "id": 1})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    if rebuild:
+        review = await upsert_employment_review(
+            db,
+            employee_id,
+            actor_id=user.get("user_id") or user.get("id"),
+            reason="employment_review_endpoint_rebuild",
+        )
+        return {
+            "employee_id": employee_id,
+            "persisted": True,
+            "rebuilt": True,
+            "writes_performed": ["employment_reviews"],
+            "employment_review": review,
+        }
+
+    review = await db.employment_reviews.find_one(
+        {"employee_id": employee_id, "current": True},
+        {"_id": 0},
+    )
+    if not review:
+        return {
+            "employee_id": employee_id,
+            "persisted": False,
+            "rebuilt": False,
+            "writes_performed": [],
+            "employment_review": None,
+        }
+
+    return {
+        "employee_id": employee_id,
+        "persisted": True,
+        "rebuilt": False,
+        "writes_performed": [],
+        "employment_review": review,
+    }
+
+
 @api_router.get("/staff/employees/{employee_id}", response_model=EmployeeResponse)
 async def get_staff_employee_by_id(employee_id: str, user: dict = Depends(get_current_user)):
     """
@@ -12448,6 +12503,13 @@ async def update_employment_history(
             "gaps_explained": sum(1 for g in gaps if g.get("explanation"))
         }
     )
+
+    employment_review = await upsert_employment_review(
+        db,
+        employee_id,
+        actor_id=user.get("user_id") or user.get("id"),
+        reason="admin_employment_history_update",
+    )
     
     return {
         "message": "Employment history updated",
@@ -12455,7 +12517,9 @@ async def update_employment_history(
         "gaps_detected": gaps,
         "employment_coverage": employment_coverage,
         "gaps_all_explained": update_data["cv_gaps_all_explained"],
-        "gaps_requiring_explanation": [g for g in gaps if not g.get("explanation") or len(str(g.get("explanation", "")).strip()) < 10]
+        "gaps_requiring_explanation": [g for g in gaps if not g.get("explanation") or len(str(g.get("explanation", "")).strip()) < 10],
+        "employment_review_synced": True,
+        "employment_review_status": employment_review.get("status"),
     }
 
 

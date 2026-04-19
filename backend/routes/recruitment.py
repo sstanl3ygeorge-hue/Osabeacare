@@ -37,6 +37,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from role_normalization import get_role_label, normalize_role
 from stageGates import StageGateService
+from employment_review_persistence import sign_off_current_employment_review
 
 logger = logging.getLogger(__name__)
 
@@ -638,15 +639,29 @@ async def sign_off_employment_review(
                    "Verify or resolve all gaps before signing off."
         )
 
-    now = datetime.now(timezone.utc).isoformat()
+    try:
+        canonical_review = await sign_off_current_employment_review(
+            db,
+            employee_id,
+            actor_id=user["user_id"],
+            actor_name=user.get("name") or user.get("email"),
+            notes=request.notes,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    now = canonical_review.get("sign_off", {}).get("signed_off_at") or datetime.now(timezone.utc).isoformat()
 
     await db.employees.update_one(
         {"id": employee_id},
         {"$set": {
             "employment_review_signed_off": True,
             "employment_review_signed_off_by": user["user_id"],
+            "employment_review_signed_off_by_name": user.get("name") or user.get("email"),
             "employment_review_signed_off_at": now,
             "employment_review_notes": request.notes,
+            "employment_review_version_signed": canonical_review.get("version"),
+            "employment_review_signed_timeline_fingerprint": canonical_review.get("timeline_fingerprint"),
             "updated_at": now,
         }}
     )
@@ -661,6 +676,8 @@ async def sign_off_employment_review(
             "signed_off_at": now,
             "notes": request.notes,
             "employment_history_count": len(employment_history),
+            "employment_review_version": canonical_review.get("version"),
+            "timeline_fingerprint": canonical_review.get("timeline_fingerprint"),
         }
     )
 
@@ -669,6 +686,7 @@ async def sign_off_employment_review(
         "signed_off_by": user["user_id"],
         "signed_off_at": now,
         "notes": request.notes,
+        "employment_review": canonical_review,
     }
 
 

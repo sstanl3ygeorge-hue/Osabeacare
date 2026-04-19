@@ -37,6 +37,7 @@ from employment_gap_engine import (
     compute_coverage_summary,
     match_gap_explanations_to_canonical_gaps,
 )
+from employment_review_persistence import upsert_employment_review
 
 # Legacy wrapper kept for callers that still reference it
 def _get_detect_cv_gaps():
@@ -47,6 +48,24 @@ def _get_put_object():
     """Lazy import of put_object from server.py"""
     from server import put_object
     return put_object
+
+
+async def _sync_employment_review_after_gap_write(db, employee_id: str, user: dict, reason: str) -> dict:
+    try:
+        return await upsert_employment_review(
+            db,
+            employee_id,
+            actor_id=user.get("user_id") or user.get("id"),
+            reason=reason,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Failed to refresh canonical employment review for %s after %s", employee_id, reason)
+        raise HTTPException(
+            status_code=500,
+            detail="Employment gap was updated, but canonical employment review refresh failed.",
+        ) from exc
 
 logger = logging.getLogger(__name__)
 
@@ -474,12 +493,21 @@ async def verify_employment_gap(
             "rejection_reason": rejection_text
         }
     )
+
+    review = await _sync_employment_review_after_gap_write(
+        db,
+        employee_id,
+        user,
+        f"employment_gap_{status}",
+    )
     
     return {
         "success": True,
         "message": f"Gap marked as {status}",
         "gap_id": gap["id"],
-        "status": status
+        "status": status,
+        "employment_review_synced": True,
+        "employment_review_status": review.get("status"),
     }
 
 
@@ -562,11 +590,20 @@ async def request_gap_info(
             "request_message": request_message
         }
     )
+
+    review = await _sync_employment_review_after_gap_write(
+        db,
+        employee_id,
+        user,
+        "employment_gap_info_requested",
+    )
     
     return {
         "success": True,
         "message": "Information request sent",
-        "notification_id": notification_id
+        "notification_id": notification_id,
+        "employment_review_synced": True,
+        "employment_review_status": review.get("status"),
     }
 
 
@@ -648,10 +685,19 @@ async def reopen_employment_gap(
         {"_id": 0}
     )
 
+    review = await _sync_employment_review_after_gap_write(
+        db,
+        employee_id,
+        user,
+        "employment_gap_reopened",
+    )
+
     return {
         "success": True,
         "message": "Gap reopened",
         "gap": _normalize_gap_record(updated_gap),
+        "employment_review_synced": True,
+        "employment_review_status": review.get("status"),
     }
 
 
@@ -684,10 +730,18 @@ async def detect_employment_gaps(
                 "gap_analysis_error": "",
             }}
         )
+        review = await _sync_employment_review_after_gap_write(
+            db,
+            employee_id,
+            user,
+            "detect_employment_gaps_no_history",
+        )
         return {
             "success": True,
             "message": "No employment history to analyze",
-            "gaps_found": 0
+            "gaps_found": 0,
+            "employment_review_synced": True,
+            "employment_review_status": review.get("status"),
         }
     
     # Detect gaps using canonical coverage-aware engine
@@ -769,6 +823,13 @@ async def detect_employment_gaps(
             "gap_analysis_error": "",
         }}
     )
+
+    review = await _sync_employment_review_after_gap_write(
+        db,
+        employee_id,
+        user,
+        "detect_employment_gaps",
+    )
     
     return {
         "success": True,
@@ -776,4 +837,6 @@ async def detect_employment_gaps(
         "new_gaps_created": new_gaps,
         "gaps": [_normalize_gap_record(gap) for gap in detected_gaps],
         "coverage": coverage,
+        "employment_review_synced": True,
+        "employment_review_status": review.get("status"),
     }

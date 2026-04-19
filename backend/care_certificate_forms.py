@@ -290,7 +290,11 @@ CC_WORKER_FORMS = {
                 "key": "barrier_example",
                 "label": "Describe a communication barrier you might encounter and how you would handle it.",
                 "hint": "For example, language differences, hearing impairment, cognitive impairment.",
-                "helper_text": "Tip: Describe a specific situation — what the challenge would be and what practical steps you would take to communicate effectively anyway.",
+                "helper_text": (
+                    "Tip: Describe a specific situation — what the challenge would be and what practical steps you would take to communicate effectively. "
+                    "For example: 'If a service user has a hearing impairment, I would face them when speaking, use clear speech, gestures, or written communication. "
+                    "I may also use hearing aids or communication tools and ensure the environment is quiet to support understanding.'"
+                ),
                 "type": "textarea",
                 "required": True,
                 "max_words": 80,

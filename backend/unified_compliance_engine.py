@@ -838,7 +838,9 @@ async def get_unified_employee_status(
         # ---------------------------------------------------------------------------
         # PROOF-OF-CHECK REQUIREMENT (single source of truth)
         # DBS Update Service check requires proof evidence on the check record.
-        # RTW always requires proof_document_id on the check record.
+        # RTW always requires proof on the check record. The compliance-file
+        # workflow accepts either proof_document_id or evidence_document_id, so
+        # unified readiness must use the same proof test.
         # If proof is required but absent the requirement is NOT complete.
         # ---------------------------------------------------------------------------
         _dbs_update_service_methods = {
@@ -859,7 +861,10 @@ async def get_unified_employee_status(
                 or dbs_check.get("evidence_document_id")
             )
         elif _rtw_proof_required:
-            _proof_satisfied = bool(rtw_check.get("proof_document_id"))
+            _proof_satisfied = bool(
+                rtw_check.get("proof_document_id")
+                or rtw_check.get("evidence_document_id")
+            )
 
         is_complete = verified_count >= min_count and _proof_satisfied
         checks[req_id] = is_complete

@@ -3645,8 +3645,20 @@ export default function EmployeeProfilePage() {
   const canonicalProgressPct = canonicalProgress?.overall_percentage ?? 0;
   const canonicalBlockers = canonicalProgress?.blockers || [];
   const canonicalBlockerDetails = canonicalProgress?.blocker_details || [];
+  const canonicalBlockerObjects = canonicalBlockerDetails.length > 0
+    ? canonicalBlockerDetails
+    : canonicalBlockers.map((blocker) => (
+        typeof blocker === 'string'
+          ? { reason: blocker, label: blocker, severity: 'critical' }
+          : blocker
+      ));
+  const canonicalPendingBlockers = canonicalBlockerObjects.filter((blocker) => blocker?.severity === 'pending');
+  const canonicalCriticalBlockers = canonicalBlockerObjects.filter((blocker) => blocker?.severity !== 'pending');
   const canonicalIsWorkReady = canonicalProgress?.is_work_ready === true;
   const canonicalCanPromote = canonicalProgress?.can_promote === true;
+  const canonicalCompletedRequirements = canonicalProgress?.completed_requirements ?? canonicalProgress?.progress?.completed ?? null;
+  const canonicalTotalRequirements = canonicalProgress?.total_requirements ?? canonicalProgress?.progress?.total ?? null;
+  const canonicalRequirementCountAvailable = Number.isFinite(canonicalTotalRequirements) && canonicalTotalRequirements > 0;
   const canonicalReadinessLabel = canonicalIsWorkReady
     ? 'Work Ready'
     : canonicalCanPromote
@@ -3797,9 +3809,7 @@ export default function EmployeeProfilePage() {
                   })()}
                   {/* Canonical Work Readiness Status Badge */}
                   {employee.person_stage === 'employee' && (() => {
-                    const reasons = canonicalBlockerDetails.length > 0
-                      ? canonicalBlockerDetails.map((blocker) => blocker.reason || blocker.message || blocker.label).filter(Boolean)
-                      : canonicalBlockers;
+                    const reasons = canonicalBlockerObjects.map((blocker) => blocker.reason || blocker.message || blocker.label).filter(Boolean);
                     
                     return (
                       <div className="flex flex-col items-start gap-1">
@@ -3841,7 +3851,9 @@ export default function EmployeeProfilePage() {
                     {canonicalProgressPct}% Complete
                   </p>
                   <p className="text-xs text-text-muted mt-0.5">
-                    {canonicalProgress?.progress?.completed ?? 0} of {canonicalProgress?.progress?.total ?? 0} requirements
+                    {canonicalRequirementCountAvailable
+                      ? `${canonicalCompletedRequirements ?? 0} of ${canonicalTotalRequirements} requirements`
+                      : 'Requirement count unavailable'}
                   </p>
                 </div>
                 {!isAuditor() && (
@@ -3919,19 +3931,11 @@ export default function EmployeeProfilePage() {
             // SAFETY ENGINES - USE COMPUTED DATA FROM API (single source of truth)
             const rtwSummary = complianceRequirements?.rtw_summary || {};
             const dbsSummary = complianceRequirements?.dbs_summary || {};
-            const trainingSummary = complianceRequirements?.training_summary || {};
-            const safetyStatus = complianceRequirements?.safety_status || {};
-            
-            // Missing items — use backend-computed count (summary.missing is server-authoritative).
-            // Avoid re-deriving from per-row flags on the client.
-            const missingItems = complianceRequirements?.summary?.missing ?? reqs.filter(r => !r.has_evidence && r.requirement_type !== 'conditional').length;
-            
-            // Pending review — per-row backend flags are authoritative; count is display-only.
-            const pendingReview = reqs.filter(r => r.has_evidence && !r.verified).length;
+            const pendingReview = canonicalPendingBlockers.length;
             
             // Canonical readiness blocking status — UCE only, no safetyStatus fallback.
             const isBlocking = !canonicalIsWorkReady && !canonicalCanPromote;
-            const blockingReasons = canonicalBlockers.length > 0 ? canonicalBlockers : (complianceRequirements?.statuses?.safety_blocking_reasons || []);
+            const blockingReasons = canonicalBlockerObjects.map((blocker) => blocker.reason || blocker.message || blocker.label).filter(Boolean);
             
             // DBS info from safety engine
             const dbsExpiry = dbsSummary.review_due_date || dbsSummary.next_dbs_review_due;
@@ -3956,9 +3960,6 @@ export default function EmployeeProfilePage() {
               rtwSummary.rtw_status_color === 'gray' || !rtwSummary.is_verified ? 'gray' : 'blue'
             );
             const rtwClasses = quickViewToneClasses[rtwTone] || quickViewToneClasses.blue;
-            
-            // Training info from safety engine
-            const trainingBlocking = trainingSummary.is_blocking;
             
             // Category breakdown
             const categoryStats = {};
@@ -4086,17 +4087,17 @@ export default function EmployeeProfilePage() {
                   <div
                     className={`p-3 rounded-xl border w-52 shrink-0 cursor-pointer hover:shadow-md transition-shadow ${
                       isBlocking ? 'border-red-200 bg-red-50' :
-                      (missingItems > 0 || pendingReview > 0) ? 'border-amber-200 bg-amber-50' : 
+                      pendingReview > 0 ? 'border-amber-200 bg-amber-50' : 
                       'border-green-200 bg-green-50'
                     }`}
                     data-testid="alerts-card"
-                    onClick={() => setActiveTab(isBlocking || missingItems > 0 || pendingReview > 0 ? 'checklist' : 'training')}
-                    title={isBlocking || missingItems > 0 || pendingReview > 0 ? 'Go to Verification & Compliance' : 'Go to Training'}
+                    onClick={() => setActiveTab(isBlocking || pendingReview > 0 ? 'checklist' : 'training')}
+                    title={isBlocking || pendingReview > 0 ? 'Go to Verification & Compliance' : 'Go to Training'}
                   >
                     <div className="flex items-center gap-2 mb-1">
                       <AlertTriangle className={`h-4 w-4 ${
                         isBlocking ? 'text-red-600' :
-                        (missingItems > 0 || pendingReview > 0) ? 'text-amber-600' : 'text-green-600'
+                        pendingReview > 0 ? 'text-amber-600' : 'text-green-600'
                       }`} />
                       <span className="text-xs font-semibold text-text-primary">
                         {isBlocking ? 'Action required' : 'Status'}
@@ -4111,13 +4112,10 @@ export default function EmployeeProfilePage() {
                           </p>
                         ))}
                       </div>
-                    ) : (missingItems > 0 || pendingReview > 0) ? (
+                    ) : pendingReview > 0 ? (
                       <div className="space-y-0.5">
-                        {missingItems > 0 && (
-                          <p className="text-xs text-amber-700">{missingItems} missing</p>
-                        )}
                         {pendingReview > 0 && (
-                          <p className="text-xs text-amber-700">{pendingReview} pending</p>
+                          <p className="text-xs text-amber-700">{pendingReview} awaiting admin review</p>
                         )}
                       </div>
                     ) : canonicalIsWorkReady || canonicalCanPromote ? (
@@ -4172,34 +4170,20 @@ export default function EmployeeProfilePage() {
             </div>
             
             {/* Missing Items */}
-            {(() => {
-              const reqs = complianceRequirements?.requirements || [];
-              const missing = complianceRequirements?.summary?.missing ?? reqs.filter(r => !r.has_evidence && r.requirement_type !== 'conditional').length;
-              if (missing > 0) {
-                return (
-                  <div className="flex items-center gap-2 px-3 py-1.5 bg-red-100 rounded-lg">
-                    <XCircle className="h-4 w-4 text-red-600" />
-                    <span className="text-sm font-medium text-red-700">{missing} Missing</span>
-                  </div>
-                );
-              }
-              return null;
-            })()}
+            {canonicalCriticalBlockers.length > 0 && (
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-red-100 rounded-lg">
+                <XCircle className="h-4 w-4 text-red-600" />
+                <span className="text-sm font-medium text-red-700">{canonicalCriticalBlockers.length} Action required</span>
+              </div>
+            )}
             
             {/* Pending Review — per-row has_evidence/verified are backend-set fields */}
-            {(() => {
-              const reqs = complianceRequirements?.requirements || [];
-              const pending = reqs.filter(r => r.has_evidence && !r.verified).length;
-              if (pending > 0) {
-                return (
-                  <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-100 rounded-lg">
-                    <Clock className="h-4 w-4 text-amber-600" />
-                    <span className="text-sm font-medium text-amber-700">{pending} Awaiting admin review</span>
-                  </div>
-                );
-              }
-              return null;
-            })()}
+            {canonicalPendingBlockers.length > 0 && (
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-100 rounded-lg">
+                <Clock className="h-4 w-4 text-amber-600" />
+                <span className="text-sm font-medium text-amber-700">{canonicalPendingBlockers.length} Awaiting admin review</span>
+              </div>
+            )}
             
             {/* Key Expiry - Show most critical */}
             {(() => {

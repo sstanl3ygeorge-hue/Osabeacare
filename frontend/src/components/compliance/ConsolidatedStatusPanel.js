@@ -93,6 +93,13 @@ const BLOCKER_SEVERITY = {
 
 // Determine blocker severity based on gate status
 const getBlockerSeverity = (blocker, gateData) => {
+  if (blocker?.severity === 'pending') {
+    return 'PENDING';
+  }
+  if (blocker?.severity === 'critical' || blocker?.severity === 'required') {
+    return 'CRITICAL';
+  }
+
   // Check if there's evidence uploaded but not verified
   const hasUploaded = gateData?.has_uploaded || blocker.has_evidence;
   const isPending = gateData?.status === 'pending' || 
@@ -282,15 +289,15 @@ export default function ConsolidatedStatusPanel({
           : blocker
       ))
     : [];
-  const gateBlockers = Array.isArray(gates.blockers) ? gates.blockers : [];
   const blockers = progressBlockerDetails.length > 0
     ? progressBlockerDetails
     : progressBlockerStrings.length > 0
       ? progressBlockerStrings
-      : gateBlockers;
+      : [];
   const canPromote = progress.can_promote;
-  const gatesPassed = gates.summary?.passed || gates.gates_passed || 0;
-  const totalGates = gates.summary?.total || gates.total_gates || 12;
+  const progressCompleted = progress.completed_requirements;
+  const progressTotal = progress.total_requirements;
+  const progressCountAvailable = Number.isFinite(progressTotal) && progressTotal > 0;
   
   // Canonical readiness/progression percentage comes from unified-progress.
   const progressPercentage = progress.overall_percentage ?? 0;
@@ -606,7 +613,9 @@ export default function ConsolidatedStatusPanel({
         <CardHeader className="py-3 px-4 bg-gray-50/50 border-b border-gray-100">
           <div className="flex items-center justify-between">
             <CardTitle className="text-base font-semibold text-gray-700">
-              PRE-EMPLOYMENT PROGRESS: {progress.completed_requirements ?? gatesPassed}/{progress.total_requirements ?? totalGates} requirements complete ({progressPercentage}%)
+              PRE-EMPLOYMENT PROGRESS: {progressCountAvailable
+                ? `${progressCompleted ?? 0}/${progressTotal} requirements complete (${progressPercentage}%)`
+                : `requirement count unavailable (${progressPercentage}%)`}
             </CardTitle>
             <Button variant="ghost" size="sm" onClick={fetchStatus}>
               <RefreshCw className="h-4 w-4" />

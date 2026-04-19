@@ -42,6 +42,124 @@ _STANDARDS_BY_ID = {s["id"]: s for s in CARE_CERTIFICATE_STANDARDS}
 _STANDARDS_BY_NUM = {s["num"]: s for s in CARE_CERTIFICATE_STANDARDS}
 _STANDARDS_BY_NAME_LOWER = {s["name"].lower(): s for s in CARE_CERTIFICATE_STANDARDS}
 
+DIRECT_CARE_ROLES = [
+    "healthcare_assistant",
+    "support_worker",
+    "care_assistant",
+    "senior_care_assistant",
+    "team_leader",
+    "nurse",
+    "senior_nurse",
+]
+
+INDUCTION_RULE_METADATA = {
+    "understand_your_role": {
+        "description": "Confirms the worker understands their duties, boundaries, supervision route, and role expectations.",
+        "completion_type": "manual",
+        "evidence_sources": ["manager_signoff"],
+        "completion_rules": ["Admin must confirm the role induction discussion has happened."],
+        "next_action": "Manager must sign off the role discussion.",
+    },
+    "personal_development": {
+        "description": "Confirms the worker understands supervision, appraisal, and development expectations.",
+        "completion_type": "manual",
+        "evidence_sources": ["manager_signoff"],
+        "completion_rules": ["Admin must confirm the personal development discussion has happened."],
+        "next_action": "Manager must sign off the development discussion.",
+    },
+    "duty_of_care": {
+        "description": "Confirms the worker understands duty of care, concerns, incidents, and escalation.",
+        "completion_type": "manual",
+        "evidence_sources": ["manager_signoff"],
+        "completion_rules": ["Admin must confirm duty of care has been covered."],
+        "next_action": "Manager must sign off duty of care induction.",
+    },
+    "equality_diversity": {
+        "description": "Confirms equality, diversity, inclusion, and human rights training is verified.",
+        "completion_type": "automatic",
+        "evidence_sources": ["verified_training_record"],
+        "completion_rules": ["A verified matching training record must exist."],
+        "next_action": "Upload, review, and verify matching training evidence.",
+    },
+    "work_person_centred": {
+        "description": "Confirms the worker understands person-centred care and individual preferences.",
+        "completion_type": "manual",
+        "evidence_sources": ["manager_signoff"],
+        "completion_rules": ["Admin must confirm person-centred care induction has happened."],
+        "next_action": "Manager must sign off person-centred care induction.",
+    },
+    "communication": {
+        "description": "Confirms communication expectations have been discussed and assessed for the role.",
+        "completion_type": "hybrid",
+        "evidence_sources": ["interview_assessment", "manager_signoff"],
+        "completion_rules": ["Interview content can support this item, but manager sign-off is still required until interview rules are fully role-aware."],
+        "next_action": "Manager must sign off communication after reviewing interview/application evidence.",
+    },
+    "privacy_dignity": {
+        "description": "Confirms the worker understands privacy, dignity, consent, and respect.",
+        "completion_type": "manual",
+        "evidence_sources": ["manager_signoff"],
+        "completion_rules": ["Admin must confirm privacy and dignity induction has happened."],
+        "next_action": "Manager must sign off privacy and dignity induction.",
+    },
+    "fluids_nutrition": {
+        "description": "Confirms nutrition, hydration, and food safety evidence relevant to care work.",
+        "completion_type": "automatic",
+        "evidence_sources": ["verified_training_record"],
+        "completion_rules": ["A verified matching food hygiene, nutrition, or fluids training record must exist."],
+        "next_action": "Upload, review, and verify matching training evidence.",
+    },
+    "awareness_mental_health": {
+        "description": "Confirms awareness of mental health, dementia, and learning disability support.",
+        "completion_type": "automatic",
+        "evidence_sources": ["verified_training_record"],
+        "completion_rules": ["A verified matching mental health, dementia, or learning disability training record must exist."],
+        "next_action": "Upload, review, and verify matching training evidence.",
+    },
+    "safeguarding_adults": {
+        "description": "Confirms adult safeguarding training evidence is verified.",
+        "completion_type": "automatic",
+        "evidence_sources": ["verified_training_record"],
+        "completion_rules": ["A verified matching safeguarding adults training record must exist."],
+        "next_action": "Upload, review, and verify safeguarding training evidence.",
+    },
+    "basic_life_support": {
+        "description": "Confirms basic life support or equivalent resuscitation evidence is verified.",
+        "completion_type": "automatic",
+        "evidence_sources": ["verified_training_record"],
+        "completion_rules": ["A verified matching basic life support training record must exist."],
+        "next_action": "Upload, review, and verify basic life support evidence.",
+    },
+    "health_safety": {
+        "description": "Confirms health and safety training evidence is verified.",
+        "completion_type": "automatic",
+        "evidence_sources": ["verified_training_record"],
+        "completion_rules": ["A verified matching health and safety training record must exist."],
+        "next_action": "Upload, review, and verify health and safety evidence.",
+    },
+    "handling_information": {
+        "description": "Confirms information governance, confidentiality, GDPR, or data protection evidence is verified.",
+        "completion_type": "automatic",
+        "evidence_sources": ["verified_training_record"],
+        "completion_rules": ["A verified matching information governance or data protection training record must exist."],
+        "next_action": "Upload, review, and verify information governance evidence.",
+    },
+    "infection_control": {
+        "description": "Confirms infection prevention and control training evidence is verified.",
+        "completion_type": "automatic",
+        "evidence_sources": ["verified_training_record"],
+        "completion_rules": ["A verified matching infection prevention and control training record must exist."],
+        "next_action": "Upload, review, and verify infection control evidence.",
+    },
+    "shadow_shift": {
+        "description": "Confirms supervised shadowing has been completed and witnessed before unsupervised work.",
+        "completion_type": "manual",
+        "evidence_sources": ["manager_signoff", "witness_note"],
+        "completion_rules": ["Admin must record a supervisor or witness note."],
+        "next_action": "Record the shadow shift supervisor/witness note.",
+    },
+}
+
 # =============================================================================
 # Default induction items for creating new checklists (used by write paths)
 # =============================================================================
@@ -112,6 +230,49 @@ def normalize_training_name(name: str) -> str:
     for char in ['&', '/', '-', ',', '(', ')', ':']:
         name = name.replace(char, ' ')
     return ' '.join(name.split())
+
+
+def normalize_role_for_induction(role: str) -> str:
+    """Normalize employee role names for induction applicability rules."""
+    value = (role or "").lower().strip()
+    value = value.replace("&", "and").replace("/", " ")
+    value = " ".join(value.replace("-", " ").replace("_", " ").split())
+
+    if not value:
+        return "unknown"
+    if "nurse" in value:
+        return "senior_nurse" if any(term in value for term in ["senior", "lead", "manager"]) else "nurse"
+    if any(term in value for term in ["healthcare assistant", "health care assistant", "hca"]):
+        return "healthcare_assistant"
+    if "support worker" in value:
+        return "support_worker"
+    if "care assistant" in value:
+        return "senior_care_assistant" if "senior" in value else "care_assistant"
+    if any(term in value for term in ["team leader", "support lead", "senior support"]):
+        return "team_leader"
+    return value.replace(" ", "_")
+
+
+def get_induction_rule_metadata(item_id: str) -> dict:
+    """Return rule metadata for an induction item."""
+    meta = INDUCTION_RULE_METADATA.get(item_id, {})
+    return {
+        "description": meta.get("description") or "Induction requirement for this role.",
+        "applicable_roles": meta.get("applicable_roles") or DIRECT_CARE_ROLES,
+        "required_for_unsupervised_work": meta.get("required_for_unsupervised_work", True),
+        "completion_type": meta.get("completion_type") or "manual",
+        "evidence_sources": meta.get("evidence_sources") or ["manager_signoff"],
+        "completion_rules": meta.get("completion_rules") or ["Admin sign-off is required."],
+        "next_action": meta.get("next_action") or "Admin review is required.",
+    }
+
+
+def get_induction_rule_metadata_by_name(item_name: str) -> dict:
+    """Return rule metadata by display name for write-path validation."""
+    standard = _STANDARDS_BY_NAME_LOWER.get((item_name or "").lower().strip())
+    if not standard:
+        return {}
+    return get_induction_rule_metadata(standard["id"])
 
 
 def get_induction_item_for_training(training_id: str, training_name: str = None) -> Optional[str]:
@@ -230,6 +391,45 @@ def _build_verified_training_set(training_records: list, training_docs: list = N
     return verified
 
 
+def _build_training_evidence_by_induction(training_records: list, training_docs: list = None) -> dict:
+    """Build linked evidence records keyed by induction item id."""
+    evidence_by_item = {}
+
+    for tr in (training_records or []):
+        training_name = tr.get("training_name") or tr.get("name") or ""
+        training_code = tr.get("code") or tr.get("requirement_id") or training_name
+        induction_id = get_induction_item_for_training(training_code, training_name)
+        if not induction_id:
+            continue
+        evidence_by_item.setdefault(induction_id, []).append({
+            "type": "training_record",
+            "id": tr.get("id") or tr.get("training_id") or tr.get("record_id"),
+            "title": training_name or training_code,
+            "code": training_code,
+            "verified_at": tr.get("verified_at") or tr.get("updated_at"),
+            "verified_by": tr.get("verified_by") or tr.get("verified_by_name"),
+            "document_id": tr.get("source_document_id") or tr.get("certificate_document_id") or tr.get("document_id"),
+        })
+
+    for doc in (training_docs or []):
+        req_id = doc.get("requirement_id") or ""
+        title = doc.get("file_name") or doc.get("document_name") or req_id
+        induction_id = get_induction_item_for_training(req_id, title)
+        if not induction_id:
+            continue
+        evidence_by_item.setdefault(induction_id, []).append({
+            "type": "training_document",
+            "id": doc.get("id") or doc.get("file_id") or doc.get("document_id"),
+            "title": title,
+            "code": req_id,
+            "verified_at": doc.get("verified_at") or doc.get("updated_at"),
+            "verified_by": doc.get("verified_by") or doc.get("verified_by_name"),
+            "document_id": doc.get("id") or doc.get("file_id") or doc.get("document_id"),
+        })
+
+    return evidence_by_item
+
+
 def is_training_verified_for_item(item_name: str, verified_set: set) -> bool:
     """Check if a verified training matches the given induction item name."""
     item_lower = item_name.lower().strip()
@@ -280,6 +480,20 @@ async def get_employee_induction_status(
             "blocking": bool,
         }
     """
+    employee = await db.employees.find_one(
+        {"id": employee_id},
+        {"_id": 0, "role": 1, "role_applied": 1, "job_role": 1, "position": 1}
+    )
+    employee_role = (
+        (employee or {}).get("role")
+        or (employee or {}).get("role_applied")
+        or (employee or {}).get("job_role")
+        or (employee or {}).get("position")
+        or ""
+    )
+    normalized_role = normalize_role_for_induction(employee_role)
+    role_unknown = normalized_role == "unknown"
+
     # Fetch induction record if not pre-fetched
     if induction_record is None:
         induction_record = await db.induction_checklists.find_one(
@@ -291,15 +505,44 @@ async def get_employee_induction_status(
         "employee_id": employee_id,
         "verified": True,
         "record_status": {"$nin": ["superseded", "deleted"]}
-    }, {"_id": 0, "training_name": 1, "requirement_id": 1, "code": 1}).to_list(100)
+    }, {
+        "_id": 0,
+        "id": 1,
+        "training_id": 1,
+        "record_id": 1,
+        "training_name": 1,
+        "name": 1,
+        "requirement_id": 1,
+        "code": 1,
+        "verified_at": 1,
+        "verified_by": 1,
+        "verified_by_name": 1,
+        "updated_at": 1,
+        "source_document_id": 1,
+        "certificate_document_id": 1,
+        "document_id": 1,
+    }).to_list(100)
 
     training_docs = await db.employee_documents.find({
         "employee_id": employee_id,
         "requirement_id": {"$regex": "training|safeguard|fire|manual|infection|health|bls|basic_life"},
         "verification_stamp": {"$nin": [None, "", "not_verified"]}
-    }, {"_id": 0, "requirement_id": 1}).to_list(50)
+    }, {
+        "_id": 0,
+        "id": 1,
+        "file_id": 1,
+        "document_id": 1,
+        "file_name": 1,
+        "document_name": 1,
+        "requirement_id": 1,
+        "verified_at": 1,
+        "verified_by": 1,
+        "verified_by_name": 1,
+        "updated_at": 1,
+    }).to_list(50)
 
     verified_set = _build_verified_training_set(training_records, training_docs)
+    training_evidence_by_item = _build_training_evidence_by_induction(training_records, training_docs)
 
     # Normalize stored items
     raw_items = induction_record.get("items", []) if induction_record else []
@@ -319,16 +562,59 @@ async def get_employee_induction_status(
         std_name = standard["name"]
         std_num = standard["num"]
         training_sync = standard.get("training_sync")
+        rule = get_induction_rule_metadata(std_id)
+
+        applicable_roles = rule["applicable_roles"]
+        is_applicable = role_unknown or normalized_role in applicable_roles
+        if not is_applicable:
+            continue
 
         # Check stored record (by id, then name, then num)
         record = id_status.get(std_id) or name_status.get(std_name.lower()) or num_status.get(std_num)
-        is_completed = record["completed"] if record else False
+        manually_completed = record["completed"] if record else False
         completed_at = record.get("completed_at") if record else None
         completed_by = record.get("completed_by_name") if record else None
         synced_from_training = record.get("synced_from_training", False) if record else False
+        linked_evidence = training_evidence_by_item.get(std_id, [])
+        has_verified_training = bool(linked_evidence) or is_training_verified_for_item(std_name, verified_set)
+        completion_type = rule["completion_type"]
 
-        # Auto-sync: check verified training
-        if not is_completed and is_training_verified_for_item(std_name, verified_set):
+        is_completed = manually_completed
+        rule_status = "incomplete"
+        status_reason = rule["next_action"]
+        completion_reason = None
+
+        if completion_type == "automatic":
+            is_completed = has_verified_training
+            synced_from_training = has_verified_training
+            if is_completed:
+                rule_status = "complete"
+                first_evidence = linked_evidence[0] if linked_evidence else {}
+                completed_at = completed_at or first_evidence.get("verified_at")
+                completed_by = completed_by or first_evidence.get("verified_by") or "Verified training record"
+                completion_reason = "Completed automatically from verified training evidence."
+                status_reason = completion_reason
+            else:
+                status_reason = "No verified matching training evidence is on file."
+        elif completion_type == "hybrid":
+            if manually_completed:
+                rule_status = "complete"
+                completion_reason = "Completed by manager sign-off after supporting evidence review."
+                status_reason = completion_reason
+            elif has_verified_training:
+                rule_status = "pending_review"
+                synced_from_training = True
+                status_reason = "Supporting evidence exists, but manager sign-off is still required."
+            else:
+                status_reason = rule["next_action"]
+        else:
+            if manually_completed:
+                rule_status = "complete"
+                completion_reason = "Completed by manager sign-off."
+                status_reason = completion_reason
+
+        # Backward-compatible auto-sync guard for older training-linked manual data.
+        if completion_type == "automatic" and not manually_completed and has_verified_training:
             is_completed = True
             synced_from_training = True
 
@@ -337,18 +623,35 @@ async def get_employee_induction_status(
 
         result_items.append({
             "id": std_id,
+            "code": std_id,
             "num": std_num,
             "name": std_name,
+            "title": std_name,
+            "description": rule["description"],
             "mandatory": True,
+            "applicable_roles": applicable_roles,
+            "role_relevance": "Applies to this employee role" if not role_unknown else "Role unavailable; using direct-care induction rules",
+            "required_for_unsupervised_work": rule["required_for_unsupervised_work"],
+            "completion_type": completion_type,
+            "evidence_sources": rule["evidence_sources"],
+            "completion_rules": rule["completion_rules"],
+            "rule_status": rule_status,
+            "completion_reason": completion_reason,
+            "status_reason": status_reason,
+            "next_action": None if is_completed else rule["next_action"],
+            "linked_evidence_ids": [e.get("id") for e in linked_evidence if e.get("id")],
+            "linked_evidence": linked_evidence,
             "status": "completed" if is_completed else "pending",
             "completed": is_completed,
             "completed_at": completed_at,
             "completed_by_name": completed_by,
             "synced_from_training": synced_from_training,
             "training_sync": training_sync,
+            "manual_action_allowed": completion_type in ["manual", "hybrid"],
         })
 
-    if completed_count == INDUCTION_TOTAL:
+    total_count = len(result_items)
+    if total_count and completed_count == total_count:
         overall = "completed"
     elif completed_count > 0:
         overall = "in_progress"
@@ -357,9 +660,15 @@ async def get_employee_induction_status(
 
     return {
         "employee_id": employee_id,
+        "role": employee_role,
+        "role_normalized": normalized_role,
+        "role_rule_warning": "Employee role is missing or not mapped; direct-care induction rules are shown by default." if role_unknown else None,
+        "rule_todos": [
+            "Interview and form question sets are not fully role-aware yet; communication remains manager sign-off supported by interview evidence.",
+        ],
         "items": result_items,
         "completed": completed_count,
-        "total": INDUCTION_TOTAL,
+        "total": total_count,
         "overall_status": overall,
-        "blocking": completed_count < INDUCTION_TOTAL,
+        "blocking": completed_count < total_count,
     }

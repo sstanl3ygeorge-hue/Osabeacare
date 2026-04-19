@@ -17,10 +17,12 @@ export default function InductionChecklistPanel({ employeeId, employeeName, isAu
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(null);
   const [downloading, setDownloading] = useState(false);
+  const [loadError, setLoadError] = useState(null);
 
   const fetchChecklist = async () => {
     try {
       setLoading(true);
+      setLoadError(null);
       const token = localStorage.getItem('token');
       const response = await axios.get(`${API}/employees/${employeeId}/induction-checklist`, {
         headers: { Authorization: `Bearer ${token}` }
@@ -28,7 +30,7 @@ export default function InductionChecklistPanel({ employeeId, employeeName, isAu
       setChecklist(response.data);
     } catch (error) {
       console.error('Failed to fetch induction checklist:', error);
-      // Silently fail - may not have checklist yet
+      setLoadError('Cannot assess induction checklist. Checklist rules or evidence could not be loaded.');
     } finally {
       setLoading(false);
     }
@@ -100,8 +102,14 @@ export default function InductionChecklistPanel({ employeeId, employeeName, isAu
   };
 
   const getStatusBadge = (status) => {
-    if (status === 'completed') {
+    if (status === 'complete' || status === 'completed') {
       return <Badge className="bg-green-100 text-green-700">Completed</Badge>;
+    }
+    if (status === 'pending_review') {
+      return <Badge className="bg-blue-100 text-blue-700">Pending review</Badge>;
+    }
+    if (status === 'cannot_assess') {
+      return <Badge className="bg-red-100 text-red-700">Cannot assess</Badge>;
     }
     return <Badge variant="outline" className="text-amber-600 border-amber-300">Pending</Badge>;
   };
@@ -133,6 +141,7 @@ export default function InductionChecklistPanel({ employeeId, employeeName, isAu
   const mandatoryCompleted = mandatoryItems.filter(i => i.status === 'completed').length;
   const overallStatus = checklist?.overall_status || 'pending';
   const progressPercent = items.length > 0 ? Math.round((completedCount / items.length) * 100) : 0;
+  const cannotAssess = Boolean(loadError);
 
   return (
     <Card className="border-[#E4E8EB] shadow-sm" data-testid="induction-checklist-panel">
@@ -143,7 +152,9 @@ export default function InductionChecklistPanel({ employeeId, employeeName, isAu
             Induction Checklist
           </CardTitle>
           <div className="flex items-center gap-2">
-            {getOverallStatusBadge(overallStatus)}
+            {cannotAssess ? (
+              <Badge className="bg-red-100 text-red-700">Cannot assess</Badge>
+            ) : getOverallStatusBadge(overallStatus)}
             {overallStatus === 'completed' && (
               <Button 
                 variant="outline" 
@@ -166,6 +177,20 @@ export default function InductionChecklistPanel({ employeeId, employeeName, isAu
             </Button>
           </div>
         </div>
+
+        {loadError && (
+          <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 flex items-start gap-2">
+            <AlertTriangle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+            <span>{loadError}</span>
+          </div>
+        )}
+
+        {!loadError && checklist?.role_rule_warning && (
+          <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800 flex items-start gap-2">
+            <AlertTriangle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+            <span>{checklist.role_rule_warning}</span>
+          </div>
+        )}
         
         {/* Progress Bar */}
         <div className="mt-4 space-y-2">
@@ -208,11 +233,16 @@ export default function InductionChecklistPanel({ employeeId, employeeName, isAu
       
       <CardContent>
         <div className="space-y-1">
-          {items.map((item, idx) => (
+          {items.map((item, idx) => {
+            const itemRuleStatus = item.rule_status || (item.status === 'completed' ? 'complete' : 'incomplete');
+            const isComplete = item.status === 'completed' || itemRuleStatus === 'complete';
+            const canManualComplete = !isAuditor && item.manual_action_allowed !== false && item.status !== 'completed';
+            const canUndoManual = !isAuditor && item.status === 'completed' && item.manual_action_allowed !== false && !item.synced_from_training;
+            return (
             <div 
               key={idx}
               className={`flex items-center justify-between p-3 rounded-lg transition-colors ${
-                item.status === 'completed' 
+                isComplete
                   ? 'bg-green-50/50 border border-green-100' 
                   : 'bg-gray-50 hover:bg-gray-100 border border-transparent'
               }`}
@@ -220,8 +250,8 @@ export default function InductionChecklistPanel({ employeeId, employeeName, isAu
             >
               <div className="flex items-center gap-3 flex-1 min-w-0">
                 {/* Status Icon */}
-                <div className={`flex-shrink-0 ${item.status === 'completed' ? 'text-green-600' : 'text-gray-300'}`}>
-                  {item.status === 'completed' ? (
+                <div className={`flex-shrink-0 ${isComplete ? 'text-green-600' : itemRuleStatus === 'pending_review' ? 'text-blue-500' : 'text-gray-300'}`}>
+                  {isComplete ? (
                     <CheckCircle className="h-5 w-5" />
                   ) : (
                     <Circle className="h-5 w-5" />
@@ -231,7 +261,7 @@ export default function InductionChecklistPanel({ employeeId, employeeName, isAu
                 {/* Item Details */}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className={`font-medium ${item.status === 'completed' ? 'text-green-800' : 'text-gray-800'}`}>
+                    <span className={`font-medium ${isComplete ? 'text-green-800' : 'text-gray-800'}`}>
                       {item.name}
                     </span>
                     {item.mandatory && (
@@ -239,7 +269,27 @@ export default function InductionChecklistPanel({ employeeId, employeeName, isAu
                         REQUIRED
                       </span>
                     )}
+                    {getStatusBadge(itemRuleStatus)}
+                    {item.completion_type && (
+                      <span className="text-[10px] text-gray-600 bg-white border border-gray-200 px-1.5 py-0.5 rounded font-medium uppercase">
+                        {item.completion_type}
+                      </span>
+                    )}
                   </div>
+                  {item.description && (
+                    <p className="text-xs text-gray-600 mt-1">{item.description}</p>
+                  )}
+                  {(item.status_reason || item.completion_reason) && (
+                    <p className={`text-xs mt-1 ${isComplete ? 'text-green-700' : itemRuleStatus === 'pending_review' ? 'text-blue-700' : 'text-amber-700'}`}>
+                      {item.completion_reason || item.status_reason}
+                    </p>
+                  )}
+                  {item.linked_evidence?.length > 0 && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      Evidence: {item.linked_evidence.map(e => e.title || e.code || e.id).filter(Boolean).slice(0, 2).join(', ')}
+                      {item.linked_evidence.length > 2 ? ` +${item.linked_evidence.length - 2} more` : ''}
+                    </p>
+                  )}
                   {item.completed_at && (
                     <div className="text-xs text-gray-500 mt-0.5 flex items-center gap-1">
                       <Clock className="h-3 w-3" />
@@ -254,7 +304,7 @@ export default function InductionChecklistPanel({ employeeId, employeeName, isAu
               <div className="flex items-center gap-2 flex-shrink-0">
                 {!isAuditor && (
                   <>
-                    {item.status !== 'completed' ? (
+                    {canManualComplete ? (
                       <Button
                         size="sm"
                         variant="outline"
@@ -278,11 +328,21 @@ export default function InductionChecklistPanel({ employeeId, employeeName, isAu
                         ) : (
                           <>
                             <CheckCircle className="h-3 w-3 mr-1" />
-                            Complete
+                            {item.completion_type === 'hybrid' ? 'Sign off' : 'Complete'}
                           </>
                         )}
                       </Button>
-                    ) : (
+                    ) : item.status !== 'completed' ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled
+                        className="h-8 px-3 text-xs rounded-lg text-gray-400"
+                        title={item.next_action || item.status_reason || 'Evidence or review required'}
+                      >
+                        Evidence required
+                      </Button>
+                    ) : canUndoManual ? (
                       <Button
                         size="sm"
                         variant="ghost"
@@ -297,19 +357,19 @@ export default function InductionChecklistPanel({ employeeId, employeeName, isAu
                           <RotateCcw className="h-3 w-3" />
                         )}
                       </Button>
-                    )}
+                    ) : null}
                   </>
                 )}
               </div>
             </div>
-          ))}
+          )})}
         </div>
         
         {/* CQC Note */}
         <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-100">
           <p className="text-xs text-blue-700">
-            <strong>CQC Requirement:</strong> All 15 Care Certificate standards must be completed during induction before an employee can work unsupervised.
-            Items linked to verified trainings are auto-completed. Manual items (e.g., Shadow Shifts) require Admin sign-off.
+            <strong>CQC Requirement:</strong> Applicable induction items must be completed before unsupervised work.
+            Training-derived items require verified evidence. Manual and hybrid items require admin or manager sign-off.
           </p>
         </div>
       </CardContent>

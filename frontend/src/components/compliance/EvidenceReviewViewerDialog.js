@@ -297,6 +297,10 @@ export default function EvidenceReviewViewerDialog({
   const goToNextPage = () => setCurrentPage(prev => Math.min(prev + 1, numPages || 1));
   const zoomIn = () => setScale(prev => Math.min(prev + 0.25, 3));
   const zoomOut = () => setScale(prev => Math.max(prev - 0.25, 0.5));
+  const resetView = () => {
+    setScale(1.0);
+    setRotation(0);
+  };
   const rotate = () => setRotation(prev => (prev + 90) % 360);
 
   // ------ Step 1: Record review checklist & move to verification ------
@@ -558,11 +562,11 @@ export default function EvidenceReviewViewerDialog({
           View the document and complete the verification checklist
         </DialogDescription>
 
-        <div className="flex h-full">
+        <div className="flex h-full min-h-0">
           {/* ===== LEFT: Document Viewer ===== */}
-          <div className="flex-1 flex flex-col bg-slate-900 min-w-0">
+          <div className="flex-1 flex flex-col bg-slate-900 min-w-0 min-h-0">
             {/* Viewer toolbar */}
-            <div className="flex items-center justify-between px-4 py-2 bg-slate-800 border-b border-slate-700">
+            <div className="flex items-center justify-between gap-3 px-4 py-2 bg-slate-800 border-b border-slate-700 flex-shrink-0">
               <div className="flex items-center gap-2 min-w-0">
                 {fileType === 'pdf' ? <FileText className="h-4 w-4 text-slate-300 flex-shrink-0" /> : <ImageIcon className="h-4 w-4 text-slate-300 flex-shrink-0" />}
                 <span className="text-sm text-slate-200 truncate">{fileName}</span>
@@ -590,11 +594,28 @@ export default function EvidenceReviewViewerDialog({
               </div>
 
               <div className="flex items-center gap-1">
-                {fileType === 'pdf' && (
+                {(fileType === 'pdf' || fileType === 'image') && (
                   <>
+                    {fileType === 'pdf' && (
+                      <>
+                        <Button size="sm" variant="ghost" className="h-7 px-2 text-slate-300 hover:text-white" onClick={goToPrevPage} disabled={currentPage <= 1} title="Previous page">
+                          <ChevronLeft className="h-4 w-4" />
+                          Prev
+                        </Button>
+                        <span className="text-xs text-slate-400 min-w-[72px] text-center">
+                          Page {currentPage} of {numPages || '?'}
+                        </span>
+                        <Button size="sm" variant="ghost" className="h-7 px-2 text-slate-300 hover:text-white" onClick={goToNextPage} disabled={!numPages || currentPage >= numPages} title="Next page">
+                          Next
+                          <ChevronRight className="h-4 w-4" />
+                        </Button>
+                        <div className="w-px h-5 bg-slate-600 mx-1" />
+                      </>
+                    )}
                     <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-slate-300 hover:text-white" onClick={zoomOut} title="Zoom out"><ZoomOut className="h-4 w-4" /></Button>
                     <span className="text-xs text-slate-400 w-10 text-center">{Math.round(scale * 100)}%</span>
                     <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-slate-300 hover:text-white" onClick={zoomIn} title="Zoom in"><ZoomIn className="h-4 w-4" /></Button>
+                    <Button size="sm" variant="ghost" className="h-7 px-2 text-slate-300 hover:text-white" onClick={resetView} title="Reset zoom and rotation">Reset</Button>
                     <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-slate-300 hover:text-white" onClick={rotate} title="Rotate"><RotateCw className="h-4 w-4" /></Button>
                     <div className="w-px h-5 bg-slate-600 mx-1" />
                   </>
@@ -607,7 +628,7 @@ export default function EvidenceReviewViewerDialog({
             </div>
 
             {/* Document content */}
-            <div className="flex-1 overflow-auto flex items-start justify-center p-4">
+            <div className="flex-1 min-h-0 overflow-auto flex items-start justify-center p-4">
               {loading ? (
                 <div className="flex flex-col items-center justify-center h-full gap-3">
                   <Loader2 className="h-8 w-8 animate-spin text-slate-400" />
@@ -619,7 +640,7 @@ export default function EvidenceReviewViewerDialog({
                   <span className="text-sm">{fileError}</span>
                 </div>
               ) : fileType === 'pdf' ? (
-                <div>
+                <div className="min-w-max">
                   <Document
                     file={viewingStamped && stampedBlobUrl ? stampedBlobUrl : blobUrl}
                     onLoadSuccess={onDocumentLoadSuccess}
@@ -634,25 +655,16 @@ export default function EvidenceReviewViewerDialog({
                       renderAnnotationLayer={true}
                     />
                   </Document>
-                  {numPages > 1 && (
-                    <div className="flex items-center justify-center gap-3 mt-3">
-                      <Button size="sm" variant="ghost" className="h-7 text-slate-300" onClick={goToPrevPage} disabled={currentPage <= 1}>
-                        <ChevronLeft className="h-4 w-4" />
-                      </Button>
-                      <span className="text-xs text-slate-400">{currentPage} / {numPages}</span>
-                      <Button size="sm" variant="ghost" className="h-7 text-slate-300" onClick={goToNextPage} disabled={currentPage >= numPages}>
-                        <ChevronRight className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  )}
                 </div>
               ) : fileType === 'image' ? (
-                <img
-                  src={viewingStamped && stampedBlobUrl ? stampedBlobUrl : blobUrl}
-                  alt={fileName}
-                  className="max-w-full max-h-full object-contain"
-                  style={{ transform: `rotate(${rotation}deg) scale(${scale})` }}
-                />
+                <div className="min-w-max min-h-max">
+                  <img
+                    src={viewingStamped && stampedBlobUrl ? stampedBlobUrl : blobUrl}
+                    alt={fileName}
+                    className="max-w-full max-h-full object-contain"
+                    style={{ transform: `rotate(${rotation}deg) scale(${scale})`, transformOrigin: 'top center' }}
+                  />
+                </div>
               ) : (
                 <iframe
                   src={viewingStamped && stampedBlobUrl ? stampedBlobUrl : blobUrl}
@@ -664,9 +676,9 @@ export default function EvidenceReviewViewerDialog({
           </div>
 
           {/* ===== RIGHT: Review Sidebar ===== */}
-          <div className="w-[380px] flex-shrink-0 border-l flex flex-col bg-white overflow-hidden">
+          <div className="w-[420px] max-w-[40vw] min-w-[360px] flex-shrink-0 border-l flex flex-col bg-white overflow-hidden min-h-0">
             {/* Header */}
-            <div className="px-4 py-3 border-b bg-slate-50">
+            <div className="px-4 py-3 border-b bg-slate-50 flex-shrink-0">
               <div className="flex items-center gap-2">
                 {isFormReview ? <FileText className="h-5 w-5 text-teal-600" /> : isTrainingReview ? <FileCheck className="h-5 w-5 text-purple-600" /> : isAcceptMode ? <Shield className="h-5 w-5 text-indigo-600" /> : isIdentity ? <User className="h-5 w-5 text-blue-600" /> : <MapPin className="h-5 w-5 text-purple-600" />}
                 <div>
@@ -708,7 +720,7 @@ export default function EvidenceReviewViewerDialog({
             </div>
 
             {/* Scrollable content */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4">
 
               {/* ---- STEP: VIEWING + CHECKLIST ---- */}
               {step === 'viewing' && (
@@ -945,7 +957,7 @@ export default function EvidenceReviewViewerDialog({
             </div>
 
             {/* Footer buttons */}
-            <div className="px-4 py-3 border-t bg-slate-50 flex items-center gap-2">
+            <div className="px-4 py-3 border-t bg-slate-50 flex items-center gap-2 flex-shrink-0 sticky bottom-0 z-10">
               {step === 'viewing' && isTrainingReview && (
                 <>
                   <Button variant="outline" size="sm" onClick={handleClose} className="flex-1">Cancel</Button>

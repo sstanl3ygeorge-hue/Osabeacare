@@ -24,6 +24,7 @@ from services.pdf_service import generate_admin_form_pdf
 from induction_definitions import (
     DEFAULT_INDUCTION_ITEMS,
     INDUCTION_NAME_TO_TRAINING_PATTERNS,
+    get_induction_rule_metadata_by_name,
     get_employee_induction_status,
     is_training_verified_for_item,
 )
@@ -77,12 +78,27 @@ async def get_induction_checklist(
     for item in induction_status["items"]:
         items.append({
             "id": item["id"],
+            "code": item.get("code"),
             "name": item["name"],
+            "title": item.get("title") or item["name"],
+            "description": item.get("description"),
             "mandatory": item["mandatory"],
             "status": item["status"],
+            "rule_status": item.get("rule_status"),
+            "completion_type": item.get("completion_type"),
+            "evidence_sources": item.get("evidence_sources", []),
+            "completion_rules": item.get("completion_rules", []),
+            "completion_reason": item.get("completion_reason"),
+            "status_reason": item.get("status_reason"),
+            "next_action": item.get("next_action"),
+            "required_for_unsupervised_work": item.get("required_for_unsupervised_work", True),
+            "role_relevance": item.get("role_relevance"),
+            "linked_evidence_ids": item.get("linked_evidence_ids", []),
+            "linked_evidence": item.get("linked_evidence", []),
             "completed_at": item["completed_at"],
             "completed_by_name": item["completed_by_name"],
             "synced_from_training": item["synced_from_training"],
+            "manual_action_allowed": item.get("manual_action_allowed", True),
         })
     
     now = datetime.now(timezone.utc).isoformat()
@@ -95,6 +111,10 @@ async def get_induction_checklist(
     return {
         "employee_id": employee_id,
         "employee_name": employee_name,
+        "role": induction_status.get("role"),
+        "role_normalized": induction_status.get("role_normalized"),
+        "role_rule_warning": induction_status.get("role_rule_warning"),
+        "rule_todos": induction_status.get("rule_todos", []),
         "items": items,
         "overall_status": overall_status,
         "started_at": now if completed_count > 0 else None,
@@ -156,6 +176,13 @@ async def update_induction_checklist(
                 status_code=422,
                 detail="Shadow Shift sign-off requires a supervisor/witness note (notes field cannot be empty)."
             )
+
+    rule_metadata = get_induction_rule_metadata_by_name(payload.item_name)
+    if payload.status == "completed" and rule_metadata.get("completion_type") == "automatic":
+        raise HTTPException(
+            status_code=422,
+            detail="This induction item is completed automatically from verified evidence and cannot be manually completed."
+        )
 
     # Find and update the specific item
     item_found = False

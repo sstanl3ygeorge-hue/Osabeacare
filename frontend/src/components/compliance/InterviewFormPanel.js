@@ -7,7 +7,7 @@ import { toast } from 'sonner';
 import { 
   ClipboardList, Download, CheckCircle, Clock, AlertTriangle,
   Loader2, RefreshCw, User, Calendar, FileText, ChevronDown,
-  ChevronRight, Plus, Edit, Save, HelpCircle, Info
+  ChevronRight, Plus, Edit, Save, HelpCircle, Info, Eye
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../ui/dialog';
 import { Label } from '../ui/label';
@@ -17,6 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { formatBackendDate } from '../../lib/dateUtils';
+import InlineDocumentViewer from '../shared/InlineDocumentViewer';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -171,6 +172,10 @@ export default function InterviewFormPanel({ employeeId, employeeName, employeeR
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState(null);
   const [downloading, setDownloading] = useState(null);
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const [viewerUrl, setViewerUrl] = useState(null);
+  const [viewerTitle, setViewerTitle] = useState('Interview Assessment');
+  const [viewerFilename, setViewerFilename] = useState('interview_record.pdf');
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [saving, setSaving] = useState(false);
   const [interviewConfig, setInterviewConfig] = useState(null);
@@ -446,7 +451,7 @@ export default function InterviewFormPanel({ employeeId, employeeName, employeeR
       const token = localStorage.getItem('token');
       
       const response = await axios.get(
-        `${API}/employees/${employeeId}/interview-records/${recordId}/download-pdf`,
+        `${API}/form-submissions/${recordId}/download-pdf`,
         {
           headers: { Authorization: `Bearer ${token}` },
           responseType: 'blob'
@@ -470,6 +475,17 @@ export default function InterviewFormPanel({ employeeId, employeeName, employeeR
     } finally {
       setDownloading(null);
     }
+  };
+
+  const handleViewPDF = (recordId) => {
+    if (!recordId) {
+      toast.error('Interview record not found');
+      return;
+    }
+    setViewerUrl(`${API}/form-submissions/${recordId}/view-pdf`);
+    setViewerTitle('Interview Assessment Record');
+    setViewerFilename(`interview_record_${employeeName?.replace(/\s+/g, '_') || 'employee'}.pdf`);
+    setViewerOpen(true);
   };
 
   const getDecisionConfig = (decision) => {
@@ -601,6 +617,18 @@ export default function InterviewFormPanel({ employeeId, employeeName, employeeR
                           {score >= passScore ? 'Completed – Passed' : 'Completed – Failed'}
                         </Badge>
                       )}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleViewPDF(interview.id);
+                        }}
+                        className="rounded-lg"
+                        title="View interview PDF"
+                      >
+                        <Eye className="h-4 w-4" />
+                      </Button>
                       <Button
                         variant="outline"
                         size="sm"
@@ -1056,6 +1084,14 @@ export default function InterviewFormPanel({ employeeId, employeeName, employeeR
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    <InlineDocumentViewer
+      open={viewerOpen}
+      onClose={() => setViewerOpen(false)}
+      fetchUrl={viewerUrl}
+      title={viewerTitle}
+      token={localStorage.getItem('token')}
+      filename={viewerFilename}
+    />
     </>
   );
 }

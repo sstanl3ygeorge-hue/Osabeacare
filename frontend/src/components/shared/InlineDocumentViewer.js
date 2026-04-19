@@ -12,6 +12,7 @@
  *   title       - dialog title
  *   token       - auth bearer token
  *   filename    - suggested download filename (optional)
+ *   onFallback  - optional fallback action when the document cannot be loaded
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
@@ -34,6 +35,8 @@ export default function InlineDocumentViewer({
   title = 'Document',
   token,
   filename = 'document',
+  fallbackLabel,
+  onFallback,
 }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -168,6 +171,11 @@ export default function InlineDocumentViewer({
               }}>
                 Retry
               </Button>
+              {onFallback && (
+                <Button variant="outline" size="sm" onClick={onFallback}>
+                  {fallbackLabel || 'Use fallback view'}
+                </Button>
+              )}
             </div>
           ) : blobUrl && isPdf && !safariPdfFallback ? (
             <object

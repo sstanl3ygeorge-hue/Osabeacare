@@ -325,6 +325,7 @@ export default function EmployeeProfilePage() {
   const [inlineViewerUrl, setInlineViewerUrl] = useState(null);
   const [inlineViewerTitle, setInlineViewerTitle] = useState('Document');
   const [inlineViewerFilename, setInlineViewerFilename] = useState('document.pdf');
+  const [inlineViewerFallback, setInlineViewerFallback] = useState(null);
 
   // Employment Review sign-off state
   const [employmentSignOffLoading, setEmploymentSignOffLoading] = useState(false);
@@ -745,6 +746,7 @@ export default function EmployeeProfilePage() {
     setInlineViewerUrl(`${API}/employees/${employeeId}/requirements/cv/evidence/${docId}/view`);
     setInlineViewerTitle(cvDocument?.original_filename || cvDocument?.file_name || 'CV / Resume');
     setInlineViewerFilename(cvDocument?.original_filename || 'cv.pdf');
+    setInlineViewerFallback(null);
     setInlineViewerOpen(true);
   };
 
@@ -3202,6 +3204,31 @@ export default function EmployeeProfilePage() {
     setInlineViewerUrl(`${API}/form-submissions/${submissionId}/view-pdf`);
     setInlineViewerTitle('Application Form');
     setInlineViewerFilename('application-form.pdf');
+    setInlineViewerFallback(null);
+    setInlineViewerOpen(true);
+  };
+
+  const openFormSubmissionPdfViewer = (submission, form) => {
+    if (!submission?.id) {
+      setViewFormSubmission({
+        isOpen: true,
+        formType: form?.key,
+        formName: form?.name,
+        submissionId: submission?.id,
+        data: submission?.data || submission?.form_data
+      });
+      return;
+    }
+    setInlineViewerUrl(`${API}/form-submissions/${submission.id}/view-pdf`);
+    setInlineViewerTitle(form?.name || 'Form Submission');
+    setInlineViewerFilename(`${form?.key || 'form'}_${employee?.first_name || ''}_${employee?.last_name || ''}.pdf`);
+    setInlineViewerFallback({
+      isOpen: true,
+      formType: form?.key,
+      formName: form?.name,
+      submissionId: submission?.id,
+      data: submission?.data || submission?.form_data
+    });
     setInlineViewerOpen(true);
   };
 
@@ -3280,7 +3307,16 @@ export default function EmployeeProfilePage() {
   const employmentCoverage = employee?.employment_coverage || null;
   const coveragePercent = Number(employmentCoverage?.coverage_percent);
   const coverageHasNumericPercent = Number.isFinite(coveragePercent);
-  const coverageDisplayPercent = coverageHasNumericPercent ? coveragePercent : 0;
+  const coverageTotalDaysRequired = Number(employmentCoverage?.total_days_required);
+  const coverageTotalDaysCovered = Number(employmentCoverage?.total_days_covered);
+  const coverageHasUsableSummary = Boolean(
+    employmentCoverage &&
+    coverageHasNumericPercent &&
+    Number.isFinite(coverageTotalDaysRequired) &&
+    coverageTotalDaysRequired > 0 &&
+    Number.isFinite(coverageTotalDaysCovered)
+  );
+  const coverageDisplayPercent = coverageHasUsableSummary ? coveragePercent : 0;
   const coverageLooksStaleOrUnusable = Boolean(
     employmentCoverage &&
     employmentHistoryHasDatedRows &&
@@ -3289,8 +3325,9 @@ export default function EmployeeProfilePage() {
     !employmentCoverage?.earliest_entry_date &&
     !employmentCoverage?.latest_entry_date
   );
+  const coverageAssessed = Boolean(coverageHasUsableSummary && !coverageLooksStaleOrUnusable);
   const coverageMet = Boolean(
-    employmentCoverage?.meets_10_year_requirement && !coverageLooksStaleOrUnusable
+    employmentCoverage?.meets_10_year_requirement && coverageAssessed
   );
   const employmentCannotAssess = !complianceFile;
   // Persisted sign-off: only true once an admin has explicitly signed off via the backend
@@ -3298,7 +3335,6 @@ export default function EmployeeProfilePage() {
   const employmentSignedOffBy = employee?.employment_review_signed_off_by_name
     || employee?.employment_review_signed_off_by || null;
   const employmentSignedOffAt = employee?.employment_review_signed_off_at || null;
-  const coverageAssessed = Boolean(employmentCoverage && !coverageLooksStaleOrUnusable);
   const gapAnalysisFailed = employee?.gap_analysis_status === 'failed';
   const employmentGapsCannotAssess = Boolean(
     employmentHistoryExists && (gapAnalysisFailed || !employmentHistoryGapRow || !gapAnalysisRun || !employmentGapEvaluation)
@@ -3385,8 +3421,8 @@ export default function EmployeeProfilePage() {
     !applicationAvailable ? 'Application evidence missing' : null,
     !declarationsAdequatelyReviewed ? 'Declarations not reviewed' : null,
     !employmentHistoryExists ? 'Employment history missing' : null,
-    (!coverageAssessed && !coverageLooksStaleOrUnusable) ? '10-year coverage not assessed' : null,
-    coverageLooksStaleOrUnusable ? 'Cannot assess 10-year coverage from current history' : null,
+    !employmentCoverage ? '10-year coverage not assessed' : null,
+    (employmentCoverage && !coverageAssessed) ? 'Cannot assess 10-year coverage from current history' : null,
     (coverageAssessed && !coverageMet) ? '10-year coverage incomplete' : null,
     employmentGapsCannotAssess ? 'Cannot assess employment gaps' : null,
     (!employmentGapsCannotAssess && employmentHistoryExists && !allGapsResolved) ? 'Gaps unresolved' : null,
@@ -5016,11 +5052,7 @@ export default function EmployeeProfilePage() {
                                           {/* Signed off → View */}
                                           {derived.status === 'signed_off' && hasSubmission && (
                                             <Button size="sm" variant="outline"
-                                              onClick={() => setViewFormSubmission({
-                                                isOpen: true, formType: form.key, formName: form.name,
-                                                submissionId: submission?.id,
-                                                data: submission?.data || submission?.form_data
-                                              })}
+                                              onClick={() => openFormSubmissionPdfViewer(submission, form)}
                                               className="text-green-700 border-green-200 hover:bg-green-50"
                                               data-testid={`view-submission-${form.key}`}>
                                               <Eye className="h-3.5 w-3.5 mr-1" />View
@@ -5031,11 +5063,7 @@ export default function EmployeeProfilePage() {
                                           {derived.status === 'reviewed' && hasSubmission && (
                                             <>
                                               <Button size="sm" variant="outline"
-                                                onClick={() => setViewFormSubmission({
-                                                  isOpen: true, formType: form.key, formName: form.name,
-                                                  submissionId: submission?.id,
-                                                  data: submission?.data || submission?.form_data
-                                                })}
+                                                onClick={() => openFormSubmissionPdfViewer(submission, form)}
                                                 className="text-indigo-600 border-indigo-200 hover:bg-indigo-50"
                                                 data-testid={`view-submission-${form.key}`}>
                                                 <Eye className="h-3.5 w-3.5 mr-1" />View
@@ -5087,11 +5115,7 @@ export default function EmployeeProfilePage() {
                                           {/* Rejected → View */}
                                           {derived.status === 'rejected' && hasSubmission && (
                                             <Button size="sm" variant="outline"
-                                              onClick={() => setViewFormSubmission({
-                                                isOpen: true, formType: form.key, formName: form.name,
-                                                submissionId: submission?.id,
-                                                data: submission?.data || submission?.form_data
-                                              })}
+                                              onClick={() => openFormSubmissionPdfViewer(submission, form)}
                                               className="text-red-600 border-red-200 hover:bg-red-50">
                                               <Eye className="h-3.5 w-3.5 mr-1" />View
                                             </Button>
@@ -8978,11 +9002,20 @@ export default function EmployeeProfilePage() {
       {/* Inline Document Viewer (PDF / image) — replaces window.open */}
       <InlineDocumentViewer
         open={inlineViewerOpen}
-        onClose={() => setInlineViewerOpen(false)}
+        onClose={() => {
+          setInlineViewerOpen(false);
+          setInlineViewerFallback(null);
+        }}
         fetchUrl={inlineViewerUrl}
         title={inlineViewerTitle}
         token={token}
         filename={inlineViewerFilename}
+        fallbackLabel={inlineViewerFallback ? 'View submitted answers' : undefined}
+        onFallback={inlineViewerFallback ? () => {
+          setInlineViewerOpen(false);
+          setViewFormSubmission(inlineViewerFallback);
+          setInlineViewerFallback(null);
+        } : undefined}
       />
     </div>
   );

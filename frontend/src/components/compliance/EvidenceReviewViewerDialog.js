@@ -125,6 +125,9 @@ export default function EvidenceReviewViewerDialog({
   trainingItem,
   onTrainingAccepted,
   onTrainingRejected,
+  trainingAcceptLabel = 'Accept extracted item',
+  trainingRejectLabel = 'Reject / needs correction',
+  trainingCompletionMessage = 'The extracted training item decision has been recorded. Verification remains a separate step on the canonical training record.',
 }) {
   const { token } = useAuth();
   const isAcceptMode = mode === 'accept';
@@ -908,7 +911,7 @@ export default function EvidenceReviewViewerDialog({
                           ? `Form submission rejected after ${viewSeconds}s of review.`
                           : `Form submission approved after ${viewSeconds}s of review. The audit trail records your viewing time and checklist.`)
                         : isTrainingReview
-                        ? 'The extracted training item decision has been recorded. Verification remains a separate step on the canonical training record.'
+                        ? trainingCompletionMessage
                         : isAcceptMode
                         ? `Evidence has been accepted after ${viewSeconds}s of review. You can now proceed to record the verification check.`
                         : `Document verified, stamped, and verification check auto-recorded. The audit trail records ${viewSeconds}s of viewing time.`}
@@ -946,16 +949,18 @@ export default function EvidenceReviewViewerDialog({
               {step === 'viewing' && isTrainingReview && (
                 <>
                   <Button variant="outline" size="sm" onClick={handleClose} className="flex-1">Cancel</Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleTrainingReject}
-                    disabled={isSubmitting || !hasMetMinViewTime || !checklist.fileViewed}
-                    className="flex-1 gap-1 text-red-700 border-red-200 hover:bg-red-50"
-                  >
-                    {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <XCircle className="h-4 w-4" />}
-                    Reject / needs correction
-                  </Button>
+                  {onTrainingRejected && trainingRejectLabel && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleTrainingReject}
+                      disabled={isSubmitting || !hasMetMinViewTime || !checklist.fileViewed}
+                      className="flex-1 gap-1 text-red-700 border-red-200 hover:bg-red-50"
+                    >
+                      {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <XCircle className="h-4 w-4" />}
+                      {trainingRejectLabel}
+                    </Button>
+                  )}
                   <Button
                     size="sm"
                     onClick={handleTrainingAccept}
@@ -963,7 +968,7 @@ export default function EvidenceReviewViewerDialog({
                     className="flex-1 gap-1 bg-green-600 hover:bg-green-700"
                   >
                     {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
-                    Accept extracted item
+                    {trainingAcceptLabel}
                   </Button>
                 </>
               )}

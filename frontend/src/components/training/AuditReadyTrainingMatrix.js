@@ -178,6 +178,7 @@ export default function AuditReadyTrainingMatrix({
   const [editingItem, setEditingItem] = useState(null);
   const [trainingReviewOpen, setTrainingReviewOpen] = useState(false);
   const [trainingReviewItem, setTrainingReviewItem] = useState(null);
+  const [trainingReviewPurpose, setTrainingReviewPurpose] = useState('proposed');
   
   // Delete training state
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -325,10 +326,22 @@ export default function AuditReadyTrainingMatrix({
     return {
       id: item.source_document_id,
       file_id: item.source_document_id,
-      file_url: item.source_document?.url,
       file_name: item.source_document?.filename || 'Source training certificate',
       name: item.source_document?.filename || 'Source training certificate',
       uploaded_at: item.source_document?.uploaded_at,
+    };
+  };
+
+  const getSourceCertificateFileForTrainingItem = (item) => {
+    const evidenceFile = Array.isArray(item?.evidence_files) ? item.evidence_files[0] : null;
+    const documentId = item?.source_document_id || evidenceFile?.document_id;
+    if (!documentId) return null;
+    return {
+      id: documentId,
+      file_id: documentId,
+      file_name: item?.original_filename || evidenceFile?.original_filename || item?.title || 'Training certificate',
+      name: item?.original_filename || evidenceFile?.original_filename || item?.title || 'Training certificate',
+      uploaded_at: item?.uploaded_at || evidenceFile?.uploaded_at,
     };
   };
 
@@ -342,6 +355,7 @@ export default function AuditReadyTrainingMatrix({
       return;
     }
     setTrainingReviewItem(item);
+    setTrainingReviewPurpose('proposed');
     setTrainingReviewOpen(true);
   };
 
@@ -440,20 +454,35 @@ export default function AuditReadyTrainingMatrix({
     setDeleteDialogOpen(true);
   };
 
+  const submitVerifyTraining = async (item) => {
+    await axios.post(
+      `${API}/api/employees/${employeeId}/training/${item.code || item.id}/verify`,
+      {},
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    toast.success(`${item.title} verified`);
+    fetchTrainingData();
+    onRefresh?.();
+  };
+
   // Verify training record - Admin only
   const handleVerifyTraining = async (item) => {
     try {
-      await axios.post(
-        `${API}/api/employees/${employeeId}/training/${item.code || item.id}/verify`,
-        {},
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      toast.success(`${item.title} verified`);
-      fetchTrainingData();
-      onRefresh?.();
+      await submitVerifyTraining(item);
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Failed to verify training');
     }
+  };
+
+  const openTrainingVerifyReview = (item) => {
+    const sourceFile = getSourceCertificateFileForTrainingItem(item);
+    if (!sourceFile) {
+      handleVerifyTraining(item);
+      return;
+    }
+    setTrainingReviewItem(item);
+    setTrainingReviewPurpose('verify');
+    setTrainingReviewOpen(true);
   };
 
   // Unverify training record - Admin only, requires reason
@@ -1269,7 +1298,7 @@ export default function AuditReadyTrainingMatrix({
                                 variant="ghost"
                                 size="sm"
                                 className="h-8 px-2 text-green-600 hover:text-green-700 hover:bg-green-50"
-                                onClick={() => handleVerifyTraining(item)}
+                                onClick={() => openTrainingVerifyReview(item)}
                                 data-testid={`verify-training-${item.code || item.id}`}
                               >
                                 <CheckCircle className="h-4 w-4 mr-1" />
@@ -1632,18 +1661,30 @@ export default function AuditReadyTrainingMatrix({
         onClose={() => {
           setTrainingReviewOpen(false);
           setTrainingReviewItem(null);
+          setTrainingReviewPurpose('proposed');
         }}
-        file={getSourceCertificateFileForProposedItem(trainingReviewItem)}
+        file={trainingReviewPurpose === 'verify'
+          ? getSourceCertificateFileForTrainingItem(trainingReviewItem)
+          : getSourceCertificateFileForProposedItem(trainingReviewItem)}
         employeeId={employeeId}
         employeeName={employeeName}
         requirementType="training_certificate"
         mode="training-review"
         trainingItem={trainingReviewItem}
+        trainingAcceptLabel={trainingReviewPurpose === 'verify' ? 'Verify training' : 'Accept extracted item'}
+        trainingRejectLabel={trainingReviewPurpose === 'verify' ? null : 'Reject / needs correction'}
+        trainingCompletionMessage={trainingReviewPurpose === 'verify'
+          ? 'Training verification has been recorded after evidence review.'
+          : 'The extracted training item decision has been recorded. Verification remains a separate step on the canonical training record.'}
         onTrainingAccepted={async ({ notes }) => {
           if (!trainingReviewItem) return;
-          await handleApproveProposed(trainingReviewItem, notes);
+          if (trainingReviewPurpose === 'verify') {
+            await submitVerifyTraining(trainingReviewItem);
+          } else {
+            await handleApproveProposed(trainingReviewItem, notes);
+          }
         }}
-        onTrainingRejected={async ({ notes }) => {
+        onTrainingRejected={trainingReviewPurpose === 'verify' ? undefined : async ({ notes }) => {
           if (!trainingReviewItem) return;
           await handleRejectProposed(trainingReviewItem, notes);
         }}

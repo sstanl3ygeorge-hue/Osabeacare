@@ -218,6 +218,10 @@ export default function AuditReadyTrainingMatrix({
   const [unverifyItem, setUnverifyItem] = useState(null);
   const [unverifyReason, setUnverifyReason] = useState('');
   const [unverifying, setUnverifying] = useState(false);
+
+  // Remove certificate state
+  const [removeCertDialogCert, setRemoveCertDialogCert] = useState(null);
+  const [removingCert, setRemovingCert] = useState(false);
   
   const isAdmin = user?.role === 'admin' || user?.role === 'superadmin' || user?.role === 'super_admin';
 
@@ -587,6 +591,31 @@ export default function AuditReadyTrainingMatrix({
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Failed to extract training');
       fetchTrainingData();
+    }
+  };
+
+  // Remove certificate file + extracted items
+  const handleRemoveCertificate = async () => {
+    if (!removeCertDialogCert) return;
+    setRemovingCert(true);
+    try {
+      const res = await axios.delete(
+        `${API}/api/employees/${employeeId}/training/certificates/${removeCertDialogCert.id}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      const preserved = res.data?.approved_training_records_preserved || 0;
+      const deleted = res.data?.proposed_items_deleted || 0;
+      toast.success(
+        preserved > 0
+          ? `Certificate removed. ${deleted} extracted item(s) deleted. ${preserved} approved training record(s) preserved.`
+          : `Certificate removed${deleted > 0 ? `. ${deleted} extracted item(s) deleted.` : '.'}`
+      );
+      setRemoveCertDialogCert(null);
+      fetchTrainingData();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to remove certificate.');
+    } finally {
+      setRemovingCert(false);
     }
   };
 
@@ -1487,6 +1516,17 @@ export default function AuditReadyTrainingMatrix({
                                 Re-extract
                               </Button>
                             )}
+                            {isAdmin && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 px-2 text-red-500 hover:text-red-700 hover:bg-red-50"
+                                onClick={() => setRemoveCertDialogCert(cert)}
+                                title="Remove certificate"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            )}
                           </div>
                         </div>
                         {cert.extraction_status === 'extraction_failed' && cert.extraction_error && (
@@ -1833,6 +1873,39 @@ export default function AuditReadyTrainingMatrix({
             >
               {unverifying ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
               Unverify
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Remove certificate confirm dialog */}
+      <Dialog open={!!removeCertDialogCert} onOpenChange={open => { if (!open) setRemoveCertDialogCert(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Remove certificate?</DialogTitle>
+            <DialogDescription>
+              This will delete the certificate file and any extracted training items that have not yet been approved.
+              Already-approved training records will be preserved.
+            </DialogDescription>
+          </DialogHeader>
+          {removeCertDialogCert && (
+            <div className="rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 mt-2">
+              <p className="font-medium">{removeCertDialogCert.original_filename || removeCertDialogCert.file_name || 'Training Certificate'}</p>
+              <p className="text-xs text-slate-500 mt-0.5">Uploaded {formatBackendDate(removeCertDialogCert.uploaded_at, { format: 'medium' })}</p>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRemoveCertDialogCert(null)} disabled={removingCert}>
+              Cancel
+            </Button>
+            <Button
+              className="bg-red-600 hover:bg-red-700 text-white"
+              onClick={handleRemoveCertificate}
+              disabled={removingCert}
+              data-testid="confirm-remove-cert-btn"
+            >
+              {removingCert ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Trash2 className="h-4 w-4 mr-2" />}
+              Remove certificate
             </Button>
           </DialogFooter>
         </DialogContent>

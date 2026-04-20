@@ -10848,6 +10848,85 @@ async def get_employee_training_certificates(
     }
 
 
+@api_router.delete("/employees/{employee_id}/training/certificates/{certificate_id}")
+async def delete_training_certificate(
+    employee_id: str,
+    certificate_id: str,
+    user: dict = Depends(require_admin),
+):
+    """
+    Delete a training certificate (raw evidence file) and its extracted proposed_training_items.
+
+    Safety rules:
+    - Deletes the employee_documents record and its storage file.
+    - Deletes any proposed_training_items linked to this certificate (status != approved/merged).
+    - Already-approved training_records are NOT deleted — training evidence they represent is preserved.
+    - If all linked proposed items are already approved, the certificate file is still removed but
+      those canonical training records are left intact.
+    """
+    from supabase_storage import delete_from_supabase
+
+    # --- 1. Locate the certificate document ---
+    cert = await db.employee_documents.find_one(
+        {"$or": [{"id": certificate_id}, {"document_id": certificate_id}],
+         "employee_id": employee_id},
+        {"_id": 0}
+    )
+    if not cert:
+        raise HTTPException(status_code=404, detail="Certificate not found.")
+
+    doc_id = cert.get("id") or cert.get("document_id") or certificate_id
+
+    # --- 2. Count approved training records that would be orphaned ---
+    approved_count = await db.training_records.count_documents({
+        "employee_id": employee_id,
+        "source_document_id": doc_id,
+        "record_status": {"$nin": ["superseded", "deleted"]},
+    })
+
+    # --- 3. Delete un-approved proposed items linked to this certificate ---
+    deleted_proposed = await db.proposed_training_items.delete_many({
+        "employee_id": employee_id,
+        "source_document_id": doc_id,
+        "status": {"$nin": ["approved", "merged"]},
+    })
+
+    # --- 4. Remove the file from storage (best-effort, non-blocking) ---
+    storage_deleted = False
+    storage_path = cert.get("storage_path") or cert.get("file_path")
+    if storage_path:
+        try:
+            storage_deleted = await delete_from_supabase(storage_path)
+        except Exception:
+            storage_deleted = False
+
+    # --- 5. Delete the employee_documents record ---
+    await db.employee_documents.delete_one(
+        {"$or": [{"id": certificate_id}, {"document_id": certificate_id}],
+         "employee_id": employee_id}
+    )
+
+    await log_audit_action(
+        user["user_id"], "delete_training_certificate", "employee_documents", employee_id,
+        {
+            "certificate_id": doc_id,
+            "filename": cert.get("original_filename") or cert.get("file_name"),
+            "proposed_items_deleted": deleted_proposed.deleted_count,
+            "approved_training_records_preserved": approved_count,
+            "storage_file_deleted": storage_deleted,
+            "deleted_by": user.get("user_id"),
+        }
+    )
+
+    return {
+        "ok": True,
+        "certificate_id": doc_id,
+        "proposed_items_deleted": deleted_proposed.deleted_count,
+        "approved_training_records_preserved": approved_count,
+        "storage_file_deleted": storage_deleted,
+    }
+
+
 @api_router.post("/employees/{employee_id}/training/assign")
 async def assign_training(
     employee_id: str,

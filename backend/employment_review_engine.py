@@ -72,6 +72,9 @@ def _normalise_gap_status(raw_status: Optional[str]) -> str:
         return GAP_STATUS_EXPLAINED
     if raw_status in {GapStatus.REJECTED.value, GapStatus.NEEDS_MORE_INFO.value}:
         return GAP_STATUS_REJECTED
+    if raw_status == GapStatus.REOPENED.value:
+        # Reopened gaps need a fresh explanation — treated as rejected for review flow
+        return GAP_STATUS_REJECTED
     return GAP_STATUS_MISSING
 
 
@@ -209,8 +212,14 @@ def _gap_segment_from_gap(gap: Dict[str, Any], index: int) -> Dict[str, Any]:
             "reviewed_by": gap.get("verified_by") or gap.get("reviewed_by"),
             "reviewed_by_name": gap.get("verified_by_name") or gap.get("reviewed_by_name"),
             "reviewed_at": gap.get("verified_at") or gap.get("reviewed_at"),
-            "notes": gap.get("admin_notes") or gap.get("notes"),
+            "notes": gap.get("admin_notes") or gap.get("notes") or (
+                gap.get("reopen_reason") if raw_status == GapStatus.REOPENED.value else None
+            ),
             "rejection_reason": gap.get("rejection_reason"),
+            "reopen_reason": gap.get("reopen_reason"),
+            "reopened_by": gap.get("reopened_by"),
+            "reopened_by_name": gap.get("reopened_by_name"),
+            "reopened_at": gap.get("reopened_at"),
         },
         "allowed_actions": (
             ["reopen_gap"]

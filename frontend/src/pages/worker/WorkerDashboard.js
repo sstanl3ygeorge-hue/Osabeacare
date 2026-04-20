@@ -105,7 +105,9 @@ function EmploymentGapsSection() {
   const fetchGaps = async () => {
     try {
       const token = localStorage.getItem('workerToken');
-      const res = await axios.get(`${API}/worker/employment-review`, {
+      // Use /worker/employment-gaps which reads directly from db.employment_gaps
+      // with stable UUIDs — prevents gap lookup failures on resubmit after admin reopen
+      const res = await axios.get(`${API}/worker/employment-gaps`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setGaps(res.data.gaps || []);
@@ -174,13 +176,14 @@ function EmploymentGapsSection() {
     if (workerState === 'awaiting_admin_review') return <Badge className="bg-blue-100 text-blue-700 text-xs"><Clock className="h-3 w-3 mr-1" />Awaiting review</Badge>;
     if (workerState === 'update_needed') return <Badge className="bg-red-100 text-red-700 text-xs"><AlertCircle className="h-3 w-3 mr-1" />Update needed</Badge>;
     if (workerState === 'action_required') return <Badge className="bg-slate-100 text-slate-600 text-xs">Action required</Badge>;
-    // Legacy fallback
+    // Legacy / direct db fallback
     const s = (gap.status || gap.verification_status || 'pending').toLowerCase();
     if (s === 'verified') return <Badge className="bg-green-100 text-green-700 text-xs"><CheckCircle className="h-3 w-3 mr-1" />Verified</Badge>;
     if (s === 'explained') return <Badge className="bg-blue-100 text-blue-700 text-xs"><Clock className="h-3 w-3 mr-1" />Awaiting review</Badge>;
+    if (s === 'reopened') return <Badge className="bg-red-100 text-red-700 text-xs"><AlertCircle className="h-3 w-3 mr-1" />Update needed</Badge>;
     if (s === 'needs_more_info') return <Badge className="bg-amber-100 text-amber-700 text-xs"><AlertTriangle className="h-3 w-3 mr-1" />More info needed</Badge>;
     if (s === 'rejected') return <Badge className="bg-red-100 text-red-700 text-xs"><AlertCircle className="h-3 w-3 mr-1" />Rejected</Badge>;
-    return <Badge className="bg-slate-100 text-slate-600 text-xs">Needs explanation</Badge>;
+    return <Badge className="bg-slate-100 text-slate-600 text-xs">Action required</Badge>;
   };
 
   const reasonLabel = (t) => {
@@ -320,6 +323,12 @@ function EmploymentGapsSection() {
                     <div className="mt-2 p-2 bg-amber-50 border border-amber-200 rounded text-sm text-amber-800">
                       <span className="text-xs font-medium block mb-1">Admin feedback</span>
                       {gap.admin_notes || gap.verification_notes}
+                    </div>
+                  )}
+                  {!gap.admin_notes && gap.reopen_reason && (
+                    <div className="mt-2 p-2 bg-orange-50 border border-orange-200 rounded text-sm text-orange-800">
+                      <span className="text-xs font-medium block mb-1">Reopened for review</span>
+                      {gap.reopen_reason}
                     </div>
                   )}
                 </div>

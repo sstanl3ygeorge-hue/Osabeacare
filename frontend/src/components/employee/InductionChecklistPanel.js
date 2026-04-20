@@ -680,7 +680,7 @@ export default function InductionChecklistPanel({ employeeId, employeeName, isAu
               const isHybrid = item.completion_type === 'hybrid';
               const isManual = item.completion_type === 'manual';
               const isAutomatic = item.completion_type === 'automatic';
-              const canManualComplete = !isAuditor && item.manual_action_allowed !== false && item.status !== 'completed' && !isHybrid && !isAutomatic;
+              const canManualComplete = !isAuditor && item.manual_action_allowed !== false && item.status !== 'completed' && !isHybrid && !isAutomatic && !isManual;
               const canUndoManual = !isAuditor && item.status === 'completed' && item.manual_action_allowed !== false && !item.synced_from_training && !isHybrid && !isAutomatic;
 
               return (

@@ -28,7 +28,7 @@ import {
   FileText, Users, GraduationCap, ClipboardCheck,
   Send, Eye, Plus, RefreshCw, Loader2, Shield,
   FileCheck, UserCheck, Briefcase, Heart, Calendar,
-  Clock, AlertCircle, Lock, Info, Edit
+  Clock, AlertCircle, Lock, Info, Edit, ChevronDown, ChevronUp
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
@@ -142,6 +142,7 @@ export default function ConsolidatedStatusPanel({
   const [data, setData] = useState(null);
   const [loadError, setLoadError] = useState(null);
   const [actionLoading, setActionLoading] = useState(null);
+  const [blockersExpanded, setBlockersExpanded] = useState(null); // null = auto
 
   const fetchStatus = async () => {
     setLoading(true);
@@ -382,20 +383,55 @@ export default function ConsolidatedStatusPanel({
       </Card>
 
       {/* BLOCKING ITEMS - ONE LIST WITH COLOR CODING */}
-      {blockers.length > 0 && (
+      {blockers.length > 0 && (() => {
+        const AUTO_COLLAPSE_THRESHOLD = 5;
+        const isExpanded = blockersExpanded !== null ? blockersExpanded : blockers.length <= AUTO_COLLAPSE_THRESHOLD;
+        const visibleBlockers = isExpanded ? blockers : blockers.slice(0, 3);
+        const criticalCount = blockers.filter(b => getBlockerSeverity(b, gates.gates?.[b.gate]) === 'CRITICAL').length;
+        const pendingCount = blockers.length - criticalCount;
+        return (
         <Card className="border border-gray-200 shadow-sm">
           <CardHeader className="py-3 px-4 bg-red-50/50 border-b border-red-100">
-            <CardTitle className="text-base font-semibold text-red-800 flex items-center gap-2">
-              <XCircle className="h-5 w-5" />
-              What's left before onboarding ({blockers.length} items)
-            </CardTitle>
-            <p className="text-xs text-gray-600 mt-1">
-              Critical = missing or unverified &nbsp;|&nbsp; Pending = waiting for Osabea review
-            </p>
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base font-semibold text-red-800 flex items-center gap-2">
+                <XCircle className="h-5 w-5" />
+                What's left before onboarding ({blockers.length} items)
+              </CardTitle>
+              {blockers.length > AUTO_COLLAPSE_THRESHOLD && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-red-700 hover:bg-red-100 h-7 px-2"
+                  onClick={() => setBlockersExpanded(e => e === null ? !isExpanded : !e)}
+                  data-testid="blockers-toggle-btn"
+                >
+                  {isExpanded ? (
+                    <><ChevronUp className="h-4 w-4 mr-1" />Collapse</>
+                  ) : (
+                    <><ChevronDown className="h-4 w-4 mr-1" />Show all {blockers.length} items</>
+                  )}
+                </Button>
+              )}
+            </div>
+            <div className="flex items-center gap-3 mt-1">
+              <p className="text-xs text-gray-600">
+                Critical = missing or unverified &nbsp;|&nbsp; Pending = waiting for Osabea review
+              </p>
+              {!isExpanded && (
+                <div className="flex items-center gap-1.5">
+                  {criticalCount > 0 && (
+                    <span className="text-[11px] font-medium bg-red-100 text-red-700 px-1.5 py-0.5 rounded">{criticalCount} critical</span>
+                  )}
+                  {pendingCount > 0 && (
+                    <span className="text-[11px] font-medium bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">{pendingCount} pending</span>
+                  )}
+                </div>
+              )}
+            </div>
           </CardHeader>
           <CardContent className="p-0">
             <div className="divide-y divide-gray-100">
-              {blockers.map((blocker, idx) => {
+              {visibleBlockers.map((blocker, idx) => {
                 const Icon = getBlockerIcon(blocker.gate);
                 const gateData = gates.gates?.[blocker.gate];
                 const severity = getBlockerSeverity(blocker, gateData);
@@ -604,9 +640,24 @@ export default function ConsolidatedStatusPanel({
                 );
               })}
             </div>
+            {!isExpanded && blockers.length > 3 && (
+              <div className="px-4 py-2 border-t border-gray-100 bg-gray-50">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-gray-600 hover:text-red-700 w-full text-xs h-7"
+                  onClick={() => setBlockersExpanded(true)}
+                  data-testid="blockers-show-all-btn"
+                >
+                  <ChevronDown className="h-3.5 w-3.5 mr-1" />
+                  Show {blockers.length - 3} more items
+                </Button>
+              </div>
+            )}
           </CardContent>
         </Card>
-      )}
+        );
+      })()}
 
       {/* PROGRESS SUMMARY - ONE CARD */}
       <Card className="border border-gray-200 shadow-sm">

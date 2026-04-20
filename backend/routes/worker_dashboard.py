@@ -2652,13 +2652,15 @@ def _worker_actor_id(employee_id: str) -> str:
 
 
 def _gap_status_for_worker(segment: dict) -> str:
-    status = (segment.get("status") or segment.get("raw_status") or "missing").lower()
+    # Use raw_status first (preserves "reopened" accurately) then normalized status
+    status = (segment.get("raw_status") or segment.get("status") or "missing").lower()
     return {
         "missing": "pending",
         "explained": "explained",
         "verified": "verified",
         "rejected": "rejected",
         "reopened": "needs_more_info",
+        "needs_more_info": "needs_more_info",
     }.get(status, status)
 
 
@@ -2703,6 +2705,9 @@ def _employment_review_to_worker_payload(review: dict, reason_types: list[str]) 
             "admin_notes": admin_review.get("notes"),
             "verification_notes": admin_review.get("notes"),
             "rejection_reason": admin_review.get("rejection_reason"),
+            "reopen_reason": admin_review.get("reopen_reason"),
+            "reopened_by_name": admin_review.get("reopened_by_name"),
+            "reopened_at": admin_review.get("reopened_at"),
             "verified": worker_status == "verified",
             "verified_at": admin_review.get("reviewed_at") if worker_status == "verified" else None,
             "verified_by": admin_review.get("reviewed_by") if worker_status == "verified" else None,

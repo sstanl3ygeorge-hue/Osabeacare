@@ -426,13 +426,6 @@ export default function ReferenceEmploymentComparison({ employeeId, onRefresh })
   );
 }
 
-  const [comparison, setComparison] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState(false);
-  const [expanded, setExpanded] = useState(false);
-
-  const fetchComparison = async () => {
-    try {
       setLoading(true);
       setLoadError(false);
       const token = localStorage.getItem('token');

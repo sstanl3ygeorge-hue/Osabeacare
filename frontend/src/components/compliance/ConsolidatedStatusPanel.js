@@ -143,6 +143,8 @@ export default function ConsolidatedStatusPanel({
   const [loadError, setLoadError] = useState(null);
   const [actionLoading, setActionLoading] = useState(null);
   const [blockersExpanded, setBlockersExpanded] = useState(null); // null = auto
+  const [gateResult, setGateResult] = useState(null); // structured recruitment gate
+  const [gateLoading, setGateLoading] = useState(false);
 
   const fetchStatus = async () => {
     setLoading(true);
@@ -171,11 +173,33 @@ export default function ConsolidatedStatusPanel({
     }
   };
 
+  const fetchGate = async () => {
+    if (!token || !employeeId) return;
+    setGateLoading(true);
+    try {
+      const res = await axios.get(
+        `${API}/api/employees/${employeeId}/recruitment-gate`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      setGateResult(res.data?.gate ?? null);
+    } catch (err) {
+      // Non-fatal — gate panel simply stays hidden
+      console.warn('Could not load recruitment gate:', err.response?.data?.detail || err.message);
+      setGateResult(null);
+    } finally {
+      setGateLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (token && employeeId) {
       fetchStatus();
+      // Only fetch the gate for applicants (not yet recruited)
+      if (personStage === 'applicant' && !recruitmentApproved) {
+        fetchGate();
+      }
     }
-  }, [token, employeeId]);
+  }, [token, employeeId, personStage, recruitmentApproved]);
 
   const handleSendReminder = async () => {
     setActionLoading('reminder');
@@ -311,6 +335,16 @@ export default function ConsolidatedStatusPanel({
   const isApplicant = personStage === 'applicant';
   const isEmployee = personStage === 'employee' || recruitmentApproved;
 
+  // Gate-derived approval readiness (canonical — overrides old isBlocked for the approve CTA)
+  const gateAllowed = gateResult?.allowed === true;
+  const gateBlockers = gateResult?.blocking_items ?? [];
+  const gateWarnings = gateResult?.warning_items ?? [];
+  const gatePassed = gateResult?.passed_items ?? [];
+  const gateMissing = gateResult?.missing_requirements ?? [];
+  const gateHasData = gateResult !== null;
+  // Approval CTA guard: if gate data loaded, use it; otherwise fall back to legacy isBlocked
+  const canApproveRecruitment = gateHasData ? gateAllowed : !isBlocked;
+
   return (
     <div className="space-y-4" data-testid="consolidated-status-panel">
       {/* STATUS HEADER */}
@@ -349,19 +383,31 @@ export default function ConsolidatedStatusPanel({
             
             {/* Main Action Button */}
             <div>
-              {isApplicant && !recruitmentApproved && !isBlocked && (
-                <Button
-                  onClick={handleApproveRecruitment}
-                  disabled={actionLoading === 'approve'}
-                  className="bg-green-600 hover:bg-green-700"
-                >
-                  {actionLoading === 'approve' ? (
-                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                  ) : (
-                    <UserCheck className="h-4 w-4 mr-2" />
+              {isApplicant && !recruitmentApproved && (
+                <div className="flex flex-col items-end gap-1">
+                  <Button
+                    onClick={handleApproveRecruitment}
+                    disabled={actionLoading === 'approve' || !canApproveRecruitment}
+                    className={canApproveRecruitment
+                      ? 'bg-green-600 hover:bg-green-700'
+                      : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                    }
+                    title={!canApproveRecruitment ? 'Resolve all blocking items before approving' : undefined}
+                  >
+                    {actionLoading === 'approve' ? (
+                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    ) : (
+                      <UserCheck className="h-4 w-4 mr-2" />
+                    )}
+                    Approve for Recruitment
+                  </Button>
+                  {!canApproveRecruitment && gateHasData && (
+                    <p className="text-[11px] text-red-600">{gateBlockers.length} blocker(s) must be resolved</p>
                   )}
-                  Approve for Recruitment
-                </Button>
+                  {canApproveRecruitment && gateWarnings.length > 0 && (
+                    <p className="text-[11px] text-amber-600">{gateWarnings.length} warning(s) — review before approving</p>
+                  )}
+                </div>
               )}
               {isEmployee && canPromote && (
                 <Button
@@ -381,6 +427,141 @@ export default function ConsolidatedStatusPanel({
           </div>
         </CardContent>
       </Card>
+
+      {/* RECRUITMENT APPROVAL CHECK — canonical gate result, applicants only */}
+      {isApplicant && !recruitmentApproved && (
+        <Card className={cn(
+          "border shadow-sm",
+          gateLoading ? "border-gray-200" :
+          !gateHasData ? "border-gray-200" :
+          !gateAllowed ? "border-red-200" :
+          gateWarnings.length > 0 ? "border-amber-200" :
+          "border-green-200"
+        )}>
+          <CardHeader className={cn(
+            "py-3 px-4 border-b",
+            gateLoading || !gateHasData ? "bg-gray-50/50 border-gray-100" :
+            !gateAllowed ? "bg-red-50/60 border-red-100" :
+            gateWarnings.length > 0 ? "bg-amber-50/60 border-amber-100" :
+            "bg-green-50/60 border-green-100"
+          )}>
+            <div className="flex items-center justify-between">
+              <CardTitle className={cn(
+                "text-base font-semibold flex items-center gap-2",
+                gateLoading || !gateHasData ? "text-gray-700" :
+                !gateAllowed ? "text-red-800" :
+                gateWarnings.length > 0 ? "text-amber-800" :
+                "text-green-800"
+              )}>
+                {gateLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : !gateHasData ? (
+                  <Info className="h-4 w-4" />
+                ) : !gateAllowed ? (
+                  <XCircle className="h-4 w-4" />
+                ) : gateWarnings.length > 0 ? (
+                  <AlertTriangle className="h-4 w-4" />
+                ) : (
+                  <CheckCircle className="h-4 w-4" />
+                )}
+                Recruitment Approval Check
+              </CardTitle>
+              <Button variant="ghost" size="sm" className="h-7 px-2 text-gray-500" onClick={fetchGate} disabled={gateLoading}>
+                <RefreshCw className={cn("h-3.5 w-3.5", gateLoading && "animate-spin")} />
+              </Button>
+            </div>
+            {gateHasData && !gateLoading && (
+              <p className={cn(
+                "text-xs mt-0.5",
+                !gateAllowed ? "text-red-600" :
+                gateWarnings.length > 0 ? "text-amber-600" :
+                "text-green-600"
+              )}>
+                {!gateAllowed
+                  ? `${gateBlockers.length} blocker(s) must be resolved before this applicant can be approved`
+                  : gateWarnings.length > 0
+                  ? `Ready to approve \u2014 ${gateWarnings.length} item(s) require investigation before or after approval`
+                  : "All recruitment gate requirements satisfied \u2014 ready for approval"
+                }
+              </p>
+            )}
+            {!gateHasData && !gateLoading && (
+              <p className="text-xs text-gray-500 mt-0.5">Gate check unavailable \u2014 using legacy readiness check for approval decision</p>
+            )}
+          </CardHeader>
+
+          {gateHasData && !gateLoading && (
+            <CardContent className="py-3 px-4 space-y-3">
+              {/* Blockers */}
+              {gateBlockers.length > 0 && (
+                <div>
+                  <p className="text-xs font-medium text-red-700 mb-1.5 flex items-center gap-1">
+                    <XCircle className="h-3.5 w-3.5" /> Blockers ({gateBlockers.length})
+                  </p>
+                  <div className="space-y-1">
+                    {gateBlockers.map((item, i) => (
+                      <div key={i} className="flex items-start gap-2 p-2 bg-red-50 rounded-lg border border-red-100">
+                        <span className="w-1.5 h-1.5 rounded-full bg-red-500 mt-1.5 shrink-0" />
+                        <div className="min-w-0">
+                          <p className="text-xs font-medium text-red-800">{item.label}</p>
+                          <p className="text-[11px] text-red-600 mt-0.5">{item.reason}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Warnings */}
+              {gateWarnings.length > 0 && (
+                <div>
+                  <p className="text-xs font-medium text-amber-700 mb-1.5 flex items-center gap-1">
+                    <AlertTriangle className="h-3.5 w-3.5" /> Warnings \u2014 investigate but not blocking ({gateWarnings.length})
+                  </p>
+                  <div className="space-y-1">
+                    {gateWarnings.map((item, i) => (
+                      <div key={i} className="flex items-start gap-2 p-2 bg-amber-50 rounded-lg border border-amber-100">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500 mt-1.5 shrink-0" />
+                        <div className="min-w-0">
+                          <p className="text-xs font-medium text-amber-800">{item.label}</p>
+                          <p className="text-[11px] text-amber-600 mt-0.5">{item.reason}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Passed */}
+              {gatePassed.length > 0 && (
+                <div>
+                  <p className="text-xs font-medium text-green-700 mb-1.5 flex items-center gap-1">
+                    <CheckCircle className="h-3.5 w-3.5" /> Passed ({gatePassed.length})
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {gatePassed.map((item, i) => (
+                      <span key={i} className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-green-100 text-green-800 border border-green-200">
+                        <CheckCircle className="h-2.5 w-2.5" />
+                        {item.label}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Missing requirement slots */}
+              {gateMissing.length > 0 && (
+                <div>
+                  <p className="text-xs font-medium text-gray-600 mb-1 flex items-center gap-1">
+                    <Info className="h-3.5 w-3.5" /> Missing requirement slots ({gateMissing.length})
+                  </p>
+                  <p className="text-[11px] text-gray-500">{gateMissing.join(', ')}</p>
+                </div>
+              )}
+            </CardContent>
+          )}
+        </Card>
+      )}
 
       {/* BLOCKING ITEMS - ONE LIST WITH COLOR CODING */}
       {blockers.length > 0 && (() => {

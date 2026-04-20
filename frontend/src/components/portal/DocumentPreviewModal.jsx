@@ -54,6 +54,9 @@ export default function DocumentPreviewModal({
   onDownload,
   // Original/Stamped toggle support
   stampedFileUrl,
+  // Stamp metadata for "Verified copy" badge
+  verificationStampByName,
+  verificationStampAt,
   // Multi-file support
   files = [],  // Array of {url, filename, content_type, file_id}
   initialFileIndex = 0
@@ -593,6 +596,23 @@ export default function DocumentPreviewModal({
                 <ShieldCheck className="h-3 w-3" />
                 Stamped
               </button>
+            </div>
+          )}
+
+          {/* Verified copy badge — shown when viewing the stamped version */}
+          {stampedFileUrl && viewingStamped && (
+            <div className="flex items-center gap-1.5 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-1.5 mr-3 shrink-0">
+              <ShieldCheck className="h-4 w-4 text-emerald-600" />
+              <div className="flex flex-col leading-tight">
+                <span className="text-xs font-semibold text-emerald-700">Verified copy</span>
+                {(verificationStampByName || verificationStampAt) && (
+                  <span className="text-[10px] text-emerald-600">
+                    {verificationStampByName && `by ${verificationStampByName}`}
+                    {verificationStampByName && verificationStampAt && ' · '}
+                    {verificationStampAt && new Date(verificationStampAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+                  </span>
+                )}
+              </div>
             </div>
           )}
 

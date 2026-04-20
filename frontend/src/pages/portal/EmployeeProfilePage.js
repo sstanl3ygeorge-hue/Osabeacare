@@ -6278,7 +6278,14 @@ export default function EmployeeProfilePage() {
                           if (stampedUrl && stampedUrl.startsWith('/api/')) {
                             stampedUrl = `${API}${stampedUrl.substring(4)}`;
                           }
-                          setPreviewFile({ url, name, filename: name, stampedFileUrl: stampedUrl });
+                          setPreviewFile({
+                            url,
+                            name,
+                            filename: name,
+                            stampedFileUrl: stampedUrl,
+                            verificationStampByName: fileObj?.verification_stamp_by_name || null,
+                            verificationStampAt: fileObj?.verification_stamp_at || null,
+                          });
                           setPreviewFiles([]); // Clear multi-file array
                           setPreviewOpen(true);
                         } else {
@@ -7372,6 +7379,8 @@ export default function EmployeeProfilePage() {
         fileUrl={previewFile?.url}
         fileName={previewFile?.name || previewFile?.filename}
         stampedFileUrl={previewFile?.stampedFileUrl}
+        verificationStampByName={previewFile?.verificationStampByName}
+        verificationStampAt={previewFile?.verificationStampAt}
         token={token}
         files={previewFiles}
         onDownload={previewFile ? async () => {

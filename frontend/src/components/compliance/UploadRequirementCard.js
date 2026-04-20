@@ -623,7 +623,13 @@ export default function UploadRequirementCard({
                             size="sm"
                             variant="default"
                             className="h-7 px-3 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-medium shadow-sm"
-                            onClick={() => window.open(file.stamped_file_url, '_blank')}
+                            onClick={() => onPreviewFile && onPreviewFile({
+                              file_url: `/api/employee-documents/${file.file_id || file.id}/file`,
+                              file_name: file.file_name || file.original_filename || 'Document',
+                              stamped_file_url: file.stamped_file_url,
+                              verification_stamp_by_name: file.verification_stamp_by_name,
+                              verification_stamp_at: file.verification_stamp_at,
+                            })}
                             title="View the stamped/verified version of this document"
                             data-testid={`${key}-view-stamped-${file.file_id || file.id}`}
                           >
@@ -688,11 +694,22 @@ export default function UploadRequirementCard({
                             size="sm"
                             variant="ghost"
                             className="h-7 w-7 p-0 text-gray-500 hover:text-blue-600"
-                            onClick={() => onPreviewFile({
-                              file_url: `/api/employee-documents/${file.file_id || file.id}/file`,
-                              file_name: file.file_name || file.original_filename || 'Document',
-                              stamped_file_url: file.stamped_file_url || null
-                            })}
+                            onClick={() => {
+                              const hasStamp = file.verification_stamp && file.verification_stamp !== 'not_verified';
+                              if (hasStamp && !file.stamped_file_url) {
+                                console.warn(
+                                  '[Stamp integrity] Verified doc is missing stamped_file_url.',
+                                  { doc_id: file.file_id || file.id, stamp: file.verification_stamp }
+                                );
+                              }
+                              onPreviewFile({
+                                file_url: `/api/employee-documents/${file.file_id || file.id}/file`,
+                                file_name: file.file_name || file.original_filename || 'Document',
+                                stamped_file_url: file.stamped_file_url || null,
+                                verification_stamp_by_name: file.verification_stamp_by_name,
+                                verification_stamp_at: file.verification_stamp_at,
+                              });
+                            }}
                             title="View document"
                             data-testid={`${key}-evidence-view-${file.file_id || file.id}`}
                           >

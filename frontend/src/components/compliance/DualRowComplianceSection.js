@@ -224,6 +224,7 @@ export default function DualRowComplianceSection({
       file_name: doc.file_name,
       original_filename: doc.file_name,
       file_url: doc.file_url,
+      stamped_file_url: doc.stamped_file_url || null,
       uploaded_at: doc.uploaded_at,
       uploaded_by: doc.uploaded_by,
       verified: doc.verified || false,

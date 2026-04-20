@@ -25,10 +25,20 @@ export default function EditEmploymentHistoryDialog({
   const [isLoading, setIsLoading] = useState(false);
   const [jobs, setJobs] = useState([]);
 
+  const normalizeJob = (job) => ({
+    id: job.id || job._id || `temp_${Date.now()}_${Math.random()}`,
+    employer: job.employer || job.company || job.employer_name || '',
+    job_title: job.job_title || job.position || job.title || '',
+    start_date: job.start_date || '',
+    end_date: job.end_date || '',
+    responsibilities: job.responsibilities || '',
+    is_current: job.is_current || job.current || false
+  });
+
   useEffect(() => {
     if (open) {
       // Initialize with current history or empty array
-      setJobs(currentHistory.length > 0 ? [...currentHistory] : [createEmptyJob()]);
+      setJobs(currentHistory.length > 0 ? currentHistory.map(normalizeJob) : [createEmptyJob()]);
     }
   }, [currentHistory, open]);
 

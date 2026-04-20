@@ -12525,6 +12525,7 @@ class EmploymentRecord(BaseModel):
 
 class UpdateEmploymentHistoryRequest(BaseModel):
     employment_history: List[EmploymentRecord]
+    edit_reason: Optional[str] = None
 
 @api_router.post("/employees/{employee_id}/employment-history")
 async def update_employment_history(
@@ -12619,7 +12620,8 @@ async def update_employment_history(
         {
             "job_count": len(history_data),
             "gaps_detected": len(gaps),
-            "gaps_explained": sum(1 for g in gaps if g.get("explanation"))
+            "gaps_explained": sum(1 for g in gaps if g.get("explanation")),
+            "edit_reason": request.edit_reason or ""
         }
     )
 

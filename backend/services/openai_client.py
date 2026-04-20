@@ -171,3 +171,79 @@ async def call_openai_vision_async(
             max_tokens=max_tokens,
         ),
     )
+
+
+# ---------------------------------------------------------------------------
+# Gemini fallback
+# ---------------------------------------------------------------------------
+
+def call_gemini_vision(
+    prompt: str,
+    *,
+    system_message: str = "You are an expert document extraction assistant.",
+    image_base64_list: Optional[List[str]] = None,
+    model: str = "gemini-1.5-flash",
+    max_tokens: int = 4096,
+) -> Optional[str]:
+    """
+    Synchronous Gemini Vision call used as a fallback when OpenAI is unavailable.
+
+    Returns the assistant's text response, or None on failure.
+    """
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        logger.warning("Gemini fallback skipped: GEMINI_API_KEY not set")
+        return None
+
+    try:
+        import google.generativeai as genai
+        from google.generativeai.types import HarmCategory, HarmBlockThreshold
+        import PIL.Image
+        import io
+
+        genai.configure(api_key=api_key)
+        gen_model = genai.GenerativeModel(model_name=model, system_instruction=system_message)
+
+        parts: List[Any] = [prompt]
+        for b64 in (image_base64_list or []):
+            img_bytes = base64.b64decode(b64)
+            img = PIL.Image.open(io.BytesIO(img_bytes))
+            parts.append(img)
+
+        response = gen_model.generate_content(
+            parts,
+            generation_config={"max_output_tokens": max_tokens},
+            safety_settings={
+                HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+                HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+                HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+                HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+            },
+        )
+        return response.text
+    except Exception as e:
+        logger.error(f"Gemini vision fallback failed: {e}")
+        return None
+
+
+async def call_gemini_vision_async(
+    prompt: str,
+    *,
+    system_message: str = "You are an expert document extraction assistant.",
+    image_base64_list: Optional[List[str]] = None,
+    model: str = "gemini-1.5-flash",
+    max_tokens: int = 4096,
+) -> Optional[str]:
+    """Async wrapper for call_gemini_vision."""
+    import asyncio
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(
+        None,
+        lambda: call_gemini_vision(
+            prompt,
+            system_message=system_message,
+            image_base64_list=image_base64_list,
+            model=model,
+            max_tokens=max_tokens,
+        ),
+    )

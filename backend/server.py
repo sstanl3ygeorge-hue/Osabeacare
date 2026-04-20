@@ -26967,20 +26967,33 @@ class DocumentExtractionService:
     
     @staticmethod
     async def _call_gemini_vision(image_base64: str, prompt: str, user_prompt: Optional[str] = None) -> Optional[str]:
-        """Call OpenAI Vision API for document extraction (replaces Gemini).
-        
+        """Call OpenAI Vision API (primary) with Gemini as fallback.
+
         When called with 2 args: prompt is the user message.
         When called with 3 args: prompt is the system message and user_prompt is the user message.
         """
-        from services.openai_client import call_openai_vision_async
-        if user_prompt is not None:
-            return await call_openai_vision_async(
-                user_prompt,
-                system_message=prompt,
+        from services.openai_client import call_openai_vision_async, call_gemini_vision_async
+
+        system_msg = prompt if user_prompt is not None else "You are an expert document extraction assistant."
+        user_msg = user_prompt if user_prompt is not None else prompt
+
+        # --- Primary: OpenAI ---
+        if os.environ.get("OPENAI_API_KEY"):
+            result = await call_openai_vision_async(
+                user_msg,
+                system_message=system_msg,
                 image_base64_list=[image_base64],
             )
-        return await call_openai_vision_async(
-            prompt,
+            if result:
+                return result
+            logger.warning("OpenAI vision returned no result; trying Gemini fallback")
+        else:
+            logger.warning("OPENAI_API_KEY not set; trying Gemini fallback")
+
+        # --- Fallback: Gemini ---
+        return await call_gemini_vision_async(
+            user_msg,
+            system_message=system_msg,
             image_base64_list=[image_base64],
         )
     
@@ -27641,6 +27654,17 @@ Extract address and document information from this proof of address document. {'
         metadata = {}
         issues = []
         
+        logger.info(f"RTW extraction: starting with {len(images)} image(s)")
+        
+        # Verify OpenAI key is available before attempting extraction
+        if not os.environ.get("OPENAI_API_KEY"):
+            logger.error("RTW extraction: OPENAI_API_KEY is not set")
+            return {
+                "fields": fields,
+                "metadata": metadata,
+                "issues": [{"code": "missing_api_key", "detail": "OPENAI_API_KEY is not configured on the server. Contact your administrator.", "severity": "blocker"}]
+            }
+        
         # Production-grade RTW prompt
         prompt = """You are an AI system extracting structured compliance data from UK Right to Work documents.
 
@@ -27706,6 +27730,14 @@ Example:
                         }
                 else:
                     issues.append({"code": "parse_error", "detail": "Failed to parse response", "severity": "warning"})
+            else:
+                logger.warning("RTW extraction: AI returned no response — check OPENAI_API_KEY and API connectivity")
+                issues.append({
+                    "code": "empty_response",
+                    "detail": "AI extraction returned no response. Verify OPENAI_API_KEY is set and the API is reachable.",
+                    "severity": "blocker"
+                })
+                return {"fields": fields, "metadata": metadata, "issues": issues}
             
             # RTW-specific validation
             if not fields.get("expiry_date") and not fields.get("permission_end"):

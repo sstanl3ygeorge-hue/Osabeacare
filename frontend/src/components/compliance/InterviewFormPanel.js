@@ -567,6 +567,19 @@ export default function InterviewFormPanel({ employeeId, employeeName, employeeR
               const isExpanded = expandedId === interview.id;
               const score = fData.total_score || 0;
               const max = fData.max_score || 24;
+              const adminDisplayStatus = interview.admin_display_status || (
+                decision
+                  ? (['Reject', 'Not Suitable'].includes(decision) ? 'reviewed_rejected' : 'reviewed_approved')
+                  : interview.status
+              );
+              const adminDisplayLabel = interview.admin_display_label || (
+                adminDisplayStatus === 'reviewed_approved' ? 'Reviewed - approved' :
+                adminDisplayStatus === 'reviewed_rejected' ? 'Reviewed - rejected' :
+                adminDisplayStatus === 'reviewed_passed' ? 'Reviewed - passed' :
+                adminDisplayStatus === 'reviewed_failed' ? 'Reviewed - failed' :
+                adminDisplayStatus === 'signed_off' || adminDisplayStatus === 'verified' ? 'Reviewed' :
+                String(adminDisplayStatus || 'Submitted, not reviewed').replace(/_/g, ' ')
+              );
               
               return (
                 <div 
@@ -615,6 +628,11 @@ export default function InterviewFormPanel({ employeeId, employeeName, employeeR
                       ) : (
                         <Badge className={score >= passScore ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}>
                           {score >= passScore ? 'Completed – Passed' : 'Completed – Failed'}
+                        </Badge>
+                      )}
+                      {interview.status === 'submitted' && adminDisplayStatus !== 'submitted' && (
+                        <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
+                          {adminDisplayLabel}
                         </Badge>
                       )}
                       <Button

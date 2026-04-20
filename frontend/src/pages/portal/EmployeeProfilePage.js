@@ -4984,6 +4984,11 @@ export default function EmployeeProfilePage() {
             const interviewDecision = interviewSubmission?.form_data?.decision || interviewSubmission?.data?.decision || interviewSubmission?.form_data?.overall_decision || null;
             const interviewScore = interviewSubmission?.form_data?.total_score || interviewSubmission?.data?.total_score || null;
             const interviewPassed = interviewScore !== null ? interviewScore >= 11 : null;
+            const interviewAdminStatus = interviewDecision
+              ? (['Reject', 'Not Suitable'].includes(interviewDecision) ? 'reviewed_rejected' : 'reviewed_approved')
+              : interviewPassed !== null
+                ? (interviewPassed ? 'reviewed_passed' : 'reviewed_failed')
+                : interviewFormStatus;
 
             // Banner colour
             const summaryBorderClass = cannotAssessForms
@@ -5084,6 +5089,9 @@ export default function EmployeeProfilePage() {
                         <Badge className="bg-gray-100 text-gray-600">Missing</Badge>
                       ) : interviewDecision ? (
                         <div className="flex flex-col items-end gap-1">
+                          <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
+                            {interviewAdminStatus === 'reviewed_rejected' ? 'Reviewed - rejected' : 'Reviewed - approved'}
+                          </Badge>
                           <Badge className={
                             ['Approve', 'Hire', 'Strong Hire'].includes(interviewDecision)
                               ? 'bg-green-100 text-green-700'

@@ -59,6 +59,41 @@ class PreInterviewReviewRequest(BaseModel):
     reviewed_by: Optional[str] = None
 
 
+def _normalise_interview_admin_status(record: dict) -> str:
+    """Return the admin-facing assessment status, not the raw submission workflow state."""
+    form_data = (record or {}).get("form_data") or (record or {}).get("data") or {}
+    raw_status = (record or {}).get("status")
+    decision = form_data.get("decision") or form_data.get("overall_decision")
+    score_present = form_data.get("total_score") is not None
+    passed = form_data.get("passed")
+
+    if raw_status == "draft" or form_data.get("is_draft"):
+        return "draft"
+    if decision:
+        if str(decision).lower() in {"reject", "not suitable"}:
+            return "reviewed_rejected"
+        return "reviewed_approved"
+    if passed is True:
+        return "reviewed_passed"
+    if passed is False or score_present:
+        return "reviewed_failed"
+    if (record or {}).get("verified") or raw_status in {"signed_off", "verified", "approved", "reviewed"}:
+        return "reviewed"
+    return raw_status or "submitted"
+
+
+def _interview_admin_status_label(status: str) -> str:
+    return {
+        "draft": "Draft",
+        "reviewed_approved": "Reviewed - approved",
+        "reviewed_rejected": "Reviewed - rejected",
+        "reviewed_passed": "Reviewed - passed",
+        "reviewed_failed": "Reviewed - failed",
+        "reviewed": "Reviewed",
+        "submitted": "Submitted, not reviewed",
+    }.get(status, str(status or "submitted").replace("_", " ").title())
+
+
 # ==================== INTERVIEW CONFIG ROUTES ====================
 
 @router.get("/interview-config/{role}")
@@ -117,6 +152,10 @@ async def get_interview_records(
         "employee_id": employee_id,
         "requirement_id": "interview_record"
     }, {"_id": 0}).sort("created_at", -1).to_list(50)
+    for record in records:
+        admin_status = _normalise_interview_admin_status(record)
+        record["admin_display_status"] = admin_status
+        record["admin_display_label"] = _interview_admin_status_label(admin_status)
     
     return {
         "stage": "admin_final_assessment",

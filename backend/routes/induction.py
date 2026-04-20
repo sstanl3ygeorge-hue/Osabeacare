@@ -1220,7 +1220,12 @@ async def reopen_induction_item(
     )
 
     if not item_reverted:
-        raise HTTPException(status_code=404, detail=f"Item '{item_code}' not found in checklist — may already be pending.")
+        logger.info(
+            "induction reopen non-fatal: checklist item already pending or missing employee_id=%s input_item=%s resolved_item=%s",
+            employee_id,
+            item_code,
+            resolved_item_code,
+        )
 
     _recalculate_induction_checklist_status(checklist, now)
 
@@ -1250,6 +1255,7 @@ async def reopen_induction_item(
         "reopened_by": admin_name,
         "submission_reverted_to_submitted": submission is not None and submission.get("status") == "signed_off",
         "overall_status": checklist["overall_status"],
+        "warning": None if item_reverted else "Checklist item was already pending or not present; submission state was left/reverted to reviewable where possible.",
     }
 
 

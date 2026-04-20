@@ -1588,6 +1588,14 @@ export default function AuditReadyTrainingMatrix({
                                     </div>
                                   </div>
                                   <div className="flex items-center gap-2">
+                                    <Badge variant="outline" className={item.is_mandatory ? 'bg-red-50 text-red-700 border-red-200 text-xs' : 'text-gray-600 text-xs'}>
+                                      {item.is_mandatory ? 'Required' : 'Additional'}
+                                    </Badge>
+                                    {item.is_unmapped && (
+                                      <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 text-xs">
+                                        Unmapped
+                                      </Badge>
+                                    )}
                                     {typeof item.confidence === 'number' && (
                                       <span className="text-xs text-gray-500">
                                         {Math.round(item.confidence * 100)}% confidence

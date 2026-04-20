@@ -10885,11 +10885,25 @@ async def delete_training_certificate(
     })
 
     # --- 3. Delete un-approved proposed items linked to this certificate ---
-    deleted_proposed = await db.proposed_training_items.delete_many({
+    # Cover ALL linkage field variants used across creation paths:
+    #   source_document_id   — canonical field (both creation paths)
+    #   document_id          — legacy field used by older bulk-save payloads
+    #   certificate_id       — UI-generated field from some frontend paths
+    #   employee_document_id — legacy alias used by some older records
+    unapproved_filter = {
         "employee_id": employee_id,
-        "source_document_id": doc_id,
+        "$or": [
+            {"source_document_id": doc_id},
+            {"document_id": doc_id},
+            {"certificate_id": doc_id},
+            {"employee_document_id": doc_id},
+            # Also catch via the certificate_id URL path param in case stored differently
+            {"source_document_id": certificate_id},
+            {"document_id": certificate_id},
+        ],
         "status": {"$nin": ["approved", "merged"]},
-    })
+    }
+    deleted_proposed = await db.proposed_training_items.delete_many(unapproved_filter)
 
     # --- 4. Remove the file from storage (best-effort, non-blocking) ---
     storage_deleted = False
@@ -11967,10 +11981,26 @@ async def re_extract_training_from_existing_certificate(
         "record_status": {"$nin": ["superseded", "deleted"]}
     }, {"_id": 0, "training_name": 1, "id": 1, "requirement_id": 1}).to_list(200)
     
-    # Check ALL proposed items (any status) to prevent re-submission
-    existing_proposed = await db.proposed_training_items.find({
+    # Check ALL proposed items (any status) to prevent re-submission,
+    # but exclude orphaned items whose source certificate no longer exists.
+    all_proposed_raw = await db.proposed_training_items.find({
         "employee_id": employee_id,
-    }, {"_id": 0, "raw_course_title": 1, "mapped_training_title": 1, "id": 1, "status": 1}).to_list(200)
+    }, {"_id": 0, "raw_course_title": 1, "mapped_training_title": 1, "id": 1, "status": 1, "source_document_id": 1}).to_list(200)
+
+    # Determine which source docs still exist
+    _raw_doc_ids = {p["source_document_id"] for p in all_proposed_raw if p.get("source_document_id")}
+    if _raw_doc_ids:
+        _existing_src_docs = await db.employee_documents.find(
+            {"id": {"$in": list(_raw_doc_ids)}}, {"_id": 0, "id": 1}
+        ).to_list(len(_raw_doc_ids))
+        _valid_src_ids = {d["id"] for d in _existing_src_docs}
+    else:
+        _valid_src_ids = set()
+
+    existing_proposed = [
+        p for p in all_proposed_raw
+        if not p.get("source_document_id") or p["source_document_id"] in _valid_src_ids
+    ]
     
     # Build normalised name set for dedup (alias-aware)
     def _normalise_training_name(name):
@@ -22382,6 +22412,28 @@ async def get_proposed_training_items_inline(
         query, {"_id": 0}
     ).sort("created_at", -1).to_list(200)
 
+    # Filter out orphaned items whose source certificate no longer exists.
+    # Collect all source_document_ids that are present, then validate in one batch query.
+    doc_ids_needed = {item["source_document_id"] for item in items if item.get("source_document_id")}
+    if doc_ids_needed:
+        existing_docs = await db.employee_documents.find(
+            {"id": {"$in": list(doc_ids_needed)}},
+            {"_id": 0, "id": 1}
+        ).to_list(len(doc_ids_needed))
+        existing_doc_ids = {d["id"] for d in existing_docs}
+    else:
+        existing_doc_ids = set()
+
+    active_items = []
+    orphaned_ids = []
+    for item in items:
+        src = item.get("source_document_id")
+        if src and src not in existing_doc_ids:
+            orphaned_ids.append(item.get("id"))
+        else:
+            active_items.append(item)
+    items = active_items
+
     for item in items:
         doc_id = item.get("source_document_id")
         if doc_id:
@@ -22399,7 +22451,48 @@ async def get_proposed_training_items_inline(
     return {"proposed_items": items, "total": len(items)}
 
 
-@api_router.get("/employees/{employee_id}/training/{requirement_id}")
+@api_router.post("/employees/{employee_id}/training/proposed-items/cleanup-orphans")
+async def cleanup_orphaned_proposed_items(
+    employee_id: str,
+    user: dict = Depends(require_admin),
+):
+    """
+    Admin-only: delete proposed_training_items whose source certificate
+    (employee_documents) no longer exists. Safe to run at any time.
+    Approved/merged items are never deleted.
+    """
+    all_proposed = await db.proposed_training_items.find(
+        {"employee_id": employee_id, "status": {"$nin": ["approved", "merged"]}},
+        {"_id": 0, "id": 1, "source_document_id": 1}
+    ).to_list(500)
+
+    doc_ids = {p["source_document_id"] for p in all_proposed if p.get("source_document_id")}
+    if not doc_ids:
+        return {"ok": True, "orphaned_deleted": 0}
+
+    existing = await db.employee_documents.find(
+        {"id": {"$in": list(doc_ids)}}, {"_id": 0, "id": 1}
+    ).to_list(len(doc_ids))
+    existing_ids = {d["id"] for d in existing}
+
+    orphan_item_ids = [
+        p["id"] for p in all_proposed
+        if p.get("source_document_id") and p["source_document_id"] not in existing_ids
+    ]
+
+    if not orphan_item_ids:
+        return {"ok": True, "orphaned_deleted": 0}
+
+    result = await db.proposed_training_items.delete_many({"id": {"$in": orphan_item_ids}})
+
+    await log_audit_action(
+        user["user_id"], "cleanup_orphaned_proposed_items", "employee", employee_id,
+        {"orphaned_deleted": result.deleted_count, "ids": orphan_item_ids}
+    )
+
+    return {"ok": True, "orphaned_deleted": result.deleted_count, "ids": orphan_item_ids}
+
+
 async def get_employee_training_record(
     employee_id: str,
     requirement_id: str,

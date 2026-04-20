@@ -464,6 +464,11 @@ export default function EmployeeProfilePage() {
   const [mismatchDialogOpen, setMismatchDialogOpen] = useState(false);
   const [mismatchReviewNote, setMismatchReviewNote] = useState('');
   const [isSubmittingMismatchNote, setIsSubmittingMismatchNote] = useState(false);
+  const [selectedCvRolesForApply, setSelectedCvRolesForApply] = useState({});
+  const [reconcileReason, setReconcileReason] = useState('');
+  const [isApplyingReconcile, setIsApplyingReconcile] = useState(false);
+  const [reconcileReason, setReconcileReason] = useState('');
+  const [isApplyingReconcile, setIsApplyingReconcile] = useState(false);
   const [isReextractingFromCv, setIsReextractingFromCv] = useState(false);
   
   // Document Correction State (Step 8)
@@ -877,6 +882,38 @@ export default function EmployeeProfilePage() {
       toast.error(err.response?.data?.detail || 'Failed to add note');
     } finally {
       setIsSubmittingMismatchNote(false);
+    }
+  };
+
+  const handleApplyReconcile = async () => {
+    const rolesToApply = (employmentMismatch?.cv_extracted_roles || []).filter(
+      (_, i) => selectedCvRolesForApply[i]
+    );
+    if (!rolesToApply.length) { toast.error('Select at least one CV role to apply'); return; }
+    if (!reconcileReason || reconcileReason.trim().length < 5) {
+      toast.error('Enter a reason (at least 5 characters) before applying');
+      return;
+    }
+    setIsApplyingReconcile(true);
+    try {
+      const res = (await axios.post(
+        `${API}/employees/${employeeId}/employment-history/apply-from-cv`,
+        { roles_to_apply: rolesToApply, edit_reason: reconcileReason },
+        { headers: { Authorization: `Bearer ${token}` } }
+      )).data;
+      toast.success(`Applied ${res.applied_count} role(s). Gaps recalculated.${
+        res.skipped_duplicates?.length ? ` Skipped ${res.skipped_duplicates.length} duplicate(s).` : ''
+      }`);
+      setSelectedCvRolesForApply({});
+      setReconcileReason('');
+      setMismatchDialogOpen(false);
+      fetchEmployee();
+      fetchComplianceFile();
+      fetchEmploymentMismatch();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to apply CV reconciliation');
+    } finally {
+      setIsApplyingReconcile(false);
     }
   };
   
@@ -8782,8 +8819,8 @@ export default function EmployeeProfilePage() {
       </Dialog>
 
       {/* Employment History Mismatch Details Dialog */}
-      <Dialog open={mismatchDialogOpen} onOpenChange={setMismatchDialogOpen}>
-        <DialogContent className="sm:max-w-3xl bg-white max-h-[90vh] overflow-y-auto">
+      <Dialog open={mismatchDialogOpen} onOpenChange={(v) => { setMismatchDialogOpen(v); if (!v) { setSelectedCvRolesForApply({}); setReconcileReason(''); } }}>
+        <DialogContent className="sm:max-w-4xl bg-white max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="font-heading flex items-center gap-2 text-gray-900">
               <AlertTriangle className="h-5 w-5 text-amber-600" />
@@ -8856,7 +8893,7 @@ export default function EmployeeProfilePage() {
                     {employmentMismatch.structured_history?.length > 0 ? (
                       employmentMismatch.structured_history.map((job, idx) => (
                         <div key={idx} className="p-2 bg-green-50 rounded border border-green-200 text-sm">
-                          <p className="font-medium">{job.employer_name || job.company}</p>
+                          <p className="font-medium">{job.employer_name || job.company || job.employer}</p>
                           <p className="text-gray-600">{job.job_title || job.role}</p>
                           <p className="text-xs text-gray-500">{job.start_date} - {job.end_date || 'Present'}</p>
                         </div>
@@ -8883,11 +8920,64 @@ export default function EmployeeProfilePage() {
                   </div>
                 </div>
               </div>
-              
+
+              {/* Apply selected CV roles to history */}
+              {!isAuditor() && employmentMismatch.cv_extracted_roles?.length > 0 && (
+                <div className="pt-4 border-t space-y-3">
+                  <h4 className="font-medium text-gray-900">Apply CV Roles to Employment History</h4>
+                  <p className="text-xs text-gray-500">
+                    Select roles from the CV to append to the canonical employment history.
+                    Existing records are never overwritten — only new entries are added.
+                    Gaps and coverage will recalculate automatically.
+                  </p>
+                  <div className="space-y-2">
+                    {employmentMismatch.cv_extracted_roles.map((role, idx) => (
+                      <label key={idx} className="flex items-start gap-3 p-2 rounded border border-gray-200 cursor-pointer hover:bg-gray-50">
+                        <input
+                          type="checkbox"
+                          className="mt-0.5"
+                          checked={!!selectedCvRolesForApply[idx]}
+                          onChange={(e) => setSelectedCvRolesForApply(prev => ({ ...prev, [idx]: e.target.checked }))}
+                        />
+                        <div className="text-sm">
+                          <p className="font-medium text-gray-900">{role.employer}</p>
+                          <p className="text-gray-600">{role.job_title}</p>
+                          <p className="text-xs text-gray-500">{role.start_date} – {role.end_date || 'Present'}</p>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                  {Object.values(selectedCvRolesForApply).some(Boolean) && (
+                    <div className="space-y-2">
+                      <label className="text-xs font-medium text-gray-700">Reason for applying (required) *</label>
+                      <Textarea
+                        value={reconcileReason}
+                        onChange={(e) => setReconcileReason(e.target.value)}
+                        placeholder="e.g. CV confirms role at Joymark Support UK Ltd from Feb 2026 not captured in application form"
+                        rows={2}
+                        className="bg-white border-[#E4E8EB] text-sm"
+                      />
+                      <Button
+                        onClick={handleApplyReconcile}
+                        disabled={isApplyingReconcile || reconcileReason.trim().length < 5}
+                        className="bg-blue-600 hover:bg-blue-700 text-white w-full"
+                      >
+                        {isApplyingReconcile ? (
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        ) : (
+                          <CheckCircle className="h-4 w-4 mr-2" />
+                        )}
+                        Apply Selected Roles to Employment History
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Add Review Note */}
               {!isAuditor() && (
                 <div className="pt-4 border-t space-y-3">
-                  <h4 className="font-medium text-gray-900">Add Review Note</h4>
+                  <h4 className="font-medium text-gray-900">Add Review Note (acknowledge without applying)</h4>
                   <p className="text-xs text-gray-500">Document your review of this mismatch to proceed with recruitment approval.</p>
                   <Textarea
                     value={mismatchReviewNote}

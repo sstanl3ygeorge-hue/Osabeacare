@@ -37193,6 +37193,233 @@ async def add_employment_mismatch_note(
     }
 
 
+# ==================== CV RECONCILIATION APPLY ====================
+
+class CvReconcileApplyItem(BaseModel):
+    """A single CV role chosen for applying to canonical history."""
+    employer: str
+    job_title: Optional[str] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    responsibilities: Optional[str] = None
+    is_current: bool = False
+
+
+class CvReconcileApplyRequest(BaseModel):
+    roles_to_apply: List[CvReconcileApplyItem]
+    edit_reason: str  # Required — admin must declare why
+
+
+@api_router.post("/employees/{employee_id}/employment-history/apply-from-cv")
+async def apply_cv_roles_to_employment_history(
+    employee_id: str,
+    request: CvReconcileApplyRequest,
+    user: dict = Depends(require_manager_or_admin),
+):
+    """
+    Safe CV-to-employment-history reconciliation.
+
+    Admin selects specific CV roles to merge into canonical employment_history.
+    Each selected role is APPENDED (deduplicated by employer+start_date).
+    Existing entries are NEVER silently overwritten — if a near-match exists,
+    the selected role is skipped and the mismatch is noted in the audit log.
+
+    After applying:
+    - Gaps are recalculated within the anchored window.
+    - Any previously-verified gap whose date range is now covered by the new
+      entry is reopened (status → "reopened", reason = "history_updated_from_cv").
+    - The canonical employment review is rebuilt.
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    if not request.edit_reason or len(request.edit_reason.strip()) < 5:
+        raise HTTPException(status_code=422, detail="edit_reason must be at least 5 characters")
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    current_history: list = list(employee.get("employment_history") or [])
+
+    def _norm_employer(name: str) -> str:
+        if not name:
+            return ""
+        n = name.lower().strip()
+        for sfx in [" ltd", " limited", " plc", " inc", " corp", " llc", " gmbh", " uk"]:
+            n = n.replace(sfx, "")
+        return n.strip()
+
+    def _norm_month(date_str) -> Optional[str]:
+        if not date_str:
+            return None
+        s = str(date_str).strip()
+        if re.match(r"^\d{4}-\d{2}", s):
+            return s[:7]
+        return None
+
+    def _is_duplicate(new_role: dict, existing: list) -> bool:
+        emp_key = _norm_employer(new_role.get("employer", ""))
+        new_start = _norm_month(new_role.get("start_date"))
+        for ex in existing:
+            ex_emp = _norm_employer(
+                ex.get("employer") or ex.get("company") or ex.get("employer_name") or ""
+            )
+            ex_start = _norm_month(ex.get("start_date"))
+            if emp_key and emp_key == ex_emp:
+                # Same employer — if start dates match within 1 month treat as duplicate
+                if new_start and ex_start:
+                    try:
+                        ny, nm = int(new_start[:4]), int(new_start[5:7])
+                        ey, em = int(ex_start[:4]), int(ex_start[5:7])
+                        if abs((ny * 12 + nm) - (ey * 12 + em)) <= 1:
+                            return True
+                    except ValueError:
+                        pass
+                elif not new_start and not ex_start:
+                    return True
+        return False
+
+    applied_roles = []
+    skipped_duplicates = []
+
+    for role in request.roles_to_apply:
+        role_dict = {
+            "employer": role.employer,
+            "job_title": role.job_title or "",
+            "start_date": role.start_date or "",
+            "end_date": role.end_date if not role.is_current else None,
+            "responsibilities": role.responsibilities or "",
+            "is_current": role.is_current,
+            "added_from_cv_reconciliation": True,
+            "added_at": now_iso,
+            "added_by": user.get("user_id"),
+        }
+        if _is_duplicate(role_dict, current_history):
+            skipped_duplicates.append(role.employer)
+        else:
+            current_history.append(role_dict)
+            applied_roles.append(role.employer)
+
+    if not applied_roles:
+        return {
+            "ok": True,
+            "applied_count": 0,
+            "skipped_duplicates": skipped_duplicates,
+            "message": "No new roles applied — all selected roles already exist in employment history.",
+        }
+
+    # Resolve anchor date
+    anchor_str = employee.get("employment_window_reference_date") or employee.get("application_submitted_at")
+    anchor_dt = None
+    if anchor_str:
+        try:
+            anchor_dt = datetime.fromisoformat(anchor_str.replace("Z", "+00:00"))
+            if anchor_dt.tzinfo is None:
+                anchor_dt = anchor_dt.replace(tzinfo=timezone.utc)
+        except (ValueError, AttributeError):
+            anchor_dt = None
+
+    # Recalculate gaps within anchored window
+    new_gaps = detect_employment_gaps_with_coverage(current_history, as_of_date=anchor_dt)
+    match_result = match_gap_explanations_to_canonical_gaps(
+        new_gaps,
+        employee.get("gap_explanations", []) or [],
+        provided_at=now_iso,
+        explanation_source="application_form",
+        apply_to_gaps=True,
+    )
+    new_gaps = match_result["gaps"]
+    new_coverage = compute_coverage_summary(current_history, gap_records=new_gaps, as_of_date=anchor_dt)
+
+    # Reopen any previously-verified gap whose range is now covered by a new entry
+    # (i.e. gap no longer appears in fresh detection)
+    new_gap_ranges = {(g.get("gap_start"), g.get("gap_end")) for g in new_gaps}
+    existing_gap_records = await db.employment_gaps.find(
+        {"employee_id": employee_id, "status": GapStatus.VERIFIED.value}, {"_id": 0}
+    ).to_list(200)
+
+    reopened_gap_ids = []
+    for eg in existing_gap_records:
+        key = (eg.get("gap_start"), eg.get("gap_end"))
+        if key not in new_gap_ranges:
+            # This verified gap is no longer detected — history now covers it.
+            # Retire it gracefully rather than silently leaving stale verified state.
+            await db.employment_gaps.update_one(
+                {"id": eg["id"], "employee_id": employee_id},
+                {"$set": {
+                    "status": "retired",
+                    "retired_at": now_iso,
+                    "retired_by": user.get("user_id"),
+                    "retire_reason": "history_updated_from_cv_reconciliation",
+                    "updated_at": now_iso,
+                }}
+            )
+            reopened_gap_ids.append(eg.get("id"))
+
+    # Upsert new gap records for gaps that still exist
+    for gap in new_gaps:
+        gap_record = create_gap_record(employee_id, gap, created_by=user.get("user_id", "admin"))
+        existing = await db.employment_gaps.find_one({
+            "employee_id": employee_id,
+            "gap_start": gap_record.get("gap_start"),
+            "gap_end": gap_record.get("gap_end"),
+        })
+        if not existing:
+            await db.employment_gaps.insert_one(gap_record)
+
+    # Persist updated history + coverage
+    await db.employees.update_one(
+        {"id": employee_id},
+        {"$set": {
+            "employment_history": current_history,
+            "employment_gaps": new_gaps,
+            "cv_gaps_detected": new_gaps,
+            "cv_gaps_all_explained": all(
+                g.get("explanation") and len(str(g.get("explanation", "")).strip()) >= 10
+                for g in new_gaps
+            ) if new_gaps else True,
+            "has_employment_gaps": len(new_gaps) > 0,
+            "employment_coverage": new_coverage,
+            "gap_analysis_status": "completed",
+            "employment_gaps_detected_at": now_iso,
+            "updated_at": now_iso,
+        }}
+    )
+
+    # Rebuild canonical employment review
+    employment_review = await upsert_employment_review(
+        db,
+        employee_id,
+        actor_id=user.get("user_id") or user.get("id"),
+        reason="cv_reconciliation_apply",
+    )
+
+    await log_audit_action(
+        user["user_id"],
+        "apply_cv_reconciliation",
+        "employee",
+        employee_id,
+        {
+            "applied_roles": applied_roles,
+            "skipped_duplicates": skipped_duplicates,
+            "edit_reason": request.edit_reason,
+            "gaps_recalculated": len(new_gaps),
+            "verified_gaps_retired": len(reopened_gap_ids),
+            "employment_review_status": employment_review.get("status"),
+        }
+    )
+
+    return {
+        "ok": True,
+        "applied_count": len(applied_roles),
+        "applied_roles": applied_roles,
+        "skipped_duplicates": skipped_duplicates,
+        "gaps_recalculated": len(new_gaps),
+        "verified_gaps_retired": len(reopened_gap_ids),
+        "retired_gap_ids": reopened_gap_ids,
+        "employment_review_status": employment_review.get("status"),
+        "coverage": new_coverage,
+    }
+
 
 async def get_application_status(reference: str):
     """

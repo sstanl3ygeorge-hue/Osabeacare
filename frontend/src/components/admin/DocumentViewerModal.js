@@ -93,7 +93,7 @@ export default function DocumentViewerModal({
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col" data-testid="document-viewer-modal">
+      <DialogContent className="max-w-6xl w-[95vw] max-h-[95vh] flex flex-col" data-testid="document-viewer-modal">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <FileText className="h-5 w-5 text-primary" />

@@ -21029,8 +21029,9 @@ async def serve_employee_document_file(doc_id: str, user: dict = Depends(get_cur
             else:
                 raise HTTPException(status_code=404, detail="File not found on disk")
         else:
-            # Cloud storage path
-            content, content_type = get_object(file_path)
+            # Cloud storage path — use retrieve_file_bytes which handles Supabase,
+            # direct HTTP(S), and legacy Emergent storage
+            content, content_type = await retrieve_file_bytes(file_path)
         
         return Response(
             content=content,
@@ -21104,8 +21105,9 @@ async def download_employee_document_file(doc_id: str, user: dict = Depends(get_
             else:
                 raise HTTPException(status_code=404, detail="File not found on disk")
         else:
-            # Cloud storage path
-            content, storage_content_type = get_object(file_path)
+            # Cloud storage path — use retrieve_file_bytes which handles Supabase,
+            # direct HTTP(S), and legacy Emergent storage
+            content, storage_content_type = await retrieve_file_bytes(file_path)
         
         # CRITICAL: Determine correct content-type from multiple sources
         # Priority: 1. File extension, 2. Stored file_type, 3. Storage response, 4. Fallback

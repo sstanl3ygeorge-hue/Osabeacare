@@ -909,8 +909,13 @@ async def get_unified_employee_status(
             if has_approved_verification:
                 verification_status = "verified"
             elif has_verified_docs:
-                # Identity / PoA / other — docs directly verified
-                verification_status = "verified"
+                # Identity / PoA / other — docs directly verified.
+                # If min_count > 1 (e.g. Proof of Address requires 2 docs),
+                # only mark "verified" when the count requirement is actually met.
+                if min_count > 1 and verified_count < min_count:
+                    verification_status = "partially_verified"
+                else:
+                    verification_status = "verified"
             elif len(matching_docs) > 0:
                 verification_status = "awaiting_review"
             else:
@@ -941,6 +946,9 @@ async def get_unified_employee_status(
                 continue  # Should not happen, but skip if approved
             elif verification_status in ("awaiting_review", "check_in_progress", "proof_required"):
                 blocker_msg = f"{get_clear_label(req_id)}: {verification_status.replace('_', ' ').title()}"
+                severity = "pending"
+            elif verification_status == "partially_verified":
+                blocker_msg = f"{get_clear_label(req_id)}: {verified_count} of {min_count} verified — {min_count - verified_count} more required"
                 severity = "pending"
             elif verification_status in ("check_required", "reupload_required"):
                 blocker_msg = f"{get_clear_label(req_id)}: {verification_status.replace('_', ' ').title()}"

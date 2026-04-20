@@ -128,6 +128,9 @@ async def process_document(db, doc: dict) -> bool:
             {
                 "$set": {
                     "stamped_file_url": stamped_url,
+                    "verification_stamp_by_name": admin_name,
+                    "verification_stamp_at": verified_at,
+                    "verification_stamp_label": "Verified copy",
                     "stamp_applied_at": datetime.now(timezone.utc).isoformat(),
                     "stamp_migration": True
                 }
@@ -217,7 +220,137 @@ async def run_migration():
     for i, doc in enumerate(docs, 1):
         print(f"\n[{i}/{len(docs)}]", end="")
         await process_document(db, doc)
-    
+
+    # -------------------------------------------------------
+    # PASS 2: Backfill flat stamp fields for docs that already
+    # have stamped_file_url but are missing verification_stamp_by_name
+    # -------------------------------------------------------
+    print("\n" + "-" * 60)
+    print("PASS 2: BACKFILL FLAT STAMP FIELDS")
+    print("-" * 60)
+
+    backfill_query = {
+        "$and": [
+            {"stamped_file_url": {"$nin": [None, "", {"$exists": False}]}},
+            {"$or": [
+                {"verification_stamp_by_name": {"$exists": False}},
+                {"verification_stamp_by_name": None},
+                {"verification_stamp_by_name": ""}
+            ]},
+            {"verification_stamp": {"$nin": [None, "", "not_verified"]}}
+        ]
+    }
+    backfill_docs = await db.employee_documents.find(backfill_query, {"_id": 0}).to_list(length=2000)
+    print(f"Found {len(backfill_docs)} documents needing flat-field backfill")
+
+    backfill_count = 0
+    for doc in backfill_docs:
+        doc_id = doc.get("id")
+        verification_stamp = doc.get("verification_stamp", {})
+        if isinstance(verification_stamp, str):
+            admin_name = "System Admin"
+            verified_at = doc.get("verified_at", doc.get("updated_at", datetime.now(timezone.utc).isoformat()))
+        else:
+            admin_name = verification_stamp.get("verified_by_name", "System Admin")
+            verified_at = verification_stamp.get("verified_at", doc.get("verified_at", doc.get("updated_at")))
+        await db.employee_documents.update_one(
+            {"id": doc_id},
+            {"$set": {
+                "verification_stamp_by_name": admin_name,
+                "verification_stamp_at": verified_at,
+                "verification_stamp_label": "Verified copy"
+            }}
+        )
+        backfill_count += 1
+
+    print(f"✓ Backfilled flat stamp fields on {backfill_count} documents")
+
+    # -----------------------------------------------------------------------
+    # PASS 3: Backfill requirement-slot verified=True for all employees
+    # that have verified documents but whose slot still has verified=False.
+    # This fixes the gate vs compliance-file mismatch for historical records.
+    # -----------------------------------------------------------------------
+    print("\n" + "-" * 60)
+    print("PASS 3: Backfill requirement slot verified flags")
+    print("-" * 60)
+
+    SLOT_KEY_ALIASES = {
+        "identity": [
+            "identity", "id_document", "passport", "driving_licence",
+            "driving_license", "identity_documents", "identity_evidence",
+            "identity_rtw", "proof_of_identity", "identity_document",
+            "identity_evidence_2", "identity_evidence_3", "identity_upload",
+        ],
+        "right_to_work": [
+            "right_to_work", "rtw", "right-to-work", "right_to_work_documents",
+            "right_to_work_evidence",
+        ],
+        "proof_of_address": [
+            "proof_of_address", "poa", "proof_of_address_1", "proof_of_address_2",
+            "address_document",
+        ],
+        "dbs": [
+            "dbs", "dbs_certificate", "dbs_check",
+        ],
+    }
+
+    slot_backfill_count = 0
+    for req_key, aliases in SLOT_KEY_ALIASES.items():
+        _dead = frozenset((
+            "rejected", "amendment_requested", "invalidated",
+            "deleted", "superseded", "uploaded_in_error",
+        ))
+        # Find all verified documents (by any alias) not already feeding a verified slot
+        verified_docs = await db.employee_documents.find(
+            {
+                "$and": [
+                    {"requirement_id": {"$in": aliases}},
+                    {"status": {"$nin": list(_dead)}},
+                    {
+                        "$or": [
+                            {"verified": True},
+                            {"status": {"$in": ["verified", "approved"]}},
+                            {"review_status": {"$in": ["verified", "approved"]}},
+                            {"verification_stamp": {"$nin": [None, "", "not_verified"]}},
+                        ]
+                    },
+                ]
+            },
+            {"_id": 0, "employee_id": 1, "verified_at": 1, "verified_by_name": 1,
+             "verification_stamp": 1},
+        ).to_list(5000)
+
+        # Group by employee_id
+        from collections import defaultdict
+        by_employee: dict = defaultdict(list)
+        for d in verified_docs:
+            by_employee[d["employee_id"]].append(d)
+
+        for employee_id, emp_docs in by_employee.items():
+            # Pick verified_at / verified_by_name from the best doc
+            best = sorted(
+                emp_docs,
+                key=lambda x: x.get("verified_at") or x.get("verification_stamp", {}).get("verified_at") or "",
+                reverse=True,
+            )[0]
+            stamp = best.get("verification_stamp") or {}
+            va = best.get("verified_at") or (stamp.get("verified_at") if isinstance(stamp, dict) else None)
+            vn = best.get("verified_by_name") or (stamp.get("verified_by_name") if isinstance(stamp, dict) else "System Admin")
+
+            result = await db.employee_documents.update_one(
+                {
+                    "employee_id": employee_id,
+                    "requirement_key": req_key,
+                    "$or": [{"verified": {"$ne": True}}, {"verified": {"$exists": False}}],
+                },
+                {"$set": {"verified": True, "verified_at": va, "verified_by_name": vn,
+                          "updated_at": datetime.now(timezone.utc).isoformat()}},
+            )
+            if result.modified_count:
+                slot_backfill_count += 1
+
+    print(f"✓ Backfilled verified=True on {slot_backfill_count} requirement slots")
+
     # Print summary
     print("\n" + "=" * 60)
     print("MIGRATION COMPLETE")

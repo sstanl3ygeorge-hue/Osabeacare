@@ -751,10 +751,22 @@ async def verify_and_stamp_identity(
     if stamped_url:
         document_update["stamped_file_url"] = stamped_url
         document_update["verification_stamp"] = stamp_data
+    # Always write flat stamp metadata so frontend can read without unpacking the dict
+    document_update["verification_stamp_by_name"] = admin_name
+    document_update["verification_stamp_at"] = now
+    document_update["verification_stamp_label"] = "Verified copy"
 
     await db.employee_documents.update_one(
         {"id": data.document_id},
         {"$set": document_update}
+    )
+
+    # Propagate verified=True to the identity requirement slot so the
+    # recruitment gate (which reads the slot) agrees with the compliance file.
+    await db.employee_documents.update_one(
+        {"employee_id": employee_id, "requirement_key": "identity"},
+        {"$set": {"verified": True, "verified_at": now,
+                  "verified_by_name": admin_name, "updated_at": now}}
     )
     
     # STEP 3: Log audit trail
@@ -939,10 +951,21 @@ async def verify_and_stamp_address(
     if stamped_url:
         document_update["stamped_file_url"] = stamped_url
         document_update["verification_stamp"] = stamp_data
+    # Always write flat stamp metadata so frontend can read without unpacking the dict
+    document_update["verification_stamp_by_name"] = admin_name
+    document_update["verification_stamp_at"] = now
+    document_update["verification_stamp_label"] = "Verified copy"
 
     await db.employee_documents.update_one(
         {"id": data.document_id},
         {"$set": document_update}
+    )
+
+    # Propagate verified=True to the proof_of_address requirement slot.
+    await db.employee_documents.update_one(
+        {"employee_id": employee_id, "requirement_key": "proof_of_address"},
+        {"$set": {"verified": True, "verified_at": now,
+                  "verified_by_name": admin_name, "updated_at": now}}
     )
     
     # STEP 3: Log audit trail
@@ -1077,7 +1100,11 @@ async def stamp_all_rtw_documents(
                 {"$set": {
                     "stamped_file_url": stamped_url,
                     "verification_stamp": stamp_data,
+                    "verification_stamp_by_name": admin_name,
+                    "verification_stamp_at": now,
+                    "verification_stamp_label": "Verified copy",
                     "status": "verified",
+                    "verified": True,
                     "verified_at": now,
                     "verified_by": user['user_id'],
                     "review_status": "verified",
@@ -1139,6 +1166,9 @@ async def stamp_all_rtw_documents(
                             {"$set": {
                                 "stamped_file_url": stamped_url,
                                 "verification_stamp": stamp_data,
+                                "verification_stamp_by_name": admin_name,
+                                "verification_stamp_at": now,
+                                "verification_stamp_label": "Verified copy",
                                 "updated_at": now
                             }}
                         )
@@ -1156,6 +1186,13 @@ async def stamp_all_rtw_documents(
             "rtw_stamped_by": user['user_id'],
             "updated_at": now
         }}
+    )
+
+    # Propagate verified=True to the right_to_work requirement slot.
+    await db.employee_documents.update_one(
+        {"employee_id": employee_id, "requirement_key": "right_to_work"},
+        {"$set": {"verified": True, "verified_at": now,
+                  "verified_by_name": admin_name, "updated_at": now}}
     )
     
     # STEP 4: Log audit trail

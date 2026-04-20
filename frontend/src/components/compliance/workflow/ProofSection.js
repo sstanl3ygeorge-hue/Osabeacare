@@ -364,15 +364,25 @@ export function ProofSection({
                 size="sm"
                 variant="ghost"
                 className="h-7 w-7 p-0 text-gray-400 hover:text-blue-600"
-                onClick={() =>
+                onClick={() => {
+                  const stampByName =
+                    proofDocument?.verification_stamp_by_name ||
+                    proofDocument?.verified_by_name ||
+                    (typeof proofDocument?.verification_stamp === 'object' ? proofDocument.verification_stamp?.verified_by_name : null) ||
+                    null;
+                  const stampAt =
+                    proofDocument?.verification_stamp_at ||
+                    proofDocument?.verified_at ||
+                    (typeof proofDocument?.verification_stamp === 'object' ? proofDocument.verification_stamp?.verified_at : null) ||
+                    null;
                   onPreviewFile?.({
                     file_url: proofFileUrl,
                     file_name: proofFileName,
                     stamped_file_url: proofDocument?.stamped_file_url || null,
-                    verification_stamp_by_name: proofDocument?.verification_stamp_by_name,
-                    verification_stamp_at: proofDocument?.verification_stamp_at,
-                  })
-                }
+                    verification_stamp_by_name: stampByName,
+                    verification_stamp_at: stampAt,
+                  });
+                }}
                 title="Preview proof document"
               >
                 <Eye className="h-3.5 w-3.5" />

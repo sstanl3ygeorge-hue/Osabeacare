@@ -37,7 +37,7 @@ function ComplianceStatusBadge({ status, isMostRecent }) {
     return (
       <Badge className="bg-amber-100 text-amber-800 text-[10px] flex items-center gap-0.5 shrink-0">
         <Info className="h-3 w-3" />
-        Earlier employer
+        Matches earlier employment record
       </Badge>
     );
   }
@@ -131,6 +131,7 @@ export default function ReferenceEmploymentComparison({ employeeId, onRefresh })
 
   const {
     has_discrepancy: hasDiscrepancy = false,
+    has_warnings: hasWarnings = false,
     highest_severity: highestSeverity = 'ok',
     total_references_declared: totalDeclared = 0,
     matched_references: matchedCount = 0,
@@ -142,33 +143,35 @@ export default function ReferenceEmploymentComparison({ employeeId, onRefresh })
   const alertCount = references.filter(r => r?.compliance_status === 'alert').length;
 
   // Header badge
+  // hasDiscrepancy = true only for alert (no-match) refs
+  // hasWarnings    = true for earlier-employer (valid match) refs
   let headerBadge;
-  if (!hasDiscrepancy) {
+  if (hasDiscrepancy) {
+    headerBadge = (
+      <Badge className="bg-red-100 text-red-700">
+        <XCircle className="h-3 w-3 mr-1" />
+        {alertCount} no employment match
+      </Badge>
+    );
+  } else if (hasWarnings) {
+    headerBadge = (
+      <Badge className="bg-amber-100 text-amber-700">
+        <Info className="h-3 w-3 mr-1" />
+        {warningCount} earlier employer — review required
+      </Badge>
+    );
+  } else {
     headerBadge = (
       <Badge className="bg-green-100 text-green-700">
         <CheckCircle className="h-3 w-3 mr-1" />
         All matched
       </Badge>
     );
-  } else if (highestSeverity === 'alert') {
-    headerBadge = (
-      <Badge className="bg-red-100 text-red-700">
-        <XCircle className="h-3 w-3 mr-1" />
-        {alertCount} unmatched
-      </Badge>
-    );
-  } else {
-    headerBadge = (
-      <Badge className="bg-amber-100 text-amber-700">
-        <Info className="h-3 w-3 mr-1" />
-        {warningCount} earlier employer
-      </Badge>
-    );
   }
 
   return (
     <Card
-      className={`border shadow-sm ${hasDiscrepancy ? (highestSeverity === 'alert' ? 'border-red-200' : 'border-amber-200') : 'border-[#E4E8EB]'}`}
+      className={`border shadow-sm ${hasDiscrepancy ? 'border-red-200' : hasWarnings ? 'border-amber-200' : 'border-[#E4E8EB]'}`}
       data-testid="reference-employment-comparison"
     >
       <CardHeader className="pb-2">
@@ -178,7 +181,7 @@ export default function ReferenceEmploymentComparison({ employeeId, onRefresh })
           onClick={() => setExpanded(!expanded)}
         >
           <CardTitle className="font-heading text-base flex items-center gap-2">
-            <Users className={`h-5 w-5 ${hasDiscrepancy ? (highestSeverity === 'alert' ? 'text-red-600' : 'text-amber-600') : 'text-primary'}`} />
+            <Users className={`h-5 w-5 ${hasDiscrepancy ? 'text-red-600' : hasWarnings ? 'text-amber-600' : 'text-primary'}`} />
             Reference-Employment Cross Check
           </CardTitle>
           <div className="flex items-center gap-2">
@@ -217,11 +220,11 @@ export default function ReferenceEmploymentComparison({ employeeId, onRefresh })
               <p className="text-2xl font-bold text-gray-700">{totalDeclared}</p>
               <p className="text-xs text-gray-500">References Declared</p>
             </div>
-            <div className={`p-2 rounded-lg text-center ${hasDiscrepancy ? 'bg-amber-50' : 'bg-green-50'}`}>
-              <p className={`text-2xl font-bold ${hasDiscrepancy ? 'text-amber-700' : 'text-green-700'}`}>
+            <div className={`p-2 rounded-lg text-center ${hasDiscrepancy ? 'bg-red-50' : 'bg-green-50'}`}>
+              <p className={`text-2xl font-bold ${hasDiscrepancy ? 'text-red-700' : 'text-green-700'}`}>
                 {matchedCount}
               </p>
-              <p className={`text-xs ${hasDiscrepancy ? 'text-amber-600' : 'text-green-600'}`}>Matched</p>
+              <p className={`text-xs ${hasDiscrepancy ? 'text-red-600' : 'text-green-600'}`}>Matched</p>
             </div>
           </div>
 
@@ -296,16 +299,14 @@ export default function ReferenceEmploymentComparison({ employeeId, onRefresh })
                             <ComplianceStatusBadge status={status} />
                           </div>
 
-                          {/* Match reason pill */}
+                          {/* Match reason pill — always show matched employer for ok/warning */}
                           {ref.matches_employment_history && (
                             <div className="mt-2 flex flex-wrap gap-1">
                               <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-green-100 text-green-700">
                                 <CheckCircle className="h-2.5 w-2.5" />
                                 {matchLabel}
                               </span>
-                              {ref.matching_employer?.employer_name &&
-                                ref.matching_employer.employer_name.toLowerCase() !==
-                                  (ref.organisation || ref.company || '').toLowerCase() && (
+                              {ref.matching_employer?.employer_name && (
                                 <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">
                                   Matched to: {ref.matching_employer.employer_name}
                                 </span>
@@ -316,14 +317,14 @@ export default function ReferenceEmploymentComparison({ employeeId, onRefresh })
                           {/* CQC investigation notice for warning / alert */}
                           {status === 'warning' && (
                             <div className="mt-2 p-1.5 bg-amber-100/60 rounded text-[10px] text-amber-800">
-                              This reference is from an earlier employer, not the most recent.
-                              NHS guidance requires this to be investigated and an explanation recorded.
+                              Matches earlier employment record — not the most recent employer.
+                              Review and record explanation if required (NHS guidance).
                             </div>
                           )}
                           {status === 'alert' && (
                             <div className="mt-2 p-1.5 bg-red-100/60 rounded text-[10px] text-red-800">
-                              This reference does not match any employer in the declared employment history.
-                              Do not approve until an explanation has been obtained and documented.
+                              No declared employment match found. Do not approve until an explanation
+                              has been obtained and documented.
                             </div>
                           )}
 
@@ -367,26 +368,27 @@ export default function ReferenceEmploymentComparison({ employeeId, onRefresh })
             </div>
           </div>
 
-          {/* Action items â€” only shown when there is something actionable */}
-          {hasDiscrepancy && (
+
+          {/* Action items */}
+          {(hasDiscrepancy || hasWarnings) && (
             <div className={`mt-4 p-3 rounded-lg border ${
-              highestSeverity === 'alert'
+              hasDiscrepancy
                 ? 'bg-red-50 border-red-200'
                 : 'bg-amber-50 border-amber-200'
             }`}>
               <h5 className={`text-sm font-medium mb-2 ${
-                highestSeverity === 'alert' ? 'text-red-800' : 'text-amber-800'
+                hasDiscrepancy ? 'text-red-800' : 'text-amber-800'
               }`}>
-                Required Actions (NHS / CQC)
+                {hasDiscrepancy ? 'Required Actions (NHS / CQC)' : 'NHS Documentation Required'}
               </h5>
               <ul className={`space-y-1 text-xs ${
-                highestSeverity === 'alert' ? 'text-red-700' : 'text-amber-700'
+                hasDiscrepancy ? 'text-red-700' : 'text-amber-700'
               }`}>
                 {alertCount > 0 && (
                   <>
                     <li className="flex items-start gap-1">
                       <span className="w-1 h-1 rounded-full bg-red-400 mt-1.5 shrink-0" />
-                      Obtain and document explanation for reference(s) not in declared employment history
+                      Obtain and document explanation for reference(s) not found in declared employment history
                     </li>
                     <li className="flex items-start gap-1">
                       <span className="w-1 h-1 rounded-full bg-red-400 mt-1.5 shrink-0" />
@@ -397,13 +399,15 @@ export default function ReferenceEmploymentComparison({ employeeId, onRefresh })
                 {warningCount > 0 && (
                   <li className="flex items-start gap-1">
                     <span className="w-1 h-1 rounded-full bg-amber-400 mt-1.5 shrink-0" />
-                    Verify why reference is from an earlier employer; record explanation before approval
+                    Reference matched to an earlier employer (valid match)  record the reason in the recruitment file per NHS guidance
                   </li>
                 )}
-                <li className="flex items-start gap-1">
-                  <span className="w-1 h-1 rounded-full bg-gray-400 mt-1.5 shrink-0" />
-                  All discrepancies must be documented in the recruitment file per NHS reference guidance
-                </li>
+                {hasDiscrepancy && (
+                  <li className="flex items-start gap-1">
+                    <span className="w-1 h-1 rounded-full bg-gray-400 mt-1.5 shrink-0" />
+                    All unmatched reference discrepancies must be documented before approval
+                  </li>
+                )}
               </ul>
             </div>
           )}

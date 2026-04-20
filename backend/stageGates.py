@@ -15,6 +15,7 @@ from requirement_definitions import (
     get_requirement_definition,
     resolve_requirement_key,
     REQUIREMENT_DEFINITIONS,
+    REQUIREMENT_ID_ALIASES,
 )
 from reference_matching import (
     match_employers,
@@ -483,6 +484,121 @@ class StageGateService:
         """Look up reference slot, trying both key styles."""
         return await self._resolve_slot(employee_id, f"reference_{ref_num}")
 
+    # -------------------------------------------------------------------------
+    # Internal: multi-source verification check for requirement gate
+    # -------------------------------------------------------------------------
+    async def _is_requirement_verified(self, employee_id: str, req_key: str) -> tuple:
+        """
+        Check whether a requirement is admin-verified by inspecting ALL matching
+        employee_documents rows, not just the slot.
+
+        Sources (in order of authority):
+          1. Any doc with requirement_key == req_key that is verified
+          2. Any doc with requirement_id in the alias list that is verified
+          3. Employee-level verification flags (identity_verified,
+             rtw_fully_verified, dbs_fully_verified) as a safety-net for
+             documents stamped before requirement-slot generation was wired.
+
+        A document is deemed verified when ANY of the following is true:
+          - doc.verified is True
+          - doc.status in ("verified", "approved")
+          - doc.review_status in ("verified", "approved")
+          - doc.verification_stamp is a non-empty dict with verified_by_name
+
+        Deleted/rejected docs are excluded.
+
+        Returns:
+            (is_verified: bool, diagnostic: str)
+            diagnostic values:
+              "no_docs"              – no docs at all for this requirement
+              "slot_unverified"      – slot exists, none verified
+              "uploaded_unverified"  – worker upload exists, not yet verified
+              "verified_flag"        – verified by doc.verified == True
+              "verified_status"      – verified by status/review_status field
+              "verified_stamp"       – verified by verification_stamp dict
+              "verified_employee"    – verified by top-level employee flag
+        """
+        # Build alias list for this req_key
+        aliases = [k for k, v in REQUIREMENT_ID_ALIASES.items() if v == req_key]
+
+        _dead = frozenset((
+            "rejected", "amendment_requested", "invalidated",
+            "deleted", "superseded", "uploaded_in_error",
+        ))
+
+        # Pull all matching docs (slot + uploads)
+        or_clauses = [{"requirement_key": req_key}]
+        if aliases:
+            or_clauses.append({"requirement_id": {"$in": aliases}})
+
+        docs = await self.db.employee_documents.find(
+            {"employee_id": employee_id, "$or": or_clauses},
+            {"_id": 0, "id": 1, "requirement_key": 1, "requirement_id": 1,
+             "verified": 1, "status": 1, "review_status": 1,
+             "verification_stamp": 1, "verified_by_name": 1},
+        ).to_list(50)
+
+        if not docs:
+            # Nothing found — check employee-level flags before giving up
+            employee = await self.db.employees.find_one(
+                {"id": employee_id},
+                {"_id": 0, "identity_verified": 1, "rtw_fully_verified": 1,
+                 "dbs_fully_verified": 1},
+            )
+            if employee:
+                emp_flag = {
+                    "identity": employee.get("identity_verified"),
+                    "right_to_work": employee.get("rtw_fully_verified"),
+                    "dbs": employee.get("dbs_fully_verified"),
+                }.get(req_key)
+                if emp_flag:
+                    return True, "verified_employee"
+            return False, "no_docs"
+
+        for doc in docs:
+            if (doc.get("status") or "").lower() in _dead:
+                continue
+            if (doc.get("review_status") or "").lower() in _dead:
+                continue
+
+            if doc.get("verified") is True:
+                return True, "verified_flag"
+
+            s = (doc.get("status") or "").lower()
+            r = (doc.get("review_status") or "").lower()
+            if s in ("verified", "approved") or r in ("verified", "approved"):
+                return True, "verified_status"
+
+            stamp = doc.get("verification_stamp")
+            if isinstance(stamp, dict) and stamp.get("verified_by_name"):
+                return True, "verified_stamp"
+            if isinstance(stamp, str) and stamp.lower() in (
+                "original_seen", "copy_verified", "certified_copy",
+                "online_check", "verified",
+            ):
+                return True, "verified_stamp"
+
+        # Docs exist but none verified — generate contextual diagnostic
+        has_slot = any(d.get("requirement_key") == req_key for d in docs)
+        diag = "slot_unverified" if has_slot else "uploaded_unverified"
+
+        # Safety-net: employee-level flags
+        employee = await self.db.employees.find_one(
+            {"id": employee_id},
+            {"_id": 0, "identity_verified": 1, "rtw_fully_verified": 1,
+             "dbs_fully_verified": 1},
+        )
+        if employee:
+            emp_flag = {
+                "identity": employee.get("identity_verified"),
+                "right_to_work": employee.get("rtw_fully_verified"),
+                "dbs": employee.get("dbs_fully_verified"),
+            }.get(req_key)
+            if emp_flag:
+                return True, "verified_employee"
+
+        return False, diag
+
     # =========================================================================
     # RECRUITMENT GATE (single source of truth)
     # =========================================================================
@@ -561,14 +677,26 @@ class StageGateService:
 
             if slot is None:
                 _missing(req_key)
-                _block(req_key, "Requirement slot not found — documents may not have been linked")
+                _block(req_key, "Requirement slot not found — documents may not have been linked to this applicant")
                 continue
 
             defn = get_requirement_definition(req_key)
             needs_verification = defn.get("verification_required", True)
 
-            if needs_verification and not slot.get("verified"):
-                _block(req_key, "Not yet verified by admin")
+            if needs_verification:
+                is_verified, diag = await self._is_requirement_verified(employee_id, req_key)
+                if not is_verified:
+                    # Surface a contextual reason rather than a generic string so
+                    # admins can diagnose quickly without digging in the DB.
+                    _diag_reasons = {
+                        "no_docs":            "No document found — file upload required",
+                        "slot_unverified":    "Document slot exists but not yet verified by admin — open the compliance panel and complete verification",
+                        "uploaded_unverified":"Document uploaded but not yet reviewed and verified by admin",
+                    }
+                    reason = _diag_reasons.get(diag, "Not yet verified by admin")
+                    _block(req_key, reason)
+                else:
+                    _pass(req_key)
             else:
                 _pass(req_key)
 
@@ -578,16 +706,37 @@ class StageGateService:
         poa_slot = await self._resolve_slot(employee_id, "proof_of_address")
         if poa_slot:
             min_files = policies.get("poa_min_files", 2)
-            # Count all docs that resolve to proof_of_address and are verified
+            # Count all docs that resolve to proof_of_address and are verified.
+            # Accept verified=True OR status/review_status "verified"/"approved"
+            # so the count matches the compliance-file's is_document_verified_with_stamp().
             poa_docs = await self.db.employee_documents.count_documents({
                 "employee_id": employee_id,
-                "$or": [
-                    {"requirement_key": "proof_of_address"},
-                    {"requirement_id": {"$regex": "proof_of_address", "$options": "i"}},
-                    {"requirement_id": {"$regex": "^poa", "$options": "i"}},
-                ],
-                "verified": True,
-                "status": {"$in": ["uploaded", "active", "verified", "approved"]}
+                "$and": [
+                    {
+                        "$or": [
+                            {"requirement_key": "proof_of_address"},
+                            {"requirement_id": {"$regex": "proof_of_address", "$options": "i"}},
+                            {"requirement_id": {"$regex": "^poa", "$options": "i"}},
+                        ]
+                    },
+                    {
+                        "status": {"$nin": [
+                            "rejected", "amendment_requested", "invalidated",
+                            "deleted", "superseded", "uploaded_in_error",
+                        ]}
+                    },
+                    {
+                        "$or": [
+                            {"verified": True},
+                            {"status": {"$in": ["verified", "approved"]}},
+                            {"review_status": {"$in": ["verified", "approved"]}},
+                            {"verification_stamp": {
+                                "$nin": [None, "", "not_verified"],
+                                "$not": {"$type": "null"}
+                            }},
+                        ]
+                    },
+                ]
             })
             if poa_docs < min_files:
                 # Re-use existing block or add a separate warning

@@ -546,7 +546,11 @@ async def stamp_all_dbs_documents(
                 {"$set": {
                     "stamped_file_url": stamped_url,
                     "verification_stamp": stamp_data,
+                    "verification_stamp_by_name": admin_name,
+                    "verification_stamp_at": now,
+                    "verification_stamp_label": "Verified copy",
                     "status": "verified",
+                    "verified": True,
                     "verified_at": now,
                     "verified_by": user['user_id'],
                     "review_status": "verified",
@@ -608,6 +612,9 @@ async def stamp_all_dbs_documents(
                             {"$set": {
                                 "stamped_file_url": stamped_url,
                                 "verification_stamp": stamp_data,
+                                "verification_stamp_by_name": admin_name,
+                                "verification_stamp_at": now,
+                                "verification_stamp_label": "Verified copy",
                                 "updated_at": now
                             }}
                         )
@@ -625,6 +632,14 @@ async def stamp_all_dbs_documents(
             "dbs_stamped_by": user['user_id'],
             "updated_at": now
         }}
+    )
+
+    # Propagate verified=True to the dbs requirement slot so the recruitment
+    # gate agrees with the compliance file.
+    await db.employee_documents.update_one(
+        {"employee_id": employee_id, "requirement_key": "dbs"},
+        {"$set": {"verified": True, "verified_at": now,
+                  "verified_by_name": admin_name, "updated_at": now}}
     )
     
     # STEP 4: Log audit trail

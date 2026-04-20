@@ -221,13 +221,16 @@ async def get_reference_employment_comparison(
 
     if alert_count > 0:
         highest_severity = "alert"
-        has_discrepancy = True
     elif warning_count > 0:
         highest_severity = "warning"
-        has_discrepancy = True
     else:
         highest_severity = "ok"
-        has_discrepancy = False
+
+    # has_discrepancy = TRUE only when a reference has NO employment-history match at all.
+    # A reference matching an EARLIER employer is a valid match (warning), NOT a discrepancy.
+    has_discrepancy = alert_count > 0
+    # has_warnings = TRUE when at least one reference matched an earlier (not most-recent) employer.
+    has_warnings = warning_count > 0
 
     # Alert banner message
     if alert_count > 0:
@@ -257,11 +260,12 @@ async def get_reference_employment_comparison(
             "matched_references": matched_count,
             "unmatched_references": unmatched_count,
             "warning_references": warning_count,
-            "has_discrepancy": has_discrepancy,
+            "has_discrepancy": has_discrepancy,   # TRUE only when alert (no-match refs exist)
+            "has_warnings": has_warnings,          # TRUE when earlier-employer refs exist
             "highest_severity": highest_severity,
         },
         "alert": {
-            "show": has_discrepancy,
+            "show": has_discrepancy or has_warnings,
             "level": alert_level,
             "message": alert_msg,
         },

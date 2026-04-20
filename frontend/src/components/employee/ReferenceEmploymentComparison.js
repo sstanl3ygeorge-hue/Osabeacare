@@ -426,10 +426,6 @@ export default function ReferenceEmploymentComparison({ employeeId, onRefresh })
   );
 }
 
-
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
-
-export default function ReferenceEmploymentComparison({ employeeId, onRefresh }) {
   const [comparison, setComparison] = useState(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);

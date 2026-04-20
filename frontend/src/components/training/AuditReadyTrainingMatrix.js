@@ -1577,6 +1577,11 @@ export default function AuditReadyTrainingMatrix({
                                         {item.mapped_training_title || item.raw_course_title}
                                       </p>
                                       <p className="text-xs text-gray-500">
+                                        {item.is_unmapped
+                                          ? 'Unmapped - admin mapping needed'
+                                          : (item.mapped_training_title && item.raw_course_title !== item.mapped_training_title
+                                              ? `Mapped from: ${item.raw_course_title} • `
+                                              : '')}
                                         {item.completed_at && `Completed: ${formatBackendDate(item.completed_at, { format: 'short' })}`}
                                         {item.expires_at && ` • Expires: ${formatBackendDate(item.expires_at, { format: 'short' })}`}
                                       </p>

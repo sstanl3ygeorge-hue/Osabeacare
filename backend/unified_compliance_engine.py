@@ -1035,98 +1035,61 @@ async def get_unified_employee_status(
     # CHECK 3: MANDATORY TRAINING (8 items)
     # ==========================================================================
     
-    # Build training lookup by NORMALIZED name (fixes "Health & Safety" vs "health safety" mismatch)
-    training_by_name = {}
-    for t in all_training:
-        t_name = (t.get("training_name") or t.get("course_name") or "").lower()
-        t_type = (t.get("training_type") or "").lower()
-        # Only add non-empty keys
-        if t_name:
-            training_by_name[t_name] = t
-        if t_type:
-            training_by_name[t_type] = t
-        # Also store by normalized name for better matching
-        normalized = normalize_training_name(t_name)
-        if normalized:
-            training_by_name[normalized] = t
-    
-    verified_training = {}  # Track which trainings are verified (for induction sync)
-    
-    for training_req in MANDATORY_TRAINING_HCA:
-        t_id = training_req["id"]
-        t_name = training_req["name"]
-        induction_sync_id = training_req.get("induction_sync")
-        
-        # Find matching training record using normalized names
-        matched_training = None
-        
-        # Generate search terms (normalized)
-        search_terms = [
-            t_id,
-            t_id.replace("_", " "),
-            t_id.replace("_", ""),
-            normalize_training_name(t_name),
-            normalize_training_name(t_id.replace("_", " ")),
-        ]
-        # Remove duplicates and empty strings
-        search_terms = [s for s in dict.fromkeys(search_terms) if s]
-        
-        for term in search_terms:
-            for key, training in training_by_name.items():
-                # Skip empty keys
-                if not key:
-                    continue
-                # Normalize the key for comparison
-                normalized_key = normalize_training_name(key)
-                # Check both directions with normalized comparison
-                if term in normalized_key or normalized_key in term:
-                    matched_training = training
-                    break
-                # Also check exact key match
-                if term in key or key in term:
-                    matched_training = training
-                    break
-            if matched_training:
-                break
-        
-        is_valid, invalid_reason = is_training_valid(matched_training)
-        checks[f"training_{t_id}"] = is_valid
-        
-        # Track for induction sync
-        if is_valid and induction_sync_id:
-            verified_training[induction_sync_id] = True
-        
-        verifier_name = None
-        if matched_training and matched_training.get("verified_by"):
-            verifier_name = get_verifier_name(matched_training["verified_by"], users_cache)
-        
-        item_data = {
-            "id": t_id,
-            "name": t_name,
-            "completed": is_valid,
-            "has_record": matched_training is not None,
-            "verified": matched_training.get("verified", False) if matched_training else False,
-            "verified_by": verifier_name,
-            "expiry_date": matched_training.get("expiry_date") if matched_training else None,
-            "invalid_reason": invalid_reason,
-        }
-        
-        categories["training"]["items"].append(item_data)
-        
-        if is_valid:
-            categories["training"]["completed"] += 1
-        else:
-            reason = f"{t_name}: {invalid_reason}" if invalid_reason else f"{t_name}: Not completed"
-            blockers.append({
+    # Use the same canonical training evaluator as the employee Training tab.
+    # This prevents stale legacy name matching from reintroducing blockers that
+    # the detailed training matrix has already marked verified/current.
+    try:
+        from services.training_evaluator import evaluate_employee_training_status
+
+        training_eval = await evaluate_employee_training_status(emp_id, role)
+        training_items = training_eval.get("items", [])
+        categories["training"]["total"] = len(training_items)
+        categories["training"]["completed"] = 0
+
+        for training_item in training_items:
+            t_id = training_item.get("code") or ""
+            t_name = training_item.get("title") or t_id.replace("_", " ").title()
+            status = training_item.get("status")
+            is_satisfied = status in {"verified", "due_soon"}
+            is_blocking = bool(training_item.get("is_currently_blocking"))
+
+            checks[f"training_{t_id}"] = is_satisfied
+            if is_satisfied:
+                categories["training"]["completed"] += 1
+
+            categories["training"]["items"].append({
                 "id": t_id,
-                "gate": "mandatory_training",
-                "label": t_name,
-                "reason": reason,
-                "category": "training",
-                "severity": "critical" if not matched_training else "pending"
+                "name": t_name,
+                "completed": is_satisfied,
+                "has_record": bool(training_item.get("record_id")),
+                "verified": bool(training_item.get("verified")),
+                "expiry_date": training_item.get("expires_at"),
+                "status": status,
+                "invalid_reason": None if is_satisfied else training_item.get("detail"),
             })
-    
-    checks["mandatory_training"] = categories["training"]["completed"] == 8  # All 8 mandatory trainings
+
+            if is_blocking:
+                blockers.append({
+                    "id": t_id,
+                    "gate": "mandatory_training",
+                    "label": t_name,
+                    "reason": training_item.get("detail") or f"{t_name}: Not compliant",
+                    "category": "training",
+                    "severity": "pending" if status in {"awaiting_review", "completed"} else "critical"
+                })
+
+        checks["mandatory_training"] = training_eval.get("blockerCount", 0) == 0
+    except Exception as exc:
+        categories["training"]["completed"] = 0
+        checks["mandatory_training"] = False
+        blockers.append({
+            "id": "mandatory_training",
+            "gate": "mandatory_training",
+            "label": "Mandatory Training",
+            "reason": f"Cannot assess mandatory training: {str(exc)}",
+            "category": "training",
+            "severity": "critical"
+        })
     
     # ==========================================================================
     # CHECK 4: INDUCTION CHECKLIST (15 Care Certificate Standards)

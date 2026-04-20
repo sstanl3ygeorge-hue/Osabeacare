@@ -10819,6 +10819,13 @@ async def get_employee_training_certificates(
         src_doc_id = rec.get("source_document_id") or rec.get("certificate_document_id")
         if src_doc_id and src_doc_id in canonical_doc_ids:
             continue
+        # Ghost suppression: if this training_record was previously linked to a canonical
+        # employee_document that has since been deleted (src_doc_id is set but the doc
+        # is gone), do NOT surface it as a certificate row.  It still exists as a
+        # training record but the source evidence file is gone — the delete cascade
+        # should have flagged it; surfacing it here only creates phantom Remove buttons.
+        if src_doc_id and src_doc_id not in canonical_doc_ids:
+            continue
         cert_url = rec.get("certificate_url", "")
         if cert_url in canonical_urls:
             continue
@@ -10876,8 +10883,50 @@ async def delete_training_certificate(
          "employee_id": employee_id},
         {"_id": 0}
     )
+
+    # --- 1b. If not found in employee_documents, check if this is a legacy
+    #          training_record id (source: training_record_legacy row) ---
     if not cert:
-        raise HTTPException(status_code=404, detail="Certificate not found.")
+        legacy_tr = await db.training_records.find_one(
+            {"id": certificate_id, "employee_id": employee_id},
+            {"_id": 0}
+        )
+        if not legacy_tr:
+            raise HTTPException(status_code=404, detail="Certificate not found.")
+
+        # Clear the certificate evidence from the training record and flag for review
+        now_iso = datetime.now(timezone.utc).isoformat()
+        await db.training_records.update_one(
+            {"id": certificate_id, "employee_id": employee_id},
+            {"$set": {
+                "certificate_url": None,
+                "original_filename": None,
+                "source_evidence_removed": True,
+                "source_evidence_removed_at": now_iso,
+                "source_evidence_removed_by": user.get("user_id"),
+                "needs_review": True,
+                "needs_review_reason": "certificate_evidence_removed_by_admin",
+                "updated_at": now_iso,
+            }}
+        )
+        await log_audit_action(
+            user["user_id"], "delete_training_certificate_legacy", "training_records", employee_id,
+            {
+                "training_record_id": certificate_id,
+                "training_name": legacy_tr.get("training_name"),
+                "action": "certificate_url_cleared_flagged_for_review",
+                "deleted_by": user.get("user_id"),
+            }
+        )
+        return {
+            "ok": True,
+            "certificate_id": certificate_id,
+            "source": "training_record_legacy",
+            "action": "certificate_evidence_cleared_flagged_for_review",
+            "proposed_items_deleted": 0,
+            "approved_training_records_preserved": 1,
+            "storage_file_deleted": False,
+        }
 
     doc_id = cert.get("id") or cert.get("document_id") or certificate_id
 
@@ -10887,6 +10936,27 @@ async def delete_training_certificate(
         "source_document_id": doc_id,
         "record_status": {"$nin": ["superseded", "deleted"]},
     })
+
+    # --- 2b. Flag verified/approved training_records derived from this cert ---
+    # Do NOT delete them — flag as source_evidence_removed so admin must re-confirm.
+    now_iso = datetime.now(timezone.utc).isoformat()
+    if approved_count > 0:
+        await db.training_records.update_many(
+            {
+                "employee_id": employee_id,
+                "source_document_id": doc_id,
+                "record_status": {"$nin": ["superseded", "deleted"]},
+            },
+            {"$set": {
+                "source_evidence_removed": True,
+                "source_evidence_removed_at": now_iso,
+                "source_evidence_removed_by": user.get("user_id"),
+                "source_document_id_removed": doc_id,
+                "needs_review": True,
+                "needs_review_reason": "source_certificate_deleted",
+                "updated_at": now_iso,
+            }}
+        )
 
     # --- 3. Delete un-approved proposed items linked to this certificate ---
     # Cover ALL linkage field variants used across creation paths:
@@ -10930,7 +11000,7 @@ async def delete_training_certificate(
             "certificate_id": doc_id,
             "filename": cert.get("original_filename") or cert.get("file_name"),
             "proposed_items_deleted": deleted_proposed.deleted_count,
-            "approved_training_records_preserved": approved_count,
+            "approved_training_records_flagged_for_review": approved_count,
             "storage_file_deleted": storage_deleted,
             "deleted_by": user.get("user_id"),
         }
@@ -10940,7 +11010,7 @@ async def delete_training_certificate(
         "ok": True,
         "certificate_id": doc_id,
         "proposed_items_deleted": deleted_proposed.deleted_count,
-        "approved_training_records_preserved": approved_count,
+        "approved_training_records_flagged_for_review": approved_count,
         "storage_file_deleted": storage_deleted,
     }
 

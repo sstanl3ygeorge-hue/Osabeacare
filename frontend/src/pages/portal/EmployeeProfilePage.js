@@ -467,8 +467,6 @@ export default function EmployeeProfilePage() {
   const [selectedCvRolesForApply, setSelectedCvRolesForApply] = useState({});
   const [reconcileReason, setReconcileReason] = useState('');
   const [isApplyingReconcile, setIsApplyingReconcile] = useState(false);
-  const [reconcileReason, setReconcileReason] = useState('');
-  const [isApplyingReconcile, setIsApplyingReconcile] = useState(false);
   const [isReextractingFromCv, setIsReextractingFromCv] = useState(false);
   
   // Document Correction State (Step 8)

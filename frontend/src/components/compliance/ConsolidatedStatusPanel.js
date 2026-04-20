@@ -145,6 +145,7 @@ export default function ConsolidatedStatusPanel({
   const [blockersExpanded, setBlockersExpanded] = useState(null); // null = auto
   const [gateResult, setGateResult] = useState(null); // structured recruitment gate
   const [gateLoading, setGateLoading] = useState(false);
+  const [gateFetchFailed, setGateFetchFailed] = useState(false); // true when gate endpoint errored
 
   const fetchStatus = async () => {
     setLoading(true);
@@ -182,10 +183,11 @@ export default function ConsolidatedStatusPanel({
         { headers: { Authorization: `Bearer ${token}` } }
       );
       setGateResult(res.data?.gate ?? null);
+      setGateFetchFailed(false);
     } catch (err) {
-      // Non-fatal — gate panel simply stays hidden
       console.warn('Could not load recruitment gate:', err.response?.data?.detail || err.message);
       setGateResult(null);
+      setGateFetchFailed(true);
     } finally {
       setGateLoading(false);
     }
@@ -342,8 +344,8 @@ export default function ConsolidatedStatusPanel({
   const gatePassed = gateResult?.passed_items ?? [];
   const gateMissing = gateResult?.missing_requirements ?? [];
   const gateHasData = gateResult !== null;
-  // Approval CTA guard: if gate data loaded, use it; otherwise fall back to legacy isBlocked
-  const canApproveRecruitment = gateHasData ? gateAllowed : !isBlocked;
+  // Approval CTA guard: gate is the ONLY signal — no fallback to legacy isBlocked
+  const canApproveRecruitment = gateAllowed;
 
   return (
     <div className="space-y-4" data-testid="consolidated-status-panel">
@@ -387,12 +389,17 @@ export default function ConsolidatedStatusPanel({
                 <div className="flex flex-col items-end gap-1">
                   <Button
                     onClick={handleApproveRecruitment}
-                    disabled={actionLoading === 'approve' || !canApproveRecruitment}
-                    className={canApproveRecruitment
+                    disabled={actionLoading === 'approve' || gateLoading || !canApproveRecruitment || gateFetchFailed || (!gateHasData && !gateLoading)}
+                    className={canApproveRecruitment && !gateFetchFailed
                       ? 'bg-green-600 hover:bg-green-700'
                       : 'bg-gray-300 text-gray-500 cursor-not-allowed'
                     }
-                    title={!canApproveRecruitment ? 'Resolve all blocking items before approving' : undefined}
+                    title={
+                      gateFetchFailed ? 'Approval check unavailable — reload to retry' :
+                      !gateHasData ? 'Approval check not yet loaded' :
+                      !canApproveRecruitment ? 'Resolve all blockers before approving' :
+                      undefined
+                    }
                   >
                     {actionLoading === 'approve' ? (
                       <Loader2 className="h-4 w-4 animate-spin mr-2" />
@@ -401,10 +408,15 @@ export default function ConsolidatedStatusPanel({
                     )}
                     Approve for Recruitment
                   </Button>
-                  {!canApproveRecruitment && gateHasData && (
+                  {gateFetchFailed && (
+                    <p className="text-[11px] text-red-600 flex items-center gap-1">
+                      <AlertTriangle className="h-3 w-3" /> Approval check unavailable — approval disabled
+                    </p>
+                  )}
+                  {!gateFetchFailed && !canApproveRecruitment && gateHasData && (
                     <p className="text-[11px] text-red-600">{gateBlockers.length} blocker(s) must be resolved</p>
                   )}
-                  {canApproveRecruitment && gateWarnings.length > 0 && (
+                  {!gateFetchFailed && canApproveRecruitment && gateWarnings.length > 0 && (
                     <p className="text-[11px] text-amber-600">{gateWarnings.length} warning(s) — review before approving</p>
                   )}
                 </div>
@@ -486,7 +498,10 @@ export default function ConsolidatedStatusPanel({
               </p>
             )}
             {!gateHasData && !gateLoading && (
-              <p className="text-xs text-gray-500 mt-0.5">Gate check unavailable \u2014 using legacy readiness check for approval decision</p>
+              <p className="text-xs text-red-600 mt-0.5 flex items-center gap-1">
+                <AlertTriangle className="h-3.5 w-3.5" />
+                Approval check unavailable — approval is disabled until this check loads successfully
+              </p>
             )}
           </CardHeader>
 
@@ -845,10 +860,11 @@ export default function ConsolidatedStatusPanel({
         <CardHeader className="py-3 px-4 bg-gray-50/50 border-b border-gray-100">
           <div className="flex items-center justify-between">
             <CardTitle className="text-base font-semibold text-gray-700">
-              PRE-EMPLOYMENT PROGRESS: {progressCountAvailable
-                ? `${progressCompleted ?? 0}/${progressTotal} requirements complete (${progressPercentage}%)`
-                : `requirement count unavailable (${progressPercentage}%)`}
+              Submission Progress — {progressCountAvailable
+                ? `${progressCompleted ?? 0} of ${progressTotal} items submitted (${progressPercentage}%)`
+                : `item count unavailable (${progressPercentage}%)`}
             </CardTitle>
+            <p className="text-[11px] text-gray-400 mt-0.5">Tracks document and form submission only — not approval readiness</p>
             <Button variant="ghost" size="sm" onClick={fetchStatus}>
               <RefreshCw className="h-4 w-4" />
             </Button>

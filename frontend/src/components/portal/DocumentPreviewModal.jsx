@@ -525,7 +525,7 @@ export default function DocumentPreviewModal({
           p-0 gap-0 bg-white flex flex-col
           ${isFullscreen 
             ? 'max-w-[100vw] w-[100vw] h-[100vh] rounded-none' 
-            : 'max-w-5xl w-[95vw] h-[90vh] rounded-xl'
+            : 'max-w-[98vw] w-[98vw] h-[96vh] rounded-xl'
           }
         `}
         data-testid="document-preview-modal"

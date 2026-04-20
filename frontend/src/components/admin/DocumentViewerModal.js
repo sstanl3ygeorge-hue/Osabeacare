@@ -42,12 +42,17 @@ export default function DocumentViewerModal({
   const { token } = useAuth();
   const [loading, setLoading] = useState(false);
   const [documentUrl, setDocumentUrl] = useState(null);
+  const [blobUrl, setBlobUrl] = useState(null);
+  const [detectedContentType, setDetectedContentType] = useState(null);
   const [error, setError] = useState(null);
 
   useEffect(() => {
     if (open && document) {
       loadDocument();
     }
+    return () => {
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
+    };
   }, [open, document]);
 
   const loadDocument = async () => {
@@ -58,11 +63,22 @@ export default function DocumentViewerModal({
 
     setLoading(true);
     setError(null);
-    
+    setBlobUrl(null);
+    setDetectedContentType(null);
+
     try {
-      // The file URL might be a direct URL or need to be fetched
       const url = document.file_url || document.url;
       setDocumentUrl(url);
+
+      // Fetch to get the real content-type and create a blob URL for images
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      const response = await fetch(url, { headers });
+      if (response.ok) {
+        const ct = response.headers.get('content-type') || '';
+        setDetectedContentType(ct);
+        const blob = await response.blob();
+        setBlobUrl(URL.createObjectURL(blob));
+      }
     } catch (err) {
       console.error('Failed to load document:', err);
       setError('Failed to load document');
@@ -78,14 +94,18 @@ export default function DocumentViewerModal({
   };
 
   const handleClose = () => {
+    if (blobUrl) URL.revokeObjectURL(blobUrl);
     setDocumentUrl(null);
+    setBlobUrl(null);
+    setDetectedContentType(null);
     setError(null);
     onClose();
   };
 
-  const isImage = document?.content_type?.startsWith('image/') || 
+  const effectiveContentType = detectedContentType || document?.content_type || '';
+  const isImage = effectiveContentType.startsWith('image/') || 
                   document?.file_url?.match(/\.(jpg|jpeg|png|gif|webp)$/i);
-  const isPdf = document?.content_type === 'application/pdf' || 
+  const isPdf = effectiveContentType.includes('pdf') || effectiveContentType === 'application/pdf' ||
                 document?.file_url?.match(/\.pdf$/i);
 
   const isVerified = document?.status === 'approved' || document?.status === 'verified' || document?.verified;
@@ -93,7 +113,7 @@ export default function DocumentViewerModal({
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-6xl w-[95vw] max-h-[95vh] flex flex-col" data-testid="document-viewer-modal">
+      <DialogContent className="max-w-[98vw] w-[98vw] h-[96vh] flex flex-col" data-testid="document-viewer-modal">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <FileText className="h-5 w-5 text-primary" />
@@ -159,7 +179,7 @@ export default function DocumentViewerModal({
         </div>
 
         {/* Document Preview Area */}
-        <div className="flex-1 min-h-[400px] overflow-auto bg-gray-100 rounded-lg">
+        <div className="flex-1 min-h-0 overflow-auto bg-gray-100 rounded-lg">
           {loading ? (
             <div className="flex items-center justify-center h-full">
               <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -176,7 +196,7 @@ export default function DocumentViewerModal({
             isImage ? (
               <div className="flex items-center justify-center p-4 h-full">
                 <img 
-                  src={documentUrl} 
+                  src={blobUrl || documentUrl} 
                   alt={document?.original_filename || 'Document'} 
                   className="max-w-full max-h-full object-contain rounded shadow-lg"
                   data-testid="document-image"
@@ -184,8 +204,9 @@ export default function DocumentViewerModal({
               </div>
             ) : isPdf ? (
               <iframe
-                src={`${documentUrl}#toolbar=0`}
-                className="w-full h-full min-h-[500px] rounded"
+                src={`${documentUrl}#toolbar=1&navpanes=1&scrollbar=1`}
+                className="w-full h-full rounded"
+                style={{ minHeight: '100%' }}
                 title={document?.original_filename || 'Document'}
                 data-testid="document-pdf"
               />

@@ -16,6 +16,13 @@ from requirement_definitions import (
     resolve_requirement_key,
     REQUIREMENT_DEFINITIONS,
 )
+from reference_matching import (
+    match_employers,
+    identify_most_recent_employer,
+    normalize_employer,
+    compliance_status_for_match,
+    MATCH_REASON_LABELS,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -335,6 +342,84 @@ class StageGateService:
     # =========================================================================
 
     # -------------------------------------------------------------------------
+    # Internal: collect employment history (mirrors reference_comparison.py)
+    # -------------------------------------------------------------------------
+    async def _get_employment_history(self, employee_id: str, employee: dict) -> list[dict]:
+        """
+        Collect de-duplicated employment history from three sources,
+        most authoritative first:
+          1. employee.employment_history  (direct profile field)
+          2. form_submissions             (application form data)
+          3. employee.cv_extraction       (CV parser output)
+        """
+        history: list[dict] = []
+
+        def _add(employer_name, position, start_date, end_date, is_current, source):
+            if not employer_name:
+                return
+            norm = normalize_employer(employer_name)
+            if not norm:
+                return
+            if any(normalize_employer(e["employer_name"]) == norm for e in history):
+                return  # deduplicate
+            history.append({
+                "employer_name": employer_name,
+                "position": position or "",
+                "start_date": start_date or "",
+                "end_date": end_date or "",
+                "is_current": bool(is_current),
+                "source": source,
+            })
+
+        # Source 1 — direct profile field
+        for emp in (employee.get("employment_history") or []):
+            if isinstance(emp, dict):
+                _add(
+                    emp.get("employer_name") or emp.get("employer") or emp.get("company") or emp.get("organisation") or "",
+                    emp.get("position") or emp.get("job_title") or emp.get("role") or "",
+                    emp.get("start_date") or emp.get("from") or "",
+                    emp.get("end_date") or emp.get("to") or "",
+                    emp.get("is_current") or emp.get("current") or False,
+                    "profile",
+                )
+
+        # Source 2 — application form submission
+        application = await self.db.form_submissions.find_one(
+            {
+                "employee_id": employee_id,
+                "form_type": {"$in": ["application_form", "application", "public_application"]},
+            },
+            {"_id": 0, "data": 1, "form_data": 1},
+        )
+        if application:
+            app_data = application.get("data") or application.get("form_data") or {}
+            for emp in (app_data.get("employment_history") or app_data.get("employmentHistory") or []):
+                if isinstance(emp, dict):
+                    _add(
+                        emp.get("employer_name") or emp.get("employer") or emp.get("company") or emp.get("organisation") or "",
+                        emp.get("position") or emp.get("job_title") or emp.get("role") or "",
+                        emp.get("start_date") or emp.get("from") or "",
+                        emp.get("end_date") or emp.get("to") or "",
+                        emp.get("is_current") or emp.get("current") or False,
+                        "application",
+                    )
+
+        # Source 3 — CV extraction
+        cv_data = employee.get("cv_extraction") or employee.get("extracted_cv_data") or {}
+        for emp in (cv_data.get("employment_history") or cv_data.get("work_experience") or []):
+            if isinstance(emp, dict):
+                _add(
+                    emp.get("employer") or emp.get("company") or emp.get("organisation") or "",
+                    emp.get("position") or emp.get("title") or emp.get("role") or "",
+                    emp.get("start_date") or "",
+                    emp.get("end_date") or "",
+                    emp.get("is_current") or False,
+                    "cv",
+                )
+
+        return history
+
+    # -------------------------------------------------------------------------
     # Internal: canonical slot resolution
     # -------------------------------------------------------------------------
     async def _resolve_slot(self, employee_id: str, req_key: str):
@@ -516,8 +601,16 @@ class StageGateService:
                     passed_items[:] = [p for p in passed_items if p["key"] != "proof_of_address"]
 
         # ------------------------------------------------------------------
-        # 3. References (handles bool/string duality)
+        # 3. References
+        #    Layer A — Verification: has admin reviewed the actual reference?
+        #    Layer B — Employment cross-check: does the referee's employer
+        #              appear in the declared employment history?
+        #              (uses shared reference_matching helpers — same logic as
+        #               the /reference-employment-comparison API endpoint)
         # ------------------------------------------------------------------
+        employment_history = await self._get_employment_history(employee_id, employee)
+        most_recent_norm = identify_most_recent_employer(employment_history)
+
         for ref_num in [1, 2]:
             ref_key = f"reference_{ref_num}"
             ref_slot = await self._resolve_reference_slot(employee_id, ref_num)
@@ -527,16 +620,72 @@ class StageGateService:
                 _block(ref_key, "Reference slot not found")
                 continue
 
-            if self._is_reference_verified(employee, ref_num):
-                _pass(ref_key)
-            else:
-                # Check if at least received (warn rather than block if policy allows)
+            # --- Layer A: verification status ---
+            verified = self._is_reference_verified(employee, ref_num)
+            if not verified:
                 ref_obj = employee.get(f"ref{ref_num}") or employee.get(f"reference_{ref_num}", {}) or {}
                 status = ref_obj.get("verification_status", "")
                 if status in (ReferenceStatus.RECEIVED,):
                     _warn(ref_key, "Reference received but not yet verified by admin")
                 else:
-                    _block(ref_key, "Reference not verified")
+                    _block(ref_key, "Reference not verified — response evidence required before approval")
+                # Don't bail: still run cross-check so the full picture is visible
+
+            # --- Layer B: employment cross-check ---
+            ref_company = (
+                employee.get(f"reference_{ref_num}_company") or
+                (ref_slot.get("metadata") or {}).get("organisation") or
+                ""
+            )
+            override_reason = employee.get(f"reference_{ref_num}_override_reason") or None
+
+            if ref_company:
+                matched, matching_employer, match_reason = match_employers(ref_company, employment_history)
+
+                is_most_recent = False
+                if matched and matching_employer and most_recent_norm:
+                    emp_norm = normalize_employer(matching_employer.get("employer_name") or "")
+                    is_most_recent = (emp_norm == most_recent_norm)
+
+                cross_status = compliance_status_for_match(
+                    matched=matched,
+                    matching_employer=matching_employer,
+                    is_most_recent=is_most_recent,
+                    override_reason=override_reason,
+                )
+                reason_label = MATCH_REASON_LABELS.get(match_reason, match_reason)
+
+                if cross_status == "alert":
+                    _block(
+                        ref_key,
+                        f"Reference employer '{ref_company}' not found in declared employment history — "
+                        "discrepancy must be documented and investigated before approval (NHS guidance)"
+                    )
+                elif cross_status == "warning":
+                    matched_name = (matching_employer or {}).get("employer_name", "")
+                    if is_most_recent is False and matched:
+                        _warn(
+                            ref_key,
+                            f"Reference employer '{ref_company}' matches an earlier employer "
+                            f"('{matched_name}', {reason_label}), not the most-recent — "
+                            "verify and record explanation per NHS guidance"
+                        )
+                    else:
+                        # override_reason present
+                        _warn(
+                            ref_key,
+                            f"Reference employer '{ref_company}' has no employment-history match, "
+                            f"but an explanation has been recorded: {override_reason}"
+                        )
+                else:
+                    # cross_status == "ok" — matched to most-recent employer
+                    # Only add a passed item if Layer A also passed (not already blocked)
+                    if verified and not any(b["key"] == ref_key for b in blocking_items):
+                        _pass(ref_key)
+            else:
+                # No company declared — can't run cross-check; if verified, accept it
+                if verified and not any(b["key"] == ref_key for b in blocking_items):
+                    _pass(ref_key)
 
         # ------------------------------------------------------------------
         # 4. Interview (check for submission with a decision)

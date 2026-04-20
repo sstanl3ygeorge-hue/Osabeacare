@@ -200,13 +200,15 @@ function ShadowShiftDialog({ existingDetails, onConfirm, onCancel, saving }) {
 
 // ─── Hybrid: View Submission modal ──────────────────────────────────────────
 
-function SubmissionViewModal({ employeeId, item, onClose, onSignOff, onReturn }) {
+function SubmissionViewModal({ employeeId, item, onClose, onSignOff, onReturn, onReopen }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [returnReason, setReturnReason] = useState('');
   const [showReturn, setShowReturn] = useState(false);
   const [acting, setActing] = useState(false);
   const [adminNotes, setAdminNotes] = useState('');
+  const [reopenReason, setReopenReason] = useState('');
+  const [showReopen, setShowReopen] = useState(false);
 
   const getErrorMessage = (err, fallback) => {
     const detail = err?.response?.data?.detail;
@@ -271,6 +273,31 @@ function SubmissionViewModal({ employeeId, item, onClose, onSignOff, onReturn })
         detail: err?.response?.data,
       });
       toast.error(getErrorMessage(err, 'Return failed.'));
+    } finally {
+      setActing(false);
+    }
+  };
+
+  const handleReopen = async () => {
+    setActing(true);
+    try {
+      const token = localStorage.getItem('token');
+      await axios.post(
+        `${API}/employees/${employeeId}/induction/items/${item.code}/reopen`,
+        { reason: reopenReason || 'Admin reopened sign-off for review' },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success('Sign-off reopened. The submission can be reviewed again.');
+      onReopen && onReopen();
+    } catch (err) {
+      console.error('Induction reopen failed', {
+        employeeId,
+        itemCode: item.code,
+        itemName: item.name,
+        status: err?.response?.status,
+        detail: err?.response?.data,
+      });
+      toast.error(getErrorMessage(err, 'Reopen failed.'));
     } finally {
       setActing(false);
     }
@@ -364,13 +391,30 @@ function SubmissionViewModal({ employeeId, item, onClose, onSignOff, onReturn })
               />
             </div>
           )}
+
+          {/* Reopen reason */}
+          {showReopen && (
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">
+                Reopen reason
+              </label>
+              <textarea
+                rows={3}
+                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                placeholder="Why is this sign-off being reopened?"
+                value={reopenReason}
+                onChange={e => setReopenReason(e.target.value)}
+                autoFocus
+              />
+            </div>
+          )}
         </div>
 
         <div className="flex items-center justify-between px-6 py-4 border-t border-slate-200 bg-slate-50 rounded-b-xl">
           <button onClick={onClose} className="text-sm text-slate-500 hover:text-slate-700">Close</button>
-          {!loading && subStatus === 'submitted' && (
+          {!loading && (subStatus === 'submitted' || subStatus === 'signed_off') && (
             <div className="flex gap-2">
-              {!showReturn ? (
+              {!showReturn && !showReopen ? (
                 <>
                   <Button
                     variant="outline" size="sm"
@@ -378,20 +422,39 @@ function SubmissionViewModal({ employeeId, item, onClose, onSignOff, onReturn })
                     className="text-red-600 border-red-300 hover:bg-red-50"
                     disabled={acting}
                   >
-                    <CornerDownLeft className="h-3 w-3 mr-1" /> Return
+                    <CornerDownLeft className="h-3 w-3 mr-1" /> Return for retake
                   </Button>
-                  <Button size="sm" onClick={handleSignOff} disabled={acting}>
-                    {acting ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <CheckCircle className="h-3 w-3 mr-1" />}
-                    Sign off
-                  </Button>
+                  {subStatus === 'signed_off' && (
+                    <Button
+                      variant="outline" size="sm"
+                      onClick={() => setShowReopen(true)}
+                      disabled={acting}
+                    >
+                      <RotateCcw className="h-3 w-3 mr-1" /> Reopen
+                    </Button>
+                  )}
+                  {subStatus === 'submitted' && (
+                    <Button size="sm" onClick={handleSignOff} disabled={acting}>
+                      {acting ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <CheckCircle className="h-3 w-3 mr-1" />}
+                      Sign off
+                    </Button>
+                  )}
                 </>
-              ) : (
+              ) : showReturn ? (
                 <>
                   <Button variant="outline" size="sm" onClick={() => setShowReturn(false)} disabled={acting}>Cancel</Button>
                   <Button size="sm" onClick={handleReturn} disabled={acting || !returnReason.trim()}
                     className="bg-red-600 hover:bg-red-700">
                     {acting ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
                     Confirm return
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Button variant="outline" size="sm" onClick={() => setShowReopen(false)} disabled={acting}>Cancel</Button>
+                  <Button size="sm" onClick={handleReopen} disabled={acting}>
+                    {acting ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
+                    Confirm reopen
                   </Button>
                 </>
               )}
@@ -800,6 +863,7 @@ export default function InductionChecklistPanel({ employeeId, employeeName, isAu
           onClose={() => setViewSubmissionItem(null)}
           onSignOff={() => { setViewSubmissionItem(null); fetchChecklist(); }}
           onReturn={() => { setViewSubmissionItem(null); fetchChecklist(); }}
+          onReopen={() => { setViewSubmissionItem(null); fetchChecklist(); }}
         />
       )}
 

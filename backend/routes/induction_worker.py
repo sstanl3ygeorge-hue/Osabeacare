@@ -339,9 +339,9 @@ async def submit_worker_induction_form(
     )
 
     if submission:
-        await db.induction_item_submissions.update_one(
-            {"employee_id": employee_id, "form_id": form_id},
-            {"$set": {
+        previous_status = submission.get("status")
+        history_update = {
+            "$set": {
                 "submitted_data": payload.data,
                 "draft_data": None,
                 "status": "submitted",
@@ -349,7 +349,23 @@ async def submit_worker_induction_form(
                 "return_reason": None,
                 "returned_at": None,
                 "updated_at": now,
-            }},
+            }
+        }
+        if previous_status == "returned":
+            history_update["$push"] = {
+                "status_history": {
+                    "action": "induction_item_resubmitted",
+                    "previous_status": previous_status,
+                    "previous_submitted_data": submission.get("submitted_data"),
+                    "previous_submitted_at": submission.get("submitted_at"),
+                    "return_reason": submission.get("return_reason"),
+                    "acted_by": employee_id,
+                    "acted_at": now,
+                }
+            }
+        await db.induction_item_submissions.update_one(
+            {"employee_id": employee_id, "form_id": form_id},
+            history_update,
         )
     else:
         await db.induction_item_submissions.insert_one({
@@ -374,7 +390,7 @@ async def submit_worker_induction_form(
 
     await log_audit_action(
         employee_id,
-        "worker_induction_form_submitted",
+        "induction_item_resubmitted" if submission and submission.get("status") == "returned" else "worker_induction_form_submitted",
         "induction_item_submissions",
         employee_id,
         {"form_id": form_id, "item_code": cfg_item.get("code")},

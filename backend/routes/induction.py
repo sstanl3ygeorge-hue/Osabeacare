@@ -672,6 +672,63 @@ def _resolve_induction_item_target(item_identifier: str, submission: dict = None
     }
 
 
+def _submission_filter(employee_id: str, submission: dict, form_id: str) -> dict:
+    if submission and submission.get("id"):
+        return {"employee_id": employee_id, "id": submission["id"]}
+    return {"employee_id": employee_id, "form_id": form_id}
+
+
+def _submission_history_event(action: str, submission: dict, actor_id: str, actor_name: str, now: str, reason: str = None) -> dict:
+    return {
+        "action": action,
+        "previous_status": (submission or {}).get("status"),
+        "submitted_data": (submission or {}).get("submitted_data"),
+        "submitted_at": (submission or {}).get("submitted_at"),
+        "signoff_by": (submission or {}).get("signoff_by"),
+        "signoff_by_name": (submission or {}).get("signoff_by_name"),
+        "signoff_at": (submission or {}).get("signoff_at"),
+        "admin_notes": (submission or {}).get("admin_notes"),
+        "return_reason": (submission or {}).get("return_reason"),
+        "acted_by": actor_id,
+        "acted_by_name": actor_name,
+        "acted_at": now,
+        "reason": reason,
+    }
+
+
+def _mark_checklist_item_pending(checklist: dict, item_code: str, input_code: str, item_name: str, reason: str = None) -> bool:
+    ensure_checklist_list_format(checklist)
+    for item in checklist.get("items", []):
+        if item.get("id") == item_code or item.get("id") == input_code or item.get("name") == item_name:
+            item["status"] = "pending"
+            item["completed"] = False
+            item["completed_at"] = None
+            item["completed_by"] = None
+            item["completed_by_name"] = None
+            item["notes"] = reason
+            item.pop("shadow_shift_signoff", None)
+            return True
+    return False
+
+
+def _recalculate_induction_checklist_status(checklist: dict, now: str) -> None:
+    mandatory_completed = sum(1 for i in checklist.get("items", []) if i.get("mandatory") and i.get("status") == "completed")
+    mandatory_total = sum(1 for i in checklist.get("items", []) if i.get("mandatory"))
+    any_completed = any(i.get("status") == "completed" for i in checklist.get("items", []))
+
+    if mandatory_total > 0 and mandatory_completed >= mandatory_total:
+        checklist["overall_status"] = "completed"
+        checklist["completed_at"] = checklist.get("completed_at") or now
+    elif any_completed:
+        checklist["overall_status"] = "in_progress"
+        checklist["completed_at"] = None
+        checklist.setdefault("started_at", now)
+    else:
+        checklist["overall_status"] = "pending"
+        checklist["completed_at"] = None
+    checklist["updated_at"] = now
+
+
 @router.get("/employees/{employee_id}/induction/items/{item_code}/submission")
 async def get_item_submission(
     employee_id: str,
@@ -719,6 +776,7 @@ async def get_item_submission(
         "submitted_data": (submission or {}).get("submitted_data"),
         "return_reason": (submission or {}).get("return_reason"),
         "admin_notes": (submission or {}).get("admin_notes"),
+        "status_history": (submission or {}).get("status_history", []),
     }
 
 
@@ -832,7 +890,21 @@ async def signoff_induction_item(
                 "signoff_by_name": admin_name,
                 "signoff_at": now,
                 "admin_notes": payload.notes,
+                "return_reason": None,
+                "returned_at": None,
+                "reopen_reason": None,
+                "reopened_at": None,
                 "updated_at": now,
+            },
+            "$push": {
+                "status_history": _submission_history_event(
+                    "induction_item_signed_off",
+                    submission,
+                    user["user_id"],
+                    admin_name,
+                    now,
+                    payload.notes,
+                )
             }},
         )
 
@@ -896,21 +968,7 @@ async def signoff_induction_item(
             new_item["shadow_shift_signoff"] = shadow_shift_details
         checklist["items"].append(new_item)
 
-    # Recalculate overall_status
-    mandatory_completed = sum(1 for i in checklist["items"] if i.get("mandatory") and i["status"] == "completed")
-    mandatory_total = sum(1 for i in checklist["items"] if i.get("mandatory"))
-    any_completed = any(i["status"] == "completed" for i in checklist["items"])
-
-    if mandatory_completed >= mandatory_total:
-        checklist["overall_status"] = "completed"
-        checklist["completed_at"] = now
-    elif any_completed:
-        checklist["overall_status"] = "in_progress"
-        checklist.setdefault("started_at", now)
-    else:
-        checklist["overall_status"] = "pending"
-
-    checklist["updated_at"] = now
+    _recalculate_induction_checklist_status(checklist, now)
 
     await db.induction_checklists.update_one(
         {"employee_id": employee_id}, {"$set": _without_mongo_id(checklist)}
@@ -969,6 +1027,13 @@ async def return_induction_item(
 
     form_id = target["form_id"]
     now = datetime.now(timezone.utc).isoformat()
+    admin = await db.users.find_one(
+        {"$or": [{"user_id": user["user_id"]}, {"id": user["user_id"]}]},
+        {"_id": 0, "name": 1, "first_name": 1, "last_name": 1, "email": 1},
+    )
+    admin_name = (admin or {}).get("name") or ""
+    if not admin_name and admin:
+        admin_name = f"{admin.get('first_name','')} {admin.get('last_name','')}".strip() or admin.get("email", "Admin")
 
     submission = submission_by_id or await db.induction_item_submissions.find_one(
         {"employee_id": employee_id, "form_id": form_id}, {"_id": 0}
@@ -987,23 +1052,49 @@ async def return_induction_item(
         form_id,
         target.get("resolved_by"),
     )
-    submission_filter = (
-        {"employee_id": employee_id, "id": submission.get("id")}
-        if submission.get("id")
-        else {"employee_id": employee_id, "form_id": form_id}
-    )
+    submission_filter = _submission_filter(employee_id, submission, form_id)
     await db.induction_item_submissions.update_one(
         submission_filter,
         {"$set": {
             "status": "returned",
             "return_reason": payload.return_reason,
             "returned_at": now,
+            "returned_by": user["user_id"],
+            "returned_by_name": admin_name or "Admin",
+            "signoff_by": None,
+            "signoff_by_name": None,
+            "signoff_at": None,
+            "admin_notes": None,
             "updated_at": now,
+        },
+        "$push": {
+            "status_history": _submission_history_event(
+                "induction_item_returned_for_retake",
+                submission,
+                user["user_id"],
+                admin_name or "Admin",
+                now,
+                payload.return_reason,
+            )
         }},
     )
 
+    checklist = await db.induction_checklists.find_one({"employee_id": employee_id})
+    if checklist:
+        _mark_checklist_item_pending(
+            checklist,
+            target.get("item_code"),
+            item_code,
+            cfg["title"],
+            f"Returned for retake: {payload.return_reason}",
+        )
+        _recalculate_induction_checklist_status(checklist, now)
+        await db.induction_checklists.update_one(
+            {"employee_id": employee_id}, {"$set": _without_mongo_id(checklist)}
+        )
+
     await log_audit_action(
-        user["user_id"], "induction_item_returned", "induction_checklist", employee_id,
+        user["user_id"], "induction_item_returned_for_retake", "induction_checklist", employee_id,
         {
             "item_code": target.get("item_code"),
             "form_id": form_id,
@@ -1085,11 +1176,7 @@ async def reopen_induction_item(
     )
 
     if submission and submission.get("status") == "signed_off":
-        submission_filter = (
-            {"employee_id": employee_id, "id": submission["id"]}
-            if submission.get("id")
-            else {"employee_id": employee_id, "form_id": form_id}
-        )
+        submission_filter = _submission_filter(employee_id, submission, form_id)
         await db.induction_item_submissions.update_one(
             submission_filter,
             {"$set": {
@@ -1098,7 +1185,21 @@ async def reopen_induction_item(
                 "reopened_by": user["user_id"],
                 "reopened_by_name": admin_name,
                 "reopen_reason": payload.reason or "Admin reopen",
+                "signoff_by": None,
+                "signoff_by_name": None,
+                "signoff_at": None,
+                "admin_notes": None,
                 "updated_at": now,
+            },
+            "$push": {
+                "status_history": _submission_history_event(
+                    "induction_item_reopened",
+                    submission,
+                    user["user_id"],
+                    admin_name,
+                    now,
+                    payload.reason or "Admin reopen",
+                )
             }},
         )
 
@@ -1110,35 +1211,18 @@ async def reopen_induction_item(
     ensure_checklist_list_format(checklist)
 
     item_name = cfg["title"]
-    item_reverted = False
-    for item in checklist["items"]:
-        if item.get("id") == resolved_item_code or item.get("id") == item_code or item.get("name") == item_name:
-            item["status"] = "pending"
-            item["completed"] = False
-            item["completed_at"] = None
-            item["completed_by"] = None
-            item["completed_by_name"] = None
-            item["notes"] = None
-            item["shadow_shift_signoff"] = None
-            item_reverted = True
-            break
+    item_reverted = _mark_checklist_item_pending(
+        checklist,
+        resolved_item_code,
+        item_code,
+        item_name,
+        payload.reason or "Reopened for admin review",
+    )
 
     if not item_reverted:
         raise HTTPException(status_code=404, detail=f"Item '{item_code}' not found in checklist — may already be pending.")
 
-    # Recalculate overall_status
-    mandatory_completed = sum(1 for i in checklist["items"] if i.get("mandatory") and i.get("status") == "completed")
-    mandatory_total = sum(1 for i in checklist["items"] if i.get("mandatory"))
-    any_completed = any(i.get("status") == "completed" for i in checklist["items"])
-
-    if mandatory_total > 0 and mandatory_completed >= mandatory_total:
-        checklist["overall_status"] = "completed"
-    elif any_completed:
-        checklist["overall_status"] = "in_progress"
-    else:
-        checklist["overall_status"] = "pending"
-    checklist["completed_at"] = None if checklist["overall_status"] != "completed" else checklist.get("completed_at")
-    checklist["updated_at"] = now
+    _recalculate_induction_checklist_status(checklist, now)
 
     await db.induction_checklists.update_one(
         {"employee_id": employee_id}, {"$set": _without_mongo_id(checklist)}

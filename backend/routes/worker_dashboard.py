@@ -31,6 +31,43 @@ from induction_definitions import get_employee_induction_status
 from employment_review_persistence import upsert_employment_review
 from .employment_gaps import _ensure_gap_record
 
+# Reference status enum (shared with stageGates)
+import sys
+import os as _os
+sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+try:
+    from stageGates import ReferenceStatus
+except ImportError:
+    class ReferenceStatus:
+        PENDING   = "pending"
+        REQUESTED = "requested"
+        RECEIVED  = "received"
+        VERIFIED  = "verified"
+        REJECTED  = "rejected"
+
+
+def _normalize_reference_status(raw) -> str:
+    """
+    Normalise the legacy bool/string mix for reference verification status
+    to the canonical ReferenceStatus enum values.
+    """
+    if raw is True:
+        return ReferenceStatus.VERIFIED
+    if raw is False or raw is None:
+        return ReferenceStatus.PENDING
+    v = str(raw).lower().strip()
+    if v in ("true", "accepted", "verified"):
+        return ReferenceStatus.VERIFIED
+    if v in ("rejected", "declined"):
+        return ReferenceStatus.REJECTED
+    if v in ("received", "submitted"):
+        return ReferenceStatus.RECEIVED
+    if v in ("requested", "sent"):
+        return ReferenceStatus.REQUESTED
+    if v in ("declared", "pending"):
+        return ReferenceStatus.PENDING
+    return ReferenceStatus.PENDING
+
 logger = logging.getLogger(__name__)
 
 FORM_LOCKED_STATUSES = ["submitted", "verified", "signed_off", "reviewed", "approved"]

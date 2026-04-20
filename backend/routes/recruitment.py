@@ -355,6 +355,30 @@ async def get_onboarding_statuses(user: dict = Depends(get_current_user)):
 
 # ==================== RECRUITMENT APPROVAL ====================
 
+@router.get("/employees/{employee_id}/recruitment-gate")
+async def get_recruitment_gate(
+    employee_id: str,
+    user: dict = Depends(require_admin)
+):
+    """
+    Return the structured gate evaluation for this applicant without
+    triggering approval.  Admin / auditor UI should call this to understand
+    WHY a profile cannot be approved even when the completion badge shows 100%.
+    """
+    db = get_db()
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    stage_gate = StageGateService(db)
+    gate_result = await stage_gate.evaluate_recruitment_gate(employee_id)
+    return {
+        "employee_id": employee_id,
+        "gate": gate_result,
+        "already_approved": bool(employee.get("recruitment_approved")),
+    }
+
+
 @router.post("/employees/{employee_id}/approve-recruitment")
 async def approve_recruitment(
     employee_id: str,
@@ -390,13 +414,19 @@ async def approve_recruitment(
 
     # ── Compliance gate ────────────────────────────────────────────────────────
     stage_gate = StageGateService(db)
-    can_approve, gate_blockers = await stage_gate.can_approve_recruitment(employee_id)
+    gate_result = await stage_gate.evaluate_recruitment_gate(employee_id)
+    can_approve = gate_result["allowed"]
+    gate_blockers = [f"{b['label']}: {b['reason']}" for b in gate_result["blocking_items"]]
+
     if not can_approve and not approval.force:
         raise HTTPException(
             status_code=400,
             detail={
                 "message": "Cannot approve: compliance requirements not met",
                 "blockers": gate_blockers,
+                "blocking_items": gate_result["blocking_items"],
+                "warning_items": gate_result["warning_items"],
+                "missing_requirements": gate_result["missing_requirements"],
                 "hint": "Set force=true to override (requires admin; logged in audit)"
             }
         )
@@ -440,6 +470,8 @@ async def approve_recruitment(
             "compliance_gate_passed": can_approve,
             "compliance_gate_bypassed": approval.force and not can_approve,
             "compliance_gate_blockers": gate_blockers if approval.force and not can_approve else [],
+            "compliance_gate_warnings": [w["label"] for w in gate_result.get("warning_items", [])],
+            "compliance_gate_missing": gate_result.get("missing_requirements", []),
             "employee_code_assigned": employee_code if not employee.get("employee_code") else None,
             "status_changed_from": current_status if current_status in APPLICANT_STATUSES else None,
             "status_changed_to": EmployeeStatus.ONBOARDING if current_status in APPLICANT_STATUSES else None

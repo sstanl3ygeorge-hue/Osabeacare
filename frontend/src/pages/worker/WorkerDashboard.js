@@ -590,8 +590,11 @@ function FormsSection() {
                 </div>
                 <div>
                   <span className="font-medium text-slate-800">{form.name}</span>
-                  {form.submitted_at && (
-                    <p className="text-xs text-green-600">Sent for review: {formatDate(form.submitted_at)}</p>
+                  {form.submitted_at && !['verified', 'signed_off', 'reviewed', 'approved'].includes(form.status) && (
+                    <p className="text-xs text-blue-600">Sent for review: {formatDate(form.submitted_at)}</p>
+                  )}
+                  {['verified', 'signed_off', 'reviewed', 'approved'].includes(form.status) && form.submitted_at && (
+                    <p className="text-xs text-green-600">Submitted {formatDate(form.submitted_at)} · reviewed by admin</p>
                   )}
                 </div>
               </div>

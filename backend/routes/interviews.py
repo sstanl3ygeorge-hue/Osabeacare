@@ -313,6 +313,37 @@ async def create_interview_record(
                 "updated_at": now
             }}
         )
+
+    # Sync pre_interview_questionnaire status to reflect admin decision
+    if not payload.get("is_draft"):
+        decision = form_data.get("decision", "")
+        if decision == "Approve":
+            new_form_status = "verified"
+        elif str(decision).lower() in {"reject", "not suitable"}:
+            new_form_status = "rejected"
+        else:
+            new_form_status = None
+
+        if new_form_status:
+            questionnaire_doc = await db.form_submissions.find_one({
+                "employee_id": employee_id,
+                "$or": [
+                    {"form_type": "pre_interview_questionnaire"},
+                    {"requirement_id": "pre_interview_questionnaire"},
+                    {"requirement_id": "interview"}
+                ]
+            })
+            if questionnaire_doc:
+                await db.form_submissions.update_one(
+                    {"_id": questionnaire_doc["_id"]},
+                    {"$set": {
+                        "status": new_form_status,
+                        "reviewed_at": now,
+                        "reviewed_by": user.get("user_id"),
+                        "interview_record_id": record_id,
+                        "updated_at": now,
+                    }}
+                )
     
     await log_audit_action(
         user['user_id'],

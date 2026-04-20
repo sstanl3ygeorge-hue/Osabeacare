@@ -5382,6 +5382,14 @@ class EmployeeResponse(BaseModel):
     gap_explanations: Optional[List[dict]] = None  # Applicant-submitted gap explanations
     gap_analysis_status: Optional[str] = None  # "completed" | "failed" | None
     gap_analysis_error: Optional[str] = None
+    # Reviewed declaration overlay used by Employment Review.
+    # Raw application declarations remain preserved in the application/form submission.
+    declarations: Optional[dict] = None
+    declarations_reviewed: Optional[bool] = None
+    declarations_reviewed_at: Optional[str] = None
+    declarations_reviewed_by: Optional[str] = None
+    declarations_reviewed_by_name: Optional[str] = None
+    declarations_review_status: Optional[str] = None
     # Driving / Vehicle
     has_driving_licence: Optional[bool] = None
     driving_licence_type: Optional[str] = None
@@ -9794,11 +9802,34 @@ async def update_declarations(
         raise HTTPException(status_code=404, detail="Employee not found")
     
     old_declarations = employee.get('declarations', {})
+    now = datetime.now(timezone.utc).isoformat()
+    reviewed_by = data.declarations.get("reviewed_by") or user.get("user_id") or user.get("id")
+    reviewed_by_name = (
+        data.declarations.get("reviewed_by_name")
+        or user.get("name")
+        or user.get("email")
+        or user.get("user_id")
+    )
+    reviewed_at = data.declarations.get("reviewed_at") or now
+    reviewed_status = data.declarations.get("review_status") or "reviewed"
+    reviewed_declarations = {
+        **data.declarations,
+        "reviewed": True,
+        "reviewed_at": reviewed_at,
+        "reviewed_by": reviewed_by,
+        "reviewed_by_name": reviewed_by_name,
+        "review_status": reviewed_status,
+    }
     
     # Update declarations
     update_data = {
-        'declarations': data.declarations,
-        'updated_at': datetime.now(timezone.utc).isoformat()
+        'declarations': reviewed_declarations,
+        'declarations_reviewed': True,
+        'declarations_reviewed_at': reviewed_at,
+        'declarations_reviewed_by': reviewed_by,
+        'declarations_reviewed_by_name': reviewed_by_name,
+        'declarations_review_status': reviewed_status,
+        'updated_at': now
     }
     
     await db.employees.update_one({"id": employee_id}, {"$set": update_data})
@@ -9828,16 +9859,30 @@ async def update_declarations(
         employee_id,
         {
             "old_values": old_declarations,
-            "new_values": data.declarations,
+            "new_values": reviewed_declarations,
             "reason": data.edit_reason,
             "employee_name": f"{employee.get('first_name')} {employee.get('last_name')}"
         }
     )
+
+    employment_review = None
+    try:
+        employment_review = await upsert_employment_review(
+            db,
+            employee_id,
+            actor_id=user.get("user_id") or user.get("id"),
+            reason="admin_declarations_review",
+        )
+    except Exception as exc:
+        logger.warning(f"Failed to sync employment review after declarations update for {employee_id}: {exc}")
     
     return {
         "success": True,
         "message": "Declarations updated",
-        "edit_logged": True
+        "edit_logged": True,
+        "declarations_reviewed": True,
+        "employment_review_synced": bool(employment_review),
+        "employment_review_status": employment_review.get("status") if employment_review else None,
     }
 
 

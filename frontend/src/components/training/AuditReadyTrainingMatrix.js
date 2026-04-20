@@ -690,8 +690,8 @@ export default function AuditReadyTrainingMatrix({
     ? 'Cannot assess'
     : mandatoryBlockers.length > 0
       ? 'Blocked'
-      : 'Ready from training';
-  const trainingDecisionClasses = trainingDecisionState === 'Ready from training'
+      : 'Training ready';
+  const trainingDecisionClasses = trainingDecisionState === 'Training ready'
     ? {
         panel: 'border-emerald-200 bg-emerald-50',
         icon: 'text-emerald-600',
@@ -744,7 +744,7 @@ export default function AuditReadyTrainingMatrix({
       <div className={`rounded-lg border p-4 ${trainingDecisionClasses.panel}`}>
         <div className="flex items-start gap-3">
           <div className={`mt-0.5 ${trainingDecisionClasses.icon}`}>
-            {trainingDecisionState === 'Ready from training' ? (
+            {trainingDecisionState === 'Training ready' ? (
               <CheckCircle2 className="h-5 w-5" />
             ) : (
               <AlertTriangle className="h-5 w-5" />
@@ -752,17 +752,17 @@ export default function AuditReadyTrainingMatrix({
           </div>
           <div className="flex-1">
             <p className={`font-medium ${trainingDecisionClasses.text}`}>
-              Training Status: {trainingDecisionState}
+              Training status: {trainingDecisionState}
             </p>
             <p className={`mt-1 text-sm ${trainingDecisionClasses.subtext}`}>
               Only verified and current mandatory training counts toward work readiness.
             </p>
             <p className={`mt-1 text-sm ${trainingDecisionClasses.subtext}`}>
-              Certificates are evidence only. Extracted items must be reviewed into canonical training records before Mandatory compliance changes.
+              Certificates are evidence only. Extracted items must be reviewed into training records before required training status changes.
             </p>
             {trainingDecisionState === 'Blocked' && exactBlockerNames.length > 0 && (
               <div className={`mt-2 text-sm ${trainingDecisionClasses.subtext}`}>
-                <p className="font-medium">Mandatory blockers</p>
+                <p className="font-medium">Required training still needed</p>
                 <ul className="mt-1 list-disc space-y-1 pl-5">
                   {exactBlockerNames.slice(0, 8).map((name) => (
                     <li key={name}>{name}</li>
@@ -834,7 +834,7 @@ export default function AuditReadyTrainingMatrix({
       </div>
 
       <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-        <span className="font-medium">Training blockers:</span> {mandatoryBlockers.length} &nbsp;|&nbsp;
+        <span className="font-medium">Required training still needed:</span> {mandatoryBlockers.length} &nbsp;|&nbsp;
         <span className="font-medium">Pending verification:</span> {mandatoryPendingVerification.length} &nbsp;|&nbsp;
         <span className="font-medium">Expired/overdue:</span> {mandatoryExpired.length} &nbsp;|&nbsp;
         <span className="font-medium">Cannot assess:</span> {cannotAssessCount} &nbsp;|&nbsp;

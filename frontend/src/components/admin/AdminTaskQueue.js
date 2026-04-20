@@ -144,7 +144,7 @@ export default function AdminTaskQueue() {
           <div className="text-center py-6 text-gray-500">
             <CheckCircle className="h-12 w-12 mx-auto mb-3 text-green-500" />
             <p className="font-medium text-green-700">All caught up!</p>
-            <p className="text-xs mt-1">No pending tasks. Great work keeping on top of compliance.</p>
+            <p className="text-xs mt-1">No pending tasks right now.</p>
           </div>
         ) : (
           <div className="space-y-2">

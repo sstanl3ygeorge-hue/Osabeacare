@@ -58,7 +58,7 @@ export default function SupersedeContractDialog({
       if (onSuccess) onSuccess();
       handleClose();
     } catch (err) {
-      toast.error(err.response?.data?.detail || 'Failed to supersede contract');
+      toast.error(err.response?.data?.detail || 'Failed to replace contract');
     } finally {
       setIsLoading(false);
     }
@@ -77,7 +77,7 @@ export default function SupersedeContractDialog({
         <DialogHeader>
           <DialogTitle className="font-heading flex items-center gap-2 text-amber-600">
             <AlertTriangle className="h-5 w-5" />
-            Supersede Contract
+            Replace contract
           </DialogTitle>
           <DialogDescription>
             Replace the existing contract for {employeeName}
@@ -89,11 +89,11 @@ export default function SupersedeContractDialog({
           <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
             <h4 className="font-medium text-amber-800 flex items-center gap-2">
               <FileX className="h-4 w-4" />
-              CQC Compliance Notice
+              Audit trail notice
             </h4>
             <p className="text-sm text-amber-700 mt-1">
               The existing contract will be marked as <strong>superseded</strong>, not deleted. 
-              This maintains the audit trail required for CQC compliance.
+              This keeps the previous contract in the audit trail.
             </p>
           </div>
 
@@ -121,7 +121,7 @@ export default function SupersedeContractDialog({
           {/* Reason for Superseding */}
           <div className="space-y-2">
             <Label className="font-medium">
-              Reason for Superseding *
+              Reason for replacing *
             </Label>
             <Textarea
               value={reason}
@@ -129,7 +129,7 @@ export default function SupersedeContractDialog({
                 setReason(e.target.value);
                 if (error) setError('');
               }}
-              placeholder="Explain why this contract needs to be replaced (e.g., 'Original contract was signed by admin, not worker - CQC compliance requirement', 'Contract terms need updating')"
+              placeholder="Explain why this contract needs to be replaced (e.g., 'Original contract was signed by admin, not worker', 'Contract terms need updating')"
               className="min-h-[100px] rounded-lg"
             />
             {error && (
@@ -171,7 +171,7 @@ export default function SupersedeContractDialog({
             disabled={isLoading || !reason.trim()}
             className="bg-amber-600 hover:bg-amber-700 text-white"
           >
-            {isLoading ? 'Processing...' : 'Supersede Contract'}
+            {isLoading ? 'Processing...' : 'Replace contract'}
           </Button>
         </DialogFooter>
       </DialogContent>

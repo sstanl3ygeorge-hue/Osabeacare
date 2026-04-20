@@ -130,7 +130,7 @@ export default function ActionableTaskQueue() {
         <CardContent className="py-8 text-center">
           <CheckCircle className="h-12 w-12 mx-auto mb-3 text-green-500" />
           <p className="font-medium text-green-700">All Tasks Complete</p>
-          <p className="text-sm text-green-600 mt-1">No pending actions required. Great work!</p>
+          <p className="text-sm text-green-600 mt-1">No pending actions right now.</p>
         </CardContent>
       </Card>
     );

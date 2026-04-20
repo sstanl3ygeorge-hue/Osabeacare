@@ -95,7 +95,7 @@ export default function AuditReasonDialog({
               data-testid="audit-reason-input"
             />
             <p className="text-xs text-gray-500 mt-1">
-              Minimum {minReasonLength} characters. This will be recorded in the CQC audit trail.
+              Minimum {minReasonLength} characters. This will be recorded in the audit trail.
             </p>
           </div>
         </div>

@@ -551,7 +551,7 @@ export default function InterviewFormPanel({ employeeId, employeeName, employeeR
             <AlertTriangle className="h-9 w-9 mx-auto mb-3 text-red-400" />
             <p className="font-semibold text-red-700">Interview Not Conducted</p>
             <p className="text-sm text-red-600 mt-1">
-              CQC safer recruitment requires a documented interview before progressing.
+              Osabea needs a documented interview before this file can move forward.
             </p>
             <p className="text-xs text-red-400 mt-1">
               Record the interview to clear this blocker.

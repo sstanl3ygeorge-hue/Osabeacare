@@ -113,7 +113,7 @@ export default function EditDeclarationsDialog({
       open={open}
       onClose={onClose}
       title="Edit Declarations"
-      description="Update employee declarations. All changes are logged for CQC audit."
+      description="Review or update employee declarations. All changes are kept in the audit trail."
       onSave={handleSave}
       isLoading={isLoading}
     >

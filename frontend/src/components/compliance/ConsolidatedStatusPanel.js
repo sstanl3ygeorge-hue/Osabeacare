@@ -335,7 +335,7 @@ export default function ConsolidatedStatusPanel({
                   isBlocked ? "text-amber-800" : "text-green-800"
                 )}>
                   {isBlocked ? (
-                    <>Cannot be promoted yet</>
+                    <>Not ready to move forward yet</>
                   ) : (
                     <>No current pre-employment blockers</>
                   )}
@@ -387,10 +387,10 @@ export default function ConsolidatedStatusPanel({
           <CardHeader className="py-3 px-4 bg-red-50/50 border-b border-red-100">
             <CardTitle className="text-base font-semibold text-red-800 flex items-center gap-2">
               <XCircle className="h-5 w-5" />
-              OPEN PRE-EMPLOYMENT BLOCKERS ({blockers.length} items)
+              What's left before onboarding ({blockers.length} items)
             </CardTitle>
             <p className="text-xs text-gray-600 mt-1">
-              🔴 Critical = Missing/Unverified &nbsp;|&nbsp; 🟡 Pending = Awaiting Verification
+              Critical = missing or unverified &nbsp;|&nbsp; Pending = waiting for Osabea review
             </p>
           </CardHeader>
           <CardContent className="p-0">
@@ -692,7 +692,7 @@ export default function ConsolidatedStatusPanel({
               onClick={() => onNavigateToTab?.('compliance')}
             >
               <Eye className="h-4 w-4 mr-1" />
-              View Full Compliance
+              View staff file
             </Button>
             <Button
               variant="outline"

@@ -137,7 +137,7 @@ export default function CheckRow({
               </Badge>
               {blocker_text && (
                 <Badge className="bg-red-100 text-red-700 text-[10px]">
-                  Blocks Readiness
+                  Needed before start
                 </Badge>
               )}
             </div>

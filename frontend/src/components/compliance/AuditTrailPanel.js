@@ -30,7 +30,7 @@ const ACTION_CONFIG = {
   request_replacement:           { label: 'Replacement requested', color: 'bg-cyan-100 text-cyan-700', icon: RefreshCw },
   delete_evidence:               { label: 'Evidence deleted', color: 'bg-red-100 text-red-700', icon: XCircle },
   remove_evidence:               { label: 'Evidence removed', color: 'bg-red-100 text-red-700', icon: XCircle },
-  verify_requirement:            { label: 'Requirement satisfied', color: 'bg-green-100 text-green-700', icon: CheckCircle },
+  verify_requirement:            { label: 'Check complete', color: 'bg-green-100 text-green-700', icon: CheckCircle },
   unverify_requirement:          { label: 'Requirement satisfaction revoked', color: 'bg-red-100 text-red-700', icon: XCircle },
   check_recorded:                { label: 'Check recorded', color: 'bg-purple-100 text-purple-700', icon: FileText },
   reference_requested:           { label: 'Reference requested', color: 'bg-cyan-100 text-cyan-700', icon: FileText },
@@ -397,7 +397,7 @@ export default function AuditTrailPanel({ employeeId }) {
           </div>
         </CardTitle>
         <p className="text-sm text-gray-500 mt-1">
-          CQC-auditable record of all compliance actions for this employee
+          Osabea audit trail for checks and staff-file decisions
         </p>
       </CardHeader>
       <CardContent>

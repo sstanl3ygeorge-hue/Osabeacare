@@ -478,7 +478,7 @@ export default function DualRowComplianceSection({
             )}
             {isAgreementsSection && agreementSatisfiedCount > 0 && (
               <Badge className="bg-emerald-100 text-emerald-700 text-xs">
-                {agreementSatisfiedCount} requirement satisfied
+                {agreementSatisfiedCount} checks complete
               </Badge>
             )}
           </div>
@@ -496,7 +496,7 @@ export default function DualRowComplianceSection({
                 {blockers.length} blocking readiness &nbsp;|&nbsp;
                 {agreementPendingReviewCount} awaiting admin review &nbsp;|&nbsp;
                 {agreementMissingCount} missing/not submitted &nbsp;|&nbsp;
-                {agreementSatisfiedCount} requirement satisfied
+                {agreementSatisfiedCount} checks complete
               </div>
             )}
             {section.rows.map((row, idx) => {
@@ -832,7 +832,7 @@ export default function DualRowComplianceSection({
         <span className="font-medium">Compliance blockers:</span> {blockerCount} &nbsp;|&nbsp;
         <span className="font-medium">Pending reviews:</span> {pendingReviewCount} &nbsp;|&nbsp;
         <span className="font-medium">Cannot assess:</span> 0 &nbsp;|&nbsp;
-        <span className="font-medium">Requirement satisfied:</span> {satisfiedRequirementCount}/{totalRequirementCount}
+        <span className="font-medium">Checks complete:</span> {satisfiedRequirementCount}/{totalRequirementCount}
         {agreementRowsForSummary.length > 0 && (
           <>
             &nbsp;|&nbsp;

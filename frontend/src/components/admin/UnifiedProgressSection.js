@@ -119,12 +119,12 @@ export default function UnifiedProgressSection({
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <CardTitle className="text-lg flex items-center gap-2 cursor-help">
-                      <span>✅</span> Full Compliance
+                      <span>✅</span> Ready to work
                       <Info className="h-4 w-4 text-slate-400" />
                     </CardTitle>
                   </TooltipTrigger>
                   <TooltipContent className="max-w-xs bg-slate-900 text-white">
-                    <p className="font-medium mb-1">Full Compliance</p>
+                    <p className="font-medium mb-1">Ready to work</p>
                     <p className="text-sm text-slate-300">
                       All requirements including documents, forms, training, induction, and competencies.
                     </p>
@@ -194,7 +194,7 @@ export default function UnifiedProgressSection({
           <div className="space-y-2">
             <p className="text-sm font-medium text-gray-700 flex items-center gap-2">
               <XCircle className="h-4 w-4 text-red-500" />
-              Blocking Items ({priorityBlockers.length})
+              Items needing attention ({priorityBlockers.length})
             </p>
             <div className="space-y-1.5 max-h-48 overflow-y-auto">
               {priorityBlockers.slice(0, 8).map((blocker, idx) => {

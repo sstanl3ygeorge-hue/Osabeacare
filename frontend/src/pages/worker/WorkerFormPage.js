@@ -117,7 +117,7 @@ export default function WorkerFormPage() {
         { headers: { Authorization: `Bearer ${token}` } }
       );
       console.log('Submit response:', response.data);
-      toast.success('Form submitted successfully! Admin has been notified.');
+      toast.success('Form sent for Osabea review.');
       navigate('/worker/dashboard');
     } catch (error) {
       console.error('Submit error:', error.response?.data || error);
@@ -329,7 +329,7 @@ export default function WorkerFormPage() {
         {!canEdit && (
           <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-center gap-3">
             <CheckCircle className="h-5 w-5 text-green-600" />
-            <p className="text-green-800">This form has been submitted and is awaiting review.</p>
+            <p className="text-green-800">This form has been sent for Osabea review.</p>
           </div>
         )}
 
@@ -387,7 +387,7 @@ export default function WorkerFormPage() {
         {canEdit && (
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
             <p className="text-sm text-blue-800 mb-3">
-              <strong>{isCorrectionRequired ? 'Ready to resubmit?' : 'Ready to submit?'}</strong> Once submitted, this form cannot be edited and will be sent to the admin for review.
+              <strong>{isCorrectionRequired ? 'Ready to resend?' : 'Ready to send?'}</strong> Once sent, this form cannot be edited unless Osabea returns it for correction.
             </p>
             <div className="flex justify-end gap-3">
               <Button variant="outline" onClick={handleSave} disabled={saving}>

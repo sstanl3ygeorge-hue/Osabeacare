@@ -3566,6 +3566,9 @@ export default function EmployeeProfilePage() {
       : employmentReadyForSignOff
         ? 'Ready for sign-off'
         : 'Blocked';
+  const employmentDecisionDisplay = employmentDecisionState === 'Cannot assess'
+    ? 'needs review data'
+    : employmentDecisionState.toLowerCase();
   const employmentDecisionClasses = employmentDecisionState === 'Signed off'
     ? {
         panel: 'border-green-200 bg-green-50',
@@ -3601,7 +3604,7 @@ export default function EmployeeProfilePage() {
     !employmentCoverage ? 'Coverage not assessed — run gap analysis' : null,
     (employmentCoverage && !coverageAssessed) ? 'Cannot assess 10-year coverage from current data' : null,
     (coverageAssessed && !coverageMet) ? '10-year coverage not met' : null,
-    employmentGapsCannotAssess ? 'Cannot assess employment gaps' : null,
+    employmentGapsCannotAssess ? 'Unable to confirm gaps from the current history' : null,
     (!employmentGapsCannotAssess && employmentHistoryExists && !allGapsResolved) ? 'Detected gaps unresolved' : null,
   ].filter(Boolean);
   const canonicalReviewBlockers = hasPersistedEmploymentReview
@@ -3613,7 +3616,7 @@ export default function EmployeeProfilePage() {
         !applicationAvailable ? 'Application evidence missing' : null,
         !declarationsAdequatelyReviewed ? 'Declarations not reviewed' : null,
         !employmentHistoryExists ? 'Employment history missing' : null,
-        employmentGapsCannotAssess ? 'Cannot assess employment gaps' : null,
+        employmentGapsCannotAssess ? 'Unable to confirm gaps from the current history' : null,
         ...canonicalReviewBlockers,
       ].filter(Boolean)
     : legacyEmploymentStatusBlockers;
@@ -3999,7 +4002,7 @@ export default function EmployeeProfilePage() {
                     className={`p-3 rounded-xl border w-52 shrink-0 cursor-pointer hover:shadow-md transition-shadow ${dbsClasses.card}`}
                     data-testid="dbs-status-card"
                     onClick={() => setActiveTab('checklist')}
-                    title="Go to Verification & Compliance"
+                    title="Go to Checks & Evidence"
                   >
                     <div className="flex items-center gap-2 mb-1">
                       <Shield className={`h-4 w-4 ${dbsClasses.icon}`} />
@@ -4028,7 +4031,7 @@ export default function EmployeeProfilePage() {
                     className={`p-3 rounded-xl border w-52 shrink-0 cursor-pointer hover:shadow-md transition-shadow ${rtwClasses.card}`}
                     data-testid="rtw-status-card"
                     onClick={() => setActiveTab('checklist')}
-                    title="Go to Verification & Compliance"
+                    title="Go to Checks & Evidence"
                   >
                     <div className="flex items-center gap-2 mb-1">
                       <FileCheck className={`h-4 w-4 ${rtwClasses.icon}`} />
@@ -4092,7 +4095,7 @@ export default function EmployeeProfilePage() {
                     }`}
                     data-testid="alerts-card"
                     onClick={() => setActiveTab(isBlocking || pendingReview > 0 ? 'checklist' : 'training')}
-                    title={isBlocking || pendingReview > 0 ? 'Go to Verification & Compliance' : 'Go to Training'}
+                    title={isBlocking || pendingReview > 0 ? 'Go to Checks & Evidence' : 'Go to Training'}
                   >
                     <div className="flex items-center gap-2 mb-1">
                       <AlertTriangle className={`h-4 w-4 ${
@@ -4130,7 +4133,7 @@ export default function EmployeeProfilePage() {
                     className="p-3 rounded-xl border border-slate-200 bg-slate-50 w-52 shrink-0 cursor-pointer hover:shadow-md transition-shadow"
                     data-testid="compliance-breakdown-card"
                     onClick={() => setActiveTab('checklist')}
-                    title="Go to Verification & Compliance"
+                    title="Go to Checks & Evidence"
                   >
                     <div className="flex items-center gap-2 mb-2">
                       <ClipboardList className="h-4 w-4 text-slate-600" />
@@ -4659,7 +4662,7 @@ export default function EmployeeProfilePage() {
           </TabsTrigger>
           <TabsTrigger value="checklist" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
             <CheckCircle className="h-4 w-4 mr-2" />
-            Verification & Compliance
+            Checks & Evidence
           </TabsTrigger>
           <TabsTrigger value="training" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
             <GraduationCap className="h-4 w-4 mr-2" />
@@ -5504,7 +5507,7 @@ export default function EmployeeProfilePage() {
                 </div>
                 <div className="flex-1">
                   <p className={`font-medium ${employmentDecisionClasses.text}`}>
-                    Employment Status: {employmentDecisionState}
+                    Employment review: {employmentDecisionDisplay}
                   </p>
                   <p className={`mt-1 text-xs ${employmentDecisionClasses.subtext}`}>
                     Source: {hasPersistedEmploymentReview ? `Canonical employment review v${employmentReview?.version || 1}` : 'Compliance-file fallback'}
@@ -5534,7 +5537,7 @@ export default function EmployeeProfilePage() {
                   )}
                   {!employmentReadyForSignOff && !employmentSignedOff && employmentStatusBlockers.length > 0 && (
                     <div className={`mt-2 text-sm ${employmentDecisionClasses.subtext}`}>
-                      <p className="font-medium">Blockers</p>
+                      <p className="font-medium">Items needing attention</p>
                       <ul className="mt-1 list-disc space-y-1 pl-5">
                         {employmentStatusBlockers.map((blocker) => (
                           <li key={blocker}>{blocker}</li>
@@ -5585,7 +5588,7 @@ export default function EmployeeProfilePage() {
                 </div>
               )}
               <div className="rounded-xl border border-[#E4E8EB] bg-white p-3 shadow-sm">
-                <p className="text-xs text-text-muted">Blockers</p>
+                <p className="text-xs text-text-muted">Items needing attention</p>
                 <p className="mt-2 text-sm font-medium text-gray-800">
                   {employmentDecisionState === 'Cannot assess' ? 'Cannot assess' : employmentStatusBlockers.length}
                 </p>
@@ -5634,7 +5637,7 @@ export default function EmployeeProfilePage() {
                   <div className="flex items-start gap-3">
                     <AlertTriangle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
                     <div>
-                      <p className="text-sm font-medium text-red-800">Cannot assess 10-year coverage</p>
+                      <p className="text-sm font-medium text-red-800">Unable to confirm 10-year coverage</p>
                       <p className="mt-1 text-xs text-red-700">
                         {coverageLooksStaleOrUnusable
                           ? 'Dated employment history is present, but the stored coverage summary did not count any dated coverage.'
@@ -5655,7 +5658,7 @@ export default function EmployeeProfilePage() {
                   <div className="flex items-start gap-3">
                     <AlertTriangle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
                     <div>
-                      <p className="text-sm font-medium text-red-800">Cannot assess 10-year coverage</p>
+                      <p className="text-sm font-medium text-red-800">Unable to confirm 10-year coverage</p>
                       <p className="mt-1 text-xs text-red-700">
                         Employment history exists, but no usable coverage summary is available yet. Re-run gap analysis to generate coverage data.
                       </p>
@@ -5883,7 +5886,7 @@ export default function EmployeeProfilePage() {
                 <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
                   <AlertCircle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
                   <div className="flex-1">
-                    <p className="font-medium text-red-800">Cannot assess employment gaps</p>
+                    <p className="font-medium text-red-800">Unable to confirm gaps from the current history</p>
                     <p className="text-sm text-red-600 mt-1">
                       {gapAnalysisFailed
                         ? 'Gap analysis encountered an error during processing. Click "Re-run Gap Analysis" to retry.'
@@ -6865,7 +6868,7 @@ export default function EmployeeProfilePage() {
                 rows={2}
               />
               <p className="text-xs text-text-muted">
-                This will be recorded in the audit trail for CQC compliance.
+                This will be recorded in the audit trail.
               </p>
             </div>
           </div>
@@ -9196,6 +9199,7 @@ export default function EmployeeProfilePage() {
         onSuccess={() => {
           fetchEmployee();
           fetchComplianceFile();
+          fetchEmploymentReview();
         }}
       />
       

@@ -381,7 +381,7 @@ export default function DashboardPage() {
               </div>
             </div>
           ) : (
-            <p className="text-green-700">No expired documents, no items expiring soon, all staff ready, and all policies acknowledged. Great work!</p>
+            <p className="text-green-700">No expired documents, no items expiring soon, all staff ready, and all policies acknowledged.</p>
           )}
         </CardContent>
       </Card>

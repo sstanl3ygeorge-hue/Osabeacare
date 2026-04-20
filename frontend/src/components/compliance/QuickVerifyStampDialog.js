@@ -556,7 +556,7 @@ export default function QuickVerifyStampDialog({
           <div className="p-3 bg-slate-100 rounded-lg">
             <div className="flex items-center gap-2 text-slate-700">
               <Shield className="h-4 w-4" />
-              <span className="text-xs font-medium">NHS Safer Recruitment Compliant</span>
+              <span className="text-xs font-medium">Osabea review record</span>
             </div>
             <p className="text-xs text-slate-500 mt-1">
               This verification will be recorded in the audit log with timestamp, your name, and method used.

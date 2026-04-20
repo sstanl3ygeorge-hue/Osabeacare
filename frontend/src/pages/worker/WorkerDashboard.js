@@ -48,7 +48,7 @@ const formatDate = (dateStr) => {
   }
 };
 
-// NHS-compliant document guidance text
+// Operational document guidance text
 const getDocumentGuidance = (docType) => {
   const guidance = {
     right_to_work: "Upload your UK passport, biometric residence permit, or share code screenshot from GOV.UK. Share code must be valid for at least 30 days.",
@@ -204,7 +204,7 @@ function EmploymentGapsSection() {
                   10-Year Employment History
                 </CardTitle>
                 <p className="text-xs text-slate-500 mt-1">
-                  CQC safer recruitment requires a full account of the last 10 years
+                  Osabea needs a clear 10-year work history before your file can move forward
                 </p>
               </div>
               {coverageMet ? (
@@ -258,7 +258,7 @@ function EmploymentGapsSection() {
             {!coverageMet && (
               <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
                 {hasGaps
-                  ? 'Please explain any gaps below. All gaps must be explained and verified to meet CQC requirements.'
+                  ? 'Please explain any gaps below. Osabea will review them before your file can move forward.'
                   : 'Your employment history does not yet cover the full 10-year window. Please contact your recruiter if you need to update your application.'}
               </p>
             )}
@@ -468,7 +468,7 @@ function FormsSection() {
   const getStatusBadge = (form) => {
     switch (form.status) {
       case 'submitted':
-        return <Badge className="bg-blue-100 text-blue-700">Submitted</Badge>;
+        return <Badge className="bg-blue-100 text-blue-700">Sent for review</Badge>;
       case 'verified':
         return <Badge className="bg-green-100 text-green-700"><CheckCircle className="h-3 w-3 mr-1" />Verified</Badge>;
       case 'signed_off':
@@ -582,7 +582,7 @@ function FormsSection() {
                 <div>
                   <span className="font-medium text-slate-800">{form.name}</span>
                   {form.submitted_at && (
-                    <p className="text-xs text-green-600">Submitted: {formatDate(form.submitted_at)}</p>
+                    <p className="text-xs text-green-600">Sent for review: {formatDate(form.submitted_at)}</p>
                   )}
                 </div>
               </div>
@@ -1395,7 +1395,7 @@ export default function WorkerDashboard() {
                   <Badge className="bg-white/20 text-white text-xs">Active Employee</Badge>
                 </div>
                 <p className="text-green-100 mt-1">
-                  All NHS compliance requirements verified. You are authorised to work.
+                  Your Osabea staff file is complete and you are authorised to work.
                 </p>
               </div>
             </div>
@@ -1414,8 +1414,8 @@ export default function WorkerDashboard() {
                 <CheckCircle className="h-8 w-8" />
               </div>
               <div>
-                <h3 className="font-bold text-xl">Compliance Complete!</h3>
-                <p className="text-blue-100">All requirements submitted. Awaiting admin verification to be cleared for work.</p>
+                <h3 className="font-bold text-xl">Staff File Submitted</h3>
+                <p className="text-blue-100">Your items are with Osabea for final review before you are cleared for work.</p>
               </div>
             </div>
           </div>
@@ -1698,8 +1698,8 @@ export default function WorkerDashboard() {
               </div>
               
               <p className="text-xs text-amber-700 mt-4 p-3 bg-amber-100/50 rounded-lg">
-                NHS Safer Recruitment requires that all references are verified against your employment history. 
-                Please explain any discrepancies to help us complete your compliance check.
+                Osabea checks references against your work history before your file can move forward.
+                Please explain any differences so the team can complete your review.
               </p>
             </CardContent>
           </Card>
@@ -1766,7 +1766,7 @@ export default function WorkerDashboard() {
                     ) : professional_registration.status === 'pending_verification' ? (
                       <Badge className="bg-amber-100 text-amber-700">
                         <Clock className="h-3 w-3 mr-1" />
-                        Pending Verification
+                        Waiting for Osabea review
                       </Badge>
                     ) : (
                       <Badge className="bg-red-100 text-red-700">
@@ -1972,7 +1972,7 @@ export default function WorkerDashboard() {
           </Card>
         )}
 
-        {/* Mandatory Training Certificates */}
+        {/* Required Training Evidence */}
         {!isActiveEmployee && (
           <Card className="shadow-md border-0">
             <CardHeader className="pb-2">
@@ -1980,10 +1980,10 @@ export default function WorkerDashboard() {
                 <div>
                   <CardTitle className="flex items-center gap-2 text-lg">
                     <FileText className="h-5 w-5 text-blue-500" />
-                    Mandatory Training Certificates
+                    Required training evidence
                   </CardTitle>
                   <p className="text-xs text-slate-500 mt-1">
-                    {(all_mandatory_trainings?.length || 8)} mandatory trainings required for work readiness • AI extracts details from your certificates
+                    {(all_mandatory_trainings?.length || 8)} required training items needed before work starts. Osabea extracts details from your certificates.
                   </p>
                 </div>
                 <Button 
@@ -2554,9 +2554,9 @@ export default function WorkerDashboard() {
                 <div className="space-y-3">
                   <div className="flex items-center justify-between p-4 bg-amber-50 rounded-xl border border-amber-200">
                     <div>
-                      <span className="font-medium text-amber-800">Contract Locked</span>
+                      <span className="font-medium text-amber-800">Contract not ready yet</span>
                       <p className="text-xs text-amber-600">
-                        Contract signing stays locked until your forms, employment history, documents, references, and training are complete.
+                        Contract signing becomes available once your forms, employment history, documents, references, and training are complete.
                       </p>
                     </div>
                     <Button 
@@ -2565,14 +2565,14 @@ export default function WorkerDashboard() {
                       data-testid="sign-contract-btn-locked"
                     >
                       <Lock className="h-4 w-4" />
-                      Locked
+                      Not ready
                     </Button>
                   </div>
                   
                   {contractEligibility?.blockers?.length > 0 && (
                     <div className="p-3 bg-gray-50 rounded-lg">
                       <p className="text-xs font-medium text-gray-600 mb-2">
-                        Remaining requirements ({contractEligibility.blockers.length}):
+                        Still needed before you can sign ({contractEligibility.blockers.length}):
                       </p>
                       <ul className="text-xs text-gray-500 space-y-1">
                         {contractEligibility.blockers.slice(0, 5).map((blocker, idx) => (
@@ -2675,7 +2675,7 @@ export default function WorkerDashboard() {
           </Card>
         )}
 
-        {/* Completed Items - With Pending Verification & View Document */}
+        {/* Completed Items - With Review Status & View Document */}
         {(completed_documents?.length > 0 || completed_trainings?.length > 0) && (
           <Card className="shadow-md border-0 bg-green-50/30">
             <CardHeader className="pb-2">
@@ -2770,7 +2770,7 @@ export default function WorkerDashboard() {
                       ) : (
                         <Badge className="bg-amber-100 text-amber-700 text-xs">
                           <Clock className="h-3 w-3 mr-1" />
-                          Pending Verification
+                          Waiting for Osabea review
                         </Badge>
                       )}
                     </div>
@@ -2824,7 +2824,7 @@ export default function WorkerDashboard() {
             ) : (
               <Badge className="bg-amber-100 text-amber-700 flex items-center gap-1">
                 <Clock className="h-3 w-3" />
-                Pending Verification
+                Waiting for Osabea review
               </Badge>
             )}
             
@@ -3156,7 +3156,7 @@ export default function WorkerDashboard() {
           ) : (
             <div className="text-center py-12">
               <AlertCircle className="h-16 w-16 text-slate-400 mx-auto mb-4" />
-              <p className="text-slate-600">No pending verification found</p>
+              <p className="text-slate-600">No items waiting for review</p>
             </div>
           )}
 
@@ -3243,12 +3243,12 @@ export default function WorkerDashboard() {
                 </p>
               </div>
 
-              {/* NHS Compliance Note */}
+              {/* Review note */}
               <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
                 <p className="text-xs text-blue-700">
                   <Shield className="h-3 w-3 inline mr-1" />
-                  NHS Safer Recruitment requires documented justification for any discrepancies. 
-                  Your explanation will be reviewed by admin and recorded for CQC audit purposes.
+                  Osabea needs a clear explanation for any differences before your file can move forward.
+                  Your explanation will be reviewed by the team and kept in the audit trail.
                 </p>
               </div>
             </div>

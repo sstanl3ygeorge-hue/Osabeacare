@@ -79,7 +79,7 @@ export default function EditReasonDialog({
               <p className="text-sm text-red-500">{error}</p>
             )}
             <p className="text-xs text-gray-500">
-              This reason will be logged in the audit trail for CQC compliance.
+              This reason will be logged in the audit trail.
             </p>
           </div>
 

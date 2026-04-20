@@ -271,7 +271,7 @@ export default function WorkReadinessPanel({
           {/* Blockers Preview */}
           {!isReady && blockers && blockers.length > 0 && (
             <div className="space-y-2">
-              <p className="text-sm font-medium text-gray-700">Blocking Items:</p>
+              <p className="text-sm font-medium text-gray-700">Items needing attention:</p>
               <div className="space-y-1.5 max-h-48 overflow-y-auto">
                 {blockers.slice(0, 6).map((blocker, idx) => {
                   const CategoryIcon = CATEGORY_ICONS[blocker.category] || AlertCircle;

@@ -138,7 +138,7 @@ export default function CompleteAgreementDialog({
               Contract Requires Worker Signature
             </DialogTitle>
             <DialogDescription className="text-red-600">
-              CQC Compliance Requirement
+              Worker signature required
             </DialogDescription>
           </DialogHeader>
           
@@ -148,7 +148,7 @@ export default function CompleteAgreementDialog({
                 Contracts cannot be signed by admin on behalf of workers.
               </p>
               <p className="text-sm text-red-700">
-                For CQC compliance, the worker must sign their employment contract themselves using their digital signature in their Worker Portal.
+                The worker must sign their employment contract themselves using their digital signature in the Worker Portal.
               </p>
               <p className="text-sm text-red-700 mt-2">
                 Please send a reminder to the worker to sign their contract.

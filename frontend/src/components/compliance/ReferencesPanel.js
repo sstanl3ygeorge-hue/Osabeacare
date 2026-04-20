@@ -493,7 +493,7 @@ export default function ReferencesPanel({ employeeId, employee, onRefresh, onEdi
             </Button>
           </CardTitle>
           <p className="text-sm text-gray-500 mt-1">
-            CQC safer recruitment. Minimum 2 satisfactory professional references required before readiness.
+            Osabea requires at least 2 satisfactory professional references before work readiness.
           </p>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -1256,7 +1256,7 @@ export default function ReferencesPanel({ employeeId, employee, onRefresh, onEdi
             </DialogTitle>
             <DialogDescription>
               {verifyAction === 'verify' 
-                ? 'Confirm that this reference meets CQC safer recruitment standards. Response evidence and admin review will be recorded.'
+                ? 'Confirm that this reference meets Osabea review standards. Response evidence and admin review will be recorded.'
                 : 'Provide a reason for marking this reference unsatisfactory.'}
             </DialogDescription>
           </DialogHeader>

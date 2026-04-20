@@ -20,8 +20,8 @@ export const PROGRESS_METRICS = {
     icon: '📋'
   },
   compliance: {
-    label: 'Full Compliance',
-    shortLabel: 'Compliance',
+    label: 'Staff File Complete',
+    shortLabel: 'Staff File',
     tooltip: 'All requirements including documents, forms, training, induction, and competencies.',
     color: 'emerald',
     bgColor: 'bg-emerald-50',
@@ -33,7 +33,7 @@ export const PROGRESS_METRICS = {
   workReadiness: {
     label: 'Work Readiness',
     shortLabel: 'Work Ready',
-    tooltip: 'CQC work readiness calculation. Measures if employee can work safely today.',
+    tooltip: 'Work-readiness calculation. Measures whether the employee can work safely today.',
     color: 'amber',
     bgColor: 'bg-amber-50',
     borderColor: 'border-amber-200',

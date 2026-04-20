@@ -40326,6 +40326,7 @@ Important:
                 "raw_course_title": raw_title,
                 "mapped_training_code": mapped_code,
                 "mapped_training_title": mapped_title,
+                "is_mandatory": bool(mapped_code and mapped_code in get_canonical_mandatory_training_ids()),
                 "is_unmapped": not bool(mapped_code),
                 "completed_at": completion_date,
                 "expires_at": expires_at,

@@ -326,12 +326,12 @@ function BulkUploadSection({ employeeId, onUploadComplete }) {
     setExtractionResult(null);
 
     try {
+      // Step 1: Upload and extract
       const formData = new FormData();
       formData.append('file', file);
-      formData.append('extract_multiple', 'true');
 
-      const response = await axios.post(
-        `${API}/api/employees/${employeeId}/training/bulk-upload`,
+      const uploadResponse = await axios.post(
+        `${API}/employees/${employeeId}/training/intake/from-upload`,
         formData,
         {
           headers: {
@@ -341,11 +341,41 @@ function BulkUploadSection({ employeeId, onUploadComplete }) {
         }
       );
 
-      setExtractionResult(response.data);
-      
-      const count = response.data.total_extracted || response.data.trainings?.length || 0;
-      toast.success(`Extracted ${count} training record${count !== 1 ? 's' : ''} from certificate`);
-      
+      const { extraction } = uploadResponse.data;
+      const proposedItems = extraction?.proposed_items || [];
+      const newCount = extraction?.new_items ?? proposedItems.length;
+      const updatedCount = extraction?.updated_items ?? 0;
+
+      // Step 2: Auto-approve all new proposed items so they show on worker dashboard
+      if (proposedItems.length > 0) {
+        await axios.post(
+          `${API}/employees/${employeeId}/training/proposed-items/review`,
+          {
+            items: proposedItems.map(item => ({
+              item_id: item.id,
+              approve: true,
+              mapped_training_code: item.mapped_training_code,
+              mapped_training_title: item.mapped_training_title || item.raw_course_title,
+              completed_at: item.completed_at,
+              expires_at: item.expires_at,
+            })),
+          },
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+      }
+
+      setExtractionResult({ newCount, updatedCount, totalCourses: extraction?.total_courses || 0 });
+
+      if (newCount > 0 && updatedCount > 0) {
+        toast.success(`${newCount} training record${newCount !== 1 ? 's' : ''} added, ${updatedCount} existing updated`);
+      } else if (newCount > 0) {
+        toast.success(`${newCount} training record${newCount !== 1 ? 's' : ''} extracted and saved`);
+      } else if (updatedCount > 0) {
+        toast.info(`No new trainings found — ${updatedCount} existing record${updatedCount !== 1 ? 's' : ''} updated with new certificate`);
+      } else {
+        toast.warning('Certificate scanned but no trainings could be identified. Check formatting or upload per-item.');
+      }
+
       onUploadComplete?.();
     } catch (error) {
       console.error('Upload error:', error);
@@ -406,12 +436,12 @@ function BulkUploadSection({ employeeId, onUploadComplete }) {
               Extraction Complete
             </div>
             <div className="text-sm text-green-600 space-y-1">
-              <p>Total trainings extracted: <strong>{extractionResult.total_extracted || 0}</strong></p>
-              {extractionResult.summary && (
-                <>
-                  <p>Mandatory: {extractionResult.summary.mandatory_count || 0}</p>
-                  <p>Additional: {extractionResult.summary.additional_count || 0}</p>
-                </>
+              <p>Total courses detected: <strong>{extractionResult.totalCourses}</strong></p>
+              <p>New records saved: <strong>{extractionResult.newCount}</strong></p>
+              {extractionResult.updatedCount > 0 && (
+                <p className="text-amber-600">
+                  ⚠️ {extractionResult.updatedCount} duplicate{extractionResult.updatedCount !== 1 ? 's' : ''} detected — existing record{extractionResult.updatedCount !== 1 ? 's' : ''} updated with new certificate
+                </p>
               )}
             </div>
           </div>
@@ -435,7 +465,7 @@ export default function EnhancedTrainingTab({ employeeId, employeeRole, initialT
     setLoading(true);
     try {
       const response = await axios.get(
-        `${API}/api/employees/${employeeId}/training-records`,
+        `${API}/employees/${employeeId}/training-records`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       setTrainings(response.data.trainings || response.data || []);
@@ -453,9 +483,33 @@ export default function EnhancedTrainingTab({ employeeId, employeeRole, initialT
   }, [fetchTrainings, initialTrainings.length]);
 
   const handleUploadClick = (trainingType) => {
-    // Scroll to bulk upload section or open dialog
-    const uploadSection = document.querySelector('[data-testid="bulk-upload-section"]');
-    uploadSection?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    // Open a file picker and upload directly to the per-requirement endpoint
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.pdf,.jpg,.jpeg,.png,.webp';
+    input.onchange = async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+        await axios.post(
+          `${API}/employees/${employeeId}/training/${trainingType}/upload-certificate`,
+          formData,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'multipart/form-data',
+            },
+          }
+        );
+        toast.success('Certificate uploaded. Training record saved — awaiting verification.');
+        fetchTrainings();
+      } catch (error) {
+        toast.error(error.response?.data?.detail || 'Upload failed');
+      }
+    };
+    input.click();
   };
 
   if (loading) {

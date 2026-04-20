@@ -1024,6 +1024,151 @@ async def return_induction_item(
     }
 
 
+class ReopenInductionItemPayload(BaseModel):
+    reason: str = ""
+
+
+@router.post("/employees/{employee_id}/induction/items/{item_code}/reopen")
+async def reopen_induction_item(
+    employee_id: str,
+    item_code: str,
+    payload: ReopenInductionItemPayload,
+    user: dict = Depends(require_admin),
+):
+    """
+    Admin-only: reopen a legacy signed-off induction item that is stuck or inconsistent.
+
+    Safe reopen rules:
+    - Only hybrid and manual items can be reopened (automatic items are evidence-driven,
+      not sign-off-driven).
+    - The checklist item is reverted from completed → pending.
+    - Any existing worker submission is reverted from signed_off → submitted so it can
+      be re-reviewed (answers are NOT deleted).
+    - The checklist overall_status is recalculated.
+    - A full audit log entry is written.
+    """
+    db = get_db()
+
+    submission_by_id = await db.induction_item_submissions.find_one(
+        {"employee_id": employee_id, "id": item_code}, {"_id": 0}
+    )
+    target = _resolve_induction_item_target(item_code, submission_by_id)
+    cfg = target["cfg"]
+    if not cfg:
+        raise HTTPException(status_code=404, detail=f"Unknown induction item code: {item_code}")
+
+    completion_type = cfg.get("completion_type")
+    if completion_type == "automatic":
+        raise HTTPException(
+            status_code=400,
+            detail="Automatic items are evidence-driven and cannot be manually reopened. Remove the underlying verified training record instead.",
+        )
+
+    resolved_item_code = target["item_code"]
+    form_id = target.get("form_id")
+    now = datetime.now(timezone.utc).isoformat()
+
+    admin = await db.users.find_one(
+        {"$or": [{"user_id": user["user_id"]}, {"id": user["user_id"]}]},
+        {"_id": 0, "name": 1, "first_name": 1, "last_name": 1, "email": 1},
+    )
+    admin_name = (admin or {}).get("name") or ""
+    if not admin_name and admin:
+        admin_name = f"{admin.get('first_name','')} {admin.get('last_name','')}".strip() or admin.get("email", "Admin")
+
+    # ── Revert worker submission (if any) from signed_off → submitted ─────────
+    # Answers are untouched; only the status field is reverted.
+    submission = submission_by_id or (
+        await db.induction_item_submissions.find_one(
+            {"employee_id": employee_id, "form_id": form_id}, {"_id": 0}
+        ) if form_id else None
+    )
+
+    if submission and submission.get("status") == "signed_off":
+        submission_filter = (
+            {"employee_id": employee_id, "id": submission["id"]}
+            if submission.get("id")
+            else {"employee_id": employee_id, "form_id": form_id}
+        )
+        await db.induction_item_submissions.update_one(
+            submission_filter,
+            {"$set": {
+                "status": "submitted",
+                "reopened_at": now,
+                "reopened_by": user["user_id"],
+                "reopened_by_name": admin_name,
+                "reopen_reason": payload.reason or "Admin reopen",
+                "updated_at": now,
+            }},
+        )
+
+    # ── Revert item in checklist from completed → pending ──────────────────────
+    checklist = await db.induction_checklists.find_one({"employee_id": employee_id})
+    if not checklist:
+        raise HTTPException(status_code=404, detail="Induction checklist not found for this employee.")
+
+    ensure_checklist_list_format(checklist)
+
+    item_name = cfg["title"]
+    item_reverted = False
+    for item in checklist["items"]:
+        if item.get("id") == resolved_item_code or item.get("id") == item_code or item.get("name") == item_name:
+            item["status"] = "pending"
+            item["completed"] = False
+            item["completed_at"] = None
+            item["completed_by"] = None
+            item["completed_by_name"] = None
+            item["notes"] = None
+            item["shadow_shift_signoff"] = None
+            item_reverted = True
+            break
+
+    if not item_reverted:
+        raise HTTPException(status_code=404, detail=f"Item '{item_code}' not found in checklist — may already be pending.")
+
+    # Recalculate overall_status
+    mandatory_completed = sum(1 for i in checklist["items"] if i.get("mandatory") and i.get("status") == "completed")
+    mandatory_total = sum(1 for i in checklist["items"] if i.get("mandatory"))
+    any_completed = any(i.get("status") == "completed" for i in checklist["items"])
+
+    if mandatory_total > 0 and mandatory_completed >= mandatory_total:
+        checklist["overall_status"] = "completed"
+    elif any_completed:
+        checklist["overall_status"] = "in_progress"
+    else:
+        checklist["overall_status"] = "pending"
+    checklist["completed_at"] = None if checklist["overall_status"] != "completed" else checklist.get("completed_at")
+    checklist["updated_at"] = now
+
+    await db.induction_checklists.update_one(
+        {"employee_id": employee_id}, {"$set": _without_mongo_id(checklist)}
+    )
+
+    await log_audit_action(
+        user["user_id"], "induction_item_reopened", "induction_checklist", employee_id,
+        {
+            "item_code": resolved_item_code,
+            "resolved_from": item_code,
+            "resolved_by": target.get("resolved_by"),
+            "completion_type": completion_type,
+            "form_id": form_id,
+            "submission_reverted": submission is not None and submission.get("status") == "signed_off",
+            "reopen_reason": payload.reason or "Admin reopen",
+            "reopened_by_name": admin_name,
+        },
+    )
+
+    return {
+        "ok": True,
+        "item_code": resolved_item_code,
+        "resolved_from": item_code,
+        "reopened_at": now,
+        "reopened_by": admin_name,
+        "submission_reverted_to_submitted": submission is not None and submission.get("status") == "signed_off",
+        "overall_status": checklist["overall_status"],
+    }
+
+
 @router.get("/employees/{employee_id}/induction/care-certificate/status")
 async def get_care_certificate_status(
     employee_id: str,

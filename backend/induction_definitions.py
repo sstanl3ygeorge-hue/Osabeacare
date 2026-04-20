@@ -25,8 +25,8 @@ CARE_CERTIFICATE_STANDARDS = [
     {"id": "work_person_centred",     "num": 5,  "name": "Work in a Person-Centred Way",                                             "training_sync": None,                    "auto_complete": "manual"},
     {"id": "communication",           "num": 6,  "name": "Communication",                                                            "training_sync": None,                    "auto_complete": "interview"},
     {"id": "privacy_dignity",         "num": 7,  "name": "Privacy and Dignity",                                                      "training_sync": None,                    "auto_complete": "manual"},
-    {"id": "fluids_nutrition",        "num": 8,  "name": "Fluids and Nutrition",                                                     "training_sync": "food_hygiene",          "auto_complete": "training"},
-    {"id": "awareness_mental_health", "num": 9,  "name": "Awareness of Mental Health, Dementia and Learning Disabilities",           "training_sync": "mental_health",         "auto_complete": "training"},
+    {"id": "fluids_nutrition",        "num": 8,  "name": "Fluids and Nutrition",                                                     "training_sync": "food_hygiene",          "auto_complete": "training_or_form"},
+    {"id": "awareness_mental_health", "num": 9,  "name": "Awareness of Mental Health, Dementia and Learning Disabilities",           "training_sync": "mental_health",         "auto_complete": "training_or_form"},
     {"id": "safeguarding_adults",     "num": 10, "name": "Safeguarding Adults",                                                      "training_sync": "safeguarding_adults",   "auto_complete": "training"},
     {"id": "basic_life_support",      "num": 11, "name": "Basic Life Support",                                                       "training_sync": "basic_life_support",    "auto_complete": "training"},
     {"id": "health_safety",           "num": 12, "name": "Health and Safety",                                                        "training_sync": "health_safety",         "auto_complete": "training"},
@@ -104,17 +104,17 @@ INDUCTION_RULE_METADATA = {
     },
     "fluids_nutrition": {
         "description": "Confirms nutrition, hydration, and food safety evidence relevant to care work.",
-        "completion_type": "automatic",
-        "evidence_sources": ["verified_training_record"],
-        "completion_rules": ["A verified matching food hygiene, nutrition, or fluids training record must exist."],
-        "next_action": "Upload, review, and verify matching training evidence.",
+        "completion_type": "hybrid",
+        "evidence_sources": ["worker_submission", "manager_signoff"],
+        "completion_rules": ["Worker must submit a nutrition and hydration awareness form. Admin must sign off."],
+        "next_action": "Worker must complete and submit the nutrition and hydration form.",
     },
     "awareness_mental_health": {
         "description": "Confirms awareness of mental health, dementia, and learning disability support.",
-        "completion_type": "automatic",
-        "evidence_sources": ["verified_training_record"],
-        "completion_rules": ["A verified matching mental health, dementia, or learning disability training record must exist."],
-        "next_action": "Upload, review, and verify matching training evidence.",
+        "completion_type": "hybrid",
+        "evidence_sources": ["worker_submission", "manager_signoff"],
+        "completion_rules": ["Worker must submit an awareness form. Admin must sign off."],
+        "next_action": "Worker must complete and submit the mental health, dementia, and learning disability awareness form.",
     },
     "safeguarding_adults": {
         "description": "Confirms adult safeguarding training evidence is verified.",
@@ -675,7 +675,18 @@ async def get_employee_induction_status(
             else:
                 status_reason = "No verified matching training evidence is on file."
         elif completion_type == "hybrid":
-            if manually_completed:
+            # If verified training maps to this item, it satisfies the standard
+            # without requiring a worker form submission — training takes priority.
+            if has_verified_training and training_sync:
+                is_completed = True
+                synced_from_training = True
+                rule_status = "complete"
+                first_evidence = linked_evidence[0] if linked_evidence else {}
+                completed_at = completed_at or first_evidence.get("verified_at")
+                completed_by = completed_by or first_evidence.get("verified_by") or "Verified training record"
+                completion_reason = "Completed automatically from verified training evidence."
+                status_reason = completion_reason
+            elif manually_completed:
                 rule_status = "complete"
                 completion_reason = "Completed by manager sign-off after supporting evidence review."
                 status_reason = completion_reason

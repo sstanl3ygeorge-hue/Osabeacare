@@ -330,6 +330,120 @@ CC_WORKER_FORMS = {
         ],
     },
 
+    # ── Standard 8: Fluids and Nutrition ─────────────────────────────────────
+    "cc_fluids_nutrition": {
+        "form_id": "cc_fluids_nutrition",
+        "standard_code": "fluids_nutrition",
+        "standard_number": 8,
+        "title": "Fluids and Nutrition",
+        "description": (
+            "Answer the questions below to confirm you understand how to support "
+            "nutrition and hydration safely in your role."
+        ),
+        "fields": [
+            {
+                "key": "hydration_importance",
+                "label": "In your own words, explain why good nutrition and hydration matter for the people you support.",
+                "helper_text": "Tip: Think about how dehydration or poor nutrition can affect health, mood, and recovery — even for people who seem well.",
+                "type": "textarea",
+                "required": True,
+                "max_words": 80,
+            },
+            {
+                "key": "care_plan_instructions",
+                "label": "How would you find out about a service user's dietary needs or restrictions?",
+                "hint": "For example, allergens, swallowing difficulties, specialist diets.",
+                "helper_text": "Tip: Think about how care plans, handovers, and speaking with the person or their family would help you understand their needs.",
+                "type": "textarea",
+                "required": True,
+                "max_words": 60,
+            },
+            {
+                "key": "concern_action",
+                "label": "What would you do if you noticed a service user was not eating or drinking enough?",
+                "helper_text": "Tip: Think about who you would tell, what you would record, and how quickly you would act.",
+                "type": "textarea",
+                "required": True,
+                "max_words": 60,
+            },
+            {
+                "key": "food_hygiene_awareness",
+                "label": "Have you been given guidance on food hygiene standards in your workplace?",
+                "type": "radio",
+                "required": True,
+                "options": [
+                    {"value": "yes", "label": "Yes"},
+                    {"value": "no", "label": "No — I need to be shown"},
+                ],
+            },
+            {
+                "key": "topics_covered",
+                "label": "Which of the following topics have been covered during your induction?",
+                "type": "checkboxes",
+                "required": True,
+                "options": [
+                    {"value": "care_plan_diets", "label": "Following individual care plans and diet instructions"},
+                    {"value": "recording_intake", "label": "Recording fluid and food intake"},
+                    {"value": "swallowing_risk", "label": "Swallowing and choking risks"},
+                    {"value": "reporting_changes", "label": "Reporting poor appetite or weight changes"},
+                    {"value": "food_hygiene", "label": "Food hygiene and safe food handling"},
+                ],
+            },
+        ],
+    },
+
+    # ── Standard 9: Awareness of Mental Health, Dementia and Learning Disabilities ──
+    "cc_awareness_mental_health": {
+        "form_id": "cc_awareness_mental_health",
+        "standard_code": "awareness_mental_health",
+        "standard_number": 9,
+        "title": "Awareness of Mental Health, Dementia and Learning Disabilities",
+        "description": (
+            "Answer the questions below to confirm you have basic awareness of mental health, "
+            "dementia, and learning disabilities and how they may affect care."
+        ),
+        "fields": [
+            {
+                "key": "awareness_overview",
+                "label": "In your own words, explain how mental health difficulties, dementia, or learning disabilities might affect a person's daily care needs.",
+                "helper_text": "Tip: Think about how communication, routine, and the way you support someone may need to be adapted.",
+                "type": "textarea",
+                "required": True,
+                "max_words": 80,
+            },
+            {
+                "key": "behaviour_response",
+                "label": "Describe how you would respond if someone in your care appeared distressed or confused.",
+                "hint": "Think about what you would do first and who you would tell.",
+                "helper_text": "Tip: Think about staying calm, using a reassuring approach, and following the person's care plan — and when to escalate.",
+                "type": "textarea",
+                "required": True,
+                "max_words": 60,
+            },
+            {
+                "key": "person_centred_support",
+                "label": "How do you make sure someone with a learning disability or dementia is supported as an individual?",
+                "helper_text": "Tip: Think about using their care plan, involving them in decisions, and not making assumptions about what they can or cannot do.",
+                "type": "textarea",
+                "required": True,
+                "max_words": 60,
+            },
+            {
+                "key": "topics_covered",
+                "label": "Which of the following have been covered during your induction?",
+                "type": "checkboxes",
+                "required": True,
+                "options": [
+                    {"value": "mental_health_overview", "label": "Basic overview of common mental health conditions"},
+                    {"value": "dementia_awareness", "label": "Dementia awareness and communication approaches"},
+                    {"value": "learning_disability", "label": "Supporting people with learning disabilities"},
+                    {"value": "positive_behaviour", "label": "Positive behaviour support principles"},
+                    {"value": "dignity_inclusion", "label": "Dignity, inclusion, and avoiding assumptions"},
+                ],
+            },
+        ],
+    },
+
     # ── Standard 7: Privacy and Dignity ───────────────────────────────────────
     "cc_privacy_and_dignity": {
         "form_id": "cc_privacy_and_dignity",

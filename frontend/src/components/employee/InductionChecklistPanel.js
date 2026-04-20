@@ -749,8 +749,8 @@ export default function InductionChecklistPanel({ employeeId, employeeName, isAu
                       )}
                       {isAutomatic && !isComplete && (
                         <Button size="sm" variant="outline" disabled className="h-8 px-3 text-xs rounded-lg text-gray-400"
-                          title={item.next_action || 'Evidence required'}>
-                          Evidence required
+                          title={item.next_action || 'Upload and verify matching training evidence'}>
+                          Upload evidence
                         </Button>
                       )}
 

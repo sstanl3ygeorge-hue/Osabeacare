@@ -215,14 +215,21 @@ export function EvidenceSection({
                     size="sm"
                     variant="ghost"
                     className="h-7 w-7 p-0 text-gray-400 hover:text-blue-600"
-                    onClick={() =>
+                    onClick={() => {
+                      const hasStamp = file.verification_stamp && file.verification_stamp !== 'not_verified';
+                      if (hasStamp && !file.stamped_file_url) {
+                        console.warn('[Stamp integrity] Verified doc missing stamped_file_url', { doc_id: docId, stamp: file.verification_stamp });
+                      }
                       onPreviewFile?.({
                         file_url:
                           file.file_url ||
                           `/api/employee-documents/${docId}/file`,
                         file_name: fileName,
-                      })
-                    }
+                        stamped_file_url: file.stamped_file_url || null,
+                        verification_stamp_by_name: file.verification_stamp_by_name,
+                        verification_stamp_at: file.verification_stamp_at,
+                      });
+                    }}
                     data-testid={`evidence-view-${docId}`}
                     title="View file"
                   >
@@ -247,15 +254,21 @@ export function EvidenceSection({
                     <Download className="h-3.5 w-3.5" />
                   </Button>
 
-                  {/* Download Stamped — only when verified & stamped */}
+                  {/* View Stamped — only when verified & stamped */}
                   {file.stamped_file_url && (
                     <Button
                       size="sm"
                       variant="ghost"
                       className="h-7 w-7 p-0 text-emerald-500 hover:text-emerald-700"
-                      onClick={() => window.open(file.stamped_file_url, '_blank')}
-                      data-testid={`evidence-download-stamped-${docId}`}
-                      title="Download stamped & verified version"
+                      onClick={() => onPreviewFile?.({
+                        file_url: file.file_url || `/api/employee-documents/${docId}/file`,
+                        file_name: fileName,
+                        stamped_file_url: file.stamped_file_url,
+                        verification_stamp_by_name: file.verification_stamp_by_name,
+                        verification_stamp_at: file.verification_stamp_at,
+                      })}
+                      data-testid={`evidence-view-stamped-${docId}`}
+                      title="View stamped & verified version"
                     >
                       <ShieldCheck className="h-3.5 w-3.5" />
                     </Button>

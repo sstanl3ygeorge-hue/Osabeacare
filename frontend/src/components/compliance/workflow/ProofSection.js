@@ -365,7 +365,13 @@ export function ProofSection({
                 variant="ghost"
                 className="h-7 w-7 p-0 text-gray-400 hover:text-blue-600"
                 onClick={() =>
-                  onPreviewFile?.({ file_url: proofFileUrl, file_name: proofFileName })
+                  onPreviewFile?.({
+                    file_url: proofFileUrl,
+                    file_name: proofFileName,
+                    stamped_file_url: proofDocument?.stamped_file_url || null,
+                    verification_stamp_by_name: proofDocument?.verification_stamp_by_name,
+                    verification_stamp_at: proofDocument?.verification_stamp_at,
+                  })
                 }
                 title="Preview proof document"
               >

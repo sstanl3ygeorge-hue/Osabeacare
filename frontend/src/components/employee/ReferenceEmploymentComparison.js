@@ -69,7 +69,7 @@ export default function ReferenceEmploymentComparison({ employeeId, onRefresh })
     );
   }
 
-  const { employment_history, references, comparison_summary, alert } = comparison;
+  const { employment_history = [], references = [], comparison_summary = {}, alert } = comparison;
   const hasDiscrepancy = comparison_summary?.has_discrepancy;
 
   return (
@@ -92,7 +92,7 @@ export default function ReferenceEmploymentComparison({ employeeId, onRefresh })
             {hasDiscrepancy ? (
               <Badge className="bg-amber-100 text-amber-700">
                 <AlertTriangle className="h-3 w-3 mr-1" />
-                {comparison_summary.unmatched_references} Mismatch
+              {comparison_summary?.unmatched_references} Mismatch
               </Badge>
             ) : (
               <Badge className="bg-green-100 text-green-700">
@@ -126,12 +126,12 @@ export default function ReferenceEmploymentComparison({ employeeId, onRefresh })
               <p className="text-xs text-gray-500">Employment Records</p>
             </div>
             <div className="p-2 bg-gray-50 rounded-lg text-center">
-              <p className="text-2xl font-bold text-gray-700">{comparison_summary.total_references_declared}</p>
+              <p className="text-2xl font-bold text-gray-700">{comparison_summary?.total_references_declared ?? 0}</p>
               <p className="text-xs text-gray-500">References Declared</p>
             </div>
             <div className={`p-2 rounded-lg text-center ${hasDiscrepancy ? 'bg-amber-50' : 'bg-green-50'}`}>
               <p className={`text-2xl font-bold ${hasDiscrepancy ? 'text-amber-700' : 'text-green-700'}`}>
-                {comparison_summary.references_matching_employment}
+                {comparison_summary?.references_matching_employment ?? 0}
               </p>
               <p className={`text-xs ${hasDiscrepancy ? 'text-amber-600' : 'text-green-600'}`}>Matched</p>
             </div>
@@ -213,7 +213,10 @@ export default function ReferenceEmploymentComparison({ employeeId, onRefresh })
                         {/* Match Details */}
                         {ref.matching_employer && (
                           <div className="mt-2 p-1.5 bg-green-100/50 rounded text-[10px] text-green-700">
-                            Matches: {ref.matching_employer.employer_name} ({ref.matching_employer.position})
+                            Matches: {ref.matching_employer.employer_name}
+                            {ref.match_reason === 'suffix_stripped' && (
+                              <span className="ml-1 text-green-600 italic">(matched ignoring common suffixes)</span>
+                            )}
                           </div>
                         )}
                         

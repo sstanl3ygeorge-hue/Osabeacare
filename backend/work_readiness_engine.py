@@ -253,19 +253,25 @@ async def can_sign_contract(db, employee_id: str) -> dict:
     employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
     if not employee:
         return {"can_sign": False, "reason": "Employee not found", "blockers": [], "completed": [], "progress_percentage": 0}
-    
+
     job_role = (employee.get("job_role") or employee.get("role") or "").lower()
     blockers = []
     completed = []
 
     unified_checks = {}
+    unified_categories = {}
+    unified_category_details = {}
     try:
         from unified_compliance_engine import get_unified_employee_status
-        unified = await get_unified_employee_status(employee_id, db, user_role="admin", include_details=False)
+        unified = await get_unified_employee_status(employee_id, db, user_role="admin", include_details=True)
         if isinstance(unified, dict) and not unified.get("error"):
             unified_checks = unified.get("checks") or {}
+            unified_categories = unified.get("categories") or {}
+            unified_category_details = unified.get("category_details") or {}
     except Exception:
         unified_checks = {}
+        unified_categories = {}
+        unified_category_details = {}
 
     # ========== DOCUMENTS (from live computed state) ==========
     core_doc_checks = ["right_to_work", "dbs", "identity", "proof_of_address"]
@@ -364,6 +370,79 @@ async def can_sign_contract(db, employee_id: str) -> dict:
             else:
                 blockers.append(f"{training_id.replace('_', ' ').title()} required")
     
+    # Contract-lock adapter correction: replace the legacy training result above
+    # with the canonical UCE/training-evaluator state used by the Training tab.
+    _training_label_fragments = [
+        "Safeguarding", "Manual Handling", "Fire Safety", "Health Safety",
+        "Bls", "Basic Life Support", "Infection Control",
+        "Information Governance", "Prevent", "Mandatory training",
+    ]
+    blockers = [
+        b for b in blockers
+        if not any(fragment in b for fragment in _training_label_fragments)
+    ]
+    completed = [
+        c for c in completed
+        if not any(fragment in c for fragment in _training_label_fragments)
+    ]
+
+    training_category = unified_category_details.get("training") or unified_categories.get("training") or {}
+    training_items = training_category.get("items") or []
+    training_total = int(training_category.get("total") or len(training_items) or 0)
+    training_completed = int(training_category.get("completed") or 0)
+    training_blocking_items = []
+    has_unified_training = "mandatory_training" in unified_checks
+    training_ok = bool(unified_checks.get("mandatory_training")) if has_unified_training else None
+
+    if has_unified_training and training_total:
+        for item in training_items:
+            name = item.get("name") or item.get("title") or item.get("label") or item.get("id") or "Training"
+            if item.get("completed") is True:
+                completed.append(f"{name} complete")
+            else:
+                detail = item.get("detail") or item.get("status") or "required"
+                training_blocking_items.append({"name": name, "detail": detail})
+        if not training_ok:
+            blockers.extend(
+                [f"{item['name']}: {item['detail']}" for item in training_blocking_items]
+                or ["Mandatory training required"]
+            )
+    else:
+        try:
+            from services.training_evaluator import evaluate_employee_training_status
+            training_eval = await evaluate_employee_training_status(employee_id, job_role)
+            training_items = training_eval.get("items") or []
+            training_total = len(training_items)
+            training_completed = sum(
+                1
+                for item in training_items
+                if item.get("status") in {"verified", "due_soon"} and not item.get("is_currently_blocking")
+            )
+            training_blocking_items = [
+                {
+                    "name": item.get("title") or item.get("code") or "Training",
+                    "detail": item.get("detail") or item.get("status") or "required",
+                }
+                for item in training_items
+                if item.get("is_currently_blocking") or (
+                    item.get("blocker") and item.get("status") not in {"verified", "due_soon"}
+                )
+            ]
+            training_ok = training_eval.get("blockerCount", 0) == 0
+            if training_ok:
+                for item in training_items:
+                    completed.append(f"{item.get('title') or item.get('code') or 'Training'} complete")
+            else:
+                blockers.extend(
+                    [f"{item['name']}: {item['detail']}" for item in training_blocking_items]
+                    or ["Mandatory training required"]
+                )
+        except Exception:
+            training_ok = False
+            training_total = 0
+            training_completed = 0
+            blockers.append("Mandatory training cannot be assessed")
+
     # ========== REFERENCES ==========
     ref_completed = 0
     has_unified_refs = "references" in unified_checks
@@ -388,7 +467,9 @@ async def can_sign_contract(db, employee_id: str) -> dict:
         else:
             blockers.append("Reference 2 not verified")
     
-    # ========== HANDBOOK ==========
+    # ========== HANDBOOK / AGREEMENTS ==========
+    # Contract signing itself is excluded from this pre-sign check. Handbook
+    # follows the same UCE/compliance-file agreement readiness where present.
     has_unified_handbook = "handbook" in unified_checks
     handbook_ok = bool(unified_checks.get("handbook")) if has_unified_handbook else False
     if not has_unified_handbook:
@@ -409,27 +490,27 @@ async def can_sign_contract(db, employee_id: str) -> dict:
     else:
         blockers.append("Employee Handbook not acknowledged")
 
-    # ========== INDUCTION (15 items) ==========
-    induction_completed = 0
-    induction_total = 15  # Care Certificate Standards
-
+    # ========== INDUCTION ==========
+    induction_category = unified_category_details.get("induction") or unified_categories.get("induction") or {}
+    induction_completed = int(induction_category.get("completed") or 0)
+    induction_total = int(induction_category.get("total") or 0)
     has_unified_induction = "induction" in unified_checks
-    induction_ok = bool(unified_checks.get("induction")) if has_unified_induction else False
-    if has_unified_induction:
-        induction_completed = induction_total if induction_ok else 0
-    else:
+    induction_ok = bool(unified_checks.get("induction")) if has_unified_induction else None
+    if not induction_total:
         from induction_definitions import get_employee_induction_status
         induction_status = await get_employee_induction_status(db, employee_id)
-        induction_completed = induction_status["completed"]
+        induction_completed = int(induction_status.get("completed") or 0)
+        induction_total = int(induction_status.get("total") or 0)
+        induction_ok = not bool(induction_status.get("blocking"))
     
-    if induction_completed >= 15:
-        completed.append("Induction complete (15/15)")
+    if induction_total and induction_completed >= induction_total:
+        completed.append(f"Induction complete ({induction_completed}/{induction_total})")
     else:
-        blockers.append(f"Induction incomplete ({induction_completed}/15)")
+        blockers.append(f"Induction incomplete ({induction_completed}/{induction_total or 15})")
     
     # ========== CALCULATE TOTAL (excluding contract) ==========
-    total_requirements = len(core_doc_checks) + len(required_forms) + len(mandatory_training) + 2 + 1 + 1  # +2 refs, +1 induction, +1 handbook
-    total_completed = doc_completed + form_completed + training_completed + ref_completed + (1 if induction_completed >= 15 else 0) + (1 if handbook_ok else 0)
+    total_requirements = len(core_doc_checks) + len(required_forms) + training_total + 2 + 1 + 1  # +2 refs, +1 induction, +1 handbook
+    total_completed = doc_completed + form_completed + training_completed + ref_completed + (1 if induction_total and induction_completed >= induction_total else 0) + (1 if handbook_ok else 0)
 
     progress_percentage = round((total_completed / total_requirements) * 100) if total_requirements > 0 else 0
 
@@ -443,7 +524,30 @@ async def can_sign_contract(db, employee_id: str) -> dict:
         "completed": completed,
         "total_requirements": total_requirements,
         "completed_count": total_completed,
-        "progress_percentage": progress_percentage
+        "progress_percentage": progress_percentage,
+        "debug": {
+            "source": "canonical_readiness_adapter",
+            "induction": {
+                "completed": induction_completed,
+                "total": induction_total,
+                "satisfied": bool(induction_ok),
+                "source": "uce_category" if induction_category else "induction_status_helper",
+            },
+            "training": {
+                "completed": training_completed,
+                "total": training_total,
+                "satisfied": bool(training_ok),
+                "blocking_items": training_blocking_items,
+                "source": "uce_category" if has_unified_training and training_category else "training_evaluator",
+            },
+            "agreements": {
+                "handbook_satisfied": handbook_ok,
+                "contract_excluded_from_pre_sign_gate": True,
+                "blocking": [] if handbook_ok else ["Employee Handbook not acknowledged"],
+                "source": "uce_checks" if has_unified_handbook else "legacy_agreement_lookup",
+            },
+            "final_contract_lock_reasons": blockers,
+        }
     }
 
 

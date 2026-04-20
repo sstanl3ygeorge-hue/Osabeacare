@@ -106,6 +106,7 @@ async def check_can_sign_contract(
         "progress_percentage": result.get("progress_percentage", 0),
         "total_requirements": result.get("total_requirements", 0),
         "completed_count": result.get("completed_count", 0),
+        "debug": result.get("debug", {}),
     }
 
 

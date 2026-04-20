@@ -328,7 +328,7 @@ def build_employment_review_from_employee(
     coverage_start = as_of_dt - timedelta(days=365 * 10)
 
     valid_jobs, invalid_entries = _normalise_employment_history_entries(employment_history)
-    detected_gaps = detect_employment_gaps_with_coverage(employment_history)
+    detected_gaps = detect_employment_gaps_with_coverage(employment_history, as_of_date=as_of_dt)
     decision_aware_gaps = _overlay_existing_gap_decisions(detected_gaps, existing_gap_records or [])
     explanation_match = match_gap_explanations_to_canonical_gaps(
         decision_aware_gaps,
@@ -337,7 +337,7 @@ def build_employment_review_from_employee(
         apply_to_gaps=True,
     )
     canonical_gaps = explanation_match.get("gaps", [])
-    coverage = compute_coverage_summary(employment_history, gap_records=canonical_gaps)
+    coverage = compute_coverage_summary(employment_history, gap_records=canonical_gaps, as_of_date=as_of_dt)
     gap_evaluation = evaluate_gaps_compliance(canonical_gaps)
 
     employment_segments = [

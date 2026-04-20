@@ -9214,6 +9214,10 @@ async def get_employment_review_preview(
         employee=employee,
         existing_gap_records=existing_gap_records,
         applicant_explanations=employee.get("gap_explanations") or [],
+        as_of_date=(
+            datetime.fromisoformat(employee["employment_window_reference_date"].replace("Z", "+00:00"))
+            if employee.get("employment_window_reference_date") else None
+        ),
     )
 
     return {
@@ -12541,13 +12545,24 @@ async def update_employment_history(
     employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
-    
+
+    # Resolve stable case anchor for window calculation
+    _anchor_str = employee.get("employment_window_reference_date") or employee.get("application_submitted_at")
+    _anchor_dt = None
+    if _anchor_str:
+        try:
+            _anchor_dt = datetime.fromisoformat(_anchor_str.replace("Z", "+00:00"))
+            if _anchor_dt.tzinfo is None:
+                _anchor_dt = _anchor_dt.replace(tzinfo=timezone.utc)
+        except (ValueError, AttributeError):
+            _anchor_dt = None
+
     # Convert to dict format
     history_data = [r.model_dump() for r in request.employment_history]
-    
+
     # Detect gaps and coverage from the same dated employment-history truth
-    gaps = detect_employment_gaps_with_coverage(history_data)
-    
+    gaps = detect_employment_gaps_with_coverage(history_data, as_of_date=_anchor_dt)
+
     now = datetime.now(timezone.utc).isoformat()
 
     # Preserve applicant-submitted explanations only when they match a dated detected gap.
@@ -12560,7 +12575,7 @@ async def update_employment_history(
     )
     gaps = match_result["gaps"]
 
-    employment_coverage = compute_coverage_summary(history_data, gap_records=gaps)
+    employment_coverage = compute_coverage_summary(history_data, gap_records=gaps, as_of_date=_anchor_dt)
     
     # Update employee with history and detected gaps
     update_data = {
@@ -34464,6 +34479,18 @@ def _normalise_gap_records_for_compliance_file(raw_gaps, employee_id: str, sourc
 async def _build_employment_history_compliance_row(employee_id: str, employee: dict) -> dict:
     """Build the canonical Employment Review row for compliance-file consumers."""
     employment_records = employee.get("employment_history") or []
+
+    # Resolve stable case anchor from employee document
+    _anch_str = employee.get("employment_window_reference_date") or employee.get("application_submitted_at")
+    _anch_dt = None
+    if _anch_str:
+        try:
+            _anch_dt = datetime.fromisoformat(_anch_str.replace("Z", "+00:00"))
+            if _anch_dt.tzinfo is None:
+                _anch_dt = _anch_dt.replace(tzinfo=timezone.utc)
+        except (ValueError, AttributeError):
+            _anch_dt = None
+
     raw_gap_records = await db.employment_gaps.find(
         {"employee_id": employee_id}
     ).sort("gap_start", 1).to_list(50)
@@ -34492,6 +34519,7 @@ async def _build_employment_history_compliance_row(employee_id: str, employee: d
         employment_coverage = compute_coverage_summary(
             employment_records,
             gap_records=canonical_gaps,
+            as_of_date=_anch_dt,
         ) if employment_records else (employee.get("employment_coverage") or None)
     except Exception as coverage_err:
         logger.warning(

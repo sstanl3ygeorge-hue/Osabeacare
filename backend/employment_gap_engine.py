@@ -504,7 +504,8 @@ def create_gap_record(
 
 def detect_employment_gaps_with_coverage(
     employment_history: List[Dict],
-    coverage_years: int = 10
+    coverage_years: int = 10,
+    as_of_date: Optional[datetime] = None,
 ) -> List[Dict]:
     """
     Coverage-aware gap detection.  Wraps detect_employment_gaps() and adds
@@ -516,6 +517,9 @@ def detect_employment_gaps_with_coverage(
       * ``"trailing"``     – gap from the most recent entry to today
       * ``"pre_history"``  – gap from the coverage window start to the
                              earliest entry
+
+    Pass ``as_of_date`` to anchor the coverage window to a stable case date
+    instead of drifting with the current clock.
     """
     from datetime import timedelta
 
@@ -530,7 +534,9 @@ def detect_employment_gaps_with_coverage(
             gap["gap_type"] = "inter_entry"
 
     # --- pre-history coverage gap ---
-    now = datetime.now(timezone.utc)
+    now = as_of_date if as_of_date is not None else datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
     coverage_start = now - timedelta(days=365 * coverage_years)
 
     valid_jobs, _invalid_entries = _normalise_employment_history_entries(employment_history)
@@ -585,6 +591,7 @@ def compute_coverage_summary(
     employment_history: List[Dict],
     coverage_years: int = 10,
     gap_records: List[Dict] = None,
+    as_of_date: Optional[datetime] = None,
 ) -> Dict:
     """
     Pure helper – returns a coverage summary dict without side effects.
@@ -596,10 +603,17 @@ def compute_coverage_summary(
     If *gap_records* is provided (actual DB records with real statuses),
     those are used for the unresolved-gap check instead of freshly-
     detected gaps which always have status ``pending``.
+
+    Pass ``as_of_date`` to anchor the window to a stable case reference date.
+    Verified gap explanation periods are included in ``total_days_accounted``
+    and ``accounted_percent`` (but not in ``total_days_covered`` /
+    ``coverage_percent``, which remain employment-only for backward compat).
     """
     from datetime import timedelta
 
-    now = datetime.now(timezone.utc)
+    now = as_of_date if as_of_date is not None else datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
     coverage_start = now - timedelta(days=365 * coverage_years)
     coverage_end = now
     total_days_required = (coverage_end - coverage_start).days
@@ -613,6 +627,9 @@ def compute_coverage_summary(
             "total_days_required": total_days_required,
             "total_days_covered": 0,
             "coverage_percent": 0.0,
+            "total_days_explained": 0,
+            "total_days_accounted": 0,
+            "accounted_percent": 0.0,
             "earliest_entry_date": None,
             "latest_entry_date": None,
             "has_current_employment": False,
@@ -665,13 +682,42 @@ def compute_coverage_summary(
     total_covered = sum((e - s).days for s, e in merged)
     coverage_pct = round((total_covered / total_days_required) * 100, 1) if total_days_required > 0 else 0.0
 
+    # Verified gap explanation periods count as accounted time (but not as
+    # employment-covered days). Only DB gap_records carry real statuses;
+    # freshly-detected gaps are all "pending" so they never contribute here.
+    _gaps_for_accounting = gap_records if gap_records is not None else []
+    gap_acc_intervals = []
+    for _gap in _gaps_for_accounting:
+        if _gap.get("status") == GapStatus.VERIFIED.value:
+            _gs = parse_employment_date(_gap.get("gap_start"))
+            _ge_raw = _gap.get("gap_end")
+            if _ge_raw and str(_ge_raw).strip().lower() not in ("present", "current"):
+                _ge = parse_employment_date(_ge_raw)
+            else:
+                _ge = coverage_end
+            if _gs and _ge:
+                _gs = max(_gs, coverage_start)
+                _ge = min(_ge, coverage_end)
+                if _gs < _ge:
+                    gap_acc_intervals.append((_gs, _ge))
+    gap_acc_intervals.sort()
+    merged_gap_acc = []
+    for _s, _e in gap_acc_intervals:
+        if merged_gap_acc and _s <= merged_gap_acc[-1][1]:
+            merged_gap_acc[-1] = (merged_gap_acc[-1][0], max(merged_gap_acc[-1][1], _e))
+        else:
+            merged_gap_acc.append((_s, _e))
+    total_days_explained = sum((_e - _s).days for _s, _e in merged_gap_acc)
+    total_days_accounted = total_covered + total_days_explained
+    accounted_pct = round((total_days_accounted / total_days_required) * 100, 1) if total_days_required > 0 else 0.0
+
     # Determine if requirement is met: check for any unresolved gaps.
     # Use DB gap_records (with real statuses) when provided; otherwise
     # fall back to freshly-detected gaps (which all default to "pending").
     if gap_records is not None:
         all_gaps = gap_records
     else:
-        all_gaps = detect_employment_gaps_with_coverage(employment_history, coverage_years)
+        all_gaps = detect_employment_gaps_with_coverage(employment_history, coverage_years, as_of_date=now)
     unresolved_statuses = {
         GapStatus.PENDING.value,
         GapStatus.EXPLAINED.value,
@@ -692,6 +738,9 @@ def compute_coverage_summary(
         "total_days_required": total_days_required,
         "total_days_covered": total_covered,
         "coverage_percent": coverage_pct,
+        "total_days_explained": total_days_explained,
+        "total_days_accounted": total_days_accounted,
+        "accounted_percent": accounted_pct,
         "earliest_entry_date": earliest_date.strftime("%Y-%m-%d") if earliest_date else None,
         "latest_entry_date": latest_end.strftime("%Y-%m-%d") if latest_end else None,
         "has_current_employment": has_current,

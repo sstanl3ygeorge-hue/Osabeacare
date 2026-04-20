@@ -86,6 +86,36 @@ async def build_persistable_employment_review(
     if not employee:
         raise ValueError("Employee not found")
 
+    # Resolve stable case anchor: stored field > application_submitted_at > caller-supplied > now
+    _stored_anchor = employee.get("employment_window_reference_date")
+    _app_submitted = employee.get("application_submitted_at")
+    if _stored_anchor:
+        from datetime import date as _date_cls
+        try:
+            _anchor_dt = datetime.fromisoformat(_stored_anchor.replace("Z", "+00:00"))
+            if _anchor_dt.tzinfo is None:
+                _anchor_dt = _anchor_dt.replace(tzinfo=timezone.utc)
+            resolved_as_of_date = _anchor_dt
+        except (ValueError, AttributeError):
+            resolved_as_of_date = as_of_date
+    elif _app_submitted:
+        try:
+            _anchor_dt = datetime.fromisoformat(_app_submitted.replace("Z", "+00:00"))
+            if _anchor_dt.tzinfo is None:
+                _anchor_dt = _anchor_dt.replace(tzinfo=timezone.utc)
+            resolved_as_of_date = _anchor_dt
+        except (ValueError, AttributeError):
+            resolved_as_of_date = as_of_date
+    else:
+        resolved_as_of_date = as_of_date  # None falls back to now() inside engine
+
+    # Store the resolved anchor date string for later use by caller
+    resolved_anchor_str = (
+        resolved_as_of_date.strftime("%Y-%m-%d")
+        if resolved_as_of_date is not None
+        else None
+    )
+
     prior_review = await db.employment_reviews.find_one(
         {"employee_id": employee_id, "current": True},
         {"_id": 0},
@@ -107,7 +137,7 @@ async def build_persistable_employment_review(
         review_employee,
         gap_records or [],
         employee.get("gap_explanations") or [],
-        as_of_date=as_of_date,
+        as_of_date=resolved_as_of_date,
     )
 
     current_fingerprint = _get_timeline_fingerprint(review)
@@ -120,7 +150,7 @@ async def build_persistable_employment_review(
             review_employee,
             gap_records or [],
             employee.get("gap_explanations") or [],
-            as_of_date=as_of_date,
+            as_of_date=resolved_as_of_date,
         )
         current_fingerprint = _get_timeline_fingerprint(review)
         if (prior_review.get("sign_off") or {}).get("signed_off"):
@@ -136,6 +166,7 @@ async def build_persistable_employment_review(
     review["persisted_at"] = now
     review["updated_at"] = now
     review["timeline_fingerprint"] = current_fingerprint
+    review["employment_window_reference_date"] = resolved_anchor_str
     review["source_counts"] = {
         "employment_history_rows": len(employee.get("employment_history") or []),
         "existing_gap_records": len(gap_records or []),
@@ -182,6 +213,14 @@ async def upsert_employment_review(
         {"$set": review, "$setOnInsert": {"created_at": now}},
         upsert=True,
     )
+
+    # Store the case anchor on the employee document once — never overwrite.
+    if review.get("employment_window_reference_date"):
+        await db.employees.update_one(
+            {"id": employee_id, "employment_window_reference_date": {"$exists": False}},
+            {"$set": {"employment_window_reference_date": review["employment_window_reference_date"]}},
+        )
+
     return review
 
 

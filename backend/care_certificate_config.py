@@ -177,6 +177,36 @@ HYBRID_LEARNING_CONTENT = {
         "dos": ["Do explain care before starting.", "Do protect privacy during personal care."],
         "donts": ["Do not rush intimate care without consent.", "Do not talk over the person."],
     },
+    "fluids_nutrition": {
+        "overview": "This standard confirms you understand nutrition, hydration, and safe support with food and fluids.",
+        "expected_to_know": [
+            "Why hydration and nutrition matter for health and wellbeing.",
+            "How to follow care plans, diet guidance, and swallowing-risk instructions.",
+            "When to report concerns about eating, drinking, or weight changes.",
+        ],
+        "guidance": [
+            "Offer food and drinks in line with the person's care plan, preferences, and risk assessment.",
+            "Record intake where required and report poor appetite, choking concerns, dehydration, or sudden change.",
+            "Follow food hygiene practice and ask for guidance if specialist diets or swallowing risks apply.",
+        ],
+        "dos": ["Do follow care plans and diet instructions.", "Do report poor intake or choking concerns promptly."],
+        "donts": ["Do not ignore swallowing-risk instructions.", "Do not force food or fluids."],
+    },
+    "awareness_mental_health": {
+        "overview": "This standard confirms you understand basic awareness of mental health, dementia, and learning disabilities.",
+        "expected_to_know": [
+            "How mental health, dementia, and learning disabilities may affect communication and support needs.",
+            "Why person-centred support and reasonable adjustments matter.",
+            "When to report changes, distress, or safeguarding concerns.",
+        ],
+        "guidance": [
+            "Treat each person as an individual and use their care plan, communication needs, and preferences.",
+            "Look for changes in mood, confusion, distress, or behaviour and report concerns.",
+            "Support dignity, inclusion, and choice without making assumptions.",
+        ],
+        "dos": ["Do use person-centred support.", "Do report changes or distress."],
+        "donts": ["Do not dismiss behaviour as difficult without looking for causes.", "Do not make assumptions about capacity or ability."],
+    },
 }
 
 
@@ -340,36 +370,46 @@ CARE_CERTIFICATE_CONFIG = [
         "code": "fluids_nutrition",
         "standard_number": 8,
         "title": "Fluids and Nutrition",
-        "completion_type": "automatic",
-        "worker_input_required": False,
-        "admin_signoff_required": False,
-        "auto_complete_allowed": True,
-        "worker_form_id": None,
-        "evidence_sources": ["verified_training_record"],
+        "completion_type": "hybrid",
+        "worker_input_required": True,
+        "admin_signoff_required": True,
+        "auto_complete_allowed": False,
+        "worker_form_id": "cc_fluids_nutrition",
+        "evidence_sources": ["verified_training_record", "worker_submission", "manager_signoff"],
         "status_rules": [
             {"condition": "has_verified_training", "status": "completed"},
-            {"condition": "none", "status": "pending_evidence"},
+            {"condition": "admin_signed_off", "status": "completed"},
+            {"condition": "worker_submitted", "status": "awaiting_signoff"},
+            {"condition": "worker_returned", "status": "returned"},
+            {"condition": "worker_draft", "status": "in_progress"},
+            {"condition": "none", "status": "awaiting_worker"},
         ],
         "description": (
-            "Verified food hygiene, nutrition, or fluids training confirms this standard."
+            "Verified food hygiene or nutrition training auto-completes this standard. "
+            "Where no training evidence exists, worker submission and manager sign-off are required."
         ),
     },
     {
         "code": "awareness_mental_health",
         "standard_number": 9,
         "title": "Awareness of Mental Health, Dementia and Learning Disabilities",
-        "completion_type": "automatic",
-        "worker_input_required": False,
-        "admin_signoff_required": False,
-        "auto_complete_allowed": True,
-        "worker_form_id": None,
-        "evidence_sources": ["verified_training_record"],
+        "completion_type": "hybrid",
+        "worker_input_required": True,
+        "admin_signoff_required": True,
+        "auto_complete_allowed": False,
+        "worker_form_id": "cc_awareness_mental_health",
+        "evidence_sources": ["verified_training_record", "worker_submission", "manager_signoff"],
         "status_rules": [
             {"condition": "has_verified_training", "status": "completed"},
-            {"condition": "none", "status": "pending_evidence"},
+            {"condition": "admin_signed_off", "status": "completed"},
+            {"condition": "worker_submitted", "status": "awaiting_signoff"},
+            {"condition": "worker_returned", "status": "returned"},
+            {"condition": "worker_draft", "status": "in_progress"},
+            {"condition": "none", "status": "awaiting_worker"},
         ],
         "description": (
-            "Verified mental health, dementia, or learning disability training confirms this standard."
+            "Verified mental health, dementia, or learning disability training auto-completes this standard. "
+            "Where no training evidence exists, worker submission and manager sign-off are required."
         ),
     },
     {

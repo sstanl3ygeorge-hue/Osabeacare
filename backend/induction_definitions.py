@@ -105,16 +105,16 @@ INDUCTION_RULE_METADATA = {
     "fluids_nutrition": {
         "description": "Confirms nutrition, hydration, and food safety evidence relevant to care work.",
         "completion_type": "hybrid",
-        "evidence_sources": ["worker_submission", "manager_signoff"],
-        "completion_rules": ["Worker must submit a nutrition and hydration awareness form. Admin must sign off."],
-        "next_action": "Worker must complete and submit the nutrition and hydration form.",
+        "evidence_sources": ["verified_training_record", "worker_submission", "manager_signoff"],
+        "completion_rules": ["Verified food hygiene or nutrition training auto-completes this item. Otherwise worker must submit a self-assessment form and admin must sign off."],
+        "next_action": "Worker must complete and submit the nutrition and hydration form, or upload verified training evidence.",
     },
     "awareness_mental_health": {
         "description": "Confirms awareness of mental health, dementia, and learning disability support.",
         "completion_type": "hybrid",
-        "evidence_sources": ["worker_submission", "manager_signoff"],
-        "completion_rules": ["Worker must submit an awareness form. Admin must sign off."],
-        "next_action": "Worker must complete and submit the mental health, dementia, and learning disability awareness form.",
+        "evidence_sources": ["verified_training_record", "worker_submission", "manager_signoff"],
+        "completion_rules": ["Verified mental health, dementia, or learning disability training auto-completes this item. Otherwise worker must submit an awareness form and admin must sign off."],
+        "next_action": "Worker must complete and submit the mental health, dementia, and learning disability awareness form, or upload verified training evidence.",
     },
     "safeguarding_adults": {
         "description": "Confirms adult safeguarding training evidence is verified.",

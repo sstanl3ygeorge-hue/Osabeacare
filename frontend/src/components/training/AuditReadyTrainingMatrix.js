@@ -1170,11 +1170,23 @@ export default function AuditReadyTrainingMatrix({
                             <p className="font-medium text-purple-900">{item.raw_course_title}</p>
                             <p className="text-xs text-purple-600">
                               Extracted from certificate • 
-                              {item.mapped_training_title && ` Mapped to: ${item.mapped_training_title}`}
+                              {item.mapped_training_code
+                                ? ` Mapped to: ${item.mapped_training_title || item.mapped_training_code}`
+                                : ' Unmapped - admin mapping needed'}
                               {item.completed_at && ` • Completed: ${formatBackendDate(item.completed_at, { format: 'short' })}`}
                               {item.expires_at && ` • Expires: ${formatBackendDate(item.expires_at, { format: 'short' })}`}
                             </p>
                           </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline" className={item.is_mandatory ? 'bg-red-50 text-red-700 border-red-200' : 'text-gray-600'}>
+                            {item.is_mandatory ? 'Required' : 'Additional'}
+                          </Badge>
+                          {item.is_unmapped && (
+                            <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">
+                              Unmapped
+                            </Badge>
+                          )}
                         </div>
                         {isAdmin && (
                           <div className="flex items-center gap-2">

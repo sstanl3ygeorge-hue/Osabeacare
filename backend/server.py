@@ -12297,6 +12297,7 @@ async def bulk_save_training_records(
             "expires_at": expiry_date,
             "provider": training.get("provider", ""),
             "is_mandatory": is_mandatory,
+            "is_unmapped": not bool(mapped_code),
             "ai_extracted": True,
             "status": "proposed",
             "created_at": now,
@@ -40325,6 +40326,7 @@ Important:
                 "raw_course_title": raw_title,
                 "mapped_training_code": mapped_code,
                 "mapped_training_title": mapped_title,
+                "is_unmapped": not bool(mapped_code),
                 "completed_at": completion_date,
                 "expires_at": expires_at,
                 "expiry_source": expiry_source,
@@ -40629,6 +40631,7 @@ Important:
                         "intake_review_notes": item.notes,
                         "mapped_training_code": training_code,
                         "mapped_training_title": training_title,
+                        "is_unmapped": False,
                     }
                     
                     # Add evidence file link
@@ -40674,6 +40677,7 @@ Important:
                         "intake_review_notes": item.notes,
                         "mapped_training_code": training_code,
                         "mapped_training_title": training_title,
+                        "is_unmapped": False,
                         "source_type": "certificate_extraction",
                         "evidence_files": [{
                             "file_id": str(uuid.uuid4()),
@@ -40700,6 +40704,7 @@ Important:
                             "created_training_record_id": record_id,
                             "mapped_training_code": training_code,
                             "mapped_training_title": training_title,
+                            "is_unmapped": not bool(item.mapped_training_code or proposed.get("mapped_training_code")),
                             "completed_at": completed_at,
                             "expires_at": expires_at,
                             "review_notes": item.notes,

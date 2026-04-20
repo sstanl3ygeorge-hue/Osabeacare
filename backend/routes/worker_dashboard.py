@@ -218,6 +218,12 @@ def _resolve_mandatory_code(training_name):
     return resolve_mandatory_training_code(training_name)
 
 
+def _map_training_title(training_name):
+    """Lazy import of shared training title mapping from server.py."""
+    from server import map_training_title
+    return map_training_title(training_name)
+
+
 # ==================== WORKER DASHBOARD ====================
 
 @router.get("/worker/dashboard")
@@ -1593,13 +1599,18 @@ async def worker_upload_document(
                     training_name = training.get("training_name", "Unknown Training")
                     training_name_normalized = normalize_name(training_name)
                     
-                    matched_code = _resolve_mandatory_code(training_name)
+                    matched_code, matched_title = _map_training_title(training_name)
+                    mapped_title = matched_title or training_name
                     
                     is_duplicate = training_name_normalized in existing_names
                     
                     if matched_code and not is_duplicate:
                         for rec in existing_training_records:
-                            rec_code = _resolve_mandatory_code(rec.get("training_name", ""))
+                            rec_code = (
+                                rec.get("mapped_training_code")
+                                or rec.get("requirement_id")
+                                or _resolve_mandatory_code(rec.get("training_name", ""))
+                            )
                             if rec_code == matched_code:
                                 is_duplicate = True
                                 break
@@ -1676,14 +1687,15 @@ async def worker_upload_document(
                             "training_name": training_name,
                             "course_name": training.get("course_name", training_name),
                             "raw_course_title": training_name,
-                            "mapped_training_title": training_name,
+                            "mapped_training_title": mapped_title,
                             "provider": training.get("provider"),
                             "completion_date": training.get("completion_date"),
                             "completed_at": training.get("completion_date"),
                             "expiry_date": training.get("expiry_date"),
                             "expires_at": training.get("expiry_date"),
                             "mapped_training_code": matched_code,
-                            "is_mandatory": matched_code is not None,
+                            "is_mandatory": matched_code is not None and matched_code in _get_mandatory_training_ids(),
+                            "is_unmapped": not bool(matched_code),
                             "ai_extracted": True,
                             "extraction_confidence": training.get("confidence", "medium"),
                             "confidence": training.get("confidence", "medium"),
@@ -1698,38 +1710,6 @@ async def worker_upload_document(
                 if proposed_items:
                     await db.proposed_training_items.insert_many(proposed_items)
                     logger.info(f"Created {len(proposed_items)} NEW proposed training items for admin review")
-
-                    # Create preliminary training_records for mandatory items so the
-                    # evaluator returns "awaiting_review" instead of "missing".
-                    # The admin review flow (review_proposed_items) already handles
-                    # updating existing records, so no duplicate issue.
-                    preliminary_records = []
-                    for p_item in proposed_items:
-                        if p_item.get("mapped_training_code"):
-                            preliminary_records.append({
-                                "id": str(uuid.uuid4()),
-                                "employee_id": employee_id,
-                                "training_name": p_item["training_name"],
-                                "requirement_id": p_item["mapped_training_code"],
-                                "mandatory": True,
-                                "completion_date": p_item.get("completion_date"),
-                                "expiry_date": p_item.get("expiry_date"),
-                                "status": "completed",
-                                "certificate_url": file_url,
-                                "original_filename": file.filename,
-                                "verified": False,
-                                "completion_method": "certificate",
-                                "record_status": "active",
-                                "source_document_id": doc_id,
-                                "intake_item_id": p_item["id"],
-                                "ai_extracted": True,
-                                "uploaded_by_worker": True,
-                                "created_at": now,
-                                "updated_at": now,
-                            })
-                    if preliminary_records:
-                        await db.training_records.insert_many(preliminary_records)
-                        logger.info(f"Created {len(preliminary_records)} preliminary training_records for mandatory items (awaiting verification)")
                 
                 if updated_items:
                     logger.info(f"Updated {len(updated_items)} existing training records with new certificate")

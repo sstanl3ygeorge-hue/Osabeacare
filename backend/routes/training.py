@@ -35,6 +35,31 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Training Management"])
 
 
+async def _sync_induction_from_verified_training(db, record: dict, user: dict) -> dict:
+    """
+    Keep induction derived from verified canonical training records, regardless
+    of which training UI surface triggered the verification.
+    """
+    from unified_compliance_engine import auto_complete_induction_from_training
+
+    training_id = (
+        record.get("mapped_training_code")
+        or record.get("requirement_id")
+        or record.get("code")
+        or record.get("training_name", "").lower().replace(" ", "_")
+    )
+    training_name = record.get("training_name") or record.get("mapped_training_title") or training_id
+
+    return await auto_complete_induction_from_training(
+        db=db,
+        employee_id=record.get("employee_id"),
+        training_id=training_id,
+        training_name=training_name,
+        verified_by=user.get("user_id"),
+        verified_by_name=user.get("name") or user.get("email") or user.get("user_id"),
+    )
+
+
 # ==================== TRAINING MODELS ====================
 
 class TrainingRecordCreate(BaseModel):
@@ -318,16 +343,30 @@ async def verify_training_record(
             }
         }
     )
+
+    induction_result = await _sync_induction_from_verified_training(
+        db,
+        {**record, "id": record_id},
+        user,
+    )
     
     await log_audit_action(
         user.get("user_id"),
         "verify_training_record",
         "training_record",
         record_id,
-        {"employee_id": record.get("employee_id"), "training_name": record.get("training_name")}
+        {
+            "employee_id": record.get("employee_id"),
+            "training_name": record.get("training_name"),
+            "induction_auto_complete": induction_result,
+        }
     )
     
-    return {"success": True, "message": "Training record verified"}
+    return {
+        "success": True,
+        "message": "Training record verified",
+        "induction_auto_complete": induction_result,
+    }
 
 
 @router.post("/training-records/{record_id}/unverify")

@@ -812,7 +812,7 @@ export default function EmployeeProfilePage() {
     setEmploymentSignOffLoading(true);
     try {
       await axios.post(
-        `${API}/admin/employees/${employeeId}/employment-review/sign-off`,
+        `${API}/employees/${employeeId}/employment-review/sign-off`,
         {},
         { headers: { Authorization: `Bearer ${token}` } }
       );

@@ -24,10 +24,45 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Import stamp functionality
-from services.pdf_service import stamp_evidence_document
-from server import retrieve_file_bytes
+# Use the branded add_verification_stamp_to_pdf from server.py which produces the
+# full Osabea-branded stamp (logo + colour border + company name).  The older
+# stamp_evidence_document from pdf_service.py uses a plain EvidenceStamper that
+# generates the minimal "✓ VERIFIED" box — NOT the correct stamp.
+from server import retrieve_file_bytes, add_verification_stamp_to_pdf as _stamp_pdf_branded
 from stamp_persistence import build_missing_stamp_backfill_query
 from supabase_storage import is_supabase_storage_configured, upload_file_to_storage
+
+
+def _apply_branded_stamp(file_bytes: bytes, stamp_data: dict, is_image: bool) -> bytes:
+    """Apply the full Osabea-branded stamp to a PDF or image.
+
+    Images are first converted to a single-page PDF via pdf_service so the
+    branded PDF stamper can work on them, then the stamp is applied.
+    """
+    if is_image:
+        from services.pdf_service import stamp_evidence_document
+        # stamp_evidence_document with is_image=True converts the image to a
+        # stamped PDF using the simple EvidenceStamper — but we want the branded
+        # stamp.  So: convert image → single-page PDF first, then brand-stamp it.
+        try:
+            from PIL import Image as _PILImage
+            import io as _io
+            img = _PILImage.open(_io.BytesIO(file_bytes))
+            img_rgb = img.convert("RGB")
+            pdf_buf = _io.BytesIO()
+            img_rgb.save(pdf_buf, format="PDF")
+            file_bytes = pdf_buf.getvalue()
+        except Exception:
+            # Fallback: use the old stamper for images if PIL conversion fails
+            return stamp_evidence_document(
+                document_bytes=file_bytes,
+                admin_name=stamp_data.get("verified_by_name", "System Admin"),
+                verified_at=stamp_data.get("verified_at", ""),
+                verification_id=stamp_data.get("verification_id", ""),
+                is_image=True,
+            )
+    # Apply the branded PDF stamp
+    return _stamp_pdf_branded(file_bytes, stamp_data)
 
 # MongoDB connection
 MONGO_URL = os.environ.get("MONGO_URL")
@@ -43,7 +78,7 @@ results = {
     "errors": []
 }
 
-async def process_document(db, doc: dict) -> bool:
+async def process_document(db, doc: dict, *, force_restamp: bool = False) -> bool:
     """Process a single document - download, stamp, upload, update."""
     doc_id = doc.get("id")
     employee_id = doc.get("employee_id")
@@ -58,8 +93,8 @@ async def process_document(db, doc: dict) -> bool:
         results["skipped_no_url"] += 1
         return False
     
-    # Skip if already has stamped URL
-    if doc.get("stamped_file_url"):
+    # Skip if already has stamped URL — unless --restamp was requested
+    if doc.get("stamped_file_url") and not force_restamp:
         print(f"    ⚠ Skipped: Already has stamped_file_url")
         results["skipped_already_stamped"] += 1
         return False
@@ -92,15 +127,23 @@ async def process_document(db, doc: dict) -> bool:
             or normalized_ct.startswith("image/")
         )
         
-        # Apply stamp
-        print(f"    🔨 Burning stamp...")
-        stamped_bytes = stamp_evidence_document(
-            document_bytes=file_bytes,
-            admin_name=admin_name,
-            verified_at=verified_at,
-            verification_id=verification_id,
-            is_image=is_image
-        )
+        # Build stamp_data dict in the same shape the branded stamper expects
+        stamp_type = "copy_verified"
+        existing_stamp = doc.get("verification_stamp")
+        if isinstance(existing_stamp, dict) and existing_stamp.get("stamp_type"):
+            stamp_type = existing_stamp["stamp_type"]
+        stamp_data_for_pdf = {
+            "stamp_type": stamp_type,
+            "verified_by_name": admin_name,
+            "verified_at": verified_at,
+            "employee_name": doc.get("employee_name", ""),
+            "document_type": requirement_id,
+            "verification_id": verification_id,
+        }
+
+        # Apply the full branded Osabea stamp
+        print(f"    🔨 Burning branded stamp (type={stamp_type})...")
+        stamped_bytes = _apply_branded_stamp(file_bytes, stamp_data_for_pdf, is_image)
         print(f"    ✓ Stamped: {len(stamped_bytes)} bytes")
         
         # Upload to Supabase
@@ -120,20 +163,14 @@ async def process_document(db, doc: dict) -> bool:
             raise Exception("Shared storage helper returned no stamped_file_url")
         print(f"    ✓ Uploaded: {stamped_url[:60]}...")
         
-        # Update database record
+        # Update database record — always persist the stamp dict we actually used
+        stamp_data_for_pdf["migrated_backfill"] = True
         await db.employee_documents.update_one(
             {"id": doc_id},
             {
                 "$set": {
                     "stamped_file_url": stamped_url,
-                    "verification_stamp": doc.get("verification_stamp") or {
-                        "stamp_type": "copy_verified",
-                        "document_type": requirement_id,
-                        "verified_by_name": admin_name,
-                        "verified_at": verified_at,
-                        "verification_id": verification_id,
-                        "migrated_backfill": True,
-                    },
+                    "verification_stamp": stamp_data_for_pdf,
                     "verification_stamp_by_name": admin_name,
                     "verification_stamp_at": verified_at,
                     "verification_stamp_label": "Verified copy",
@@ -155,10 +192,12 @@ async def process_document(db, doc: dict) -> bool:
         return False
 
 
-async def run_migration():
+async def run_migration(force_restamp: bool = False):
     """Main migration function."""
     print("=" * 60)
     print("STAMP MIGRATION SCRIPT")
+    if force_restamp:
+        print("Mode: RE-STAMP (overwrite existing stamps with branded version)")
     print("Burns visual CQC stamps onto historical verified documents")
     print("=" * 60)
     
@@ -179,8 +218,22 @@ async def run_migration():
     db = client[DB_NAME]
     print(f"✓ Connected to MongoDB: {DB_NAME}")
     
-    query = build_missing_stamp_backfill_query()
-    
+    if force_restamp:
+        # Target documents that were stamped by a previous migration run
+        # (identified by stamp_migration: True) so we overwrite the old plain stamp.
+        from stamp_persistence import _NON_FILE_REQUIREMENT_IDS
+        query = {
+            "$and": [
+                {"stamp_migration": True},
+                {"file_url": {"$exists": True}},
+                {"file_url": {"$nin": [None, ""]}},
+                {"requirement_id": {"$nin": list(_NON_FILE_REQUIREMENT_IDS)}},
+            ]
+        }
+        print("\n⚠ RE-STAMP mode: targeting documents from previous migration runs")
+    else:
+        query = build_missing_stamp_backfill_query()
+
     docs = await db.employee_documents.find(query, {"_id": 0}).to_list(length=500)
     results["total_found"] = len(docs)
     
@@ -213,7 +266,7 @@ async def run_migration():
     
     for i, doc in enumerate(docs, 1):
         print(f"\n[{i}/{len(docs)}]", end="")
-        await process_document(db, doc)
+        await process_document(db, doc, force_restamp=force_restamp)
 
     # -------------------------------------------------------
     # PASS 2: Backfill flat stamp fields for docs that already
@@ -375,4 +428,5 @@ async def run_migration():
 
 
 if __name__ == "__main__":
-    asyncio.run(run_migration())
+    force_restamp = "--restamp" in sys.argv
+    asyncio.run(run_migration(force_restamp=force_restamp))

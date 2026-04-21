@@ -27255,7 +27255,15 @@ class DocumentExtractionService:
     async def _convert_to_images(file_content: bytes, file_type: str) -> List[str]:
         """Convert document to base64 images for vision processing."""
         images = []
-        file_ext = file_type.lower().replace(".", "")
+        normalized_type = (file_type or "").lower().strip()
+        # Accept both extensions (".pdf", "pdf") and MIME types ("application/pdf").
+        if "/" in normalized_type:
+            file_ext = normalized_type.split("/", 1)[1]
+        else:
+            file_ext = normalized_type
+        file_ext = file_ext.split(";", 1)[0].replace(".", "").strip()
+        
+        logger.info(f"Document conversion: file_type={file_type}, normalized_ext={file_ext}")
         
         if file_ext == "pdf":
             import fitz

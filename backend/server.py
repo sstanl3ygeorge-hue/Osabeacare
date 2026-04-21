@@ -8691,27 +8691,26 @@ async def sign_contract(
     now = datetime.now(timezone.utc)
     timestamp = now.strftime('%Y%m%d_%H%M%S')
     
-    # Save signature image
-    sig_dir = Path("/app/uploads/contract_signatures")
-    sig_dir.mkdir(parents=True, exist_ok=True)
+    from agreement_document_service import (
+        CONTRACT_AGREEMENT_TYPE,
+        ensure_agreement_rendered,
+    )
+    from supabase_storage import download_file_from_storage, upload_file_to_storage
+
+    # Persist signature image remotely so the audit artefact survives restarts.
     sig_filename = f"{employee_id}_{timestamp}.png"
-    sig_path = sig_dir / sig_filename
-    
-    with open(sig_path, "wb") as f:
-        f.write(signature_bytes)
-    
-    signature_url = f"/uploads/contract_signatures/{sig_filename}"
-    
-    # Get contract template (if exists)
-    contract_template = None
-    contract_doc = await db.contract_templates.find_one({"active": True})
-    if contract_doc and contract_doc.get("file_url"):
-        template_path = contract_doc.get("file_url")
-        if template_path.startswith("/"):
-            template_path = f"/app{template_path}"
-        if os.path.exists(template_path):
-            with open(template_path, "rb") as f:
-                contract_template = f.read()
+    signature_url = await upload_file_to_storage(
+        signature_bytes,
+        sig_filename,
+        folder=f"agreements/{employee_id}/signatures",
+    )
+    if not signature_url:
+        raise HTTPException(status_code=500, detail="Failed to persist signature image")
+
+    contract_record = await ensure_agreement_rendered(db, employee, CONTRACT_AGREEMENT_TYPE)
+    contract_template = await download_file_from_storage(contract_record.get("rendered_file_url"))
+    if not contract_template:
+        raise HTTPException(status_code=500, detail="Failed to load rendered contract")
     
     # Generate signed PDF with signature embedded
     signer_info = {
@@ -8726,17 +8725,15 @@ async def sign_contract(
         signer_info
     )
     
-    # Save signed contract
-    contracts_dir = Path("/app/uploads/contracts")
-    contracts_dir.mkdir(parents=True, exist_ok=True)
     contract_filename = f"{employee_id}_signed_contract_{timestamp}.pdf"
-    contract_path = contracts_dir / contract_filename
-    
-    with open(contract_path, "wb") as f:
-        f.write(signed_pdf_bytes)
-    
-    contract_url = f"/uploads/contracts/{contract_filename}"
-    
+    contract_url = await upload_file_to_storage(
+        signed_pdf_bytes,
+        contract_filename,
+        folder=f"agreements/{employee_id}/signed",
+    )
+    if not contract_url:
+        raise HTTPException(status_code=500, detail="Failed to persist signed contract")
+
     # Update or create agreement_acknowledgements
     await db.agreement_acknowledgements.update_one(
         {
@@ -8749,14 +8746,18 @@ async def sign_contract(
                 "acknowledged_at": now.isoformat(),
                 "status": "signed",
                 "signed_document_url": contract_url,
+                "rendered_file_url": contract_record.get("rendered_file_url"),
                 "signed_at": now.isoformat(),
                 "signature_image_url": signature_url,
                 "signer_name": request.full_name,
                 "signer_employee_code": employee.get("employee_code"),
                 "completion_mode": "digital_signature",
-                "verification_status": "verified",  # Auto-verify digital signatures
+                "template_version": contract_record.get("template_version"),
+                "employee_name": employee.get("name") or f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
+                "verification_status": "verified",  # Worker self-signature is authoritative agreement completion
                 "verified_at": now.isoformat(),
-                "verified_by": "system_auto_verify"
+                "verified_by": "system_auto_verify",
+                "verified_by_name": "Osabea worker portal",
             },
             "$setOnInsert": {
                 "id": str(uuid.uuid4()),
@@ -8767,34 +8768,34 @@ async def sign_contract(
         },
         upsert=True
     )
-    
-    # Also acknowledge the Employee Handbook when contract is signed (bundled together for UX)
-    await db.agreement_acknowledgements.update_one(
+
+    await db.generated_contracts.update_one(
         {
             "employee_id": employee_id,
-            "agreement_type": "handbook_acknowledgement"
+            "template_version": contract_record.get("template_version"),
         },
         {
             "$set": {
+                "employee_id": employee_id,
+                "employee_name": employee.get("name") or f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
+                "template_id": "ZERO_HOUR_CONTRACT_V1",
+                "template_version": contract_record.get("template_version"),
+                "rendered_file_url": contract_record.get("rendered_file_url"),
+                "rendered_at": contract_record.get("rendered_at"),
                 "status": "signed",
-                "acknowledged": True,
-                "acknowledged_at": now.isoformat(),
                 "signed_at": now.isoformat(),
-                "signer_name": request.full_name,
-                "signer_employee_code": employee.get("employee_code"),
-                "completion_mode": "bundled_with_contract",
-                "verification_status": "verified",  # Auto-verify when bundled with contract
-                "verified_at": now.isoformat(),
-                "verified_by": "system_auto_verify"
+                "signed_by": worker.get("employee_id"),
+                "signed_by_name": request.full_name,
+                "signed_document_url": contract_url,
+                "updated_at": now.isoformat(),
             },
             "$setOnInsert": {
-                "id": str(uuid.uuid4()),
-                "employee_id": employee_id,
-                "agreement_type": "handbook_acknowledgement",
-                "created_at": now.isoformat()
-            }
+                "id": f"contract_{employee_id}_{contract_record.get('template_version')}",
+                "generated_at": contract_record.get("rendered_at") or now.isoformat(),
+                "created_at": now.isoformat(),
+            },
         },
-        upsert=True
+        upsert=True,
     )
     
     # Log audit
@@ -8814,6 +8815,7 @@ async def sign_contract(
         "success": True,
         "message": "Contract signed successfully",
         "contract_url": contract_url,
+        "rendered_file_url": contract_record.get("rendered_file_url"),
         "signed_at": now.isoformat()
     }
 

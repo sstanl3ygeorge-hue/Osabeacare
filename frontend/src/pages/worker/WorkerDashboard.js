@@ -924,20 +924,25 @@ export default function WorkerDashboard() {
     setDocumentLoading(true);
     setDocumentBlobUrl(null);
     
-    if (!doc?.document_id && !doc?.id) {
+    if (!doc?.document_id && !doc?.id && !doc?.file_url) {
       setDocumentLoading(false);
       return;
     }
     
     try {
-      const token = localStorage.getItem('workerToken');
-      const response = await axios.get(
-        `${API}/employee-documents/${doc.document_id || doc.id}/file`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-          responseType: 'blob'
-        }
-      );
+      let response;
+      if (doc?.file_url && !doc?.document_id) {
+        response = await axios.get(doc.file_url, { responseType: 'blob' });
+      } else {
+        const token = localStorage.getItem('workerToken');
+        response = await axios.get(
+          `${API}/employee-documents/${doc.document_id || doc.id}/file`,
+          {
+            headers: { Authorization: `Bearer ${token}` },
+            responseType: 'blob'
+          }
+        );
+      }
       
       // Create blob URL for the document
       const blobUrl = URL.createObjectURL(response.data);
@@ -958,6 +963,42 @@ export default function WorkerDashboard() {
     setDocumentBlobUrl(null);
     setViewerDocument(null);
     setViewerOpen(false);
+  };
+
+  const downloadAgreement = async (agreement) => {
+    const url = agreement?.download_url || agreement?.file_url;
+    if (!url) {
+      toast.error('Agreement PDF is not available yet');
+      return;
+    }
+    try {
+      const response = await axios.get(url, { responseType: 'blob' });
+      const blobUrl = URL.createObjectURL(response.data);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = `${agreement.name || 'agreement'}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+    } catch {
+      toast.error('Failed to download agreement');
+    }
+  };
+
+  const handleAcknowledgeAgreement = async (agreement) => {
+    try {
+      const token = localStorage.getItem('workerToken');
+      await axios.post(
+        `${API}/worker/agreements/${agreement.id}/acknowledge`,
+        { signer_name: employee?.name },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success(`${agreement.name} acknowledged`);
+      fetchDashboard();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to acknowledge agreement');
+    }
   };
 
   const handleLogout = () => {
@@ -2443,8 +2484,7 @@ export default function WorkerDashboard() {
         )}
 
         {/* ========== AGREEMENTS (P0: Contract & Handbook Status) ========== */}
-        {/* Show contract_acceptance in this panel only after it's been signed; the dedicated section below handles the pre-signing state */}
-        {agreements && agreements.filter(a => !(a.id === 'contract_acceptance' && !contract_signed)).length > 0 && (
+        {agreements && agreements.length > 0 && (
           <Card className="shadow-md border-0" data-testid="agreements-section">
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between">
@@ -2454,21 +2494,21 @@ export default function WorkerDashboard() {
                     Agreements & Acknowledgements
                   </CardTitle>
                   <p className="text-xs text-slate-500 mt-1">
-                    Review handbook-related acknowledgements alongside your contract stage.
+                    Review the full contract and handbook PDFs here, then sign or acknowledge them from your portal.
                   </p>
                 </div>
                 <Badge className={`${
-                  agreements.filter(a => !(a.id === 'contract_acceptance' && !contract_signed)).every(a => a.verified) ? 'bg-green-100 text-green-700' :
-                  agreements.filter(a => !(a.id === 'contract_acceptance' && !contract_signed)).some(a => a.signed || a.verified) ? 'bg-blue-100 text-blue-700' :
+                  agreements.every(a => a.verified) ? 'bg-green-100 text-green-700' :
+                  agreements.some(a => a.signed || a.verified) ? 'bg-blue-100 text-blue-700' :
                   'bg-slate-100 text-slate-600'
                 }`}>
-                  {agreements.filter(a => !(a.id === 'contract_acceptance' && !contract_signed) && a.verified).length} of {agreements.filter(a => !(a.id === 'contract_acceptance' && !contract_signed)).length} Verified
+                  {agreements.filter(a => a.verified).length} of {agreements.length} completed
                 </Badge>
               </div>
             </CardHeader>
             <CardContent>
               <div className="space-y-3">
-                {agreements.filter(a => !(a.id === 'contract_acceptance' && !contract_signed)).map((agreement) => (
+                {agreements.map((agreement) => (
                   <div
                     key={agreement.id}
                     className={`p-4 rounded-xl border ${
@@ -2508,24 +2548,79 @@ export default function WorkerDashboard() {
                           )}
                           {!agreement.signed && !agreement.verified && (
                             <p className="text-xs text-slate-500 mt-0.5">
-                              {agreement.id === 'contract_acceptance' 
-                                ? 'Sign contract in the section below' 
+                              {agreement.id === 'contract_acceptance'
+                                ? (contractEligibility?.can_sign
+                                  ? 'Review the contract PDF, then sign when you are ready.'
+                                  : 'You can review the contract now. Signing unlocks when earlier onboarding steps are complete.')
                                 : agreement.id === 'handbook_acknowledgement'
-                                  ? 'Acknowledge during contract signing'
+                                  ? 'Open the full handbook PDF, then acknowledge once you have read it.'
                                   : 'Awaiting completion'}
+                            </p>
+                          )}
+                          {agreement.template_version && (
+                            <p className="text-[11px] text-slate-400 mt-1">
+                              Version {agreement.template_version}
+                              {agreement.rendered_at && ` • prepared ${formatDate(agreement.rendered_at)}`}
                             </p>
                           )}
                         </div>
                       </div>
-                      <Badge className={`text-xs ${
-                        agreement.verified ? 'bg-green-100 text-green-700' :
-                        agreement.signed ? 'bg-blue-100 text-blue-700' :
-                        'bg-slate-100 text-slate-600'
-                      }`}>
-                        {agreement.verified ? 'Verified' :
-                         agreement.signed ? 'Signed' : 
-                         agreement.id === 'contract_acceptance' ? 'See Below ↓' : 'Pending'}
-                      </Badge>
+                      <div className="flex flex-wrap items-center justify-end gap-2">
+                        {(agreement.file_url || agreement.download_url) && (
+                          <>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="gap-1"
+                              onClick={() => openDocumentViewer({ ...agreement, name: agreement.name })}
+                            >
+                              <Eye className="h-3.5 w-3.5" />
+                              View PDF
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="gap-1"
+                              onClick={() => downloadAgreement(agreement)}
+                            >
+                              <Download className="h-3.5 w-3.5" />
+                              Download PDF
+                            </Button>
+                          </>
+                        )}
+                        {agreement.id === 'contract_acceptance' && !agreement.signed && !agreement.verified && (
+                          <Button
+                            size="sm"
+                            className="gap-1"
+                            disabled={!contractEligibility?.can_sign}
+                            onClick={() => setShowSignaturePad(true)}
+                            data-testid="agreement-sign-contract-btn"
+                          >
+                            <PenTool className="h-3.5 w-3.5" />
+                            Sign
+                          </Button>
+                        )}
+                        {agreement.id === 'handbook_acknowledgement' && !agreement.signed && !agreement.verified && (
+                          <Button
+                            size="sm"
+                            className="gap-1"
+                            onClick={() => handleAcknowledgeAgreement(agreement)}
+                          >
+                            <CheckCircle className="h-3.5 w-3.5" />
+                            Acknowledge
+                          </Button>
+                        )}
+                        <Badge className={`text-xs ${
+                          agreement.verified ? 'bg-green-100 text-green-700' :
+                          agreement.signed ? 'bg-blue-100 text-blue-700' :
+                          'bg-slate-100 text-slate-600'
+                        }`}>
+                          {agreement.verified ? 'Verified' :
+                           agreement.signed ? 'Signed' :
+                           agreement.id === 'contract_acceptance' && contractEligibility?.can_sign ? 'Ready to sign' :
+                           agreement.id === 'contract_acceptance' ? 'Waiting for earlier steps' : 'Pending'}
+                        </Badge>
+                      </div>
                     </div>
                   </div>
                 ))}

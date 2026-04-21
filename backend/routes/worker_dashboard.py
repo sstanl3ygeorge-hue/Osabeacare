@@ -30,6 +30,12 @@ from .dependencies import (
 from induction_definitions import get_employee_induction_status
 from employment_review_persistence import upsert_employment_review
 from .employment_gaps import _ensure_gap_record
+from agreement_document_service import (
+    CONTRACT_AGREEMENT_TYPE,
+    HANDBOOK_AGREEMENT_TYPE,
+    _employee_name,
+    ensure_agreement_rendered,
+)
 
 # Reference status enum (shared with stageGates)
 import sys
@@ -150,6 +156,10 @@ class FormSubmitRequest(BaseModel):
     form_data: dict
 
 
+class AgreementAcknowledgeRequest(BaseModel):
+    signer_name: Optional[str] = None
+
+
 # ==================== LAZY IMPORTS ====================
 # Avoid circular imports by importing heavy dependencies lazily
 
@@ -262,6 +272,73 @@ def _map_training_title(training_name):
 
 
 # ==================== WORKER DASHBOARD ====================
+
+@router.post("/worker/agreements/{agreement_type}/acknowledge")
+async def acknowledge_worker_agreement(
+    agreement_type: str,
+    payload: AgreementAcknowledgeRequest,
+    worker: dict = Depends(get_current_worker),
+):
+    """Worker-side acknowledgement for full rendered agreement PDFs."""
+    if agreement_type != HANDBOOK_AGREEMENT_TYPE:
+        raise HTTPException(status_code=400, detail="Only handbook acknowledgement is supported on this route")
+
+    db = get_db()
+    employee_id = worker.get("employee_id")
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    agreement_record = await ensure_agreement_rendered(db, employee, agreement_type)
+    now = datetime.now(timezone.utc).isoformat()
+    signer_name = payload.signer_name or _employee_name(employee)
+
+    await db.agreement_acknowledgements.update_one(
+        {"employee_id": employee_id, "agreement_type": agreement_type},
+        {
+            "$set": {
+                "acknowledged": True,
+                "acknowledged_at": now,
+                "status": "signed",
+                "completion_mode": "worker_acknowledgement",
+                "signer_name": signer_name,
+                "verification_status": "verified",
+                "verified_at": now,
+                "verified_by": employee_id,
+                "verified_by_name": "Osabea worker portal",
+                "template_version": agreement_record.get("template_version"),
+                "rendered_file_url": agreement_record.get("rendered_file_url"),
+                "employee_name": agreement_record.get("employee_name") or signer_name,
+                "updated_at": now,
+            }
+        },
+    )
+
+    await log_audit_action(
+        f"worker_{employee_id}",
+        "acknowledge_agreement",
+        "agreement_acknowledgements",
+        agreement_record.get("id") or f"agr_{agreement_type}_{employee_id}",
+        {
+            "employee_id": employee_id,
+            "agreement_type": agreement_type,
+            "template_version": agreement_record.get("template_version"),
+            "rendered_file_url": agreement_record.get("rendered_file_url"),
+        },
+    )
+
+    try_auto_promote_worker = get_try_auto_promote_worker_func()
+    await try_auto_promote_worker(employee_id)
+
+    refreshed = await db.agreement_acknowledgements.find_one(
+        {"employee_id": employee_id, "agreement_type": agreement_type},
+        {"_id": 0},
+    )
+    return {
+        "success": True,
+        "agreement": refreshed,
+        "message": "Agreement acknowledged successfully",
+    }
 
 @router.get("/worker/dashboard")
 async def worker_dashboard(worker: dict = Depends(get_current_worker)):
@@ -878,11 +955,15 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
     
     # Agreements status
     agreements_status = []
-    
-    contract_ack = await db.agreement_acknowledgements.find_one({
-        "employee_id": employee_id,
-        "agreement_type": "contract_acceptance"
-    }, {"_id": 0})
+    employee_min = await db.employees.find_one({"id": employee_id}, {"_id": 0}) or {"id": employee_id}
+    try:
+        contract_ack = await ensure_agreement_rendered(db, employee_min, CONTRACT_AGREEMENT_TYPE)
+    except Exception as e:
+        logger.warning(f"Could not render contract agreement for {employee_id}: {e}")
+        contract_ack = await db.agreement_acknowledgements.find_one({
+            "employee_id": employee_id,
+            "agreement_type": CONTRACT_AGREEMENT_TYPE
+        }, {"_id": 0}) or {}
     
     contract_status = {
         "id": "contract_acceptance",
@@ -892,22 +973,32 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             contract_ack.get("acknowledged")
             or contract_ack.get("status") in ("signed", "submitted", "verified")
         )),
-        "signed_at": contract_ack.get("acknowledged_at") if contract_ack else None,
+        "signed_at": (contract_ack or {}).get("signed_at") or (contract_ack or {}).get("acknowledged_at"),
         "verified": bool(contract_ack and contract_ack.get("verification_status") == "verified"),
         "verified_at": contract_ack.get("verified_at") if contract_ack else None,
         "verified_by_name": contract_ack.get("verified_by_name") if contract_ack else None,
         "can_sign": not bool(contract_ack and contract_ack.get("acknowledged")),
         "status": "verified" if (contract_ack and contract_ack.get("verification_status") == "verified") else (
             "signed" if (contract_ack and contract_ack.get("acknowledged")) else "pending"
-        )
+        ),
+        "file_url": (contract_ack or {}).get("signed_document_url") or (contract_ack or {}).get("rendered_file_url"),
+        "rendered_file_url": (contract_ack or {}).get("rendered_file_url"),
+        "signed_document_url": (contract_ack or {}).get("signed_document_url"),
+        "download_url": (contract_ack or {}).get("signed_document_url") or (contract_ack or {}).get("rendered_file_url"),
+        "template_version": (contract_ack or {}).get("template_version"),
+        "rendered_at": (contract_ack or {}).get("rendered_at"),
+        "employee_name": (contract_ack or {}).get("employee_name"),
     }
     agreements_status.append(contract_status)
     contract_signed = contract_status["signed"]
-    
-    handbook_ack = await db.agreement_acknowledgements.find_one({
-        "employee_id": employee_id,
-        "agreement_type": "handbook_acknowledgement"
-    }, {"_id": 0})
+    try:
+        handbook_ack = await ensure_agreement_rendered(db, employee_min, HANDBOOK_AGREEMENT_TYPE)
+    except Exception as e:
+        logger.warning(f"Could not render handbook agreement for {employee_id}: {e}")
+        handbook_ack = await db.agreement_acknowledgements.find_one({
+            "employee_id": employee_id,
+            "agreement_type": HANDBOOK_AGREEMENT_TYPE
+        }, {"_id": 0}) or {}
     
     handbook_status = {
         "id": "handbook_acknowledgement",
@@ -921,7 +1012,13 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
         "can_sign": not bool(handbook_ack and handbook_ack.get("acknowledged")),
         "status": "verified" if (handbook_ack and handbook_ack.get("verification_status") == "verified") else (
             "signed" if (handbook_ack and handbook_ack.get("acknowledged")) else "pending"
-        )
+        ),
+        "file_url": (handbook_ack or {}).get("rendered_file_url"),
+        "rendered_file_url": (handbook_ack or {}).get("rendered_file_url"),
+        "download_url": (handbook_ack or {}).get("rendered_file_url"),
+        "template_version": (handbook_ack or {}).get("template_version"),
+        "rendered_at": (handbook_ack or {}).get("rendered_at"),
+        "employee_name": (handbook_ack or {}).get("employee_name"),
     }
     agreements_status.append(handbook_status)
     

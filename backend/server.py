@@ -710,49 +710,84 @@ async def retrieve_file_bytes(file_url: str) -> tuple:
     if not file_url:
         raise ValueError("No file reference provided")
 
-    def _legacy_object_path(ref: str) -> str:
-        legacy_prefix = f"{STORAGE_URL}/objects/"
-        if ref.startswith(legacy_prefix):
-            return ref.replace(legacy_prefix, "", 1)
-        return ref.lstrip("/")
+    # Normalize common storage reference variants so we can try multiple backends.
+    candidates = [file_url]
+    if file_url.startswith("/api/uploads/"):
+        candidates.append(file_url.replace("/api", "", 1))
+    if file_url.startswith("api/uploads/"):
+        candidates.append(file_url.replace("api/", "", 1))
+    if file_url.startswith("/uploads/"):
+        candidates.append(file_url.lstrip("/"))
+    if file_url.startswith("uploads/"):
+        candidates.append(f"/{file_url}")
 
-    ext = file_url.rsplit(".", 1)[-1].lower() if "." in file_url else ""
+    # De-duplicate while preserving order
+    unique_candidates: list[str] = []
+    for ref in candidates:
+        if ref not in unique_candidates:
+            unique_candidates.append(ref)
 
-    # --- 1. Direct HTTP(S) URL ---
-    if file_url.startswith(("http://", "https://")):
+    attempts: list[str] = []
+    for ref in unique_candidates:
+        # 0. Local legacy paths on disk (best-effort, non-fatal if missing)
+        local_ref = ref
+        if local_ref.startswith("/uploads/") or local_ref.startswith("uploads/"):
+            local_path = Path("/app") / local_ref.lstrip("/")
+            if local_path.exists():
+                content = local_path.read_bytes()
+                ext_local = local_path.suffix.lower().lstrip(".")
+                return content, _EXT_CONTENT_TYPES.get(ext_local, "application/octet-stream")
+            attempts.append(f"local-miss:{local_path}")
+
+        def _legacy_object_path(path_ref: str) -> str:
+            legacy_prefix = f"{STORAGE_URL}/objects/"
+            if path_ref.startswith(legacy_prefix):
+                return path_ref.replace(legacy_prefix, "", 1)
+            return path_ref.lstrip("/")
+
+        ext_local = ref.rsplit(".", 1)[-1].lower() if "." in ref else ""
+
+        # --- 1. Direct HTTP(S) URL ---
+        if ref.startswith(("http://", "https://")):
+            try:
+                import httpx as _httpx
+                async with _httpx.AsyncClient(timeout=60.0) as client:
+                    resp = await client.get(ref, follow_redirects=True)
+                    if resp.status_code == 200:
+                        ct = resp.headers.get("content-type", "").split(";")[0].strip()
+                        return resp.content, ct or _EXT_CONTENT_TYPES.get(ext_local, "application/octet-stream")
+                    attempts.append(f"http-status:{resp.status_code}:{ref}")
+            except Exception as e:
+                attempts.append(f"http-error:{ref}:{e}")
+
+            # --- 2. Supabase authenticated download ---
+            try:
+                content = await download_file_from_storage(ref)
+                if content:
+                    return content, _EXT_CONTENT_TYPES.get(ext_local, "application/octet-stream")
+                attempts.append(f"supabase-empty:{ref}")
+            except Exception as e:
+                attempts.append(f"supabase-http-error:{ref}:{e}")
+
+        # --- 2b. Supabase object key/path ---
         try:
-            import httpx as _httpx
-            async with _httpx.AsyncClient(timeout=60.0) as client:
-                resp = await client.get(file_url, follow_redirects=True)
-                if resp.status_code == 200:
-                    ct = resp.headers.get("content-type", "").split(";")[0].strip()
-                    return resp.content, ct or _EXT_CONTENT_TYPES.get(ext, "application/octet-stream")
+            from supabase_storage import get_supabase_public_url, is_supabase_storage_configured
+            if is_supabase_storage_configured() and not ref.startswith(("http://", "https://")):
+                content = await download_file_from_storage(get_supabase_public_url(ref.lstrip("/")))
+                if content:
+                    return content, _EXT_CONTENT_TYPES.get(ext_local, "application/octet-stream")
+                attempts.append(f"supabase-path-empty:{ref}")
         except Exception as e:
-            logger.warning(f"retrieve_file_bytes: direct HTTP fetch failed for {file_url}: {e}")
+            attempts.append(f"supabase-path-error:{ref}:{e}")
 
-        # --- 2. Supabase authenticated download ---
+        # --- 3. Legacy Emergent storage ---
         try:
-            content = await download_file_from_storage(file_url)
-            if content:
-                return content, _EXT_CONTENT_TYPES.get(ext, "application/octet-stream")
+            file_bytes, stored_ct = get_object(_legacy_object_path(ref))
+            return file_bytes, stored_ct or _EXT_CONTENT_TYPES.get(ext_local, "application/octet-stream")
         except Exception as e:
-            logger.warning(f"retrieve_file_bytes: Supabase download failed for {file_url}: {e}")
+            attempts.append(f"legacy-error:{ref}:{e}")
 
-    # --- 2b. Supabase object key/path ---
-    try:
-        from supabase_storage import get_supabase_public_url, is_supabase_storage_configured
-        if is_supabase_storage_configured() and not file_url.startswith(("http://", "https://")):
-            content = await download_file_from_storage(get_supabase_public_url(file_url))
-            if content:
-                return content, _EXT_CONTENT_TYPES.get(ext, "application/octet-stream")
-    except Exception as e:
-        logger.warning(f"retrieve_file_bytes: Supabase path download failed for {file_url}: {e}")
-
-    # --- 3. Legacy Emergent storage ---
-    # Worker/admin uploads may store either the raw object key
-    # ("documents/<employee>/<file>") or the full legacy object URL.
-    file_bytes, stored_ct = get_object(_legacy_object_path(file_url))
-    return file_bytes, stored_ct or _EXT_CONTENT_TYPES.get(ext, "application/octet-stream")
+    raise Exception(f"Failed to retrieve file bytes for '{file_url}'. Attempts: {' | '.join(attempts[:8])}")
 
 
 app = FastAPI(title="Osabea Healthcare Solutions API")
@@ -3309,7 +3344,7 @@ async def stamp_and_persist_document(
             context=f"stamp_and_persist_document:{document.get('id')}",
         )
     except Exception as exc:
-        raise Exception("Stamping failed — cannot approve document") from exc
+        raise Exception(f"Stamping failed — cannot approve document: {exc}") from exc
 
     logger.info(
         "verify-flow DB update start doc_id=%s employee_id=%s",
@@ -3339,7 +3374,7 @@ async def stamp_and_persist_document(
             context=f"stamp_and_persist_document:{document.get('id')}:post_write",
         )
     except Exception as exc:
-        raise Exception("Stamping failed — cannot approve document") from exc
+        raise Exception(f"Stamping failed — cannot approve document: {exc}") from exc
 
     return updated
 
@@ -19799,6 +19834,10 @@ async def verify_employee_document(doc_id: str, user: dict = Depends(require_man
             },
         )
     except Exception as exc:
+        root = exc
+        while getattr(root, "__cause__", None):
+            root = root.__cause__
+        root_message = str(root) if str(root) else str(exc)
         logger.exception(
             "verify-flow unhandled exception doc_id=%s employee_id=%s file_url=%s",
             doc_id,
@@ -19808,7 +19847,7 @@ async def verify_employee_document(doc_id: str, user: dict = Depends(require_man
         return JSONResponse(
             status_code=500,
             content={
-                "detail": "Failed to verify document",
+                "detail": f"Failed to verify document: {root_message}",
                 "error_code": "DOCUMENT_VERIFY_UNHANDLED",
                 "doc_id": doc_id,
                 "employee_id": (doc or {}).get("employee_id"),
@@ -20364,17 +20403,9 @@ async def apply_verification_stamp(
             content_type = None
             
             try:
-                # For storage paths (osabea-care/...), use get_object
-                if file_url.startswith("osabea-care/") or not file_url.startswith(("http://", "https://")):
-                    original_bytes, content_type = get_object(file_url)
-                else:
-                    # For full URLs, use httpx
-                    import httpx
-                    async with httpx.AsyncClient(timeout=30.0) as client:
-                        response = await client.get(file_url)
-                        if response.status_code == 200:
-                            original_bytes = response.content
-                            content_type = response.headers.get("content-type", "").lower()
+                # Shared retriever handles local uploads, Supabase URLs/keys,
+                # and legacy object storage references.
+                original_bytes, content_type = await retrieve_file_bytes(file_url)
             except Exception as fetch_err:
                 logger.error(f"Failed to fetch original file for stamping {doc_id}: {fetch_err}")
                 original_bytes = None
@@ -20655,28 +20686,7 @@ async def verify_document_with_digital_stamp(
     # Try to get and stamp the file
     if file_url and file_extension in ["pdf", "jpg", "jpeg", "png"]:
         try:
-            # Determine if file is stored locally or remotely
-            if file_url.startswith(("http://", "https://")):
-                # Download from remote URL
-                response = requests.get(file_url, timeout=30)
-                if response.status_code == 200:
-                    file_bytes = response.content
-                else:
-                    file_bytes = None
-            elif file_url.startswith("/uploads/") or file_url.startswith("uploads/"):
-                # Local file storage - prepend /app to the path
-                clean_path = file_url if file_url.startswith("/") else f"/{file_url}"
-                local_path = f"/app{clean_path}"
-                logging.info(f"Looking for local file at: {local_path}")
-                if os.path.exists(local_path):
-                    with open(local_path, "rb") as f:
-                        file_bytes = f.read()
-                    logging.info(f"Loaded file bytes: {len(file_bytes)} bytes")
-                else:
-                    logging.warning(f"Local file not found at: {local_path}")
-                    file_bytes = None
-            else:
-                file_bytes = None
+            file_bytes, _file_content_type = await retrieve_file_bytes(file_url)
             
             if file_bytes:
                 # Apply stamp based on file type

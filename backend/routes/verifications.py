@@ -200,7 +200,8 @@ async def _stamp_document(
         return None
 
     try:
-        file_bytes = await download_file_from_storage(file_url)
+        from server import retrieve_file_bytes
+        file_bytes, _content_type = await retrieve_file_bytes(file_url)
         if not file_bytes:
             return None
 
@@ -732,125 +733,129 @@ async def verify_and_stamp_identity(
     """
     db = get_db()
     stamp_and_persist_document = get_stamp_and_persist_document()
-    
-    employee = await db.employees.find_one({"id": employee_id})
-    if not employee:
-        raise HTTPException(status_code=404, detail="Employee not found")
-    
-    checks = data.checks_confirmed
-    if not checks.get('document_genuine') or not checks.get('details_match'):
-        raise HTTPException(status_code=400, detail="All verification checks must be confirmed")
-    
-    document = await db.employee_documents.find_one({"id": data.document_id})
-    if not document:
-        raise HTTPException(status_code=404, detail="Document not found")
 
-    # Require checklist completion before final verification.
-    if not document.get("file_viewed"):
-        raise HTTPException(
-            status_code=400,
-            detail="Must complete review checklist before verification. Call /start-review endpoint first."
-        )
-    
-    now = datetime.now(timezone.utc).isoformat()
-    admin_name = user.get('name', 'Admin')
-    
-    # STEP 1: Record the verification check
-    verification_record = {
-        "method": data.method,
-        "checked_at": now,
-        "checked_by": user['user_id'],
-        "checked_by_name": admin_name,
-        "outcome": "verified",
-        "checks_confirmed": checks,
-        "stamp_type": data.stamp_type
-    }
-    
-    await db.employees.update_one(
-        {"id": employee_id},
-        {"$set": {
-            "identity_verification": verification_record,
-            "identity_verified": True,
-            "identity_verified_at": now,
-            "identity_verified_by": user['user_id'],
-            "updated_at": now
-        }}
-    )
-    
-    updated_document = await stamp_and_persist_document(
-        document,
-        {"user_id": user["user_id"], "name": admin_name, "email": user.get("email")},
-        db_handle=db,
-        status="approved",
-        review_status="approved",
-        stamp_type=data.stamp_type,
-    )
-    stamped_url = updated_document.get("stamped_file_url")
-
-    # Propagate verified=True to the identity requirement slot so the
-    # recruitment gate (which reads the slot) agrees with the compliance file.
-    await db.employee_documents.update_one(
-        {"employee_id": employee_id, "requirement_key": "identity"},
-        {"$set": {"verified": True, "verified_at": now,
-                  "verified_by_name": admin_name, "updated_at": now}}
-    )
-    
-    # STEP 3: Log audit trail
-    await log_audit_action(
-        user['user_id'],
-        "verify_and_stamp_identity",
-        "employee",
-        employee_id,
-        {
-            "document_id": data.document_id,
-            "method": data.method,
-            "stamp_type": data.stamp_type,
-            "checks_confirmed": checks
-        }
-    )
-    
-    # STEP 4: Auto-record the formal identity check — stamped document IS the proof
-    # This eliminates the manual "Record Check" step after stamping.
-    auto_check_record = None
     try:
-        # Map stamp method to check method
-        STAMP_TO_CHECK_METHOD = {
-            "original_seen_interview": "original_document_seen",
-            "original_seen_office": "original_document_seen",
-            "original_seen": "original_document_seen",
-            "copy_verified_video": "copy_verified",
-            "copy_verified": "copy_verified",
+        employee = await db.employees.find_one({"id": employee_id})
+        if not employee:
+            raise HTTPException(status_code=404, detail="Employee not found")
+
+        checks = data.checks_confirmed
+        if not checks.get('document_genuine') or not checks.get('details_match'):
+            raise HTTPException(status_code=400, detail="All verification checks must be confirmed")
+
+        document = await db.employee_documents.find_one({"id": data.document_id})
+        if not document:
+            raise HTTPException(status_code=404, detail="Document not found")
+
+        if not document.get("file_viewed"):
+            raise HTTPException(
+                status_code=400,
+                detail="Must complete review checklist before verification. Call /start-review endpoint first."
+            )
+
+        now = datetime.now(timezone.utc).isoformat()
+        admin_name = user.get('name', 'Admin')
+
+        verification_record = {
+            "method": data.method,
+            "checked_at": now,
+            "checked_by": user['user_id'],
+            "checked_by_name": admin_name,
+            "outcome": "verified",
+            "checks_confirmed": checks,
+            "stamp_type": data.stamp_type,
         }
-        check_method = STAMP_TO_CHECK_METHOD.get(data.method, "original_document_seen")
 
-        CheckRecordService = get_check_record_service()
-        auto_check_record = await CheckRecordService.record_identity_verification(
-            employee_id=employee_id,
-            data={
-                "method": check_method,
-                "checked_at": now,
-                "outcome": "verified",
-                "proof_document_id": data.document_id,
-                "notes": f"Auto-recorded from verify-and-stamp ({data.stamp_type}). Checks confirmed: document genuine, details match profile.",
-                "name_matches_application": True,
-                "photo_match_confirmed": True,
-            },
-            recorded_by=user['user_id']
+        await db.employees.update_one(
+            {"id": employee_id},
+            {"$set": {
+                "identity_verification": verification_record,
+                "identity_verified": True,
+                "identity_verified_at": now,
+                "identity_verified_by": user['user_id'],
+                "updated_at": now,
+            }}
         )
-        logger.info(f"Auto-recorded identity check {auto_check_record.get('id')} for employee {employee_id}")
-    except Exception as e:
-        logger.error(f"Failed to auto-record identity check for {employee_id}: {e}")
-        # Non-fatal — admin can still record manually
 
-    return {
-        "success": True,
-        "message": "Identity verified and stamped successfully",
-        "verification": verification_record,
-        "stamp_applied": stamped_url is not None,
-        "stamped_file_url": stamped_url,
-        "check_auto_recorded": auto_check_record is not None,
-        "check_record_id": auto_check_record.get("id") if auto_check_record else None
-    }
+        updated_document = await stamp_and_persist_document(
+            document,
+            {"user_id": user["user_id"], "name": admin_name, "email": user.get("email")},
+            db_handle=db,
+            status="approved",
+            review_status="approved",
+            stamp_type=data.stamp_type,
+        )
+        stamped_url = updated_document.get("stamped_file_url")
+
+        await db.employee_documents.update_one(
+            {"employee_id": employee_id, "requirement_key": "identity"},
+            {"$set": {
+                "verified": True,
+                "verified_at": now,
+                "verified_by_name": admin_name,
+                "updated_at": now,
+            }}
+        )
+
+        await log_audit_action(
+            user['user_id'],
+            "verify_and_stamp_identity",
+            "employee",
+            employee_id,
+            {
+                "document_id": data.document_id,
+                "method": data.method,
+                "stamp_type": data.stamp_type,
+                "checks_confirmed": checks,
+            }
+        )
+
+        auto_check_record = None
+        try:
+            stamp_to_method = {
+                "original_seen_interview": "original_document_seen",
+                "original_seen_office": "original_document_seen",
+                "original_seen": "original_document_seen",
+                "copy_verified_video": "copy_verified",
+                "copy_verified": "copy_verified",
+            }
+            check_method = stamp_to_method.get(data.method, "original_document_seen")
+            CheckRecordService = get_check_record_service()
+            auto_check_record = await CheckRecordService.record_identity_verification(
+                employee_id=employee_id,
+                data={
+                    "method": check_method,
+                    "checked_at": now,
+                    "outcome": "verified",
+                    "proof_document_id": data.document_id,
+                    "notes": f"Auto-recorded from verify-and-stamp ({data.stamp_type}). Checks confirmed: document genuine, details match profile.",
+                    "name_matches_application": True,
+                    "photo_match_confirmed": True,
+                },
+                recorded_by=user['user_id']
+            )
+            logger.info(f"Auto-recorded identity check {auto_check_record.get('id')} for employee {employee_id}")
+        except Exception as e:
+            logger.error(f"Failed to auto-record identity check for {employee_id}: {e}")
+
+        return {
+            "success": True,
+            "message": "Identity verified and stamped successfully",
+            "verification": verification_record,
+            "stamp_applied": stamped_url is not None,
+            "stamped_file_url": stamped_url,
+            "check_auto_recorded": auto_check_record is not None,
+            "check_record_id": auto_check_record.get("id") if auto_check_record else None,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(
+            "verify-and-stamp identity failed employee_id=%s document_id=%s",
+            employee_id,
+            data.document_id,
+        )
+        raise HTTPException(status_code=500, detail=f"Failed to verify document: {e}") from e
 
 
 @router.post("/employees/{employee_id}/address/verify-and-stamp")
@@ -869,136 +874,143 @@ async def verify_and_stamp_address(
     """
     db = get_db()
     stamp_and_persist_document = get_stamp_and_persist_document()
-    
-    employee = await db.employees.find_one({"id": employee_id})
-    if not employee:
-        raise HTTPException(status_code=404, detail="Employee not found")
-    
-    checks = data.checks_confirmed
-    if not checks.get('document_genuine') or not checks.get('details_match') or not checks.get('date_valid'):
-        raise HTTPException(status_code=400, detail="All verification checks must be confirmed")
-    
-    document = await db.employee_documents.find_one({"id": data.document_id})
-    if not document:
-        raise HTTPException(status_code=404, detail="Document not found")
 
-    # Require checklist completion before final verification.
-    if not document.get("file_viewed"):
-        raise HTTPException(
-            status_code=400,
-            detail="Must complete review checklist before verification. Call /start-review endpoint first."
-        )
-    
-    now = datetime.now(timezone.utc).isoformat()
-    admin_name = user.get('name', 'Admin')
-    
-    # STEP 1: Record the verification check
-    verification_record = {
-        "method": data.method,
-        "checked_at": now,
-        "checked_by": user['user_id'],
-        "checked_by_name": admin_name,
-        "outcome": "verified",
-        "checks_confirmed": checks,
-        "stamp_type": data.stamp_type,
-        "ai_validation": data.ai_validation
-    }
-    
-    # Get existing verified docs count
-    existing_verified = await db.employee_documents.count_documents({
-        "employee_id": employee_id,
-        "requirement_id": "proof_of_address",
-        "status": {"$in": ["verified", "approved", "accepted"]},
-        "id": {"$ne": data.document_id}
-    })
-    
-    total_verified = existing_verified + 1
-    is_complete = total_verified >= 2  # NHS requires 2 PoA documents
-    
-    await db.employees.update_one(
-        {"id": employee_id},
-        {"$set": {
-            "address_verification": verification_record,
-            "address_documents_verified_count": total_verified,
-            "address_verified": is_complete,
-            "address_verified_at": now if is_complete else None,
-            "address_verified_by": user['user_id'] if is_complete else None,
-            "updated_at": now
-        }}
-    )
-    
-    updated_document = await stamp_and_persist_document(
-        document,
-        {"user_id": user["user_id"], "name": admin_name, "email": user.get("email")},
-        db_handle=db,
-        status="approved",
-        review_status="approved",
-        stamp_type=data.stamp_type,
-    )
-    stamped_url = updated_document.get("stamped_file_url")
-
-    # Propagate verified=True to the proof_of_address requirement slot.
-    await db.employee_documents.update_one(
-        {"employee_id": employee_id, "requirement_key": "proof_of_address"},
-        {"$set": {"verified": True, "verified_at": now,
-                  "verified_by_name": admin_name, "updated_at": now}}
-    )
-    
-    # STEP 3: Log audit trail
-    await log_audit_action(
-        user['user_id'],
-        "verify_and_stamp_address",
-        "employee",
-        employee_id,
-        {
-            "document_id": data.document_id,
-            "method": data.method,
-            "stamp_type": data.stamp_type,
-            "checks_confirmed": checks,
-            "documents_verified_count": total_verified,
-            "is_complete": is_complete
-        }
-    )
-    
-    # STEP 4: Auto-record the formal address check — stamped document IS the proof
-    auto_check_record = None
     try:
-        STAMP_TO_CHECK_METHOD = {
-            "original_seen": "original_document_seen",
-            "copy_verified": "uploaded_copy_reviewed",
+        employee = await db.employees.find_one({"id": employee_id})
+        if not employee:
+            raise HTTPException(status_code=404, detail="Employee not found")
+
+        checks = data.checks_confirmed
+        if not checks.get('document_genuine') or not checks.get('details_match') or not checks.get('date_valid'):
+            raise HTTPException(status_code=400, detail="All verification checks must be confirmed")
+
+        document = await db.employee_documents.find_one({"id": data.document_id})
+        if not document:
+            raise HTTPException(status_code=404, detail="Document not found")
+
+        if not document.get("file_viewed"):
+            raise HTTPException(
+                status_code=400,
+                detail="Must complete review checklist before verification. Call /start-review endpoint first."
+            )
+
+        now = datetime.now(timezone.utc).isoformat()
+        admin_name = user.get('name', 'Admin')
+
+        verification_record = {
+            "method": data.method,
+            "checked_at": now,
+            "checked_by": user['user_id'],
+            "checked_by_name": admin_name,
+            "outcome": "verified",
+            "checks_confirmed": checks,
+            "stamp_type": data.stamp_type,
+            "ai_validation": data.ai_validation,
         }
-        check_method = STAMP_TO_CHECK_METHOD.get(data.method, "original_document_seen")
 
-        CheckRecordService = get_check_record_service()
-        auto_check_record = await CheckRecordService.record_address_verification(
-            employee_id=employee_id,
-            data={
-                "method": check_method,
-                "checked_at": now,
-                "outcome": "verified",
-                "proof_document_id": data.document_id,
-                "documents_received_count": total_verified,
-                "documents_required_count": 2,
-                "address_matches_application": True,
-                "notes": f"Auto-recorded from verify-and-stamp ({data.stamp_type}). Checks confirmed: document genuine, details match, date valid.",
-            },
-            recorded_by=user['user_id']
+        existing_verified = await db.employee_documents.count_documents({
+            "employee_id": employee_id,
+            "requirement_id": "proof_of_address",
+            "status": {"$in": ["verified", "approved", "accepted"]},
+            "id": {"$ne": data.document_id}
+        })
+
+        total_verified = existing_verified + 1
+        is_complete = total_verified >= 2
+
+        await db.employees.update_one(
+            {"id": employee_id},
+            {"$set": {
+                "address_verification": verification_record,
+                "address_documents_verified_count": total_verified,
+                "address_verified": is_complete,
+                "address_verified_at": now if is_complete else None,
+                "address_verified_by": user['user_id'] if is_complete else None,
+                "updated_at": now,
+            }}
         )
-        logger.info(f"Auto-recorded address check {auto_check_record.get('id')} for employee {employee_id}")
-    except Exception as e:
-        logger.error(f"Failed to auto-record address check for {employee_id}: {e}")
 
-    return {
-        "success": True,
-        "message": f"Address document verified and stamped. {total_verified}/2 documents verified.",
-        "verification": verification_record,
-        "stamp_applied": stamped_url is not None,
-        "stamped_file_url": stamped_url,
-        "documents_verified_count": total_verified,
-        "is_complete": is_complete,
-        "check_auto_recorded": auto_check_record is not None,
-        "check_record_id": auto_check_record.get("id") if auto_check_record else None
-    }
+        updated_document = await stamp_and_persist_document(
+            document,
+            {"user_id": user["user_id"], "name": admin_name, "email": user.get("email")},
+            db_handle=db,
+            status="approved",
+            review_status="approved",
+            stamp_type=data.stamp_type,
+        )
+        stamped_url = updated_document.get("stamped_file_url")
+
+        await db.employee_documents.update_one(
+            {"employee_id": employee_id, "requirement_key": "proof_of_address"},
+            {"$set": {
+                "verified": True,
+                "verified_at": now,
+                "verified_by_name": admin_name,
+                "updated_at": now,
+            }}
+        )
+
+        await log_audit_action(
+            user['user_id'],
+            "verify_and_stamp_address",
+            "employee",
+            employee_id,
+            {
+                "document_id": data.document_id,
+                "method": data.method,
+                "stamp_type": data.stamp_type,
+                "checks_confirmed": checks,
+                "documents_verified_count": total_verified,
+                "is_complete": is_complete,
+            }
+        )
+
+        auto_check_record = None
+        try:
+            stamp_to_method = {
+                "original_seen": "original_document_seen",
+                "copy_verified": "uploaded_copy_reviewed",
+            }
+            check_method = stamp_to_method.get(data.method, "original_document_seen")
+            CheckRecordService = get_check_record_service()
+            auto_check_record = await CheckRecordService.record_address_verification(
+                employee_id=employee_id,
+                data={
+                    "method": check_method,
+                    "checked_at": now,
+                    "outcome": "verified",
+                    "proof_document_id": data.document_id,
+                    "documents_received_count": total_verified,
+                    "documents_required_count": 2,
+                    "address_matches_application": True,
+                    "notes": f"Auto-recorded from verify-and-stamp ({data.stamp_type}). Checks confirmed: document genuine, details match, date valid.",
+                },
+                recorded_by=user['user_id']
+            )
+            logger.info(f"Auto-recorded address check {auto_check_record.get('id')} for employee {employee_id}")
+        except Exception as e:
+            logger.error(f"Failed to auto-record address check for {employee_id}: {e}")
+
+        return {
+            "success": True,
+            "message": f"Address document verified and stamped. {total_verified}/2 documents verified.",
+            "verification": verification_record,
+            "stamp_applied": stamped_url is not None,
+            "stamped_file_url": stamped_url,
+            "documents_verified_count": total_verified,
+            "is_complete": is_complete,
+            "check_auto_recorded": auto_check_record is not None,
+            "check_record_id": auto_check_record.get("id") if auto_check_record else None,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(
+            "verify-and-stamp address failed employee_id=%s document_id=%s",
+            employee_id,
+            data.document_id,
+        )
+        raise HTTPException(status_code=500, detail=f"Failed to verify document: {e}") from e
 
 
 # ==================== RTW STAMP-ALL ENDPOINT ====================

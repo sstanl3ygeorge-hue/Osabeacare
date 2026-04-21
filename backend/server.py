@@ -8728,15 +8728,20 @@ async def sign_contract(
         },
     )
     
+    _contract_url = (
+        contract_record.get("worker_signed_contract_pdf_url")
+        or contract_record.get("rendered_contract_pdf_url")
+        or contract_record.get("rendered_file_url")
+    )
     # Log audit
     await log_audit_action(f"worker_{employee_id}", "contract_signed", "employee", employee_id, {
         "signature_url": signature_url,
-        "contract_url": contract_url,
+        "contract_url": _contract_url,
         "signer_name": request.full_name,
         "signed_at": now.isoformat()
     })
-    
-    logger.info(f"Contract signed by employee {employee_id}: {contract_url}")
+
+    logger.info(f"Contract signed by employee {employee_id}: {_contract_url}")
     
     # Try auto-promotion after contract signature
     await try_auto_promote_worker(employee_id)

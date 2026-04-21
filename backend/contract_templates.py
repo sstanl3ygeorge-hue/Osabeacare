@@ -20,7 +20,7 @@ from typing import Optional, Dict, Any
 ZERO_HOUR_CONTRACT_TEMPLATE = {
     "id": "zero_hour_contract_v1",
     "name": "Zero Hour Contract of Employment",
-    "company": "iCubeDALPro Limited t/a iCareServicesGroup Limited",
+    "company": "Osabea Healthcare Solutions Ltd",
     "version": "1.0",
     "effective_date": "2024-01-01",
     
@@ -41,7 +41,7 @@ ZERO_HOUR_CONTRACT_TEMPLATE = {
             "title": "PARTIES",
             "content": """This contract of employment is made between:
 
-**The Employer:** iCubeDALPro Limited t/a iCareServicesGroup Limited (the "Company")
+**The Employer:** [COMPANY_NAME] (the "Company")
 Registered Office: [COMPANY_ADDRESS]
 Company Number: [COMPANY_NUMBER]
 
@@ -207,7 +207,7 @@ Address: [EMPLOYEE_ADDRESS]"""
 **Date:** [SIGNATURE_DATE]
 
 
-**For and on behalf of iCubeDALPro Limited t/a iCareServicesGroup Limited:**
+**For and on behalf of [COMPANY_NAME]:**
 
 **Authorised Signature:** _______________________________
 
@@ -246,6 +246,7 @@ def fill_contract_template(
     
     # Build replacement map from employee data
     replacements = {
+        "[COMPANY_NAME]": template.get("company", "Osabea Healthcare Solutions Ltd"),
         "[EMPLOYEE_NAME]": f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip() or "[Employee Name]",
         "[EMPLOYEE_ADDRESS]": _format_address(employee.get('address', {})) or "[Employee Address]",
         "[START_DATE]": _format_date(employee.get('start_date')) or "[Start Date]",

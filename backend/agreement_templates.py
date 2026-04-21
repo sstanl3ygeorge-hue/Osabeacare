@@ -65,7 +65,7 @@ ZERO_HOUR_CONTRACT_V1 = {
     "version_date": "2024-10-01",
     "description": "Statement of Main Terms of Employment for Zero Hour Contract workers",
     "company_name": "Osabea Healthcare Solutions Ltd",
-    "company_address": "Unit 12, Harrods Road, Harlow, CM19 5BJ",
+    "company_address": "Osabea Healthcare Solutions Ltd, Harlow",
     
     "sections": [
         {

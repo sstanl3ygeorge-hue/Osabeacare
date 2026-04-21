@@ -108,6 +108,7 @@ from supabase_storage import (
     # Note: is_supabase_storage_configured, upload_to_supabase, upload_file_to_supabase
     # are imported locally in functions to avoid shadowing issues
 )
+from stamp_persistence import assert_stamp_integrity, assert_verified_document_stamp_persisted
 
 # ==================== MODULAR ROUTERS ====================
 # Import refactored route modules
@@ -3028,8 +3029,7 @@ def create_verification_footer_elements(
 # ============================================================================
 
 async def _upload_stamped_file(stamped_bytes: bytes, filename: str, file_ext: str, employee_id: str) -> Optional[str]:
-    """Upload stamped file to cloud storage / Supabase / local fallback. Returns URL or None."""
-    stamped_url = None
+    """Upload stamped file to remote storage. Raises if persistence fails."""
     try:
         from emergentintegrations.cloud_storage import CloudStorage, StorageConfig  # pyright: ignore[reportMissingImports]
         CLOUD_STORAGE_URL = os.environ.get("CLOUD_STORAGE_URL")
@@ -3041,20 +3041,256 @@ async def _upload_stamped_file(stamped_bytes: bytes, filename: str, file_ext: st
                 file_data=stamped_bytes, file_name=filename,
                 folder=f"employees/{emp_code}/stamped", content_type=ct
             )
+            if not stamped_url:
+                raise Exception("Cloud storage returned no stamped file URL")
+            return stamped_url
         else:
             raise Exception("CLOUD_STORAGE_URL not configured")
-    except Exception:
+    except Exception as cloud_exc:
         try:
             from supabase_storage import upload_file_to_supabase
             ct = "application/pdf" if file_ext == "pdf" else f"image/{file_ext}"
             stamped_url = await upload_file_to_supabase(stamped_bytes, filename, ct)
-        except Exception:
-            local_path = f"/app/uploads/stamped/{filename}"
-            os.makedirs("/app/uploads/stamped", exist_ok=True)
-            with open(local_path, "wb") as f:
-                f.write(stamped_bytes)
-            stamped_url = f"/api/uploads/stamped/{filename}"
-    return stamped_url
+            if not stamped_url:
+                raise Exception("Supabase upload returned no stamped file URL")
+            return stamped_url
+        except Exception as supabase_exc:
+            raise Exception(
+                f"Remote stamped upload failed (cloud={cloud_exc}, supabase={supabase_exc})"
+            ) from supabase_exc
+
+
+def _default_verified_stamp_type_for_document(doc: dict) -> str:
+    """
+    Default legacy verification routes to a conservative visual stamp.
+
+    These routes verify already-uploaded evidence after review; they do not
+    capture enough method detail to distinguish "original seen" from
+    "copy verified", so we default to copy_verified instead of silently
+    approving without any stamped artifact.
+    """
+    return "copy_verified"
+
+
+def _document_type_label_for_stamp(doc: dict) -> str:
+    doc_type_labels = {
+        "right_to_work_evidence": "Right to Work",
+        "right_to_work": "Right to Work",
+        "right_to_work_documents": "Right to Work",
+        "right_to_work_check": "Right to Work",
+        "dbs_certificate": "DBS Certificate",
+        "dbs": "DBS Certificate",
+        "dbs_check": "DBS Certificate",
+        "dbs_status_check": "DBS Certificate",
+        "identity_evidence": "Identity Document",
+        "identity": "Identity Document",
+        "identity_documents": "Identity Document",
+        "passport": "Passport",
+        "proof_of_address_evidence": "Proof of Address",
+        "proof_of_address": "Proof of Address",
+        "training_certificate": "Training Certificate",
+        "qualification": "Qualification",
+        "professional_registration": "Professional Registration",
+    }
+    return doc_type_labels.get(doc.get("requirement_id", ""), doc.get("document_type", "Document"))
+
+
+async def _create_required_stamped_file_for_document(doc: dict, stamp_data: dict) -> str:
+    """
+    Burn and upload a visual verification stamp.
+
+    This fails closed: if the document is being marked verified/approved and we
+    cannot persist the stamped artifact, the caller must not continue.
+    """
+    file_url = doc.get("file_url") or doc.get("file_path")
+    if not file_url:
+        raise HTTPException(
+            status_code=500,
+            detail="Verification stamp persistence failed: document has no file_url",
+        )
+
+    try:
+        original_bytes, content_type = await retrieve_file_bytes(file_url)
+    except Exception as exc:
+        logger.error(f"Failed to fetch original file for stamping {doc.get('id')}: {exc}")
+        raise HTTPException(
+            status_code=500,
+            detail="Verification stamp persistence failed: could not read original file",
+        ) from exc
+
+    content_type = (content_type or "").lower()
+    is_image = any(img_type in content_type for img_type in ["image/", "png", "jpg", "jpeg", "webp", "bmp", "tiff"])
+    file_ext = "pdf"
+
+    try:
+        if "pdf" in content_type or file_url.lower().endswith(".pdf") or is_image:
+            from services.pdf_service import stamp_evidence_document
+            stamped_bytes = stamp_evidence_document(
+                document_bytes=original_bytes,
+                admin_name=stamp_data.get("verified_by_name", "Admin"),
+                verified_at=stamp_data.get("verified_at", ""),
+                verification_id=stamp_data.get("verification_id", ""),
+                is_image=is_image,
+            )
+        else:
+            converted_pdf = convert_document_to_pdf(original_bytes, content_type, file_url)
+            stamped_bytes = add_verification_stamp_to_pdf(converted_pdf, stamp_data) if converted_pdf else None
+    except Exception as exc:
+        logger.error(f"Failed to generate stamped document for {doc.get('id')}: {exc}")
+        stamped_bytes = None
+
+    if not stamped_bytes:
+        raise HTTPException(
+            status_code=500,
+            detail="Verification stamp persistence failed: unsupported document format",
+        )
+
+    stamped_filename = f"stamped_{doc.get('id')}_{uuid.uuid4().hex[:8]}.{file_ext}"
+    stamped_file_url = await _upload_stamped_file(
+        stamped_bytes,
+        stamped_filename,
+        file_ext,
+        doc.get("employee_id", "unknown"),
+    )
+
+    if not stamped_file_url:
+        raise HTTPException(
+            status_code=500,
+            detail="Verification stamp persistence failed: upload returned no stamped file URL",
+        )
+
+    return stamped_file_url
+
+
+async def stamp_and_persist_document(
+    document: dict,
+    verified_by_user: dict,
+    *,
+    db_handle=None,
+    status: str = "approved",
+    review_status: str = "approved",
+    stamp_type: Optional[str] = None,
+    extra_updates: Optional[dict] = None,
+) -> dict:
+    """
+    Single fail-closed verification persistence path.
+
+    A document cannot leave this function in a verified/approved state unless
+    the stamped artifact exists remotely and the stamp metadata is persisted.
+    """
+    if not document or not document.get("id"):
+        raise Exception("Stamping failed — cannot approve document")
+
+    db_ref = db_handle or db
+    if db_ref is None:
+        raise Exception("Stamping failed — cannot approve document")
+
+    now = datetime.now(timezone.utc).isoformat()
+
+    verifier_name = (
+        verified_by_user.get("name")
+        or f"{verified_by_user.get('first_name', '')} {verified_by_user.get('last_name', '')}".strip()
+        or verified_by_user.get("email")
+        or "Admin"
+    )
+    verifier_id = verified_by_user.get("user_id") or verified_by_user.get("id")
+    employee_name = document.get("employee_name") or document.get("employee_full_name")
+    if not employee_name and document.get("employee_id"):
+        employee = await db_ref.employees.find_one(
+            {"id": document.get("employee_id")},
+            {"_id": 0, "first_name": 1, "last_name": 1, "name": 1},
+        )
+        if employee:
+            employee_name = employee.get("name") or f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip()
+    employee_name = employee_name or "Unknown"
+
+    existing_stamp = document.get("verification_stamp")
+    existing_stamped_url = document.get("stamped_file_url")
+    already_stamped = bool(
+        existing_stamped_url
+        and existing_stamp not in (None, "", False)
+        and document.get("verification_stamp_at")
+        and document.get("verification_stamp_by_name")
+    )
+
+    effective_stamp_type = stamp_type or (
+        existing_stamp if isinstance(existing_stamp, str) and existing_stamp not in ("", "not_verified") else _default_verified_stamp_type_for_document(document)
+    )
+    stamp_info = VERIFICATION_STAMP_TYPES.get(effective_stamp_type, VERIFICATION_STAMP_TYPES[_default_verified_stamp_type_for_document(document)])
+    stamp_data = existing_stamp if isinstance(existing_stamp, dict) and existing_stamp else {
+        "stamp_type": effective_stamp_type,
+        "verified_by_name": verifier_name,
+        "verified_at": now,
+        "employee_name": employee_name,
+        "document_type": _document_type_label_for_stamp(document),
+        "verification_id": str(uuid.uuid4())[:12].upper(),
+    }
+
+    stamped_file_url = existing_stamped_url
+    if not already_stamped:
+        stamped_file_url = await _create_required_stamped_file_for_document(document, stamp_data)
+
+    update_data = {
+        "verification_stamp": stamp_data,
+        "verification_stamp_label": stamp_info["label"],
+        "verification_stamp_audit_text": stamp_info["audit_text"],
+        "verification_stamp_badge_color": stamp_info.get("badge_color"),
+        "verification_stamp_by": verifier_id,
+        "verification_stamp_by_name": verifier_name,
+        "verification_stamp_at": now,
+        "verified": True,
+        "verified_by": verifier_id,
+        "verified_by_name": verifier_name,
+        "verified_at": now,
+        "status": status,
+        "review_status": review_status,
+        "review_reason": None,
+        "reviewed_at": now,
+        "reviewed_by": verifier_id,
+        "reviewed_by_name": verifier_name,
+        "stamped_file_url": stamped_file_url,
+        "stamp_burned_at": now,
+        "updated_at": now,
+        "rejection_reason": None,
+        "amendment_reason": None,
+        "rejected_at": None,
+        "amendment_requested_at": None,
+        "rejected_by": None,
+        "rejected_by_name": None,
+    }
+    if extra_updates:
+        update_data.update(extra_updates)
+
+    try:
+        assert_stamp_integrity(
+            update_data,
+            stamped_file_url,
+            context=f"stamp_and_persist_document:{document.get('id')}",
+        )
+    except Exception as exc:
+        raise Exception("Stamping failed — cannot approve document") from exc
+
+    result = await db_ref.employee_documents.update_one(
+        {"id": document["id"]},
+        {"$set": update_data},
+    )
+    if result.matched_count != 1:
+        raise Exception("Stamping failed — cannot approve document")
+
+    updated = await db_ref.employee_documents.find_one({"id": document["id"]}, {"_id": 0})
+    if not updated:
+        raise Exception("Stamping failed — cannot approve document")
+
+    try:
+        assert_stamp_integrity(
+            updated,
+            updated.get("stamped_file_url"),
+            context=f"stamp_and_persist_document:{document.get('id')}:post_write",
+        )
+    except Exception as exc:
+        raise Exception("Stamping failed — cannot approve document") from exc
+
+    return updated
 
 
 def add_verification_stamp_to_pdf(input_pdf_bytes: bytes, stamp_data: dict) -> bytes:
@@ -18050,28 +18286,24 @@ async def verify_requirement(
             "right_to_work_evidence": ["right_to_work", "identity_rtw", "right_to_work_documents", "right_to_work_evidence"],
         }
         req_ids_to_search = legacy_mapping.get(requirement_id, [requirement_id])
-        
-        await db.employee_documents.update_many(
+        docs_to_verify = await db.employee_documents.find(
             {"employee_id": employee_id, "requirement_id": {"$in": req_ids_to_search}},
-            {"$set": {
-                "verified": True,
-                "status": "approved",
-                "verified_by": user['user_id'],
-                "verified_by_name": verified_by_name,
-                "verified_at": now,
-                "verification_notes": verification_notes,
-                "updated_at": now,
-                # Clear stale rejection/amendment metadata
-                "rejection_reason": None,
-                "amendment_reason": None,
-                "rejected_at": None,
-                "amendment_requested_at": None,
-                "rejected_by": None,
-                "rejected_by_name": None,
-                "review_status": "approved",
-                "review_reason": None,
-            }}
-        )
+            {"_id": 0}
+        ).to_list(length=200)
+
+        for doc in docs_to_verify:
+            await stamp_and_persist_document(
+                doc,
+                {
+                    "user_id": user["user_id"],
+                    "name": verified_by_name,
+                    "email": user.get("email"),
+                },
+                db_handle=db,
+                status="approved",
+                review_status="approved",
+                extra_updates={"verification_notes": verification_notes},
+            )
     
     await log_audit_action(user['user_id'], "document_verified", "requirement", requirement_id,
                            {
@@ -19503,33 +19735,24 @@ async def verify_employee_document(doc_id: str, user: dict = Depends(require_man
         email = user['email']
         name_part = email.split('@')[0]
         verifier_name = ' '.join(word.capitalize() for word in name_part.replace('.', ' ').replace('_', ' ').split())
-    
-    update_data = {
-        "verified": True,
-        "verified_by": user['user_id'],
-        "verified_by_name": verifier_name,  # P0 FIX: Store name, not email
-        "verified_at": now,
-        "status": "approved",  # Ensure status is approved
-        # Clear stale rejection/amendment metadata
-        "rejection_reason": None,
-        "amendment_reason": None,
-        "rejected_at": None,
-        "amendment_requested_at": None,
-        "rejected_by": None,
-        "rejected_by_name": None,
-        "review_status": "approved",
-        "review_reason": None,
-    }
-    
-    await db.employee_documents.update_one({"id": doc_id}, {"$set": update_data})
+
+    updated_doc = await stamp_and_persist_document(
+        doc,
+        {
+            "user_id": user["user_id"],
+            "name": verifier_name,
+            "email": user.get("email"),
+        },
+        db_handle=db,
+        status="approved",
+        review_status="approved",
+    )
     await log_audit_action(user['user_id'], "verify_document", "employee_document", doc_id, {
         "verified": True,
         "verified_by_name": verifier_name,
         "document_type": doc.get("requirement_id"),
         "employee_id": doc.get("employee_id")
     })
-    
-    updated_doc = await db.employee_documents.find_one({"id": doc_id}, {"_id": 0})
     
     return EmployeeDocumentResponse(**updated_doc)
 
@@ -20179,6 +20402,16 @@ async def apply_verification_stamp(
         except Exception as e:
             stamp_burn_error = str(e)
             logger.error(f"Failed to burn visual stamp into document {doc_id}: {e}")
+
+    try:
+        assert_verified_document_stamp_persisted(
+            update_data,
+            stamped_file_url,
+            context=f"employee-documents/{doc_id}/verification-stamp",
+        )
+    except ValueError as exc:
+        logger.error(f"{exc}; stamp_burn_error={stamp_burn_error}")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
     
     await db.employee_documents.update_one({"id": doc_id}, {"$set": update_data})
     await log_audit_action(user['user_id'], "apply_verification_stamp", "employee_document", doc_id, {
@@ -20745,34 +20978,58 @@ async def verify_document_with_evidence(
     # ======================================================================
     # Update document record
     # ======================================================================
-    update_data = {
-        "verification_stamp": stamp_type,
-        "verification_stamp_label": stamp_info["label"],
-        "verification_stamp_audit_text": stamp_info["audit_text"],
-        "verification_stamp_badge_color": stamp_info.get("badge_color", "green"),
-        "verification_outcome": outcome,
-        "verification_proof_url": proof_url,
-        "verification_reference_number": reference_number,
-        "verification_notes": notes,
-        "verification_id": verification_id,
-        "verified": outcome in ['verified', 'information_present'],
-        "verified_by": user['user_id'],
-        "verified_by_name": verifier_name,
-        "verified_at": now,
-        "status": status_map[outcome],
-        "verification_stamp_by": user['user_id'],
-        "verification_stamp_by_name": verifier_name,
-        "verification_stamp_at": now,
-        "review_status": "approved" if outcome != 'not_verified' else "rejected",
-    }
-    if stamped_file_url:
-        update_data["stamped_file_url"] = stamped_file_url
-        update_data["stamp_burned_at"] = now
-    if stamped_proof_url:
-        update_data["stamped_proof_url"] = stamped_proof_url
-        update_data["proof_stamp_burned_at"] = now
-    
-    await db.employee_documents.update_one({"id": doc['id']}, {"$set": update_data})
+    if outcome == "not_verified":
+        update_data = {
+            "verification_stamp": stamp_type,
+            "verification_stamp_label": stamp_info["label"],
+            "verification_stamp_audit_text": stamp_info["audit_text"],
+            "verification_stamp_badge_color": stamp_info.get("badge_color", "green"),
+            "verification_outcome": outcome,
+            "verification_proof_url": proof_url,
+            "verification_reference_number": reference_number,
+            "verification_notes": notes,
+            "verification_id": verification_id,
+            "verified": False,
+            "verified_by": user['user_id'],
+            "verified_by_name": verifier_name,
+            "verified_at": now,
+            "status": status_map[outcome],
+            "verification_stamp_by": user['user_id'],
+            "verification_stamp_by_name": verifier_name,
+            "verification_stamp_at": now,
+            "review_status": "rejected",
+        }
+        if stamped_proof_url:
+            update_data["stamped_proof_url"] = stamped_proof_url
+            update_data["proof_stamp_burned_at"] = now
+        await db.employee_documents.update_one({"id": doc['id']}, {"$set": update_data})
+        updated_doc = await db.employee_documents.find_one({"id": doc['id']}, {"_id": 0})
+    else:
+        updated_doc = await stamp_and_persist_document(
+            doc,
+            {
+                "user_id": user["user_id"],
+                "name": verifier_name,
+                "email": user.get("email"),
+            },
+            db_handle=db,
+            status=status_map[outcome],
+            review_status="approved",
+            stamp_type=stamp_type,
+            extra_updates={
+                "verification_outcome": outcome,
+                "verification_proof_url": proof_url,
+                "verification_reference_number": reference_number,
+                "verification_notes": notes,
+                "verification_id": verification_id,
+                **(
+                    {
+                        "stamped_proof_url": stamped_proof_url,
+                        "proof_stamp_burned_at": now,
+                    } if stamped_proof_url else {}
+                ),
+            },
+        )
     
     # Log to audit trail with full details
     await log_audit_action(
@@ -20931,37 +21188,37 @@ async def verify_all_documents_in_requirement(employee_id: str, requirement_id: 
                 detail="DBS recheck is flagged as required but no recheck due date has been set."
             )
 
-    # Find all documents for this requirement
-    result = await db.employee_documents.update_many(
+    docs_to_verify = await db.employee_documents.find(
         {
             "employee_id": employee_id,
             "requirement_id": {"$in": req_ids_to_search},
             "status": {"$in": ["uploaded", "approved"]}
         },
-        {"$set": {
-            "verified": True,
-            "verified_by": user['user_id'],
-            "verified_by_name": verifier_name,
-            "verified_at": now,
-            "status": "approved",
-            # Clear stale rejection/amendment metadata
-            "rejection_reason": None,
-            "amendment_reason": None,
-            "rejected_at": None,
-            "amendment_requested_at": None,
-            "rejected_by": None,
-            "rejected_by_name": None,
-            "review_status": "approved",
-            "review_reason": None,
-        }}
-    )
+        {"_id": 0}
+    ).to_list(length=200)
+
+    verified_count = 0
+
+    for doc in docs_to_verify:
+        await stamp_and_persist_document(
+            doc,
+            {
+                "user_id": user["user_id"],
+                "name": verifier_name,
+                "email": user.get("email"),
+            },
+            db_handle=db,
+            status="approved",
+            review_status="approved",
+        )
+        verified_count += 1
     
     await log_audit_action(user['user_id'], "verify_requirement", "requirement", requirement_id, {
         "employee_id": employee_id,
-        "documents_verified": result.modified_count
+        "documents_verified": verified_count
     })
     
-    return {"message": f"Verified {result.modified_count} documents", "verified_count": result.modified_count}
+    return {"message": f"Verified {verified_count} documents", "verified_count": verified_count}
 
 @api_router.delete("/employee-documents/{doc_id}")
 async def delete_employee_document(doc_id: str, user: dict = Depends(require_manager_or_admin)):

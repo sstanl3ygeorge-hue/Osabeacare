@@ -22,7 +22,6 @@ from typing import Optional, List
 
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
-
 from .dependencies import (
     get_db,
     get_current_user,
@@ -154,6 +153,83 @@ def get_storage_helpers():
     """Lazy import of storage helpers from server.py"""
     from server import download_file_from_storage, upload_file_to_storage, add_verification_stamp_to_pdf
     return download_file_from_storage, upload_file_to_storage, add_verification_stamp_to_pdf
+
+
+def get_stamp_and_persist_document():
+    """Lazy import shared fail-closed stamp helper from server.py."""
+    from server import stamp_and_persist_document
+    return stamp_and_persist_document
+
+
+_IMAGE_MIME_TYPES = frozenset({
+    "image/jpeg", "image/jpg", "image/png", "image/gif",
+    "image/webp", "image/bmp", "image/tiff",
+})
+_IMAGE_EXTENSIONS = frozenset({
+    ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tiff",
+})
+
+
+def _is_image_file(doc: dict) -> bool:
+    """Return True if the document is an image (not a PDF)."""
+    file_type = (doc.get("file_type") or "").lower()
+    if file_type in _IMAGE_MIME_TYPES:
+        return True
+    file_name = (doc.get("file_name") or doc.get("original_filename") or "").lower()
+    return any(file_name.endswith(ext) for ext in _IMAGE_EXTENSIONS)
+
+
+async def _stamp_document(
+    doc: dict,
+    stamp_data: dict,
+    folder: str,
+    download_file_from_storage,
+    upload_file_to_storage,
+    add_verification_stamp_to_pdf,
+) -> str | None:
+    """
+    Download, stamp, and re-upload a document (PDF or image).
+
+    Returns the stamped file URL, or None if stamping failed or no file exists.
+    Handles images via stamp_evidence_document so JPGs/PNGs are never skipped.
+    """
+    from services.pdf_service import stamp_evidence_document
+
+    file_url = doc.get("file_url")
+    if not file_url:
+        return None
+
+    try:
+        file_bytes = await download_file_from_storage(file_url)
+        if not file_bytes:
+            return None
+
+        is_image = _is_image_file(doc)
+
+        if is_image:
+            # stamp_evidence_document handles image → stamped PDF conversion
+            stamped_bytes = stamp_evidence_document(
+                document_bytes=file_bytes,
+                admin_name=stamp_data.get("verified_by_name", "Admin"),
+                verified_at=stamp_data.get("verified_at", ""),
+                verification_id=stamp_data.get("verification_id", ""),
+                is_image=True,
+            )
+            original_name = doc.get("file_name") or "document"
+            # Always upload as PDF (stamped images are converted to PDF)
+            base_name = original_name.rsplit(".", 1)[0] if "." in original_name else original_name
+            stamped_filename = f"stamped_{base_name}.pdf"
+        else:
+            # PDF path — use existing helper
+            stamped_bytes = add_verification_stamp_to_pdf(file_bytes, stamp_data)
+            stamped_filename = f"stamped_{doc.get('file_name', 'document.pdf')}"
+
+        return await upload_file_to_storage(stamped_bytes, stamped_filename, folder)
+
+    except Exception as e:
+        import logging
+        logging.error(f"_stamp_document failed for {doc.get('id')}: {e}")
+        return None
 
 
 # ==================== RTW EXTRACTION ENDPOINT ====================
@@ -655,7 +731,7 @@ async def verify_and_stamp_identity(
     - Complete audit trail for NHS/CQC compliance
     """
     db = get_db()
-    download_file_from_storage, upload_file_to_storage, add_verification_stamp_to_pdf = get_storage_helpers()
+    stamp_and_persist_document = get_stamp_and_persist_document()
     
     employee = await db.employees.find_one({"id": employee_id})
     if not employee:
@@ -701,65 +777,15 @@ async def verify_and_stamp_identity(
         }}
     )
     
-    # STEP 2: Apply the visual stamp to the document
-    stamp_data = {
-        "stamp_type": data.stamp_type,
-        "document_type": "Identity Document",
-        "employee_name": employee.get('name') or f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
-        "verified_by_name": admin_name,
-        "verified_at": now,
-        "verification_id": str(uuid.uuid4())[:8].upper()
-    }
-    
-    stamped_url = None
-
-    try:
-        file_url = document.get('file_url')
-        if file_url:
-            file_bytes = await download_file_from_storage(file_url)
-            if file_bytes and document.get('file_type') == 'application/pdf':
-                stamped_bytes = add_verification_stamp_to_pdf(file_bytes, stamp_data)
-                stamped_filename = f"stamped_{document.get('file_name', 'document.pdf')}"
-                stamped_url = await upload_file_to_storage(
-                    stamped_bytes, 
-                    stamped_filename, 
-                    f"employees/{employee_id}/identity"
-                )
-    except Exception as e:
-        logging.error(f"Failed to apply stamp to identity document: {e}")
-
-    document_update = {
-        "status": "approved",
-        "verified": True,
-        "verified_at": now,
-        "verified_by": user['user_id'],
-        "verified_by_name": admin_name,
-        "review_status": "approved",
-        "review_reason": None,
-        "reviewed_at": now,
-        "reviewed_by": user['user_id'],
-        "reviewed_by_name": admin_name,
-        "rejection_reason": None,
-        "amendment_reason": None,
-        "rejected_at": None,
-        "amendment_requested_at": None,
-        "rejected_by": None,
-        "rejected_by_name": None,
-        "updated_at": now
-    }
-
-    if stamped_url:
-        document_update["stamped_file_url"] = stamped_url
-        document_update["verification_stamp"] = stamp_data
-    # Always write flat stamp metadata so frontend can read without unpacking the dict
-    document_update["verification_stamp_by_name"] = admin_name
-    document_update["verification_stamp_at"] = now
-    document_update["verification_stamp_label"] = "Verified copy"
-
-    await db.employee_documents.update_one(
-        {"id": data.document_id},
-        {"$set": document_update}
+    updated_document = await stamp_and_persist_document(
+        document,
+        {"user_id": user["user_id"], "name": admin_name, "email": user.get("email")},
+        db_handle=db,
+        status="approved",
+        review_status="approved",
+        stamp_type=data.stamp_type,
     )
+    stamped_url = updated_document.get("stamped_file_url")
 
     # Propagate verified=True to the identity requirement slot so the
     # recruitment gate (which reads the slot) agrees with the compliance file.
@@ -842,7 +868,7 @@ async def verify_and_stamp_address(
     - Stamp applied automatically
     """
     db = get_db()
-    download_file_from_storage, upload_file_to_storage, add_verification_stamp_to_pdf = get_storage_helpers()
+    stamp_and_persist_document = get_stamp_and_persist_document()
     
     employee = await db.employees.find_one({"id": employee_id})
     if not employee:
@@ -901,65 +927,15 @@ async def verify_and_stamp_address(
         }}
     )
     
-    # STEP 2: Apply the visual stamp to the document
-    stamp_data = {
-        "stamp_type": data.stamp_type,
-        "document_type": "Proof of Address",
-        "employee_name": employee.get('name') or f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
-        "verified_by_name": admin_name,
-        "verified_at": now,
-        "verification_id": str(uuid.uuid4())[:8].upper()
-    }
-    
-    stamped_url = None
-
-    try:
-        file_url = document.get('file_url')
-        if file_url:
-            file_bytes = await download_file_from_storage(file_url)
-            if file_bytes and document.get('file_type') == 'application/pdf':
-                stamped_bytes = add_verification_stamp_to_pdf(file_bytes, stamp_data)
-                stamped_filename = f"stamped_{document.get('file_name', 'document.pdf')}"
-                stamped_url = await upload_file_to_storage(
-                    stamped_bytes, 
-                    stamped_filename, 
-                    f"employees/{employee_id}/address"
-                )
-    except Exception as e:
-        logging.error(f"Failed to apply stamp to address document: {e}")
-
-    document_update = {
-        "status": "approved",
-        "verified": True,
-        "verified_at": now,
-        "verified_by": user['user_id'],
-        "verified_by_name": admin_name,
-        "review_status": "approved",
-        "review_reason": None,
-        "reviewed_at": now,
-        "reviewed_by": user['user_id'],
-        "reviewed_by_name": admin_name,
-        "rejection_reason": None,
-        "amendment_reason": None,
-        "rejected_at": None,
-        "amendment_requested_at": None,
-        "rejected_by": None,
-        "rejected_by_name": None,
-        "updated_at": now
-    }
-
-    if stamped_url:
-        document_update["stamped_file_url"] = stamped_url
-        document_update["verification_stamp"] = stamp_data
-    # Always write flat stamp metadata so frontend can read without unpacking the dict
-    document_update["verification_stamp_by_name"] = admin_name
-    document_update["verification_stamp_at"] = now
-    document_update["verification_stamp_label"] = "Verified copy"
-
-    await db.employee_documents.update_one(
-        {"id": data.document_id},
-        {"$set": document_update}
+    updated_document = await stamp_and_persist_document(
+        document,
+        {"user_id": user["user_id"], "name": admin_name, "email": user.get("email")},
+        db_handle=db,
+        status="approved",
+        review_status="approved",
+        stamp_type=data.stamp_type,
     )
+    stamped_url = updated_document.get("stamped_file_url")
 
     # Propagate verified=True to the proof_of_address requirement slot.
     await db.employee_documents.update_one(
@@ -1047,7 +1023,7 @@ async def stamp_all_rtw_documents(
     Both documents get the same Verification ID for audit linking.
     """
     db = get_db()
-    download_file_from_storage, upload_file_to_storage, add_verification_stamp_to_pdf = get_storage_helpers()
+    stamp_and_persist_document = get_stamp_and_persist_document()
     
     employee = await db.employees.find_one({"id": employee_id})
     if not employee:
@@ -1068,58 +1044,27 @@ async def stamp_all_rtw_documents(
             if not document:
                 errors.append(f"Document {doc_id} not found")
                 continue
-            
-            stamp_data = {
-                "stamp_type": "original_seen",
-                "document_type": "Right to Work Evidence",
-                "employee_name": employee_name,
-                "verified_by_name": admin_name,
-                "verified_at": now,
-                "verification_id": verification_id
-            }
-            
-            file_url = document.get('file_url')
-            stamped_url = None
-            
-            if file_url:
-                try:
-                    file_bytes = await download_file_from_storage(file_url)
-                    if file_bytes and document.get('file_type') == 'application/pdf':
-                        stamped_bytes = add_verification_stamp_to_pdf(file_bytes, stamp_data)
-                        stamped_filename = f"stamped_{document.get('file_name', 'document.pdf')}"
-                        stamped_url = await upload_file_to_storage(
-                            stamped_bytes,
-                            stamped_filename,
-                            f"employees/{employee_id}/rtw"
-                        )
-                except Exception as e:
-                    logging.error(f"Failed to stamp RTW evidence {doc_id}: {e}")
-            
-            await db.employee_documents.update_one(
-                {"id": doc_id},
-                {"$set": {
-                    "stamped_file_url": stamped_url,
-                    "verification_stamp": stamp_data,
-                    "verification_stamp_by_name": admin_name,
-                    "verification_stamp_at": now,
-                    "verification_stamp_label": "Verified copy",
-                    "status": "verified",
-                    "verified": True,
-                    "verified_at": now,
-                    "verified_by": user['user_id'],
-                    "review_status": "verified",
-                    "review_reason": None,
-                    "reviewed_at": now,
-                    "reviewed_by": user['user_id'],
-                    "reviewed_by_name": admin_name,
-                    "updated_at": now
-                }}
+            await stamp_and_persist_document(
+                document,
+                {"user_id": user["user_id"], "name": admin_name, "email": user.get("email")},
+                db_handle=db,
+                status="verified",
+                review_status="verified",
+                stamp_type="original_seen",
             )
             stamped_count += 1
-            
         except Exception as e:
             logging.error(f"Error stamping evidence {doc_id}: {e}")
             errors.append(f"Failed to stamp {doc_id}")
+
+    if errors:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "message": "One or more Right to Work evidence documents could not be stamped and were not finalized.",
+                "errors": errors,
+            },
+        )
     
     # STEP 2: Stamp verification proof document (if exists and requested)
     if data.stamp_verification_proof:
@@ -1135,46 +1080,21 @@ async def stamp_all_rtw_documents(
                 try:
                     proof_doc = await db.employee_documents.find_one({"id": proof_doc_id})
                     if proof_doc and not proof_doc.get('verification_stamp'):
-                        stamp_data = {
-                            "stamp_type": "online_check",
-                            "document_type": "RTW Verification Proof",
-                            "employee_name": employee_name,
-                            "verified_by_name": admin_name,
-                            "verified_at": now,
-                            "verification_id": verification_id
-                        }
-                        
-                        file_url = proof_doc.get('file_url')
-                        stamped_url = None
-                        
-                        if file_url:
-                            try:
-                                file_bytes = await download_file_from_storage(file_url)
-                                if file_bytes and proof_doc.get('file_type') == 'application/pdf':
-                                    stamped_bytes = add_verification_stamp_to_pdf(file_bytes, stamp_data)
-                                    stamped_filename = f"stamped_{proof_doc.get('file_name', 'proof.pdf')}"
-                                    stamped_url = await upload_file_to_storage(
-                                        stamped_bytes,
-                                        stamped_filename,
-                                        f"employees/{employee_id}/rtw"
-                                    )
-                            except Exception as e:
-                                logging.error(f"Failed to stamp RTW proof: {e}")
-                        
-                        await db.employee_documents.update_one(
-                            {"id": proof_doc_id},
-                            {"$set": {
-                                "stamped_file_url": stamped_url,
-                                "verification_stamp": stamp_data,
-                                "verification_stamp_by_name": admin_name,
-                                "verification_stamp_at": now,
-                                "verification_stamp_label": "Verified copy",
-                                "updated_at": now
-                            }}
+                        await stamp_and_persist_document(
+                            proof_doc,
+                            {"user_id": user["user_id"], "name": admin_name, "email": user.get("email")},
+                            db_handle=db,
+                            status="verified",
+                            review_status="verified",
+                            stamp_type="online_check",
                         )
                         stamped_count += 1
                 except Exception as e:
                     logging.error(f"Error stamping verification proof: {e}")
+                    raise HTTPException(
+                        status_code=500,
+                        detail="Right to Work verification proof could not be stamped.",
+                    ) from e
     
     # STEP 3: Update employee RTW status
     await db.employees.update_one(

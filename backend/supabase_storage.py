@@ -47,11 +47,12 @@ async def upload_to_supabase(
     if not is_supabase_storage_configured():
         raise Exception("Supabase storage not configured. Set SUPABASE_URL and SUPABASE_SERVICE_KEY.")
     
-    # Generate unique path
+    # Generate unique path, ensuring folder does not already include the bucket name
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     safe_filename = filename.replace(" ", "_").replace("/", "_")
-    storage_path = f"{folder}/{timestamp}_{safe_filename}"
-    
+    clean_folder = _normalize_storage_path(folder, bucket)
+    storage_path = f"{clean_folder}/{timestamp}_{safe_filename}"
+
     # Upload URL
     upload_url = f"{SUPABASE_URL}/storage/v1/object/{bucket}/{storage_path}"
     
@@ -85,7 +86,7 @@ async def upload_to_supabase(
             logger.error(f"Supabase upload failed: {response.status_code} - {error_detail}")
             raise Exception(f"Upload failed: {response.status_code} - {error_detail}")
     
-    # Generate public URL
+    # Generate public URL (storage_path is already normalised above)
     public_url = f"{SUPABASE_URL}/storage/v1/object/public/{bucket}/{storage_path}"
     
     logger.info(f"Uploaded to Supabase: {storage_path}")
@@ -132,9 +133,25 @@ async def delete_from_supabase(
             return False
 
 
+def _normalize_storage_path(path: str, bucket: str) -> str:
+    """Strip any leading bucket-name prefix so paths are never doubled.
+
+    Stored paths from older code were sometimes saved as
+    ``documents/employees/…`` (bucket name included) instead of just
+    ``employees/…``.  Joining them naively produces
+    ``/object/public/documents/documents/employees/…``.
+    """
+    prefix = f"{bucket}/"
+    if path.startswith(prefix):
+        path = path[len(prefix):]
+    # Also strip a leading slash that would create an empty path segment
+    return path.lstrip("/")
+
+
 def get_supabase_public_url(path: str, bucket: str = DEFAULT_BUCKET) -> str:
     """Get the public URL for a stored file."""
-    return f"{SUPABASE_URL}/storage/v1/object/public/{bucket}/{path}"
+    clean_path = _normalize_storage_path(path, bucket)
+    return f"{SUPABASE_URL}/storage/v1/object/public/{bucket}/{clean_path}"
 
 
 

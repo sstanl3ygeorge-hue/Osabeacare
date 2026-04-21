@@ -16,7 +16,6 @@ Requirements:
 import os
 import sys
 import asyncio
-import httpx
 from datetime import datetime, timezone
 from motor.motor_asyncio import AsyncIOMotorClient
 from dotenv import load_dotenv
@@ -26,7 +25,9 @@ load_dotenv()
 
 # Import stamp functionality
 from services.pdf_service import stamp_evidence_document
-from supabase_storage import upload_to_supabase, is_supabase_storage_configured
+from server import retrieve_file_bytes
+from stamp_persistence import build_missing_stamp_backfill_query
+from supabase_storage import is_supabase_storage_configured, upload_file_to_storage
 
 # MongoDB connection
 MONGO_URL = os.environ.get("MONGO_URL")
@@ -42,23 +43,12 @@ results = {
     "errors": []
 }
 
-
-async def download_file(url: str) -> bytes:
-    """Download file from URL."""
-    async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
-        response = await client.get(url)
-        if response.status_code == 200:
-            return response.content
-        else:
-            raise Exception(f"Download failed: {response.status_code}")
-
-
 async def process_document(db, doc: dict) -> bool:
     """Process a single document - download, stamp, upload, update."""
     doc_id = doc.get("id")
     employee_id = doc.get("employee_id")
     requirement_id = doc.get("requirement_id", "unknown")
-    file_url = doc.get("file_url")
+    file_url = doc.get("file_url") or doc.get("file_path")
     
     print(f"\n  Processing: {requirement_id} for employee {employee_id[:8]}...")
     
@@ -75,25 +65,32 @@ async def process_document(db, doc: dict) -> bool:
         return False
     
     try:
-        # Get verification info
-        verification_stamp = doc.get("verification_stamp", {})
-        if isinstance(verification_stamp, str):
-            # Old format - just a status string
-            admin_name = "System Admin"
-            verified_at = doc.get("verified_at", doc.get("updated_at", datetime.now(timezone.utc).isoformat()))
-            verification_id = doc_id[:12]
-        else:
-            admin_name = verification_stamp.get("verified_by_name", "System Admin")
-            verified_at = verification_stamp.get("verified_at", doc.get("updated_at"))
+        # Get verification info — handle all legacy shapes:
+        # - dict (current): has verified_by_name, verified_at, verification_id
+        # - string (old): just a status string like "verified"
+        # - None/missing: image-verified docs where stamp was never written
+        verification_stamp = doc.get("verification_stamp") or {}
+        if isinstance(verification_stamp, dict) and verification_stamp:
+            admin_name = verification_stamp.get("verified_by_name") or doc.get("verification_stamp_by_name") or "System Admin"
+            verified_at = verification_stamp.get("verified_at") or doc.get("verified_at") or doc.get("updated_at") or datetime.now(timezone.utc).isoformat()
             verification_id = verification_stamp.get("verification_id", doc_id[:12])
+        else:
+            # String status or None — fall back to flat fields or document fields
+            admin_name = doc.get("verification_stamp_by_name") or doc.get("reviewed_by_name") or doc.get("verified_by_name") or "System Admin"
+            verified_at = doc.get("verified_at") or doc.get("reviewed_at") or doc.get("updated_at") or datetime.now(timezone.utc).isoformat()
+            verification_id = doc_id[:12]
         
         # Download original file
         print(f"    ↓ Downloading from: {file_url[:60]}...")
-        file_bytes = await download_file(file_url)
+        file_bytes, content_type = await retrieve_file_bytes(file_url)
         print(f"    ✓ Downloaded: {len(file_bytes)} bytes")
         
         # Determine if it's an image or PDF
-        is_image = any(file_url.lower().endswith(ext) for ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp'])
+        normalized_ct = (content_type or "").lower()
+        is_image = (
+            any(file_url.lower().endswith(ext) for ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tiff'])
+            or normalized_ct.startswith("image/")
+        )
         
         # Apply stamp
         print(f"    🔨 Burning stamp...")
@@ -114,12 +111,13 @@ async def process_document(db, doc: dict) -> bool:
             original_filename = original_filename.rsplit('.', 1)[0] + '_stamped.pdf'
         
         print(f"    ↑ Uploading to Supabase as: {original_filename}")
-        upload_result = await upload_to_supabase(
+        stamped_url = await upload_file_to_storage(
             file_content=stamped_bytes,
             filename=original_filename,
             folder=f"stamped/{employee_id}"
         )
-        stamped_url = upload_result.get("url")
+        if not stamped_url:
+            raise Exception("Shared storage helper returned no stamped_file_url")
         print(f"    ✓ Uploaded: {stamped_url[:60]}...")
         
         # Update database record
@@ -128,6 +126,14 @@ async def process_document(db, doc: dict) -> bool:
             {
                 "$set": {
                     "stamped_file_url": stamped_url,
+                    "verification_stamp": doc.get("verification_stamp") or {
+                        "stamp_type": "copy_verified",
+                        "document_type": requirement_id,
+                        "verified_by_name": admin_name,
+                        "verified_at": verified_at,
+                        "verification_id": verification_id,
+                        "migrated_backfill": True,
+                    },
                     "verification_stamp_by_name": admin_name,
                     "verification_stamp_at": verified_at,
                     "verification_stamp_label": "Verified copy",
@@ -173,19 +179,7 @@ async def run_migration():
     db = client[DB_NAME]
     print(f"✓ Connected to MongoDB: {DB_NAME}")
     
-    # Find documents that need stamping
-    # Criteria: Has verification_stamp that's not "not_verified" AND no stamped_file_url AND has valid HTTP URL
-    query = {
-        "$and": [
-            {"verification_stamp": {"$nin": [None, "", "not_verified"]}},
-            {"$or": [
-                {"stamped_file_url": {"$exists": False}},
-                {"stamped_file_url": None},
-                {"stamped_file_url": ""}
-            ]},
-            {"file_url": {"$regex": "^https?://"}}  # Only documents with valid HTTP/HTTPS URLs
-        ]
-    }
+    query = build_missing_stamp_backfill_query()
     
     docs = await db.employee_documents.find(query, {"_id": 0}).to_list(length=500)
     results["total_found"] = len(docs)
@@ -231,12 +225,20 @@ async def run_migration():
 
     backfill_query = {
         "$and": [
-            {"stamped_file_url": {"$nin": [None, "", {"$exists": False}]}},
-            {"$or": [
-                {"verification_stamp_by_name": {"$exists": False}},
-                {"verification_stamp_by_name": None},
-                {"verification_stamp_by_name": ""}
-            ]},
+            # Has a stamped URL already (this pass only fills in the flat metadata)
+            {"stamped_file_url": {"$exists": True}},
+            {"stamped_file_url": {"$nin": [None, ""]}},
+            # But is missing at least one flat stamp field
+            {
+                "$or": [
+                    {"verification_stamp_by_name": {"$exists": False}},
+                    {"verification_stamp_by_name": None},
+                    {"verification_stamp_by_name": ""},
+                    {"verification_stamp_at": {"$exists": False}},
+                    {"verification_stamp_at": None},
+                ]
+            },
+            # Only if a stamp dict or status exists (legacy rows shouldn't be invented)
             {"verification_stamp": {"$nin": [None, "", "not_verified"]}}
         ]
     }

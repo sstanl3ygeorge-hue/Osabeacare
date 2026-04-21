@@ -21,7 +21,6 @@ from typing import Optional, List
 
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
-
 from .dependencies import (
     get_db,
     get_current_user,
@@ -130,6 +129,69 @@ def get_storage_helpers():
     """Lazy import of storage helpers from server.py"""
     from server import download_file_from_storage, upload_file_to_storage, add_verification_stamp_to_pdf
     return download_file_from_storage, upload_file_to_storage, add_verification_stamp_to_pdf
+
+
+def get_stamp_and_persist_document():
+    """Lazy import shared fail-closed stamp helper from server.py."""
+    from server import stamp_and_persist_document
+    return stamp_and_persist_document
+
+
+_IMAGE_MIME_TYPES = frozenset({
+    "image/jpeg", "image/jpg", "image/png", "image/gif",
+    "image/webp", "image/bmp", "image/tiff",
+})
+_IMAGE_EXTENSIONS = frozenset({
+    ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tiff",
+})
+
+
+def _is_image_file(doc: dict) -> bool:
+    file_type = (doc.get("file_type") or "").lower()
+    if file_type in _IMAGE_MIME_TYPES:
+        return True
+    file_name = (doc.get("file_name") or doc.get("original_filename") or "").lower()
+    return any(file_name.endswith(ext) for ext in _IMAGE_EXTENSIONS)
+
+
+async def _stamp_document(
+    doc: dict,
+    stamp_data: dict,
+    folder: str,
+    download_file_from_storage,
+    upload_file_to_storage,
+    add_verification_stamp_to_pdf,
+) -> "str | None":
+    """Download, stamp (PDF or image), and re-upload. Returns URL or None."""
+    from services.pdf_service import stamp_evidence_document
+    import logging
+
+    file_url = doc.get("file_url")
+    if not file_url:
+        return None
+    try:
+        file_bytes = await download_file_from_storage(file_url)
+        if not file_bytes:
+            return None
+        is_image = _is_image_file(doc)
+        if is_image:
+            stamped_bytes = stamp_evidence_document(
+                document_bytes=file_bytes,
+                admin_name=stamp_data.get("verified_by_name", "Admin"),
+                verified_at=stamp_data.get("verified_at", ""),
+                verification_id=stamp_data.get("verification_id", ""),
+                is_image=True,
+            )
+            original_name = doc.get("file_name") or "document"
+            base_name = original_name.rsplit(".", 1)[0] if "." in original_name else original_name
+            stamped_filename = f"stamped_{base_name}.pdf"
+        else:
+            stamped_bytes = add_verification_stamp_to_pdf(file_bytes, stamp_data)
+            stamped_filename = f"stamped_{doc.get('file_name', 'document.pdf')}"
+        return await upload_file_to_storage(stamped_bytes, stamped_filename, folder)
+    except Exception as e:
+        logging.error(f"_stamp_document failed for {doc.get('id')}: {e}")
+        return None
 
 
 # ==================== DBS REGISTER ENDPOINT ====================
@@ -497,7 +559,7 @@ async def stamp_all_dbs_documents(
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
     
-    download_file_from_storage, upload_file_to_storage, add_verification_stamp_to_pdf = get_storage_helpers()
+    stamp_and_persist_document = get_stamp_and_persist_document()
     
     verification_id = str(uuid.uuid4())[:8].upper()
     now = datetime.now(timezone.utc).isoformat()
@@ -514,58 +576,27 @@ async def stamp_all_dbs_documents(
             if not document:
                 errors.append(f"Document {doc_id} not found")
                 continue
-            
-            stamp_data = {
-                "stamp_type": "original_seen",
-                "document_type": "DBS Certificate",
-                "employee_name": employee_name,
-                "verified_by_name": admin_name,
-                "verified_at": now,
-                "verification_id": verification_id
-            }
-            
-            file_url = document.get('file_url')
-            stamped_url = None
-            
-            if file_url:
-                try:
-                    file_bytes = await download_file_from_storage(file_url)
-                    if file_bytes and document.get('file_type') == 'application/pdf':
-                        stamped_bytes = add_verification_stamp_to_pdf(file_bytes, stamp_data)
-                        stamped_filename = f"stamped_{document.get('file_name', 'document.pdf')}"
-                        stamped_url = await upload_file_to_storage(
-                            stamped_bytes,
-                            stamped_filename,
-                            f"employees/{employee_id}/dbs"
-                        )
-                except Exception as e:
-                    logging.error(f"Failed to stamp DBS evidence {doc_id}: {e}")
-            
-            await db.employee_documents.update_one(
-                {"id": doc_id},
-                {"$set": {
-                    "stamped_file_url": stamped_url,
-                    "verification_stamp": stamp_data,
-                    "verification_stamp_by_name": admin_name,
-                    "verification_stamp_at": now,
-                    "verification_stamp_label": "Verified copy",
-                    "status": "verified",
-                    "verified": True,
-                    "verified_at": now,
-                    "verified_by": user['user_id'],
-                    "review_status": "verified",
-                    "review_reason": None,
-                    "reviewed_at": now,
-                    "reviewed_by": user['user_id'],
-                    "reviewed_by_name": admin_name,
-                    "updated_at": now
-                }}
+            await stamp_and_persist_document(
+                document,
+                {"user_id": user["user_id"], "name": admin_name, "email": user.get("email")},
+                db_handle=db,
+                status="verified",
+                review_status="verified",
+                stamp_type="original_seen",
             )
             stamped_count += 1
-            
         except Exception as e:
             logging.error(f"Error stamping DBS evidence {doc_id}: {e}")
             errors.append(f"Failed to stamp {doc_id}")
+
+    if errors:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "message": "One or more DBS evidence documents could not be stamped and were not finalized.",
+                "errors": errors,
+            },
+        )
     
     # STEP 2: Stamp DBS Update Service proof (if exists)
     if data.stamp_verification_proof:
@@ -581,42 +612,13 @@ async def stamp_all_dbs_documents(
                 try:
                     proof_doc = await db.employee_documents.find_one({"id": proof_doc_id})
                     if proof_doc and not proof_doc.get('verification_stamp'):
-                        stamp_data = {
-                            "stamp_type": "online_check",
-                            "document_type": "DBS Update Service Proof",
-                            "employee_name": employee_name,
-                            "verified_by_name": admin_name,
-                            "verified_at": now,
-                            "verification_id": verification_id
-                        }
-                        
-                        file_url = proof_doc.get('file_url')
-                        stamped_url = None
-                        
-                        if file_url:
-                            try:
-                                file_bytes = await download_file_from_storage(file_url)
-                                if file_bytes and proof_doc.get('file_type') == 'application/pdf':
-                                    stamped_bytes = add_verification_stamp_to_pdf(file_bytes, stamp_data)
-                                    stamped_filename = f"stamped_{proof_doc.get('file_name', 'proof.pdf')}"
-                                    stamped_url = await upload_file_to_storage(
-                                        stamped_bytes,
-                                        stamped_filename,
-                                        f"employees/{employee_id}/dbs"
-                                    )
-                            except Exception as e:
-                                logging.error(f"Failed to stamp DBS proof: {e}")
-                        
-                        await db.employee_documents.update_one(
-                            {"id": proof_doc_id},
-                            {"$set": {
-                                "stamped_file_url": stamped_url,
-                                "verification_stamp": stamp_data,
-                                "verification_stamp_by_name": admin_name,
-                                "verification_stamp_at": now,
-                                "verification_stamp_label": "Verified copy",
-                                "updated_at": now
-                            }}
+                        await stamp_and_persist_document(
+                            proof_doc,
+                            {"user_id": user["user_id"], "name": admin_name, "email": user.get("email")},
+                            db_handle=db,
+                            status="verified",
+                            review_status="verified",
+                            stamp_type="online_check",
                         )
                         stamped_count += 1
                 except Exception as e:

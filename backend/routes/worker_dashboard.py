@@ -1008,12 +1008,19 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
     }
     agreements_status.append(contract_status)
     contract_signed = contract_status["contract_state"] == "fully_executed"
+    handbook_render_error_detail = None
     try:
         handbook_ack = await ensure_agreement_rendered(db, employee_min, HANDBOOK_AGREEMENT_TYPE)
-    except HandbookRenderError:
-        # Required org fields are not configured — surface this clearly rather
-        # than silently producing a broken handbook PDF.
-        raise
+    except HandbookRenderError as e:
+        # Do not fail the whole dashboard if handbook org fields are incomplete.
+        # Keep dashboard usable and surface handbook as pending with an issue.
+        handbook_render_error_detail = str(e)
+        logger.warning(f"Handbook render blocked for {employee_id}: {e}")
+        handbook_ack_result = await db.agreement_acknowledgements.find_one({
+            "employee_id": employee_id,
+            "agreement_type": HANDBOOK_AGREEMENT_TYPE
+        }, {"_id": 0})
+        handbook_ack = handbook_ack_result if handbook_ack_result is not None else {}
     except Exception as e:
         logger.warning(f"Could not render handbook agreement for {employee_id}: {e}")
         handbook_ack_result = await db.agreement_acknowledgements.find_one({
@@ -1048,6 +1055,8 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
         "rendered_at": handbook_ack.get("rendered_at"),
         "employee_name": handbook_ack.get("employee_name"),
     }
+    if handbook_render_error_detail:
+        handbook_status["render_issue"] = handbook_render_error_detail
     agreements_status.append(handbook_status)
     
     # Unified progress

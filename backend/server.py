@@ -3239,7 +3239,7 @@ async def stamp_and_persist_document(
     if not document or not document.get("id"):
         raise Exception("Stamping failed — cannot approve document")
 
-    db_ref = db_handle or db
+    db_ref = db_handle if db_handle is not None else db
     if db_ref is None:
         raise Exception("Stamping failed — cannot approve document")
 

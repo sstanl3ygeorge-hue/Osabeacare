@@ -1223,6 +1223,7 @@ export default function WorkerDashboard() {
   const alerts = _alerts || [];
   const references = _references || [];
   const agreements = _agreements || [];
+  const contractAgreement = agreements.find((agreement) => agreement.id === 'contract_acceptance');
   
   const isActiveEmployee =
     employee?.is_active_employee ||
@@ -2493,9 +2494,9 @@ export default function WorkerDashboard() {
                     <PenTool className="h-5 w-5 text-purple-500" />
                     Agreements & Acknowledgements
                   </CardTitle>
-                  <p className="text-xs text-slate-500 mt-1">
-                    Review the full contract and handbook PDFs here, then sign or acknowledge them from your portal.
-                  </p>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Review the exact PDF that is on file, then sign or acknowledge it from your portal.
+                    </p>
                 </div>
                 <Badge className={`${
                   agreements.every(a => a.verified) ? 'bg-green-100 text-green-700' :
@@ -2511,22 +2512,25 @@ export default function WorkerDashboard() {
                 {agreements.map((agreement) => (
                   <div
                     key={agreement.id}
-                    className={`p-4 rounded-xl border ${
-                      agreement.verified ? 'bg-green-50 border-green-200' :
-                      agreement.signed ? 'bg-blue-50 border-blue-200' :
-                      'bg-slate-50 border-slate-200'
-                    }`}
+                      className={`p-4 rounded-xl border ${
+                        agreement.verified ? 'bg-green-50 border-green-200' :
+                        agreement.signed ? 'bg-blue-50 border-blue-200' :
+                        'bg-slate-50 border-slate-200'
+                      }`}
                     data-testid={`agreement-${agreement.id}`}
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
                         <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
                           agreement.verified ? 'bg-green-100' :
+                          agreement.rejected ? 'bg-red-100' :
                           agreement.signed ? 'bg-blue-100' :
                           'bg-slate-100'
                         }`}>
                           {agreement.verified ? (
                             <CheckCircle className="h-5 w-5 text-green-600" />
+                          ) : agreement.rejected ? (
+                            <AlertCircle className="h-5 w-5 text-red-600" />
                           ) : agreement.signed ? (
                             <PenTool className="h-5 w-5 text-blue-600" />
                           ) : (
@@ -2541,20 +2545,28 @@ export default function WorkerDashboard() {
                               {agreement.verified_by_name && ` by ${agreement.verified_by_name}`}
                             </p>
                           )}
-                          {!agreement.verified && agreement.signed && agreement.signed_at && (
-                            <p className="text-xs text-blue-600 mt-0.5">
-                              Signed on {formatDate(agreement.signed_at)} - Awaiting admin verification
+                            {!agreement.verified && agreement.signed && agreement.signed_at && (
+                              <p className="text-xs text-blue-600 mt-0.5">
+                                {agreement.contract_state === 'awaiting_company_countersignature'
+                                  ? `Signed on ${formatDate(agreement.signed_at)} - Awaiting Osabea countersignature`
+                                  : `Signed on ${formatDate(agreement.signed_at)}`}
+                              </p>
+                            )}
+                          {agreement.rejected && (
+                            <p className="text-xs text-red-600 mt-0.5">
+                              Rejected{agreement.rejected_at ? ` on ${formatDate(agreement.rejected_at)}` : ''}{agreement.rejected_by_name ? ` by ${agreement.rejected_by_name}` : ''}.
+                              {agreement.rejection_reason ? ` ${agreement.rejection_reason}` : ''}
                             </p>
                           )}
-                          {!agreement.signed && !agreement.verified && (
-                            <p className="text-xs text-slate-500 mt-0.5">
-                              {agreement.id === 'contract_acceptance'
-                                ? (contractEligibility?.can_sign
-                                  ? 'Review the contract PDF, then sign when you are ready.'
-                                  : 'You can review the contract now. Signing unlocks when earlier onboarding steps are complete.')
-                                : agreement.id === 'handbook_acknowledgement'
-                                  ? 'Open the full handbook PDF, then acknowledge once you have read it.'
-                                  : 'Awaiting completion'}
+                            {!agreement.signed && !agreement.verified && (
+                              <p className="text-xs text-slate-500 mt-0.5">
+                                {agreement.id === 'contract_acceptance'
+                                  ? (contractEligibility?.can_sign
+                                    ? 'Review the contract PDF, then sign when you are ready.'
+                                    : 'You can review the contract now. Signing unlocks when earlier onboarding steps are complete.')
+                                  : agreement.id === 'handbook_acknowledgement'
+                                    ? 'Open the full handbook PDF, then acknowledge once you have read it.'
+                                      : 'Awaiting completion'}
                             </p>
                           )}
                           {agreement.template_version && (
@@ -2588,18 +2600,18 @@ export default function WorkerDashboard() {
                             </Button>
                           </>
                         )}
-                        {agreement.id === 'contract_acceptance' && !agreement.signed && !agreement.verified && (
-                          <Button
-                            size="sm"
-                            className="gap-1"
+                         {agreement.id === 'contract_acceptance' && ['awaiting_worker_signature', 'rejected_reopen_required', 'draft_rendered', undefined, null].includes(agreement.contract_state) && !agreement.verified && (
+                            <Button
+                              size="sm"
+                              className="gap-1"
                             disabled={!contractEligibility?.can_sign}
                             onClick={() => setShowSignaturePad(true)}
                             data-testid="agreement-sign-contract-btn"
                           >
                             <PenTool className="h-3.5 w-3.5" />
-                            Sign
-                          </Button>
-                        )}
+                           Sign
+                            </Button>
+                          )}
                         {agreement.id === 'handbook_acknowledgement' && !agreement.signed && !agreement.verified && (
                           <Button
                             size="sm"
@@ -2612,14 +2624,17 @@ export default function WorkerDashboard() {
                         )}
                         <Badge className={`text-xs ${
                           agreement.verified ? 'bg-green-100 text-green-700' :
+                          agreement.rejected ? 'bg-red-100 text-red-700' :
                           agreement.signed ? 'bg-blue-100 text-blue-700' :
                           'bg-slate-100 text-slate-600'
                         }`}>
-                          {agreement.verified ? 'Verified' :
-                           agreement.signed ? 'Signed' :
-                           agreement.id === 'contract_acceptance' && contractEligibility?.can_sign ? 'Ready to sign' :
-                           agreement.id === 'contract_acceptance' ? 'Waiting for earlier steps' : 'Pending'}
-                        </Badge>
+                            {agreement.verified ? 'Fully executed' :
+                             agreement.rejected ? 'Action required' :
+                             agreement.contract_state === 'awaiting_company_countersignature' ? 'Waiting for Osabea signature' :
+                             agreement.signed ? 'Signed' :
+                            agreement.id === 'contract_acceptance' && contractEligibility?.can_sign ? 'Ready to sign' :
+                            agreement.id === 'contract_acceptance' ? 'Waiting for earlier steps' : 'Pending'}
+                          </Badge>
                       </div>
                     </div>
                   </div>
@@ -2637,12 +2652,35 @@ export default function WorkerDashboard() {
                 <FileText className="h-5 w-5 text-red-500" />
                 Contract Review & Signature
               </CardTitle>
-              <p className="text-xs text-slate-500 mt-1">
-                Contract signing is the last onboarding step before you are ready to start.
-              </p>
-            </CardHeader>
-            <CardContent>
-              {contractEligibility?.can_sign ? (
+                <p className="text-xs text-slate-500 mt-1">
+                 Review and sign your contract here. Osabea will countersign before the final version is complete.
+                </p>
+              </CardHeader>
+              <CardContent>
+              {contractAgreement?.contract_state === 'awaiting_company_countersignature' ? (
+                <div className="flex items-center justify-between p-4 bg-blue-50 rounded-xl border border-blue-200">
+                  <div>
+                    <span className="font-medium text-blue-800">Awaiting company countersignature</span>
+                    <p className="text-xs text-blue-600">Your signed contract is on file. Osabea still needs to countersign it before it becomes the final executed agreement.</p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    className="gap-2"
+                    onClick={() => openDocumentViewer({ ...contractAgreement, name: contractAgreement.name })}
+                  >
+                    <Eye className="h-4 w-4" />
+                    View current PDF
+                  </Button>
+                </div>
+              ) : contractAgreement?.contract_state === 'fully_executed' ? (
+                <div className="flex items-center justify-between p-4 bg-green-50 rounded-xl border border-green-200">
+                  <div>
+                    <span className="font-medium text-green-800">Contract fully executed</span>
+                    <p className="text-xs text-green-600">Your contract has been signed by both you and Osabea. You can continue to view or download the executed PDF above.</p>
+                  </div>
+                  <Badge className="bg-green-100 text-green-700">Complete</Badge>
+                </div>
+              ) : contractEligibility?.can_sign ? (
                 <div className="flex items-center justify-between p-4 bg-green-50 rounded-xl border border-green-200">
                   <div>
                     <span className="font-medium text-green-800">Ready to Sign</span>
@@ -2898,14 +2936,14 @@ export default function WorkerDashboard() {
       {/* Contract Signature Dialog */}
       <Dialog open={showSignaturePad} onOpenChange={setShowSignaturePad}>
         <DialogContent className="max-w-xl p-0">
-          <SignaturePad
-            employeeId={employee.id}
-            employeeName={employee.name}
-            onSigned={() => {
-              setShowSignaturePad(false);
-              fetchDashboard(); // Refresh dashboard
-              toast.success('Contract signed! Your compliance status has been updated.');
-            }}
+            <SignaturePad
+              employeeId={employee.id}
+              employeeName={employee.name}
+              onSigned={() => {
+                setShowSignaturePad(false);
+                fetchDashboard(); // Refresh dashboard
+                toast.success('Contract signed and sent for Osabea countersignature.');
+              }}
             onCancel={() => setShowSignaturePad(false)}
           />
         </DialogContent>

@@ -8693,9 +8693,10 @@ async def sign_contract(
     
     from agreement_document_service import (
         CONTRACT_AGREEMENT_TYPE,
+        create_worker_signed_contract,
         ensure_agreement_rendered,
     )
-    from supabase_storage import download_file_from_storage, upload_file_to_storage
+    from supabase_storage import upload_file_to_storage
 
     # Persist signature image remotely so the audit artefact survives restarts.
     sig_filename = f"{employee_id}_{timestamp}.png"
@@ -8708,94 +8709,23 @@ async def sign_contract(
         raise HTTPException(status_code=500, detail="Failed to persist signature image")
 
     contract_record = await ensure_agreement_rendered(db, employee, CONTRACT_AGREEMENT_TYPE)
-    contract_template = await download_file_from_storage(contract_record.get("rendered_file_url"))
-    if not contract_template:
-        raise HTTPException(status_code=500, detail="Failed to load rendered contract")
-    
-    # Generate signed PDF with signature embedded
-    signer_info = {
-        "name": request.full_name,
-        "date": now.strftime("%d %B %Y"),
-        "employee_id": employee.get("employee_code", employee_id)
-    }
-    
-    signed_pdf_bytes = await embed_signature_in_contract_pdf(
-        contract_template,
+    contract_record = await create_worker_signed_contract(
+        db,
+        employee,
+        contract_record,
         signature_bytes,
-        signer_info
+        request.full_name,
     )
-    
-    contract_filename = f"{employee_id}_signed_contract_{timestamp}.pdf"
-    contract_url = await upload_file_to_storage(
-        signed_pdf_bytes,
-        contract_filename,
-        folder=f"agreements/{employee_id}/signed",
-    )
-    if not contract_url:
-        raise HTTPException(status_code=500, detail="Failed to persist signed contract")
 
-    # Update or create agreement_acknowledgements
     await db.agreement_acknowledgements.update_one(
-        {
-            "employee_id": employee_id,
-            "agreement_type": "contract_acceptance"
-        },
+        {"id": contract_record.get("id")},
         {
             "$set": {
-                "acknowledged": True,
-                "acknowledged_at": now.isoformat(),
-                "status": "signed",
-                "signed_document_url": contract_url,
-                "rendered_file_url": contract_record.get("rendered_file_url"),
-                "signed_at": now.isoformat(),
                 "signature_image_url": signature_url,
-                "signer_name": request.full_name,
                 "signer_employee_code": employee.get("employee_code"),
                 "completion_mode": "digital_signature",
-                "template_version": contract_record.get("template_version"),
-                "employee_name": employee.get("name") or f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
-                "verification_status": "verified",  # Worker self-signature is authoritative agreement completion
-                "verified_at": now.isoformat(),
-                "verified_by": "system_auto_verify",
-                "verified_by_name": "Osabea worker portal",
-            },
-            "$setOnInsert": {
-                "id": str(uuid.uuid4()),
-                "employee_id": employee_id,
-                "agreement_type": "contract_acceptance",
-                "created_at": now.isoformat()
             }
         },
-        upsert=True
-    )
-
-    await db.generated_contracts.update_one(
-        {
-            "employee_id": employee_id,
-            "template_version": contract_record.get("template_version"),
-        },
-        {
-            "$set": {
-                "employee_id": employee_id,
-                "employee_name": employee.get("name") or f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
-                "template_id": "ZERO_HOUR_CONTRACT_V1",
-                "template_version": contract_record.get("template_version"),
-                "rendered_file_url": contract_record.get("rendered_file_url"),
-                "rendered_at": contract_record.get("rendered_at"),
-                "status": "signed",
-                "signed_at": now.isoformat(),
-                "signed_by": worker.get("employee_id"),
-                "signed_by_name": request.full_name,
-                "signed_document_url": contract_url,
-                "updated_at": now.isoformat(),
-            },
-            "$setOnInsert": {
-                "id": f"contract_{employee_id}_{contract_record.get('template_version')}",
-                "generated_at": contract_record.get("rendered_at") or now.isoformat(),
-                "created_at": now.isoformat(),
-            },
-        },
-        upsert=True,
     )
     
     # Log audit
@@ -8813,10 +8743,11 @@ async def sign_contract(
     
     return {
         "success": True,
-        "message": "Contract signed successfully",
-        "contract_url": contract_url,
-        "rendered_file_url": contract_record.get("rendered_file_url"),
-        "signed_at": now.isoformat()
+        "message": "Contract signed and sent for company countersignature",
+        "contract_state": contract_record.get("contract_state"),
+        "contract_url": contract_record.get("worker_signed_contract_pdf_url") or contract_record.get("rendered_contract_pdf_url"),
+        "rendered_file_url": contract_record.get("rendered_contract_pdf_url") or contract_record.get("rendered_file_url"),
+        "signed_at": contract_record.get("worker_signed_at") or now.isoformat()
     }
 
 
@@ -8841,13 +8772,17 @@ async def get_contract_status(
         }
     
     return {
-        "signed": contract_ack.get("status") == "signed",
-        "status": contract_ack.get("status", "unknown"),
-        "signed_at": contract_ack.get("signed_at"),
-        "signer_name": contract_ack.get("signer_name"),
-        "contract_url": contract_ack.get("signed_document_url"),
+        "signed": contract_ack.get("contract_state") in ["awaiting_company_countersignature", "fully_executed"],
+        "status": contract_ack.get("contract_state") or contract_ack.get("status", "unknown"),
+        "signed_at": contract_ack.get("worker_signed_at") or contract_ack.get("signed_at"),
+        "signer_name": contract_ack.get("worker_signer_name") or contract_ack.get("signer_name"),
+        "contract_url": contract_ack.get("executed_contract_pdf_url") or contract_ack.get("worker_signed_contract_pdf_url") or contract_ack.get("rendered_contract_pdf_url") or contract_ack.get("signed_document_url"),
         "verification_status": contract_ack.get("verification_status"),
-        "completion_mode": contract_ack.get("completion_mode")
+        "completion_mode": contract_ack.get("completion_mode"),
+        "contract_state": contract_ack.get("contract_state"),
+        "rendered_contract_pdf_url": contract_ack.get("rendered_contract_pdf_url"),
+        "worker_signed_contract_pdf_url": contract_ack.get("worker_signed_contract_pdf_url"),
+        "executed_contract_pdf_url": contract_ack.get("executed_contract_pdf_url"),
     }
 
 
@@ -30171,23 +30106,54 @@ class AgreementAcknowledgementService:
     ) -> Optional[dict]:
         """Verify an agreement acknowledgement."""
         now = datetime.now(timezone.utc).isoformat()
-        
-        result = await db.agreement_acknowledgements.find_one_and_update(
-            {"id": acknowledgement_id},
-            {
-                "$set": {
-                    "verification_status": "verified",
-                    "verified_at": now,
-                    "verified_by": verified_by,
-                    "verification_notes": notes
-                }
-            },
-            return_document=True
-        )
+        current = await db.agreement_acknowledgements.find_one({"id": acknowledgement_id}, {"_id": 0})
+        if not current:
+            return None
+
+        verified_by_name = verified_by
+        verifying_user = await db.users.find_one({"user_id": verified_by}, {"_id": 0, "name": 1})
+        if verifying_user and verifying_user.get("name"):
+            verified_by_name = verifying_user["name"]
+
+        if current.get("agreement_type") == "contract_acceptance":
+            from agreement_document_service import countersign_contract
+
+            result = await countersign_contract(
+                db,
+                current,
+                company_signer_name=verified_by_name,
+            )
+            if result:
+                await db.agreement_acknowledgements.update_one(
+                    {"id": acknowledgement_id},
+                    {
+                        "$set": {
+                            "verified_by": verified_by,
+                            "verification_notes": notes,
+                            "verified_at": now,
+                        }
+                    },
+                )
+                result = await db.agreement_acknowledgements.find_one({"id": acknowledgement_id}, {"_id": 0})
+        else:
+            result = await db.agreement_acknowledgements.find_one_and_update(
+                {"id": acknowledgement_id},
+                {
+                    "$set": {
+                        "verification_status": "verified",
+                        "verified_at": now,
+                        "verified_by": verified_by,
+                        "verified_by_name": verified_by_name,
+                        "verification_notes": notes
+                    }
+                },
+                return_document=True
+            )
         
         if result:
             await log_audit_action(verified_by, "verify_agreement", "agreement_acknowledgements", acknowledgement_id, {
-                "status": "verified"
+                "status": "verified",
+                "agreement_type": current.get("agreement_type"),
             })
             result.pop("_id", None)
         
@@ -30201,24 +30167,70 @@ class AgreementAcknowledgementService:
     ) -> Optional[dict]:
         """Reject an agreement acknowledgement."""
         now = datetime.now(timezone.utc).isoformat()
-        
+        current = await db.agreement_acknowledgements.find_one({"id": acknowledgement_id})
+        if not current:
+            return None
+
+        rejected_by_name = rejected_by
+        rejecting_user = await db.users.find_one({"user_id": rejected_by}, {"_id": 0, "name": 1})
+        if rejecting_user and rejecting_user.get("name"):
+            rejected_by_name = rejecting_user["name"]
+
+        set_payload = {
+            "acknowledged": False,
+            "status": "rejected",
+            "verification_status": "rejected",
+            "contract_state": "rejected_reopen_required" if current.get("agreement_type") == "contract_acceptance" else current.get("contract_state"),
+            "rejected_at": now,
+            "rejected_by": rejected_by,
+            "rejected_by_name": rejected_by_name,
+            "rejection_reason": reason,
+            "signed_at": None,
+            "acknowledged_at": None,
+            "verified_at": None,
+            "verified_by": None,
+            "verified_by_name": None,
+            "verification_notes": None,
+        }
+        if current.get("agreement_type") == "contract_acceptance":
+            set_payload["signed_document_url"] = None
+            set_payload["worker_signed_contract_pdf_url"] = None
+            set_payload["executed_contract_pdf_url"] = None
+            set_payload["worker_signed_at"] = None
+            set_payload["worker_signer_name"] = None
+            set_payload["company_signed_at"] = None
+            set_payload["company_signer_name"] = None
+
         result = await db.agreement_acknowledgements.find_one_and_update(
             {"id": acknowledgement_id},
-            {
-                "$set": {
-                    "verification_status": "rejected",
-                    "rejected_at": now,
-                    "rejected_by": rejected_by,
-                    "rejection_reason": reason
-                }
-            },
+            {"$set": set_payload},
             return_document=True
         )
+        if result and current.get("agreement_type") == "contract_acceptance":
+            await db.generated_contracts.update_many(
+                {"employee_id": current.get("employee_id"), "template_version": current.get("template_version")},
+                {"$set": {
+                    "status": "rejected_reopen_required",
+                    "contract_state": "rejected_reopen_required",
+                    "worker_signed_contract_pdf_url": None,
+                    "executed_contract_pdf_url": None,
+                    "worker_signed_at": None,
+                    "worker_signer_name": None,
+                    "company_signed_at": None,
+                    "company_signer_name": None,
+                    "updated_at": now,
+                    "rejection_reason": reason,
+                    "rejected_at": now,
+                    "rejected_by_name": rejected_by_name,
+                }}
+            )
         
         if result:
             await log_audit_action(rejected_by, "reject_agreement", "agreement_acknowledgements", acknowledgement_id, {
                 "status": "rejected",
-                "reason": reason
+                "reason": reason,
+                "agreement_type": current.get("agreement_type"),
+                "employee_id": current.get("employee_id"),
             })
             result.pop("_id", None)
         
@@ -30246,17 +30258,34 @@ class AgreementAcknowledgementService:
             {
                 "$set": {
                     "verification_status": "pending",
+                    "status": "awaiting_company_countersignature" if current.get("agreement_type") == "contract_acceptance" and current.get("worker_signed_contract_pdf_url") else "pending",
+                    "contract_state": "awaiting_company_countersignature" if current.get("agreement_type") == "contract_acceptance" and current.get("worker_signed_contract_pdf_url") else (
+                        "awaiting_worker_signature" if current.get("agreement_type") == "contract_acceptance" else current.get("contract_state")
+                    ),
                     "unverified_at": now,
                     "unverified_by": unverified_by,
                     "unverify_reason": reason,
                     # Clear previous verification
                     "verified_at": None,
                     "verified_by": None,
+                    "verified_by_name": None,
                     "verification_notes": None
                 }
             },
             return_document=True
         )
+        if result and current.get("agreement_type") == "contract_acceptance":
+            await db.generated_contracts.update_many(
+                {"employee_id": current.get("employee_id"), "template_version": current.get("template_version")},
+                {"$set": {
+                    "status": result.get("contract_state") or "awaiting_worker_signature",
+                    "contract_state": result.get("contract_state") or "awaiting_worker_signature",
+                    "executed_contract_pdf_url": None,
+                    "company_signed_at": None,
+                    "company_signer_name": None,
+                    "updated_at": now,
+                }}
+            )
         
         if result:
             await log_audit_action(unverified_by, "unverify_agreement", "agreement_acknowledgements", acknowledgement_id, {
@@ -36188,6 +36217,18 @@ async def get_compliance_file(
                 "verification_status": latest_ack.get("verification_status") if latest_ack else None,
                 "verified_at": latest_ack.get("verified_at") if latest_ack else None,
                 "verified_by": latest_ack.get("verified_by") if latest_ack else None,
+                "verified_by_name": latest_ack.get("verified_by_name") if latest_ack else None,
+                "rendered_file_url": latest_ack.get("rendered_file_url") if latest_ack else None,
+                "rendered_contract_pdf_url": latest_ack.get("rendered_contract_pdf_url") if latest_ack else None,
+                "worker_signed_contract_pdf_url": latest_ack.get("worker_signed_contract_pdf_url") if latest_ack else None,
+                "executed_contract_pdf_url": latest_ack.get("executed_contract_pdf_url") if latest_ack else None,
+                "signed_document_url": latest_ack.get("signed_document_url") if latest_ack else None,
+                "template_version": latest_ack.get("template_version") if latest_ack else None,
+                "contract_state": latest_ack.get("contract_state") if latest_ack else None,
+                "worker_signed_at": latest_ack.get("worker_signed_at") if latest_ack else None,
+                "worker_signer_name": latest_ack.get("worker_signer_name") if latest_ack else None,
+                "company_signed_at": latest_ack.get("company_signed_at") if latest_ack else None,
+                "company_signer_name": latest_ack.get("company_signer_name") if latest_ack else None,
                 # Link to new-style submission if available
                 "submission_id": str(submission.get("_id")) if submission else None
             } if latest_ack or submission else None,

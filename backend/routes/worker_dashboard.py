@@ -34,6 +34,7 @@ from agreement_document_service import (
     CONTRACT_AGREEMENT_TYPE,
     HANDBOOK_AGREEMENT_TYPE,
     _employee_name,
+    current_contract_artifact,
     ensure_agreement_rendered,
 )
 
@@ -965,32 +966,39 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             "agreement_type": CONTRACT_AGREEMENT_TYPE
         }, {"_id": 0}) or {}
     
+    contract_state = (contract_ack or {}).get("contract_state")
     contract_status = {
         "id": "contract_acceptance",
         "name": "Contract Acceptance",
         "type": "contract_acceptance",
-        "signed": bool(contract_ack and (
-            contract_ack.get("acknowledged")
-            or contract_ack.get("status") in ("signed", "submitted", "verified")
-        )),
-        "signed_at": (contract_ack or {}).get("signed_at") or (contract_ack or {}).get("acknowledged_at"),
-        "verified": bool(contract_ack and contract_ack.get("verification_status") == "verified"),
+        "rejected": bool(contract_ack and contract_ack.get("verification_status") == "rejected"),
+        "rejection_reason": (contract_ack or {}).get("rejection_reason"),
+        "rejected_at": (contract_ack or {}).get("rejected_at"),
+        "rejected_by_name": (contract_ack or {}).get("rejected_by_name"),
+        "signed": bool(contract_state in ("awaiting_company_countersignature", "fully_executed")),
+        "signed_at": (contract_ack or {}).get("worker_signed_at") or (contract_ack or {}).get("signed_at") or (contract_ack or {}).get("acknowledged_at"),
+        "verified": bool(contract_state == "fully_executed" or (contract_ack and contract_ack.get("verification_status") == "verified")),
         "verified_at": contract_ack.get("verified_at") if contract_ack else None,
         "verified_by_name": contract_ack.get("verified_by_name") if contract_ack else None,
-        "can_sign": not bool(contract_ack and contract_ack.get("acknowledged")),
-        "status": "verified" if (contract_ack and contract_ack.get("verification_status") == "verified") else (
-            "signed" if (contract_ack and contract_ack.get("acknowledged")) else "pending"
-        ),
-        "file_url": (contract_ack or {}).get("signed_document_url") or (contract_ack or {}).get("rendered_file_url"),
-        "rendered_file_url": (contract_ack or {}).get("rendered_file_url"),
+        "can_sign": bool((contract_ack or {}).get("verification_status") == "rejected") or contract_state in (None, "", "draft_rendered", "awaiting_worker_signature", "rejected_reopen_required"),
+        "status": "rejected" if (contract_ack and contract_ack.get("verification_status") == "rejected") else (contract_state or "pending"),
+        "contract_state": contract_state or "awaiting_worker_signature",
+        "file_url": current_contract_artifact(contract_ack or {}),
+        "rendered_file_url": (contract_ack or {}).get("rendered_contract_pdf_url") or (contract_ack or {}).get("rendered_file_url"),
+        "worker_signed_contract_pdf_url": (contract_ack or {}).get("worker_signed_contract_pdf_url"),
+        "executed_contract_pdf_url": (contract_ack or {}).get("executed_contract_pdf_url"),
         "signed_document_url": (contract_ack or {}).get("signed_document_url"),
-        "download_url": (contract_ack or {}).get("signed_document_url") or (contract_ack or {}).get("rendered_file_url"),
+        "download_url": current_contract_artifact(contract_ack or {}),
         "template_version": (contract_ack or {}).get("template_version"),
         "rendered_at": (contract_ack or {}).get("rendered_at"),
         "employee_name": (contract_ack or {}).get("employee_name"),
+        "worker_signer_name": (contract_ack or {}).get("worker_signer_name"),
+        "worker_signed_at": (contract_ack or {}).get("worker_signed_at"),
+        "company_signer_name": (contract_ack or {}).get("company_signer_name"),
+        "company_signed_at": (contract_ack or {}).get("company_signed_at"),
     }
     agreements_status.append(contract_status)
-    contract_signed = contract_status["signed"]
+    contract_signed = contract_status["contract_state"] == "fully_executed"
     try:
         handbook_ack = await ensure_agreement_rendered(db, employee_min, HANDBOOK_AGREEMENT_TYPE)
     except Exception as e:
@@ -1004,14 +1012,20 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
         "id": "handbook_acknowledgement",
         "name": "Employee Handbook Acknowledgement",
         "type": "handbook_acknowledgement",
-        "signed": bool(handbook_ack and handbook_ack.get("acknowledged")),
+        "rejected": bool(handbook_ack and handbook_ack.get("verification_status") == "rejected"),
+        "rejection_reason": (handbook_ack or {}).get("rejection_reason"),
+        "rejected_at": (handbook_ack or {}).get("rejected_at"),
+        "rejected_by_name": (handbook_ack or {}).get("rejected_by_name"),
+        "signed": bool(handbook_ack and handbook_ack.get("acknowledged") and handbook_ack.get("verification_status") != "rejected"),
         "signed_at": handbook_ack.get("acknowledged_at") if handbook_ack else None,
         "verified": bool(handbook_ack and handbook_ack.get("verification_status") == "verified"),
         "verified_at": handbook_ack.get("verified_at") if handbook_ack else None,
         "verified_by_name": handbook_ack.get("verified_by_name") if handbook_ack else None,
-        "can_sign": not bool(handbook_ack and handbook_ack.get("acknowledged")),
-        "status": "verified" if (handbook_ack and handbook_ack.get("verification_status") == "verified") else (
+        "can_sign": bool((handbook_ack or {}).get("verification_status") == "rejected") or not bool(handbook_ack and handbook_ack.get("acknowledged")),
+        "status": "rejected" if (handbook_ack and handbook_ack.get("verification_status") == "rejected") else (
+            "verified" if (handbook_ack and handbook_ack.get("verification_status") == "verified") else (
             "signed" if (handbook_ack and handbook_ack.get("acknowledged")) else "pending"
+            )
         ),
         "file_url": (handbook_ack or {}).get("rendered_file_url"),
         "rendered_file_url": (handbook_ack or {}).get("rendered_file_url"),

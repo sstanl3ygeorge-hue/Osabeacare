@@ -83,6 +83,11 @@ export default function AgreementRow({
   };
 
   const lifecycleStatus = getLifecycleStatus();
+  const contractArtifactUrl =
+    acknowledgement_data?.executed_contract_pdf_url ||
+    acknowledgement_data?.worker_signed_contract_pdf_url ||
+    acknowledgement_data?.rendered_contract_pdf_url ||
+    acknowledgement_data?.rendered_file_url;
 
   // Status colors and icons
   const getStatusConfig = () => {
@@ -92,7 +97,7 @@ export default function AgreementRow({
       case 'rejected':
         return { color: 'red', bgColor: 'bg-red-100', textColor: 'text-red-700', icon: XCircle, label: 'Rejected / action required' };
       case 'submitted':
-        return { color: 'amber', bgColor: 'bg-amber-100', textColor: 'text-amber-700', icon: Clock, label: 'Awaiting admin review' };
+        return { color: 'amber', bgColor: 'bg-amber-100', textColor: 'text-amber-700', icon: Clock, label: key === 'contract_acceptance' ? 'Awaiting company countersignature' : 'Awaiting admin review' };
       case 'sent':
         return { color: 'blue', bgColor: 'bg-blue-100', textColor: 'text-blue-700', icon: Mail, label: 'Evidence requested' };
       case 'in_progress':
@@ -129,7 +134,7 @@ export default function AgreementRow({
             '"Verified by admin"',
             { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } }
           );
-          toast.success('Agreement verified');
+          toast.success(key === 'contract_acceptance' ? 'Contract countersigned' : 'Agreement verified');
           if (onRefresh) onRefresh();
         } catch (err) {
           toast.error(err.response?.data?.detail || 'Failed to verify');
@@ -147,7 +152,7 @@ export default function AgreementRow({
         { notes: 'Verified by admin' },
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      toast.success('Agreement verified');
+      toast.success(key === 'contract_acceptance' ? 'Contract countersigned' : 'Agreement verified');
       if (onRefresh) onRefresh();
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Failed to verify');
@@ -250,6 +255,10 @@ export default function AgreementRow({
 
   // Handle PDF export
   const handleExportPDF = async () => {
+    if (key === 'contract_acceptance' && contractArtifactUrl) {
+      window.open(contractArtifactUrl, '_blank', 'noopener,noreferrer');
+      return;
+    }
     const submissionId = submission_data?.id || acknowledgement_data?.submission_id;
     if (!submissionId) {
       toast.error('No submission to export');
@@ -357,7 +366,9 @@ export default function AgreementRow({
                   variant="outline"
                   onClick={(e) => { 
                     e.stopPropagation(); 
-                    if (onViewSubmission) {
+                    if (key === 'contract_acceptance' && contractArtifactUrl) {
+                      window.open(contractArtifactUrl, '_blank', 'noopener,noreferrer');
+                    } else if (onViewSubmission) {
                       const submissionId = submission_data?.id || acknowledgement_data?.submission_id;
                       onViewSubmission(key, title, templateId, submissionId);
                     }
@@ -382,7 +393,7 @@ export default function AgreementRow({
                     data-testid={`verify-${key}`}
                   >
                     {isProcessing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle className="h-3.5 w-3.5 mr-1" />}
-                    Verify
+                    {key === 'contract_acceptance' ? 'Countersign' : 'Verify'}
                   </Button>
                   <Button
                     size="sm"

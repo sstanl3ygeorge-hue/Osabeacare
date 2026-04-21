@@ -1170,6 +1170,73 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             })
 
     status = "READY" if is_active_employee else ("NOT_READY" if has_blockers else "READY")
+
+    # ── Employment Readiness ─────────────────────────────────────────────────
+    # Separate from onboarding progress (which counts docs/training/forms).
+    # Employment readiness is ONLY unblocked when both agreements are fully
+    # executed/verified.  Rejected, pending, or awaiting-countersignature states
+    # all result in a BLOCKED employment status.
+    contract_fully_executed = contract_state == "fully_executed" or bool(
+        contract_ack and contract_ack.get("verification_status") == "verified"
+    ) if 'contract_ack' in dir() else False
+
+    handbook_acknowledged = bool(
+        handbook_ack
+        and handbook_ack.get("acknowledged")
+        and handbook_ack.get("verification_status") not in ("rejected",)
+    ) if 'handbook_ack' in dir() else False
+
+    contract_rejected = bool(
+        contract_ack and contract_ack.get("verification_status") == "rejected"
+    ) if 'contract_ack' in dir() else False
+    handbook_rejected = bool(
+        handbook_ack and handbook_ack.get("verification_status") == "rejected"
+    ) if 'handbook_ack' in dir() else False
+
+    any_agreement_rejected = contract_rejected or handbook_rejected
+
+    if is_active_employee:
+        employment_readiness = "ready_for_work"
+        employment_readiness_label = "Ready for Work"
+        employment_readiness_blockers = []
+    elif contract_fully_executed and handbook_acknowledged:
+        employment_readiness = "ready_for_work"
+        employment_readiness_label = "Ready for Work"
+        employment_readiness_blockers = []
+    elif any_agreement_rejected:
+        employment_readiness = "blocked"
+        employment_readiness_label = "Blocked"
+        employment_readiness_blockers = []
+        if contract_rejected:
+            employment_readiness_blockers.append({
+                "type": "contract_rejected",
+                "label": "Contract rejected — action required",
+            })
+        if handbook_rejected:
+            employment_readiness_blockers.append({
+                "type": "handbook_rejected",
+                "label": "Handbook acknowledgement rejected — action required",
+            })
+    elif not contract_fully_executed or not handbook_acknowledged:
+        employment_readiness = "awaiting_agreements"
+        employment_readiness_label = "Awaiting Agreements"
+        employment_readiness_blockers = []
+        if not contract_fully_executed:
+            employment_readiness_blockers.append({
+                "type": "contract_pending",
+                "label": "Contract not yet fully executed",
+            })
+        if not handbook_acknowledged:
+            employment_readiness_blockers.append({
+                "type": "handbook_pending",
+                "label": "Handbook not yet acknowledged",
+            })
+    else:
+        employment_readiness = "blocked"
+        employment_readiness_label = "Blocked"
+        employment_readiness_blockers = []
+    # ─────────────────────────────────────────────────────────────────────────
+
     
     # Get form status for onboarding employees
     forms_status = []
@@ -1471,6 +1538,9 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
         "recommended_trainings": all_recommended_trainings,
         "alerts": sorted(alerts, key=lambda x: x.get("days_left", 999)),
         "contract_signed": contract_signed,
+        "employment_readiness": employment_readiness,
+        "employment_readiness_label": employment_readiness_label,
+        "employment_readiness_blockers": employment_readiness_blockers,
         "professional_registration": prof_reg_status,
         "references": references_status,
         "induction": induction_status,

@@ -1203,6 +1203,9 @@ export default function WorkerDashboard() {
     recommended_trainings: _recommended_trainings,
     alerts: _alerts,
     contract_signed = false,
+    employment_readiness,
+    employment_readiness_label,
+    employment_readiness_blockers: _employment_readiness_blockers,
     professional_registration,
     references: _references,
     induction,
@@ -1223,6 +1226,7 @@ export default function WorkerDashboard() {
   const alerts = _alerts || [];
   const references = _references || [];
   const agreements = _agreements || [];
+  const employment_readiness_blockers = _employment_readiness_blockers || [];
   const contractAgreement = agreements.find((agreement) => agreement.id === 'contract_acceptance');
   
   const isActiveEmployee =
@@ -1543,6 +1547,75 @@ export default function WorkerDashboard() {
               <p className="text-sm text-slate-500 mt-3">
                 {progress.completed} of {progress.required} requirements completed
               </p>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Employment Readiness Banner - shown when onboarding is in progress or complete */}
+        {!isActiveEmployee && employment_readiness && (
+          <Card className={`shadow-md border-0 border-l-4 ${
+            employment_readiness === 'ready_for_work'
+              ? 'border-l-green-500 bg-green-50/60'
+              : employment_readiness === 'blocked'
+              ? 'border-l-red-500 bg-red-50/60'
+              : 'border-l-amber-500 bg-amber-50/60'
+          }`} data-testid="employment-readiness-banner">
+            <CardContent className="py-4">
+              <div className="flex items-center gap-3">
+                <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                  employment_readiness === 'ready_for_work'
+                    ? 'bg-green-100'
+                    : employment_readiness === 'blocked'
+                    ? 'bg-red-100'
+                    : 'bg-amber-100'
+                }`}>
+                  {employment_readiness === 'ready_for_work'
+                    ? <ShieldCheck className="h-5 w-5 text-green-600" />
+                    : employment_readiness === 'blocked'
+                    ? <AlertCircle className="h-5 w-5 text-red-600" />
+                    : <Clock className="h-5 w-5 text-amber-600" />
+                  }
+                </div>
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className={`font-semibold text-sm ${
+                      employment_readiness === 'ready_for_work'
+                        ? 'text-green-800'
+                        : employment_readiness === 'blocked'
+                        ? 'text-red-800'
+                        : 'text-amber-800'
+                    }`}>
+                      Employment Status: {employment_readiness_label || employment_readiness}
+                    </span>
+                    <Badge className={`text-xs ${
+                      employment_readiness === 'ready_for_work'
+                        ? 'bg-green-100 text-green-700'
+                        : employment_readiness === 'blocked'
+                        ? 'bg-red-100 text-red-700'
+                        : 'bg-amber-100 text-amber-700'
+                    }`}>
+                      {employment_readiness === 'ready_for_work' ? 'Ready for Work'
+                        : employment_readiness === 'blocked' ? 'Blocked'
+                        : 'Awaiting Agreements'}
+                    </Badge>
+                  </div>
+                  {employment_readiness_blockers.length > 0 && (
+                    <ul className="mt-1 space-y-0.5">
+                      {employment_readiness_blockers.map((b, i) => (
+                        <li key={i} className={`text-xs flex items-center gap-1 ${
+                          employment_readiness === 'blocked' ? 'text-red-700' : 'text-amber-700'
+                        }`}>
+                          <AlertTriangle className="h-3 w-3 flex-shrink-0" />
+                          {b.label}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {employment_readiness === 'ready_for_work' && (
+                    <p className="text-xs text-green-700 mt-0.5">All agreements complete — you are cleared for employment.</p>
+                  )}
+                </div>
+              </div>
             </CardContent>
           </Card>
         )}
@@ -2499,11 +2572,14 @@ export default function WorkerDashboard() {
                     </p>
                 </div>
                 <Badge className={`${
+                  agreements.some(a => a.rejected) ? 'bg-red-100 text-red-700' :
                   agreements.every(a => a.verified) ? 'bg-green-100 text-green-700' :
                   agreements.some(a => a.signed || a.verified) ? 'bg-blue-100 text-blue-700' :
                   'bg-slate-100 text-slate-600'
                 }`}>
-                  {agreements.filter(a => a.verified).length} of {agreements.length} completed
+                  {agreements.some(a => a.rejected)
+                    ? `${agreements.filter(a => a.rejected).length} action required`
+                    : `${agreements.filter(a => a.verified).length} of ${agreements.length} completed`}
                 </Badge>
               </div>
             </CardHeader>
@@ -2513,6 +2589,7 @@ export default function WorkerDashboard() {
                   <div
                     key={agreement.id}
                       className={`p-4 rounded-xl border ${
+                        agreement.rejected ? 'bg-red-50 border-red-300 border-2' :
                         agreement.verified ? 'bg-green-50 border-green-200' :
                         agreement.signed ? 'bg-blue-50 border-blue-200' :
                         'bg-slate-50 border-slate-200'

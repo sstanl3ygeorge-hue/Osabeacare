@@ -145,33 +145,83 @@ def _resolve_contract_fields(employee: Dict[str, Any], org_settings: Optional[Di
     }
 
 
+# Canonical {{token}} replacements used by the migrated DOCX template.
+# The DOCX template (zero_hour_contract_template.docx) was migrated in April 2026
+# to use only {{token}} placeholders — no legacy (insert...) variants remain.
+def _build_contract_replacements(fields: Dict[str, str]) -> Dict[str, str]:
+    """Return a mapping of {{token}} placeholders to rendered field values."""
+    f = fields
+    return {
+        "{{employee_name}}": f["full_name"],
+        "{{issue_date}}": f["issue_date"],
+        "{{job_title}}": f["job_title"],
+        "{{contract_start_date}}": f["contract_start_date"],
+        "{{continuous_service_date}}": f["continuous_service_date"],
+        "{{hourly_rate}}": f["hourly_rate"],
+        "{{sleep_in_rate}}": f["sleep_in_rate"],
+        "{{company_name}}": f["company_name"],
+        "{{company_address}}": f["company_address"],
+        "{{commencement_wording}}": f["commencement_wording"],
+    }
+
+
+REQUIRED_CONTRACT_FIELDS = [
+    "full_name",
+    "job_title",
+    "issue_date",
+    "contract_start_date",
+    "hourly_rate",
+    "company_name",
+]
+
+
+def _validate_contract_fields(fields: Dict[str, str]) -> None:
+    """Log warnings for TBC or missing required contract fields."""
+    import logging
+    _log = logging.getLogger(__name__)
+    for field in REQUIRED_CONTRACT_FIELDS:
+        value = fields.get(field, "")
+        if not value or value in ("TBC", "0.00"):
+            _log.warning("Contract field '%s' is missing or placeholder: %r", field, value)
+
+
 def _replace_contract_text(text: str, fields: Dict[str, str]) -> str:
     updated = _clean_text(text)
-    replacements = {
-        "(Insert Employee Name)": fields["full_name"],
-        "(insert name of employee)": fields["full_name"],
-        "(insert date of issue)": fields["issue_date"],
-        "(insert job title)": fields["job_title"],
-        "(insert 'will commence' or 'commenced')": fields["commencement_wording"],
-        "(insert date this contract starts)": fields["contract_start_date"],
-        "(insert continuous service date of employment)": fields["continuous_service_date"],
-        "Ł(insert amount)": f"£{fields['hourly_rate']}",
-        "£(insert amount)": f"£{fields['hourly_rate']}",
-        "Ł40": f"£{fields['sleep_in_rate']}",
-        "iCubeDALPro Limited t/a iCareServicesGroup": fields["company_name"],
-        "Unit 12, Harrods Road, Harlow, CM19 5BJ": fields["company_address"],
-    }
-    for old, new in replacements.items():
+    for old, new in _build_contract_replacements(fields).items():
         updated = updated.replace(old, new)
     return updated
 
 
 def _replace_handbook_text(text: str, org_settings: Optional[Dict[str, Any]]) -> str:
     updated = _clean_text(text)
-    org_name = (org_settings or {}).get("organisation_name")
-    if org_name:
-        updated = updated.replace("Osabea Healthcare Solutions Ltd", org_name)
-        updated = updated.replace("Osabea Healthcare Solutions", org_name)
+    settings = org_settings or {}
+    org_name = settings.get("organisation_name") or "Osabea Healthcare Solutions Ltd"
+    org_address = settings.get("organisation_address") or settings.get("address") or ""
+    registered_manager = settings.get("registered_manager_name") or settings.get("registered_manager") or "The Registered Manager"
+    grievance_contact = settings.get("grievance_contact_name") or settings.get("hr_contact_name") or "HR Department"
+    grievance_email = settings.get("grievance_contact_email") or settings.get("hr_email") or ""
+    mileage_rate = settings.get("mileage_rate") or "0.45"
+    replacements = {
+        # {{token}} style
+        "{{company_name}}": org_name,
+        "{{company_address}}": org_address,
+        "{{registered_manager}}": registered_manager,
+        "{{grievance_contact_name}}": grievance_contact,
+        "{{grievance_contact_email}}": grievance_email,
+        "{{mileage_rate}}": str(mileage_rate),
+        # Legacy embedded names in old handbook template
+        "Osabea Healthcare Solutions Ltd": org_name,
+        "Osabea Healthcare Solutions": org_name,
+        "iCubeDALPro Limited t/a iCareServicesGroup": org_name,
+        "iCubeDALPro": org_name,
+        "Unit 12, Harrods Road, Harlow, CM19 5BJ": org_address,
+        "(insert Registered Manager name)": registered_manager,
+        "(insert grievance contact name)": grievance_contact,
+        "(insert mileage rate)": str(mileage_rate),
+    }
+    for old, new in replacements.items():
+        if new:  # don't replace with empty string
+            updated = updated.replace(old, new)
     return updated
 
 
@@ -223,8 +273,9 @@ async def _load_template_bytes(db, agreement_type: str) -> tuple[bytes, str, Pat
             remote = await download_file_from_storage(file_url)
             if remote:
                 return remote, Path(file_url).name or "contract_template.docx", Path(file_url)
-        if CONTRACT_TEMPLATE_PDF_PATH.exists():
-            return CONTRACT_TEMPLATE_PDF_PATH.read_bytes(), CONTRACT_TEMPLATE_PDF_PATH.name, CONTRACT_TEMPLATE_PDF_PATH
+        # Always prefer DOCX so token substitution works reliably.
+        # The PDF template (zero_hour_contract_template.pdf) used a coordinate-based
+        # overlay that doesn't survive layout changes — DOCX rendering is definitive.
         return CONTRACT_TEMPLATE_DOCX_PATH.read_bytes(), CONTRACT_TEMPLATE_DOCX_PATH.name, CONTRACT_TEMPLATE_DOCX_PATH
 
     return HANDBOOK_TEMPLATE_PATH.read_bytes(), HANDBOOK_TEMPLATE_PATH.name, HANDBOOK_TEMPLATE_PATH
@@ -351,40 +402,6 @@ def _merge_overlay(base_pdf_bytes: bytes, overlay_builders: Dict[int, Any]) -> b
     return output.getvalue()
 
 
-def _render_contract_pdf_from_template(template_bytes: bytes, fields: Dict[str, str]) -> bytes:
-    def page0(canv, width, height):
-        canv.setFillColor(colors.black)
-        canv.setFont("Helvetica-Bold", 14)
-        canv.drawString(150, 618, fields["full_name"])
-        logo = get_logo_image(width=38 * mm, height=16 * mm)
-        if logo:
-            logo.drawOn(canv, 62, height - 95)
-
-    def page1(canv, width, height):
-        canv.setFillColor(colors.white)
-        for x, y, w, h in [
-            (128, 650, 110, 16),
-            (392, 631, 115, 14),
-            (142, 503, 140, 15),
-            (203, 454, 170, 15),
-            (223, 434, 170, 15),
-            (152, 284, 78, 15),
-            (284, 225, 52, 14),
-        ]:
-            canv.rect(x, y, w, h, fill=1, stroke=0)
-        canv.setFillColor(colors.black)
-        canv.setFont("Helvetica", 10)
-        canv.drawString(132, 654, fields["issue_date"])
-        canv.drawString(396, 635, fields["full_name"])
-        canv.drawString(145, 506, fields["job_title"])
-        canv.drawString(206, 457, fields["contract_start_date"])
-        canv.drawString(226, 437, fields["continuous_service_date"])
-        canv.drawString(155, 287, f"£{fields['hourly_rate']}")
-        canv.drawString(286, 228, f"£{fields['sleep_in_rate']}")
-
-    return _merge_overlay(template_bytes, {0: page0, 1: page1})
-
-
 def _apply_contract_signatures(
     base_pdf_bytes: bytes,
     worker_signature_bytes: Optional[bytes] = None,
@@ -414,7 +431,10 @@ def _apply_contract_signatures(
         if company_signed_at:
             canv.drawString(115, 34, _format_date(company_signed_at))
 
-    return _merge_overlay(base_pdf_bytes, {6: signature_page})
+    # Derive last-page index from the actual rendered PDF (DOCX output is variable-length).
+    _reader = PdfReader(io.BytesIO(base_pdf_bytes))
+    last_page_idx = max(0, len(_reader.pages) - 1)
+    return _merge_overlay(base_pdf_bytes, {last_page_idx: signature_page})
 
 
 def current_contract_artifact(agreement: Dict[str, Any]) -> Optional[str]:
@@ -433,15 +453,12 @@ async def build_agreement_rendering(db, employee: Dict[str, Any], agreement_type
     employee_name = _employee_name(employee)
     if agreement_type == CONTRACT_AGREEMENT_TYPE:
         fields = _resolve_contract_fields(employee, org_settings)
-        is_pdf_template = source_path.suffix.lower() == ".pdf" or template_bytes[:4] == b"%PDF"
-        if is_pdf_template:
-            pdf_bytes = _render_contract_pdf_from_template(template_bytes, fields)
-        else:
-            doc = Document(io.BytesIO(template_bytes))
-            blocks = _docx_to_blocks(doc, lambda text: _replace_contract_text(text, fields))
-            title = "Employment Contract"
-            subtitle = f"{fields['company_name']} | Version {version}"
-            pdf_bytes = _render_pdf(blocks, title, subtitle, employee_name)
+        _validate_contract_fields(fields)
+        doc = Document(io.BytesIO(template_bytes))
+        blocks = _docx_to_blocks(doc, lambda text: _replace_contract_text(text, fields))
+        title = "Employment Contract"
+        subtitle = f"{fields['company_name']} | Version {version}"
+        pdf_bytes = _render_pdf(blocks, title, subtitle, employee_name)
     else:
         doc = Document(io.BytesIO(template_bytes))
         blocks = _docx_to_blocks(doc, lambda text: _replace_handbook_text(text, org_settings))

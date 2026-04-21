@@ -105,6 +105,16 @@ def _clean_text(text: str) -> str:
     )
 
 
+# Raised when required contract fields are unresolved so we never produce a
+# broken PDF with TBC values.
+class ContractRenderError(Exception):
+    """Required contract fields are missing or unresolved."""
+
+
+class HandbookRenderError(Exception):
+    """Required handbook/org fields are missing or unresolved."""
+
+
 def _resolve_contract_fields(employee: Dict[str, Any], org_settings: Optional[Dict[str, Any]]) -> Dict[str, str]:
     issue_date = _format_date(_utcnow())
     contract_start = (
@@ -112,6 +122,7 @@ def _resolve_contract_fields(employee: Dict[str, Any], org_settings: Optional[Di
         or employee.get("start_date")
         or employee.get("employment_start_date")
         or employee.get("job_start_date")
+        or employee.get("onboarding_start_date")
         or employee.get("promoted_at")
     )
     continuous_service = (
@@ -125,11 +136,23 @@ def _resolve_contract_fields(employee: Dict[str, Any], org_settings: Optional[Di
         or employee.get("position")
         or "Care Worker"
     )
-    org_name = (org_settings or {}).get("organisation_name") or "Osabea Healthcare Solutions Ltd"
+    settings = org_settings or {}
+    org_name = settings.get("organisation_name") or "Osabea Healthcare Solutions Ltd"
+    # Address must be a real street address, not the company name.
+    # Sources in priority order; company name is explicitly excluded as a fallback.
     org_address = (
-        (org_settings or {}).get("organisation_address")
-        or (org_settings or {}).get("address")
-        or "Osabea Healthcare Solutions Ltd"
+        settings.get("organisation_address")
+        or settings.get("business_address")
+        or settings.get("registered_address")
+        or settings.get("address")
+    ) or None  # None signals that address has not been configured
+    # Hourly rate: try multiple field names used across different data models
+    hourly_rate_raw = (
+        employee.get("hourly_rate")
+        or employee.get("pay_rate")
+        or employee.get("rate")
+        or employee.get("base_rate")
+        or employee.get("wage_rate")
     )
     return {
         "full_name": _employee_name(employee),
@@ -137,10 +160,10 @@ def _resolve_contract_fields(employee: Dict[str, Any], org_settings: Optional[Di
         "issue_date": issue_date,
         "contract_start_date": _format_date(contract_start),
         "continuous_service_date": _format_date(continuous_service),
-        "hourly_rate": _format_money(employee.get("hourly_rate") or employee.get("pay_rate") or employee.get("rate")),
+        "hourly_rate": _format_money(hourly_rate_raw),
         "sleep_in_rate": _format_money(employee.get("sleep_in_rate") or employee.get("sleepin_rate") or "40.00"),
         "company_name": org_name,
-        "company_address": org_address,
+        "company_address": org_address or "TBC",
         "commencement_wording": "commences",
     }
 
@@ -170,58 +193,186 @@ REQUIRED_CONTRACT_FIELDS = [
     "job_title",
     "issue_date",
     "contract_start_date",
+    "continuous_service_date",
     "hourly_rate",
     "company_name",
+    "company_address",
 ]
+
+# Values that indicate a field is unresolved and must not appear in a final PDF.
+_UNRESOLVED_SENTINELS = {"TBC", "0.00", "", "None", "none"}
 
 
 def _validate_contract_fields(fields: Dict[str, str]) -> None:
-    """Log warnings for TBC or missing required contract fields."""
+    """Raise ContractRenderError if any required field is missing or still a placeholder.
+
+    Callers must catch this and return a 422 / incomplete-data response rather
+    than producing a broken PDF with TBC values visible to the worker.
+    """
     import logging
     _log = logging.getLogger(__name__)
+    missing: List[str] = []
     for field in REQUIRED_CONTRACT_FIELDS:
-        value = fields.get(field, "")
-        if not value or value in ("TBC", "0.00"):
-            _log.warning("Contract field '%s' is missing or placeholder: %r", field, value)
+        value = (fields.get(field) or "").strip()
+        if not value or value in _UNRESOLVED_SENTINELS:
+            _log.warning("Contract field '%s' is missing or unresolved: %r", field, value)
+            missing.append(field)
+    if missing:
+        raise ContractRenderError(
+            f"Contract cannot be rendered: the following required fields are unresolved: "
+            f"{', '.join(missing)}. Set them on the employee record or org_settings before generating."
+        )
+
+
+# Template artifact phrases that must be removed from rendered output.
+# These are leftover template-editor notes that should never appear in a
+# worker-facing contract.
+_ARTIFACT_PHRASES = [
+    "Logo (if required)",
+]
 
 
 def _replace_contract_text(text: str, fields: Dict[str, str]) -> str:
     updated = _clean_text(text)
     for old, new in _build_contract_replacements(fields).items():
         updated = updated.replace(old, new)
+    # Strip any remaining template artifact phrases
+    for artifact in _ARTIFACT_PHRASES:
+        updated = updated.replace(artifact, "")
     return updated
 
 
-def _replace_handbook_text(text: str, org_settings: Optional[Dict[str, Any]]) -> str:
+# ---------------------------------------------------------------------------
+# Handbook field resolution and validation
+# ---------------------------------------------------------------------------
+
+REQUIRED_HANDBOOK_FIELDS = [
+    "company_name",
+    "company_address",
+]
+
+_HANDBOOK_UNRESOLVED_SENTINELS = {"TBC", "", "None", "none", "xxxxxx"}
+
+# {{token}} phrases that are known to appear in older handbook templates and
+# must not survive into a rendered PDF even if the DOCX uses them.
+_HANDBOOK_ARTIFACT_PHRASES = [
+    "We advise that",
+    "You could base these values",
+    "[Add other benefits",
+    "(add duration of probation)",
+    "(insert Registered Manager name)",
+    "(insert grievance contact name)",
+    "(insert mileage rate)",
+    "iCubeDALPro",
+    "Unit 12, Harrods Road, Harlow, CM19 5BJ",
+]
+
+
+def _resolve_handbook_fields(org_settings: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Map org_settings → canonical handbook field dict."""
+    s = org_settings or {}
+    org_name = s.get("organisation_name") or None
+    org_address = (
+        s.get("organisation_address")
+        or s.get("business_address")
+        or s.get("registered_address")
+        or s.get("address")
+    ) or None
+    registered_manager = (
+        s.get("registered_manager_name") or s.get("registered_manager") or "The Registered Manager"
+    )
+    registered_manager_email = s.get("registered_manager_email") or None
+    grievance_contact = (
+        s.get("grievance_contact_name") or s.get("hr_contact_name") or None
+    )
+    grievance_email = (
+        s.get("grievance_contact_email") or s.get("hr_email") or None
+    )
+    appeal_contact = s.get("appeal_contact_name") or grievance_contact
+    appeal_email = s.get("appeal_contact_email") or grievance_email
+    hr_contact = s.get("hr_contact_name") or grievance_contact
+    hr_email = s.get("hr_contact_email") or s.get("hr_email") or grievance_email
+    mileage_rate = s.get("mileage_rate") or "0.45"
+    about_us_text = s.get("about_us_text") or None
+    phone_number = s.get("phone_number") or s.get("contact_phone") or None
+    website = s.get("website") or s.get("website_url") or None
+    return {
+        "company_name": org_name,
+        "company_address": org_address,
+        "registered_manager_name": registered_manager,
+        "registered_manager_email": registered_manager_email,
+        "grievance_contact_name": grievance_contact,
+        "grievance_contact_email": grievance_email,
+        "appeal_contact_name": appeal_contact,
+        "appeal_contact_email": appeal_email,
+        "hr_contact_name": hr_contact,
+        "hr_contact_email": hr_email,
+        "mileage_rate": str(mileage_rate),
+        "about_us_text": about_us_text,
+        "phone_number": phone_number,
+        "website": website,
+    }
+
+
+def _validate_handbook_fields(fields: Dict[str, Any]) -> None:
+    """Raise HandbookRenderError if required handbook fields are missing or unresolved."""
+    import logging
+    _log = logging.getLogger(__name__)
+    missing: List[str] = []
+    for field in REQUIRED_HANDBOOK_FIELDS:
+        val = (fields.get(field) or "").strip()
+        if not val or val in _HANDBOOK_UNRESOLVED_SENTINELS:
+            _log.warning("Handbook field '%s' is missing or unresolved: %r", field, val)
+            missing.append(field)
+    if missing:
+        raise HandbookRenderError(
+            f"Cannot render handbook: required field(s) missing or unresolved: "
+            f"{', '.join(missing)}"
+        )
+
+
+def _replace_handbook_text(text: str, fields: Dict[str, Any]) -> str:
+    """Apply handbook field substitutions and strip any remaining artifact phrases."""
     updated = _clean_text(text)
-    settings = org_settings or {}
-    org_name = settings.get("organisation_name") or "Osabea Healthcare Solutions Ltd"
-    org_address = settings.get("organisation_address") or settings.get("address") or ""
-    registered_manager = settings.get("registered_manager_name") or settings.get("registered_manager") or "The Registered Manager"
-    grievance_contact = settings.get("grievance_contact_name") or settings.get("hr_contact_name") or "HR Department"
-    grievance_email = settings.get("grievance_contact_email") or settings.get("hr_email") or ""
-    mileage_rate = settings.get("mileage_rate") or "0.45"
-    replacements = {
-        # {{token}} style
+    org_name = fields.get("company_name") or "Osabea Healthcare Solutions Ltd"
+    org_address = fields.get("company_address") or ""
+
+    # {{token}} replacements first
+    token_map = {
         "{{company_name}}": org_name,
         "{{company_address}}": org_address,
-        "{{registered_manager}}": registered_manager,
-        "{{grievance_contact_name}}": grievance_contact,
-        "{{grievance_contact_email}}": grievance_email,
-        "{{mileage_rate}}": str(mileage_rate),
-        # Legacy embedded names in old handbook template
-        "Osabea Healthcare Solutions Ltd": org_name,
-        "Osabea Healthcare Solutions": org_name,
+        "{{registered_manager_name}}": fields.get("registered_manager_name") or "",
+        "{{registered_manager_email}}": fields.get("registered_manager_email") or "",
+        "{{grievance_contact_name}}": fields.get("grievance_contact_name") or "",
+        "{{grievance_contact_email}}": fields.get("grievance_contact_email") or "",
+        "{{appeal_contact_name}}": fields.get("appeal_contact_name") or "",
+        "{{appeal_contact_email}}": fields.get("appeal_contact_email") or "",
+        "{{hr_contact_name}}": fields.get("hr_contact_name") or "",
+        "{{hr_contact_email}}": fields.get("hr_contact_email") or "",
+        "{{mileage_rate}}": str(fields.get("mileage_rate") or "0.45"),
+        "{{about_us_text}}": fields.get("about_us_text") or "",
+        "{{phone_number}}": fields.get("phone_number") or "",
+        "{{website}}": fields.get("website") or "",
+    }
+    for token, val in token_map.items():
+        updated = updated.replace(token, val)
+
+    # Legacy phrase replacements for old embedded names that may still be in
+    # older template versions. The company name is intentionally kept in the
+    # DOCX (it already reads "Osabea") but any old iCube names must be cleaned.
+    legacy = {
         "iCubeDALPro Limited t/a iCareServicesGroup": org_name,
         "iCubeDALPro": org_name,
-        "Unit 12, Harrods Road, Harlow, CM19 5BJ": org_address,
-        "(insert Registered Manager name)": registered_manager,
-        "(insert grievance contact name)": grievance_contact,
-        "(insert mileage rate)": str(mileage_rate),
+        "Unit 12, Harrods Road, Harlow, CM19 5BJ": org_address if org_address else "",
     }
-    for old, new in replacements.items():
-        if new:  # don't replace with empty string
+    for old, new in legacy.items():
+        if new:
             updated = updated.replace(old, new)
+
+    # Strip any remaining artifact phrases that should never reach production
+    for artifact in _HANDBOOK_ARTIFACT_PHRASES:
+        updated = updated.replace(artifact, "")
+
     return updated
 
 
@@ -333,6 +484,20 @@ def _render_pdf(blocks: List[Dict[str, Any]], title: str, subtitle: str, employe
     )
     styles = _create_styles()
     story: List[Any] = []
+    usable_width = A4[0] - (16 * mm) - (16 * mm)
+    table_cell_style = ParagraphStyle(
+        name="AgreementTableCell",
+        parent=styles["AgreementBody"],
+        fontName="Helvetica",
+        fontSize=8,
+        leading=10,
+        spaceAfter=0,
+    )
+    table_header_style = ParagraphStyle(
+        name="AgreementTableHeader",
+        parent=table_cell_style,
+        fontName="Helvetica-Bold",
+    )
 
     logo = get_logo_image(width=42 * mm, height=18 * mm)
     if logo:
@@ -350,14 +515,42 @@ def _render_pdf(blocks: List[Dict[str, Any]], title: str, subtitle: str, employe
             rows = block["rows"]
             max_cols = max(len(r) for r in rows)
             normalized = [r + [""] * (max_cols - len(r)) for r in rows]
-            table = PdfTable(normalized, repeatRows=1)
+
+            # Some handbook tables contain merged cells with page-long prose.
+            # ReportLab cannot split a single oversized table row across pages,
+            # so render these as normal paragraphs instead of a strict table.
+            if any(sum(len(str(cell)) for cell in row) > 1200 for row in normalized):
+                header = [str(cell).strip() for cell in normalized[0] if str(cell).strip()]
+                if header:
+                    story.append(PdfParagraph(" | ".join(escape(h) for h in header), table_header_style))
+                    story.append(Spacer(1, 1.5 * mm))
+                for row in normalized[1:]:
+                    row_text = " | ".join(str(cell).strip() for cell in row if str(cell).strip())
+                    if row_text:
+                        story.append(PdfParagraph(escape(row_text).replace("\n", "<br/>"), table_cell_style))
+                        story.append(Spacer(1, 1.2 * mm))
+                story.append(Spacer(1, 3 * mm))
+                continue
+
+            paragraph_rows: List[List[PdfParagraph]] = []
+            for row_index, row in enumerate(normalized):
+                style = table_header_style if row_index == 0 else table_cell_style
+                paragraph_rows.append([
+                    PdfParagraph(escape(str(cell)).replace("\n", "<br/>"), style)
+                    for cell in row
+                ])
+
+            col_width = usable_width / max_cols if max_cols else usable_width
+            table = PdfTable(
+                paragraph_rows,
+                repeatRows=1,
+                colWidths=[col_width] * max_cols,
+                splitByRow=1,
+            )
             table.setStyle(TableStyle([
                 ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#D1D5DB")),
                 ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F3F4F6")),
                 ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
-                ("FONTSIZE", (0, 0), (-1, -1), 8),
-                ("LEADING", (0, 0), (-1, -1), 10),
                 ("LEFTPADDING", (0, 0), (-1, -1), 4),
                 ("RIGHTPADDING", (0, 0), (-1, -1), 4),
                 ("TOPPADDING", (0, 0), (-1, -1), 3),
@@ -460,10 +653,12 @@ async def build_agreement_rendering(db, employee: Dict[str, Any], agreement_type
         subtitle = f"{fields['company_name']} | Version {version}"
         pdf_bytes = _render_pdf(blocks, title, subtitle, employee_name)
     else:
+        handbook_fields = _resolve_handbook_fields(org_settings)
+        _validate_handbook_fields(handbook_fields)
         doc = Document(io.BytesIO(template_bytes))
-        blocks = _docx_to_blocks(doc, lambda text: _replace_handbook_text(text, org_settings))
+        blocks = _docx_to_blocks(doc, lambda text: _replace_handbook_text(text, handbook_fields))
         title = "Employee Handbook"
-        subtitle = f"{(org_settings or {}).get('organisation_name') or 'Osabea Healthcare Solutions Ltd'} | Version {version}"
+        subtitle = f"{handbook_fields['company_name']} | Version {version}"
         pdf_bytes = _render_pdf(blocks, title, subtitle, employee_name)
     return {
         "template_version": version,

@@ -3110,7 +3110,19 @@ async def _create_required_stamped_file_for_document(doc: dict, stamp_data: dict
         )
 
     try:
+        logger.info(
+            "verify-flow file retrieval start doc_id=%s employee_id=%s file_url=%s",
+            doc.get("id"),
+            doc.get("employee_id"),
+            file_url,
+        )
         original_bytes, content_type = await retrieve_file_bytes(file_url)
+        logger.info(
+            "verify-flow file retrieval end doc_id=%s bytes=%s content_type=%s",
+            doc.get("id"),
+            len(original_bytes) if original_bytes else 0,
+            content_type,
+        )
     except Exception as exc:
         logger.error(f"Failed to fetch original file for stamping {doc.get('id')}: {exc}")
         raise HTTPException(
@@ -3146,11 +3158,22 @@ async def _create_required_stamped_file_for_document(doc: dict, stamp_data: dict
         )
 
     stamped_filename = f"stamped_{doc.get('id')}_{uuid.uuid4().hex[:8]}.{file_ext}"
+    logger.info(
+        "verify-flow upload start doc_id=%s employee_id=%s stamped_filename=%s",
+        doc.get("id"),
+        doc.get("employee_id"),
+        stamped_filename,
+    )
     stamped_file_url = await _upload_stamped_file(
         stamped_bytes,
         stamped_filename,
         file_ext,
         doc.get("employee_id", "unknown"),
+    )
+    logger.info(
+        "verify-flow upload end doc_id=%s stamped_file_url=%s",
+        doc.get("id"),
+        stamped_file_url,
     )
 
     if not stamped_file_url:
@@ -3228,10 +3251,28 @@ async def stamp_and_persist_document(
 
     stamped_file_url = existing_stamped_url
     if not already_stamped:
+        logger.info(
+            "verify-flow stamp generation start doc_id=%s employee_id=%s file_url=%s",
+            document.get("id"),
+            document.get("employee_id"),
+            document.get("file_url") or document.get("file_path"),
+        )
         stamped_file_url = await _create_required_stamped_file_for_document(document, stamp_data)
+        logger.info(
+            "verify-flow stamp generation end doc_id=%s stamped_file_url=%s",
+            document.get("id"),
+            stamped_file_url,
+        )
+
+    # Keep verification_stamp flat for API/model compatibility; preserve full
+    # payload separately for audit/debug and backward-safe evolution.
+    persisted_stamp_type = effective_stamp_type
+    if isinstance(existing_stamp, dict):
+        persisted_stamp_type = str(existing_stamp.get("stamp_type") or effective_stamp_type)
 
     update_data = {
-        "verification_stamp": stamp_data,
+        "verification_stamp": persisted_stamp_type,
+        "verification_stamp_payload": stamp_data,
         "verification_stamp_label": stamp_info["label"],
         "verification_stamp_audit_text": stamp_info["audit_text"],
         "verification_stamp_badge_color": stamp_info.get("badge_color"),
@@ -3270,9 +3311,19 @@ async def stamp_and_persist_document(
     except Exception as exc:
         raise Exception("Stamping failed — cannot approve document") from exc
 
+    logger.info(
+        "verify-flow DB update start doc_id=%s employee_id=%s",
+        document.get("id"),
+        document.get("employee_id"),
+    )
     result = await db_ref.employee_documents.update_one(
         {"id": document["id"]},
         {"$set": update_data},
+    )
+    logger.info(
+        "verify-flow DB update end doc_id=%s matched=%s",
+        document.get("id"),
+        result.matched_count,
     )
     if result.matched_count != 1:
         raise Exception("Stamping failed — cannot approve document")
@@ -8693,6 +8744,7 @@ async def sign_contract(
     
     from agreement_document_service import (
         CONTRACT_AGREEMENT_TYPE,
+        ContractRenderError,
         create_worker_signed_contract,
         ensure_agreement_rendered,
     )
@@ -8708,7 +8760,13 @@ async def sign_contract(
     if not signature_url:
         raise HTTPException(status_code=500, detail="Failed to persist signature image")
 
-    contract_record = await ensure_agreement_rendered(db, employee, CONTRACT_AGREEMENT_TYPE)
+    try:
+        contract_record = await ensure_agreement_rendered(db, employee, CONTRACT_AGREEMENT_TYPE)
+    except ContractRenderError as e:
+        raise HTTPException(
+            status_code=422,
+            detail=str(e),
+        )
     contract_record = await create_worker_signed_contract(
         db,
         employee,
@@ -19624,79 +19682,139 @@ async def verify_employee_document(doc_id: str, user: dict = Depends(require_man
     IDENTITY/POA HARDENING:
     - Requires review checklist completion before verification
     """
-    doc = await db.employee_documents.find_one({"id": doc_id})
-    if not doc:
-        raise HTTPException(status_code=404, detail="Document not found")
-    
-    # LEGAL DOCUMENT RESTRICTION
-    LEGAL_SENSITIVE_REQUIREMENTS = [
-        "right_to_work_documents",
-        "right_to_work_check",
-        "dbs_certificate",
-        "dbs_check",
-        "identity_documents",
-        "proof_of_address"
-    ]
-    
-    requirement_id = doc.get("requirement_id", "")
-    if requirement_id in LEGAL_SENSITIVE_REQUIREMENTS:
-        if user.get('role') == UserRole.BRANCH_MANAGER:
-            raise HTTPException(
-                status_code=403,
-                detail=f"Legal/sensitive documents ({requirement_id}) require Admin verification."
-            )
-    
-    # HARDENING: For Identity/PoA, require review checklist before verification
-    is_identity_poa = any(x in requirement_id.lower() for x in ["identity", "proof_of_address"])
-    if is_identity_poa and not doc.get("file_viewed"):
-        raise HTTPException(
-            status_code=400,
-            detail="Must complete review checklist before verification. Call /start-review endpoint first."
+    doc = None
+    try:
+        logger.info(
+            "verify-flow route entered doc_id=%s reviewer_user_id=%s",
+            doc_id,
+            user.get("user_id"),
+        )
+
+        doc = await db.employee_documents.find_one({"id": doc_id})
+        if not doc:
+            raise HTTPException(status_code=404, detail="Document not found")
+
+        logger.info(
+            "verify-flow document loaded doc_id=%s employee_id=%s file_url=%s status=%s requirement_id=%s",
+            doc_id,
+            doc.get("employee_id"),
+            doc.get("file_url") or doc.get("file_path"),
+            doc.get("status"),
+            doc.get("requirement_id"),
         )
     
-    # Ensure document is approved before verification
-    if doc.get('status') not in ['approved', 'uploaded']:
-        raise HTTPException(status_code=400, detail="Document must be approved before verification")
+        # LEGAL DOCUMENT RESTRICTION
+        LEGAL_SENSITIVE_REQUIREMENTS = [
+            "right_to_work_documents",
+            "right_to_work_check",
+            "dbs_certificate",
+            "dbs_check",
+            "identity_documents",
+            "proof_of_address"
+        ]
     
-    now = datetime.now(timezone.utc).isoformat()
+        requirement_id = doc.get("requirement_id", "")
+        if requirement_id in LEGAL_SENSITIVE_REQUIREMENTS:
+            if user.get('role') == UserRole.BRANCH_MANAGER:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"Legal/sensitive documents ({requirement_id}) require Admin verification."
+                )
     
-    # P0 FIX: Get verifier's full name (not email)
-    verifier = await db.users.find_one({"user_id": user['user_id']}, {"_id": 0, "name": 1, "first_name": 1, "last_name": 1})
-    if not verifier:
-        verifier = await db.users.find_one({"id": user['user_id']}, {"_id": 0, "name": 1, "first_name": 1, "last_name": 1})
+        # HARDENING: For Identity/PoA, require review checklist before verification
+        is_identity_poa = any(x in requirement_id.lower() for x in ["identity", "proof_of_address"])
+        if is_identity_poa and not doc.get("file_viewed"):
+            raise HTTPException(
+                status_code=400,
+                detail="Must complete review checklist before verification. Call /start-review endpoint first."
+            )
     
-    verifier_name = "Admin"
-    if verifier:
-        if verifier.get('name'):
-            verifier_name = verifier['name']
-        elif verifier.get('first_name'):
-            verifier_name = f"{verifier.get('first_name', '')} {verifier.get('last_name', '')}".strip()
+        # Ensure document is approved before verification
+        if doc.get('status') not in ['approved', 'uploaded']:
+            raise HTTPException(status_code=400, detail="Document must be approved before verification")
     
-    # Fallback: format email as name
-    if verifier_name == "Admin" and user.get('email'):
-        email = user['email']
-        name_part = email.split('@')[0]
-        verifier_name = ' '.join(word.capitalize() for word in name_part.replace('.', ' ').replace('_', ' ').split())
+        now = datetime.now(timezone.utc).isoformat()
+    
+        # P0 FIX: Get verifier's full name (not email)
+        verifier = await db.users.find_one({"user_id": user['user_id']}, {"_id": 0, "name": 1, "first_name": 1, "last_name": 1})
+        if not verifier:
+            verifier = await db.users.find_one({"id": user['user_id']}, {"_id": 0, "name": 1, "first_name": 1, "last_name": 1})
+    
+        verifier_name = "Admin"
+        if verifier:
+            if verifier.get('name'):
+                verifier_name = verifier['name']
+            elif verifier.get('first_name'):
+                verifier_name = f"{verifier.get('first_name', '')} {verifier.get('last_name', '')}".strip()
+    
+        # Fallback: format email as name
+        if verifier_name == "Admin" and user.get('email'):
+            email = user['email']
+            name_part = email.split('@')[0]
+            verifier_name = ' '.join(word.capitalize() for word in name_part.replace('.', ' ').replace('_', ' ').split())
 
-    updated_doc = await stamp_and_persist_document(
-        doc,
-        {
-            "user_id": user["user_id"],
-            "name": verifier_name,
-            "email": user.get("email"),
-        },
-        db_handle=db,
-        status="approved",
-        review_status="approved",
-    )
-    await log_audit_action(user['user_id'], "verify_document", "employee_document", doc_id, {
-        "verified": True,
-        "verified_by_name": verifier_name,
-        "document_type": doc.get("requirement_id"),
-        "employee_id": doc.get("employee_id")
-    })
-    
-    return EmployeeDocumentResponse(**updated_doc)
+        logger.info("verify-flow upload/start persist start doc_id=%s", doc_id)
+        updated_doc = await stamp_and_persist_document(
+            doc,
+            {
+                "user_id": user["user_id"],
+                "name": verifier_name,
+                "email": user.get("email"),
+            },
+            db_handle=db,
+            status="approved",
+            review_status="approved",
+        )
+        logger.info(
+            "verify-flow upload/start persist end doc_id=%s stamped_file_url=%s",
+            doc_id,
+            updated_doc.get("stamped_file_url"),
+        )
+
+        await log_audit_action(user['user_id'], "verify_document", "employee_document", doc_id, {
+            "verified": True,
+            "verified_by_name": verifier_name,
+            "document_type": doc.get("requirement_id"),
+            "employee_id": doc.get("employee_id")
+        })
+
+        return EmployeeDocumentResponse(**updated_doc)
+    except HTTPException as exc:
+        logger.exception(
+            "verify-flow handled HTTPException doc_id=%s employee_id=%s file_url=%s status=%s detail=%s",
+            doc_id,
+            (doc or {}).get("employee_id"),
+            (doc or {}).get("file_url") or (doc or {}).get("file_path"),
+            exc.status_code,
+            exc.detail,
+        )
+        detail_text = exc.detail if isinstance(exc.detail, str) else json.dumps(exc.detail)
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "detail": detail_text,
+                "error_code": "DOCUMENT_VERIFY_FAILED",
+                "doc_id": doc_id,
+                "employee_id": (doc or {}).get("employee_id"),
+            },
+        )
+    except Exception as exc:
+        logger.exception(
+            "verify-flow unhandled exception doc_id=%s employee_id=%s file_url=%s",
+            doc_id,
+            (doc or {}).get("employee_id"),
+            (doc or {}).get("file_url") or (doc or {}).get("file_path"),
+        )
+        return JSONResponse(
+            status_code=500,
+            content={
+                "detail": "Failed to verify document",
+                "error_code": "DOCUMENT_VERIFY_UNHANDLED",
+                "doc_id": doc_id,
+                "employee_id": (doc or {}).get("employee_id"),
+                "exception_type": type(exc).__name__,
+            },
+        )
 
 class UnverifyDocumentRequest(BaseModel):
     reason: str = Field(..., min_length=5, description="Reason for removing verification (audit requirement)")

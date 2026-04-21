@@ -66,6 +66,7 @@ from agreement_document_service import (  # noqa: E402
     _resolve_contract_fields,
     _validate_contract_fields,
     CONTRACT_TEMPLATE_DOCX_PATH,
+    ContractRenderError,
     REQUIRED_CONTRACT_FIELDS,
 )
 
@@ -86,6 +87,10 @@ _COMPLETE_EMPLOYEE = {
 _ORG_SETTINGS = {
     "organisation_name": "Osabea Healthcare Solutions Ltd",
     "organisation_address": "19 Station Road, Harlow, CM20 2BB",
+}
+
+_ORG_SETTINGS_NO_ADDRESS = {
+    "organisation_name": "Osabea Healthcare Solutions Ltd",
 }
 
 # Phrases that must NOT appear in a rendered contract.  Covers both the
@@ -284,71 +289,97 @@ class TestSignaturePagePlacement:
 # ---------------------------------------------------------------------------
 
 class TestMissingFieldValidation:
-    """Regression: broken employee data must produce a logged warning."""
+    """Regression: broken employee data must raise ContractRenderError."""
 
-    def test_missing_hourly_rate_warns(self, caplog):
-        """An employee with no hourly rate must trigger a warning before rendering."""
+    def test_missing_hourly_rate_raises(self):
+        """An employee with no hourly rate must raise ContractRenderError."""
         employee = {**_COMPLETE_EMPLOYEE, "hourly_rate": None, "pay_rate": None, "rate": None}
         fields = _resolve_contract_fields(employee, _ORG_SETTINGS)
-        with caplog.at_level(logging.WARNING, logger="agreement_document_service"):
+        with pytest.raises(ContractRenderError, match="hourly_rate"):
             _validate_contract_fields(fields)
-        assert any("hourly_rate" in msg for msg in caplog.messages), (
-            "No warning logged for missing hourly_rate"
-        )
 
-    def test_missing_contract_start_date_warns(self, caplog):
-        """An employee with no start date must trigger a warning."""
+    def test_missing_contract_start_date_raises(self):
+        """An employee with no start date must raise ContractRenderError."""
         employee = {
             k: v for k, v in _COMPLETE_EMPLOYEE.items()
             if k not in ("contract_start_date", "start_date", "employment_start_date",
-                         "job_start_date", "promoted_at")
+                         "job_start_date", "promoted_at", "onboarding_start_date")
         }
         fields = _resolve_contract_fields(employee, _ORG_SETTINGS)
-        with caplog.at_level(logging.WARNING, logger="agreement_document_service"):
+        with pytest.raises(ContractRenderError, match="contract_start_date"):
             _validate_contract_fields(fields)
-        assert any("contract_start_date" in msg for msg in caplog.messages), (
-            "No warning logged for missing contract_start_date"
-        )
 
-    def test_all_required_fields_present_no_warning(self, caplog):
-        """A fully populated employee record must produce zero warnings."""
+    def test_all_required_fields_present_no_error(self):
+        """A fully populated employee record must not raise."""
         fields = _resolve_contract_fields(_COMPLETE_EMPLOYEE, _ORG_SETTINGS)
-        with caplog.at_level(logging.WARNING, logger="agreement_document_service"):
-            _validate_contract_fields(fields)
-        warning_messages = [m for m in caplog.messages if "Contract field" in m]
-        assert warning_messages == [], (
-            f"Unexpected field warnings for complete employee: {warning_messages}"
-        )
+        _validate_contract_fields(fields)  # must not raise
 
-    def test_tbc_placeholder_in_field_warns(self, caplog):
-        """A field that resolves to 'TBC' (e.g. no start date) must be flagged."""
+    def test_tbc_placeholder_raises(self):
+        """Fields that resolve to 'TBC' must cause ContractRenderError."""
         employee = {
             "id": "emp_test_002",
             "name": "Ghost Worker",
             "job_title": "Support Worker",
-            # no date fields, no rates → TBC values
+            # no date fields, no rates → many TBC values
         }
         fields = _resolve_contract_fields(employee, _ORG_SETTINGS)
-        with caplog.at_level(logging.WARNING, logger="agreement_document_service"):
+        with pytest.raises(ContractRenderError):
             _validate_contract_fields(fields)
-        # At minimum hourly_rate and contract_start_date should be warned
-        warned_fields = {
-            msg.split("'")[1]  # extract field name from "Contract field 'X' is missing"
-            for msg in caplog.messages
-            if msg.startswith("Contract field")
-        }
-        assert "hourly_rate" in warned_fields
-        assert "contract_start_date" in warned_fields
 
     @pytest.mark.parametrize("missing_field", REQUIRED_CONTRACT_FIELDS)
-    def test_each_required_field_independently(self, missing_field, caplog):
-        """Every entry in REQUIRED_CONTRACT_FIELDS must individually trigger a warning
-        when that field is absent."""
-        # Build a complete fields dict then manually blank the target field
+    def test_each_required_field_independently(self, missing_field):
+        """Every entry in REQUIRED_CONTRACT_FIELDS must individually raise
+        ContractRenderError when that field is absent."""
         fields = _resolve_contract_fields(_COMPLETE_EMPLOYEE, _ORG_SETTINGS)
         fields[missing_field] = ""  # forcibly blank
-        with caplog.at_level(logging.WARNING, logger="agreement_document_service"):
+        with pytest.raises(ContractRenderError, match=missing_field):
             _validate_contract_fields(fields)
-        assert any(missing_field in msg for msg in caplog.messages), (
-            f"No warning produced for missing required field: {missing_field!r}"
+
+
+# ---------------------------------------------------------------------------
+# Test 4 — Contract quality guards
+# ---------------------------------------------------------------------------
+
+class TestContractQualityGuards:
+    """Rendered contracts must be free of artifacts, TBC values, and leaked company data."""
+
+    def test_no_logo_artifact_in_rendered_contract(self):
+        """'Logo (if required)' must never appear in a rendered contract PDF."""
+        pdf_bytes = _render_contract_pdf(_COMPLETE_EMPLOYEE, _ORG_SETTINGS)
+        from PyPDF2 import PdfReader
+        reader = PdfReader(io.BytesIO(pdf_bytes))
+        all_text = "\n".join(page.extract_text() or "" for page in reader.pages)
+        assert "Logo (if required)" not in all_text, (
+            "Logo artifact found in rendered contract PDF"
         )
+
+    def test_no_tbc_in_fully_resolved_contract(self):
+        """A contract rendered with complete data must contain no 'TBC' strings."""
+        pdf_bytes = _render_contract_pdf(_COMPLETE_EMPLOYEE, _ORG_SETTINGS)
+        from PyPDF2 import PdfReader
+        reader = PdfReader(io.BytesIO(pdf_bytes))
+        all_text = "\n".join(page.extract_text() or "" for page in reader.pages)
+        assert "TBC" not in all_text, (
+            "TBC placeholder survived into a fully-resolved contract PDF"
+        )
+
+    def test_company_address_is_real_address_not_company_name(self):
+        """company_address must be the street address, not the organisation name."""
+        fields = _resolve_contract_fields(_COMPLETE_EMPLOYEE, _ORG_SETTINGS)
+        addr = fields.get("company_address", "")
+        company_name = fields.get("company_name", "")
+        assert addr != company_name, (
+            f"company_address equals company_name: {addr!r}"
+        )
+        assert "Osabea Healthcare Solutions Ltd" not in addr, (
+            f"Company name leaked into company_address: {addr!r}"
+        )
+        assert "Station Road" in addr, (
+            f"Expected street address in company_address, got: {addr!r}"
+        )
+
+    def test_missing_organisation_address_raises_on_render(self):
+        """Org settings without an address must block rendering via ContractRenderError."""
+        fields = _resolve_contract_fields(_COMPLETE_EMPLOYEE, _ORG_SETTINGS_NO_ADDRESS)
+        with pytest.raises(ContractRenderError, match="company_address"):
+            _validate_contract_fields(fields)

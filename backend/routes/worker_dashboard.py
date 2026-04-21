@@ -33,6 +33,8 @@ from .employment_gaps import _ensure_gap_record
 from agreement_document_service import (
     CONTRACT_AGREEMENT_TYPE,
     HANDBOOK_AGREEMENT_TYPE,
+    ContractRenderError,
+    HandbookRenderError,
     _employee_name,
     current_contract_artifact,
     ensure_agreement_rendered,
@@ -1001,6 +1003,10 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
     contract_signed = contract_status["contract_state"] == "fully_executed"
     try:
         handbook_ack = await ensure_agreement_rendered(db, employee_min, HANDBOOK_AGREEMENT_TYPE)
+    except HandbookRenderError:
+        # Required org fields are not configured — surface this clearly rather
+        # than silently producing a broken handbook PDF.
+        raise
     except Exception as e:
         logger.warning(f"Could not render handbook agreement for {employee_id}: {e}")
         handbook_ack = await db.agreement_acknowledgements.find_one({

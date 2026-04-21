@@ -2677,18 +2677,6 @@ export default function WorkerDashboard() {
                             </Button>
                           </>
                         )}
-                         {agreement.id === 'contract_acceptance' && ['awaiting_worker_signature', 'rejected_reopen_required', 'draft_rendered', undefined, null].includes(agreement.contract_state) && !agreement.verified && (
-                            <Button
-                              size="sm"
-                              className="gap-1"
-                            disabled={!contractEligibility?.can_sign}
-                            onClick={() => setShowSignaturePad(true)}
-                            data-testid="agreement-sign-contract-btn"
-                          >
-                            <PenTool className="h-3.5 w-3.5" />
-                           Sign
-                            </Button>
-                          )}
                         {agreement.id === 'handbook_acknowledgement' && !agreement.signed && !agreement.verified && (
                           <Button
                             size="sm"

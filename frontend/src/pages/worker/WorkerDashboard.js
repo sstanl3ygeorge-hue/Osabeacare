@@ -1685,20 +1685,28 @@ export default function WorkerDashboard() {
                     <Button 
                       size="sm" 
                       className="bg-purple-600 hover:bg-purple-700"
-                      onClick={() => {
-                        // Scroll to CV upload section or trigger upload
-                        toast.info('Please scroll down to the Documents section to upload a new CV');
-                      }}
+                      onClick={triggerCvFileInput}
+                      disabled={uploading === 'cv'}
+                      data-testid={`cv-rejection-upload-btn-${notif.id}`}
                     >
-                      <Upload className="h-4 w-4 mr-1" />
-                      Upload New CV
+                      {uploading === 'cv' ? (
+                        <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                      ) : (
+                        <Upload className="h-4 w-4 mr-1" />
+                      )}
+                      {uploading === 'cv' ? 'Uploading…' : 'Upload New CV'}
                     </Button>
                     <Button 
                       size="sm" 
                       variant="outline"
                       onClick={() => {
-                        // Scroll to employment history section
-                        toast.info('Please scroll down to Employment History to explain gaps');
+                        const el = document.querySelector('[data-testid="employment-history-section"]')
+                          || document.querySelector('[data-testid="employment-gaps-section"]');
+                        if (el) {
+                          el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        } else {
+                          toast.info('Please scroll down to Employment History to explain gaps');
+                        }
                       }}
                     >
                       <MessageSquare className="h-4 w-4 mr-1" />
@@ -1707,6 +1715,60 @@ export default function WorkerDashboard() {
                   </div>
                 </div>
               ))}
+            </CardContent>
+          </Card>
+        )}
+
+        {/* ========== CV UPLOAD CARD (onboarding only — when CV missing/replacement required) ========== */}
+        {!isActiveEmployee
+          && cvStatus
+          && !cvStatus.has_cv
+          && cvStatus.can_upload_cv
+          && !notifications.some(n => n.type === 'cv_rejected' && !n.resolved)
+          && (
+          <Card
+            className="shadow-md border-0 border-l-4 border-l-purple-500 bg-purple-50/40"
+            data-testid="cv-upload-card"
+          >
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2 text-lg text-purple-800">
+                    <FileText className="h-5 w-5" />
+                    CV / Resume
+                  </CardTitle>
+                  <p className="text-xs text-purple-700 mt-1">
+                    {cvStatus.extraction_status === 'no_cv_uploaded'
+                      ? 'Upload your CV so we can build your employment history.'
+                      : 'Your previous CV needs to be replaced.'}
+                  </p>
+                </div>
+                <Badge className="bg-purple-100 text-purple-700">
+                  {cvStatus.extraction_status === 'no_cv_uploaded' ? 'Not uploaded' : 'Replacement required'}
+                </Badge>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="p-4 bg-white rounded-xl border border-purple-200">
+                <p className="text-sm text-slate-700 mb-3">
+                  Your CV is used as supporting evidence to bootstrap your employment history.
+                  PDF only. Admin will review after upload.
+                </p>
+                <Button
+                  size="sm"
+                  onClick={triggerCvFileInput}
+                  disabled={uploading === 'cv'}
+                  className="bg-purple-600 hover:bg-purple-700"
+                  data-testid="cv-upload-btn"
+                >
+                  {uploading === 'cv' ? (
+                    <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                  ) : (
+                    <Upload className="h-4 w-4 mr-1" />
+                  )}
+                  {uploading === 'cv' ? 'Uploading…' : 'Upload CV (PDF)'}
+                </Button>
+              </div>
             </CardContent>
           </Card>
         )}

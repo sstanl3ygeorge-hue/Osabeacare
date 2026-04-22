@@ -1268,6 +1268,40 @@ async def evaluate_work_readiness(
         })
     else:
         verified_keys.append("references")
+
+        # CQC Reg 19 sufficiency: at least one verified EMPLOYMENT reference
+        # for clinical/care roles, or a recorded explanation.
+        try:
+            from governance.references_sufficiency import evaluate_reference_sufficiency
+            role_for_suff = (
+                person.get("applicant_role")
+                or person.get("role")
+                or person.get("job_role")
+            )
+            slots = []
+            if ref_doc:
+                for n in (1, 2):
+                    slot = ref_doc.get(f"ref{n}") or {}
+                    if slot:
+                        slot = dict(slot)
+                        slot["reference_num"] = n
+                        slots.append(slot)
+            verdict = evaluate_reference_sufficiency(role_for_suff, slots)
+            if not verdict["sufficient"]:
+                blockers.append({
+                    "requirement_key": "references_sufficiency",
+                    "label": "Reference Sufficiency (CQC Reg 19)",
+                    "reason": verdict["blocker_reason"] or (
+                        "No verified employment reference on file and no "
+                        "explanation recorded."
+                    ),
+                    "category": "references",
+                    "section": "recruitment",
+                    "requires_explanation": True,
+                })
+        except Exception:
+            # Additive check — never block overall readiness on helper failure.
+            pass
     
     # ==========================================================================
     # CHECK 7: Proof of Address (Minimum 2 documents required for NHS)
@@ -1294,7 +1328,55 @@ async def evaluate_work_readiness(
         })
     else:
         verified_keys.append("proof_of_address_count")
-    
+
+    # ==========================================================================
+    # CHECK 7b: CV Required (Soft Mandatory — CQC supporting evidence)
+    # --------------------------------------------------------------------------
+    # CV is required for ALL applicants but is supporting evidence only; it
+    # must NOT populate the employment history (that comes from the
+    # application form + gap-review workflow). Progression to interview /
+    # hiring / onboarding completion is blocked until a CV is on file.
+    # Truth source matches GET /api/worker/cv-extraction-status: a CV counts
+    # as present when cv_document_id is set AND the linked document is still
+    # active (not rejected/superseded), OR cv_status is "approved" (admin
+    # sign-off). cv_status values of "rejected" / "replacement_requested" /
+    # "missing" / "replacement_required" all raise the blocker again.
+    # ==========================================================================
+    all_required_keys.append("cv_uploaded")
+    cv_document_id = person.get("cv_document_id")
+    cv_status_value = (person.get("cv_status") or "").lower()
+    cv_replacement_required = cv_status_value in {
+        "rejected", "replacement_requested", "missing", "replacement_required"
+    }
+    cv_present = False
+    if cv_document_id and not cv_replacement_required:
+        cv_doc = await db.employee_documents.find_one({"id": cv_document_id})
+        if cv_doc:
+            doc_status = (cv_doc.get("status") or "").lower()
+            is_active = cv_doc.get("is_active")
+            cv_present = (
+                bool(cv_doc.get("file_url"))
+                and doc_status not in {"superseded", "archived", "deleted", "rejected", "invalidated"}
+                and is_active is not False
+            )
+
+    if not cv_present:
+        if cv_replacement_required:
+            reason = "CV was rejected — please upload a replacement"
+        elif cv_document_id:
+            reason = "CV is no longer on file — please re-upload"
+        else:
+            reason = "CV not uploaded"
+        blockers.append({
+            "requirement_key": "cv_uploaded",
+            "label": "CV / Resume",
+            "reason": reason,
+            "category": "document",
+            "section": "application",
+        })
+    else:
+        verified_keys.append("cv_uploaded")
+
     # ==========================================================================
     # CHECK 8: Required Training Matrix
     # ==========================================================================

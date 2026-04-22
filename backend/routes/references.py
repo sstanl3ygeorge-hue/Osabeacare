@@ -103,7 +103,14 @@ async def get_references_for_employee(
                     "request": coll_ref.get("request") or {},
                     "response": coll_ref.get("response") or {},
                     "verification_status": coll_ref.get("verification_status", "pending"),
-                    "verified": coll_ref.get("verification_status") == "verified"
+                    "verified": coll_ref.get("verification_status") == "verified",
+                    # CQC Reg 19 sufficiency fields
+                    "type": coll_ref.get("type"),
+                    "is_employment_reference": coll_ref.get("is_employment_reference"),
+                    "explanation_required": coll_ref.get("explanation_required"),
+                    "explanation_reason": coll_ref.get("explanation_reason"),
+                    "explanation_provided_by": coll_ref.get("explanation_provided_by"),
+                    "explanation_provided_at": coll_ref.get("explanation_provided_at"),
                 })
         
         # From employee_references collection
@@ -455,15 +462,26 @@ async def download_reference_response_pdf(
         }
     
     mismatch_data = ref_data.get("mismatch")
-    
+
+    # CQC Reg 19 sufficiency fields stamped by the verify endpoint.
+    sufficiency_data = {
+        "type": ref_data.get("type"),
+        "is_employment_reference": ref_data.get("is_employment_reference"),
+        "explanation_required": ref_data.get("explanation_required"),
+        "explanation_reason": ref_data.get("explanation_reason"),
+        "explanation_provided_by": ref_data.get("explanation_provided_by"),
+        "explanation_provided_at": ref_data.get("explanation_provided_at"),
+    }
+
     from services.pdf_service import generate_reference_response_pdf
-    
+
     pdf_bytes = generate_reference_response_pdf(
         response_data=response_data,
         declared_data=declared_data,
         employee_data=employee,
         reference_num=ref_num,
-        mismatch_data=mismatch_data
+        mismatch_data=mismatch_data,
+        sufficiency_data=sufficiency_data,
     )
     
     employee_name = f"{employee.get('first_name', '')}_{employee.get('last_name', '')}".replace(' ', '_')

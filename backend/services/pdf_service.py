@@ -528,7 +528,8 @@ def generate_reference_response_pdf(
     declared_data: Dict[str, Any],
     employee_data: Dict[str, Any],
     reference_num: int,
-    mismatch_data: Optional[Dict[str, Any]] = None
+    mismatch_data: Optional[Dict[str, Any]] = None,
+    sufficiency_data: Optional[Dict[str, Any]] = None,
 ) -> bytes:
     """
     Generate PDF for a referee response with company logo.
@@ -706,6 +707,28 @@ def generate_reference_response_pdf(
     if response_data.get('declaration_authority'):
         elements.append(Paragraph("✓ Has authority to provide this reference", styles['FieldValue']))
     elements.append(Spacer(1, 3*mm))
+
+    # ===== REFERENCE SUFFICIENCY (CQC Reg 19) =====
+    if sufficiency_data:
+        elements.append(Paragraph("Reference Sufficiency (CQC Reg 19)", styles['SectionHeader']))
+        ref_type = sufficiency_data.get('type') or 'unspecified'
+        is_emp = sufficiency_data.get('is_employment_reference')
+        elements.append(Paragraph(
+            f"<b>Type:</b> {ref_type} &nbsp;&nbsp; <b>Employment Reference:</b> {'Yes' if is_emp else 'No'}",
+            styles['FieldValue'],
+        ))
+        explanation = sufficiency_data.get('explanation_reason')
+        if explanation:
+            elements.append(Paragraph(f"<b>Explanation for non-employment reference:</b>", styles['FieldValue']))
+            elements.append(Paragraph(str(explanation), styles['Notes']))
+            provided_by = sufficiency_data.get('explanation_provided_by')
+            provided_at = sufficiency_data.get('explanation_provided_at')
+            if provided_by or provided_at:
+                elements.append(Paragraph(
+                    f"<i>Recorded by {provided_by or 'admin'} on {provided_at or 'N/A'}</i>",
+                    styles['FieldValue'],
+                ))
+        elements.append(Spacer(1, 3*mm))
     
     # ===== FOOTER =====
     elements.append(Spacer(1, 6*mm))

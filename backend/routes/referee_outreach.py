@@ -24,6 +24,12 @@ from .dependencies import (
     get_db, get_current_user, require_admin, require_manager_or_admin,
     log_audit_action, SENDER_EMAIL
 )
+from governance.references_sufficiency import (
+    VALID_REFERENCE_TYPES,
+    classify_reference_type,
+    evaluate_verify_request,
+    role_requires_employment_reference,
+)
 
 router = APIRouter(tags=["Referee Outreach"])
 logger = logging.getLogger(__name__)
@@ -115,6 +121,13 @@ class ReferenceVerifyRequest(BaseModel):
     action: str  # 'verify' or 'reject'
     notes: Optional[str] = None
     mismatch_reason: Optional[str] = None
+    # Reference sufficiency (CQC Reg 19) — admin declares the kind of reference
+    # being verified. When the post-verify state would leave the employee with
+    # no verified employment reference for a care role, the endpoint demands
+    # ``explanation_reason`` before completing the verify.
+    reference_type: Optional[str] = None  # 'employment' | 'character' | 'academic'
+    is_employment_reference: Optional[bool] = None
+    explanation_reason: Optional[str] = None
 
 
 @router.post("/employees/{employee_id}/send-reference-request")
@@ -627,6 +640,81 @@ async def verify_or_reject_reference(
         )
 
     if request.action == 'verify':
+        # ---- Reg 19 sufficiency pre-check -----------------------------------
+        # Resolve role (applicant_role preferred, falls back to role).
+        employee_full = await db.employees.find_one(
+            {"id": employee_id},
+            {"_id": 0, "role": 1, "applicant_role": 1, "job_role": 1},
+        ) or {}
+        role = (
+            employee_full.get("applicant_role")
+            or employee_full.get("role")
+            or employee_full.get("job_role")
+        )
+
+        # Figure out the type the admin has asserted for this reference.
+        admin_type = (request.reference_type or "").strip().lower() or None
+        if admin_type and admin_type not in VALID_REFERENCE_TYPES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"reference_type must be one of {VALID_REFERENCE_TYPES}",
+            )
+
+        # Build a projected version of THIS slot with the admin's choice,
+        # then evaluate overall sufficiency after verify.
+        proposed_slot = dict(ref_data)
+        proposed_slot["reference_num"] = reference_num
+        if admin_type:
+            proposed_slot["type"] = admin_type
+            proposed_slot["is_employment_reference"] = admin_type == "employment"
+        elif request.is_employment_reference is True:
+            proposed_slot["type"] = "employment"
+            proposed_slot["is_employment_reference"] = True
+        else:
+            # Infer from response relationship_type if admin didn't state.
+            inferred = classify_reference_type(ref_data)
+            proposed_slot["type"] = inferred
+            proposed_slot["is_employment_reference"] = inferred == "employment"
+
+        if request.explanation_reason:
+            proposed_slot["explanation_reason"] = request.explanation_reason
+
+        # Other existing slots (not the one being verified) — still reflecting
+        # current DB state.
+        other_slots = []
+        for other_num in (1, 2):
+            if other_num == reference_num:
+                continue
+            other_slot = dict(references_doc.get(f"ref{other_num}") or {})
+            other_slot["reference_num"] = other_num
+            other_slots.append(other_slot)
+
+        verdict = evaluate_verify_request(
+            role=role,
+            existing_slots=other_slots,
+            this_slot_proposed=proposed_slot,
+            explanation_reason=request.explanation_reason,
+        )
+
+        if not verdict["sufficient"] and verdict["requires_explanation"]:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "reference_sufficiency_explanation_required",
+                    "message": (
+                        "Role requires at least one employment reference. "
+                        "Provide an explanation_reason describing why the "
+                        "alternative references are acceptable."
+                    ),
+                    "requires_explanation": True,
+                    "role": role,
+                    "employment_reference_verified_count": verdict[
+                        "employment_reference_verified_count"
+                    ],
+                    "verified_count": verdict["verified_count"] + 1,  # post-verify
+                },
+            )
+
         verification_fields = {
             f"{ref_key}.request.status": "verified",
             f"{ref_key}.verification.status": "verified",
@@ -637,7 +725,17 @@ async def verify_or_reject_reference(
             f"{ref_key}.verification.rejected_by": None,
             f"{ref_key}.verification.rejected_at": None,
             f"{ref_key}.verification.rejection_reason": None,
+            # Sufficiency stamp
+            f"{ref_key}.type": proposed_slot["type"],
+            f"{ref_key}.is_employment_reference": proposed_slot["is_employment_reference"],
+            f"{ref_key}.explanation_required": verdict["role_requires_employment_reference"]
+                and verdict["employment_reference_verified_count"] == 0,
         }
+
+        if request.explanation_reason:
+            verification_fields[f"{ref_key}.explanation_reason"] = request.explanation_reason
+            verification_fields[f"{ref_key}.explanation_provided_by"] = user['user_id']
+            verification_fields[f"{ref_key}.explanation_provided_at"] = now
 
         if request.mismatch_reason:
             verification_fields[f"{ref_key}.mismatch.documented"] = True
@@ -678,7 +776,15 @@ async def verify_or_reject_reference(
             "action": "verified",
             "mismatch_reason": request.mismatch_reason,
             "notes": request.notes,
-            "employee_id": employee_id
+            "employee_id": employee_id,
+            # Reg 19 sufficiency trail
+            "reference_type": proposed_slot["type"],
+            "is_employment_reference": proposed_slot["is_employment_reference"],
+            "explanation_reason": request.explanation_reason,
+            "role_requires_employment_reference": verdict["role_requires_employment_reference"],
+            "employment_reference_verified_count_after": verdict[
+                "employment_reference_verified_count"
+            ],
         })
 
         return {
@@ -1097,3 +1203,79 @@ async def flag_recent_employer_mismatch(
             f"POST /references/{employee_id}/{ref_num}/review-mismatch-explanation"
         ),
     }
+
+
+# ==========================================================================
+# Reference sufficiency explanation (CQC Reg 19)
+# ==========================================================================
+
+class ReferenceSufficiencyExplanationRequest(BaseModel):
+    reference_num: int  # 1 or 2 — the slot the explanation applies to
+    explanation_reason: str
+
+
+@router.post("/employees/{employee_id}/references/sufficiency-explanation")
+async def record_reference_sufficiency_explanation(
+    employee_id: str,
+    request: ReferenceSufficiencyExplanationRequest,
+    user: dict = Depends(require_manager_or_admin),
+):
+    """Record why a non-employment reference is acceptable for this applicant.
+
+    Used when no verified employment reference can be obtained for a role
+    that would normally require one. Satisfies CQC Regulation 19 audit trail.
+    The explanation is stamped on the relevant reference slot and emitted
+    to the audit log; it is surfaced in the compliance export.
+    """
+    db = get_db()
+
+    if request.reference_num not in (1, 2):
+        raise HTTPException(status_code=400, detail="reference_num must be 1 or 2")
+    if not request.explanation_reason or not request.explanation_reason.strip():
+        raise HTTPException(status_code=400, detail="explanation_reason is required")
+
+    ref_key = f"ref{request.reference_num}"
+    now = datetime.now(timezone.utc).isoformat()
+
+    employee = await db.employees.find_one(
+        {"id": employee_id}, {"_id": 0, "role": 1, "applicant_role": 1, "job_role": 1}
+    )
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    role = (
+        employee.get("applicant_role")
+        or employee.get("role")
+        or employee.get("job_role")
+    )
+
+    await db.references.update_one(
+        {"employee_id": employee_id},
+        {"$set": {
+            f"{ref_key}.explanation_reason": request.explanation_reason.strip(),
+            f"{ref_key}.explanation_provided_by": user['user_id'],
+            f"{ref_key}.explanation_provided_at": now,
+            f"{ref_key}.explanation_required": role_requires_employment_reference(role),
+        }},
+        upsert=True,
+    )
+
+    await log_audit_action(
+        user['user_id'],
+        "record_reference_sufficiency_explanation",
+        "employee",
+        employee_id,
+        {
+            "reference_num": request.reference_num,
+            "explanation_reason": request.explanation_reason.strip(),
+            "role": role,
+            "role_requires_employment_reference": role_requires_employment_reference(role),
+        },
+    )
+
+    return {
+        "status": "success",
+        "reference_num": request.reference_num,
+        "explanation_recorded_at": now,
+    }
+

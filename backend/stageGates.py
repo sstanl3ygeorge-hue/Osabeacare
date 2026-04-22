@@ -952,6 +952,39 @@ class StageGateService:
             _pass("application_form")
 
         # ------------------------------------------------------------------
+        # 7. CV / Resume (soft-mandatory supporting evidence)
+        #    Required for interview + hiring progression. CV must NOT
+        #    populate employment history — that comes from the application
+        #    form + gap review. Truth source mirrors the
+        #    /api/worker/cv-extraction-status endpoint.
+        # ------------------------------------------------------------------
+        cv_document_id = employee.get("cv_document_id")
+        cv_status_value = (employee.get("cv_status") or "").lower()
+        cv_replacement_required = cv_status_value in {
+            "rejected", "replacement_requested", "missing", "replacement_required"
+        }
+        cv_present = False
+        if cv_document_id and not cv_replacement_required:
+            cv_doc = await self.db.employee_documents.find_one({"id": cv_document_id})
+            if cv_doc:
+                doc_status = (cv_doc.get("status") or "").lower()
+                cv_present = (
+                    bool(cv_doc.get("file_url"))
+                    and doc_status not in {"superseded", "archived", "deleted", "rejected", "invalidated"}
+                    and cv_doc.get("is_active") is not False
+                )
+        if not cv_present:
+            if cv_replacement_required:
+                cv_reason = "CV was rejected — applicant must upload a replacement before progressing"
+            elif cv_document_id:
+                cv_reason = "CV is no longer on file — applicant must re-upload before progressing"
+            else:
+                cv_reason = "CV / Resume not uploaded — required before interview or hiring approval"
+            _block("cv", cv_reason)
+        else:
+            _pass("cv")
+
+        # ------------------------------------------------------------------
         # Final verdict
         # ------------------------------------------------------------------
         return GateResult(

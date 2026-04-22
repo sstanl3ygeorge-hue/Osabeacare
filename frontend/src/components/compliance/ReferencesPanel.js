@@ -89,6 +89,10 @@ export default function ReferencesPanel({ employeeId, employee, onRefresh, onEdi
   const [verifyNotes, setVerifyNotes] = useState('');
   const [mismatchReason, setMismatchReason] = useState('');
   const [verifyLoading, setVerifyLoading] = useState(false);
+  // Reg 19 sufficiency inputs
+  const [referenceType, setReferenceType] = useState('employment');
+  const [explanationReason, setExplanationReason] = useState('');
+  const [explanationRequired, setExplanationRequired] = useState(false);
 
   // Recent-employer mismatch flag state
   const [flaggingMismatch, setFlaggingMismatch] = useState(null); // ref_num being flagged
@@ -206,6 +210,19 @@ export default function ReferencesPanel({ employeeId, employee, onRefresh, onEdi
     setVerifyAction(action);
     setVerifyNotes('');
     setMismatchReason('');
+    // Seed reference type from stored value or infer from relationship_type.
+    const currentRef = references?.references?.[`reference_${refNum}`] || {};
+    const storedType = currentRef.type;
+    const rel = (currentRef.response?.relationship_type || '').toLowerCase();
+    const seededType = storedType
+      || (rel && (rel.includes('manager') || rel.includes('supervisor') || rel.includes('director') || rel.includes('hr'))
+          ? 'employment'
+          : rel.includes('tutor') || rel.includes('lecturer') || rel.includes('university')
+          ? 'academic'
+          : 'employment'); // default to employment — admin can switch
+    setReferenceType(seededType);
+    setExplanationReason(currentRef.explanation_reason || '');
+    setExplanationRequired(false);
     setVerifyDialogOpen(true);
   };
   
@@ -220,7 +237,11 @@ export default function ReferencesPanel({ employeeId, employee, onRefresh, onEdi
         {
           action: verifyAction,
           notes: verifyNotes,
-          mismatch_reason: mismatchReason || null
+          mismatch_reason: mismatchReason || null,
+          // Reg 19 sufficiency
+          reference_type: verifyAction === 'verify' ? referenceType : null,
+          is_employment_reference: verifyAction === 'verify' ? referenceType === 'employment' : null,
+          explanation_reason: verifyAction === 'verify' && explanationReason ? explanationReason : null,
         },
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -295,7 +316,21 @@ export default function ReferencesPanel({ employeeId, employee, onRefresh, onEdi
         await onRefresh();
       }
     } catch (error) {
-      toast.error(extractErrorMessage(error, `Failed to ${verifyAction} reference`));
+      // CQC Reg 19 sufficiency: backend demands an explanation before we can
+      // mark this reference verified. Keep the dialog open and reveal the
+      // explanation field.
+      const detail = error?.response?.data?.detail;
+      const requiresExplanation =
+        detail && typeof detail === 'object' && detail.requires_explanation === true;
+      if (requiresExplanation) {
+        setExplanationRequired(true);
+        toast.error(
+          detail.message ||
+            'This role requires at least one employment reference. Please provide an explanation for the alternative reference.'
+        );
+      } else {
+        toast.error(extractErrorMessage(error, `Failed to ${verifyAction} reference`));
+      }
     } finally {
       setVerifyLoading(false);
     }
@@ -1261,6 +1296,43 @@ export default function ReferencesPanel({ employeeId, employee, onRefresh, onEdi
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
+            {/* Reference Type (Reg 19) */}
+            {verifyAction === 'verify' && (
+              <div>
+                <Label>Reference Type *</Label>
+                <Select value={referenceType} onValueChange={setReferenceType}>
+                  <SelectTrigger className="mt-1" data-testid="verify-reference-type-select">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="employment">Employment</SelectItem>
+                    <SelectItem value="character">Character</SelectItem>
+                    <SelectItem value="academic">Academic</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-gray-500 mt-1">
+                  CQC Reg 19: Care roles require at least one employment reference or a recorded explanation.
+                </p>
+              </div>
+            )}
+
+            {/* Explanation — shown when admin picks non-employment OR when backend demands it */}
+            {verifyAction === 'verify' && (explanationRequired || referenceType !== 'employment') && (
+              <div>
+                <Label className="text-amber-700">
+                  Explanation for alternative reference *
+                </Label>
+                <Textarea
+                  value={explanationReason}
+                  onChange={(e) => setExplanationReason(e.target.value)}
+                  placeholder="Why is an employment reference not available? (e.g. prior employer has ceased trading, gap in employment, first role, etc.)"
+                  className="mt-1 border-amber-300"
+                  rows={3}
+                  data-testid="verify-reference-explanation"
+                />
+              </div>
+            )}
+
             {/* Mismatch Handling */}
             {verifyAction === 'verify' && (
               <div>
@@ -1299,7 +1371,12 @@ export default function ReferencesPanel({ employeeId, employee, onRefresh, onEdi
             </Button>
             <Button 
               onClick={handleVerifyReference}
-              disabled={verifyLoading || (verifyAction === 'reject' && !verifyNotes)}
+              disabled={
+                verifyLoading
+                || (verifyAction === 'reject' && !verifyNotes)
+                || (verifyAction === 'verify' && explanationRequired && !explanationReason.trim())
+                || (verifyAction === 'verify' && referenceType !== 'employment' && !explanationReason.trim())
+              }
               className={verifyAction === 'verify' ? 'bg-green-600 hover:bg-green-700' : ''}
               variant={verifyAction === 'reject' ? 'destructive' : 'default'}
             >

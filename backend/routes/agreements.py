@@ -225,6 +225,88 @@ async def unverify_agreement_acknowledgement(
     return result
 
 
+@router.post("/employees/{employee_id}/agreements/{acknowledgement_id}/regenerate")
+async def regenerate_agreement_acknowledgement(
+    employee_id: str,
+    acknowledgement_id: str,
+    reason: str = Body(..., embed=True),
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Admin recovery action: wipe an acknowledgement row back to a clean,
+    freshly-rendered "pending" state.
+
+    Use this when a handbook acknowledgement is stuck in a bad state —
+    e.g. an old rejected or self-completed row remains after the render
+    pipeline was fixed, or the rendered PDF link is broken — and the
+    worker needs a clean slate to re-acknowledge.
+
+    For contracts this action is intentionally restricted: admins cannot
+    discard a worker's executed signature; use reject/unverify instead.
+    """
+    if not reason or len(reason.strip()) < 3:
+        raise HTTPException(status_code=400, detail="Reason must be at least 3 characters")
+
+    db = get_db()
+    existing = await db.agreement_acknowledgements.find_one(
+        {"id": acknowledgement_id, "employee_id": employee_id},
+        {"_id": 0},
+    )
+    if not existing:
+        raise HTTPException(status_code=404, detail="Acknowledgement not found")
+
+    agreement_type = existing.get("agreement_type")
+    # CQC: do not let regenerate be used to bypass a worker-signed contract.
+    if agreement_type == "contract_acceptance":
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Contracts cannot be regenerated through this endpoint. "
+                "Use reject or unverify to return a contract to the worker."
+            ),
+        )
+
+    employee = await db.employees.find_one({"id": employee_id})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    # Snapshot the old row into the audit log then delete it, so that
+    # ensure_agreement_rendered() below is free to create a fresh row under
+    # the unique (employee_id, agreement_type) filter without collision.
+    snapshot = {k: v for k, v in existing.items() if k != "_id"}
+
+    await db.agreement_acknowledgements.delete_one(
+        {"id": acknowledgement_id, "employee_id": employee_id},
+    )
+
+    # Re-render cleanly. ensure_agreement_rendered() will upsert a fresh row
+    # because no active row now exists for (employee_id, agreement_type).
+    from agreement_document_service import ensure_agreement_rendered
+    fresh = await ensure_agreement_rendered(db, employee, agreement_type)
+
+    await log_audit_action(
+        user["user_id"],
+        "regenerate_agreement_acknowledgement",
+        "agreement_acknowledgements",
+        acknowledgement_id,
+        {
+            "employee_id": employee_id,
+            "agreement_type": agreement_type,
+            "reason": reason.strip(),
+            "regenerated_at": now_iso,
+            "previous_row": snapshot,
+        },
+    )
+
+    return {
+        "success": True,
+        "message": "Acknowledgement regenerated. Worker can now re-acknowledge.",
+        "agreement": fresh,
+    }
+
+
 @router.post("/admin/agreements/supersede-admin-contracts")
 async def supersede_admin_signed_contracts(
     user: dict = Depends(require_admin)

@@ -687,16 +687,25 @@ async def ensure_agreement_rendered(db, employee: Dict[str, Any], agreement_type
     )
     rendering = await build_agreement_rendering(db, employee, agreement_type)
 
+    # Do not early-return a stale row if it was rejected or its rendered PDF
+    # reference is missing. This is the recovery path for employees who were
+    # stuck behind an old rejected / self-completed handbook row after the
+    # render pipeline was fixed.
+    existing_verification = (existing or {}).get("verification_status")
+    existing_is_rejected = existing_verification == "rejected"
+
     if agreement_type == CONTRACT_AGREEMENT_TYPE and existing:
         if (
             existing.get("template_version") == rendering["template_version"]
             and existing.get("rendered_contract_pdf_url")
+            and not existing_is_rejected
         ):
             return existing
     elif (
         existing
         and existing.get("template_version") == rendering["template_version"]
         and existing.get("rendered_file_url")
+        and not existing_is_rejected
     ):
         return existing
 

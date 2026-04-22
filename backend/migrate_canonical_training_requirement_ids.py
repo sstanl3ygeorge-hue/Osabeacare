@@ -40,6 +40,15 @@ from motor.motor_asyncio import AsyncIOMotorClient
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# Load backend/.env the same way server.py does so the migration picks up
+# MONGO_URL / DB_NAME without requiring them to be exported in the shell.
+try:
+    from dotenv import load_dotenv
+    _here = os.path.dirname(os.path.abspath(__file__))
+    load_dotenv(os.path.join(_here, ".env"))
+except Exception:
+    pass
+
 from governance.training_dedup import (  # noqa: E402
     canonical_training_key,
     pick_best_training_record,

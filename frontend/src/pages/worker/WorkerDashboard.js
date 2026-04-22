@@ -645,6 +645,12 @@ export default function WorkerDashboard() {
   // Profile completion wizard state
   const [showProfileWizard, setShowProfileWizard] = useState(false);
   const [profileCompletionStatus, setProfileCompletionStatus] = useState(null);
+  // Handbook acknowledgement modal state
+  const [showHandbookAckModal, setShowHandbookAckModal] = useState(false);
+  const [handbookAckAgreement, setHandbookAckAgreement] = useState(null);
+  const [handbookPdfViewed, setHandbookPdfViewed] = useState(false);
+  const [handbookAckConfirmed, setHandbookAckConfirmed] = useState(false);
+  const [submittingHandbookAck, setSubmittingHandbookAck] = useState(false);
   const navigate = useNavigate();
 
   const fetchDashboard = useCallback(async () => {
@@ -1017,6 +1023,50 @@ export default function WorkerDashboard() {
       fetchDashboard();
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to acknowledge agreement');
+    }
+  };
+
+  const openHandbookAckModal = (agreement) => {
+    if (!agreement?.file_url && !agreement?.download_url) {
+      toast.error('Handbook PDF is not available yet. Please try again shortly.');
+      return;
+    }
+    setHandbookAckAgreement(agreement);
+    setHandbookPdfViewed(false);
+    setHandbookAckConfirmed(false);
+    setShowHandbookAckModal(true);
+  };
+
+  const closeHandbookAckModal = () => {
+    if (submittingHandbookAck) return;
+    setShowHandbookAckModal(false);
+    setHandbookAckAgreement(null);
+    setHandbookPdfViewed(false);
+    setHandbookAckConfirmed(false);
+  };
+
+  const viewHandbookPdfFromModal = () => {
+    if (!handbookAckAgreement) return;
+    openDocumentViewer({ ...handbookAckAgreement, name: handbookAckAgreement.name });
+    setHandbookPdfViewed(true);
+  };
+
+  const submitHandbookAck = async () => {
+    if (!handbookAckAgreement) return;
+    if (!handbookAckAgreement.file_url && !handbookAckAgreement.download_url) {
+      toast.error('Handbook PDF is not available yet. Please try again shortly.');
+      return;
+    }
+    if (!handbookPdfViewed || !handbookAckConfirmed) return;
+    setSubmittingHandbookAck(true);
+    try {
+      await handleAcknowledgeAgreement(handbookAckAgreement);
+      setShowHandbookAckModal(false);
+      setHandbookAckAgreement(null);
+      setHandbookPdfViewed(false);
+      setHandbookAckConfirmed(false);
+    } finally {
+      setSubmittingHandbookAck(false);
     }
   };
 
@@ -2792,7 +2842,9 @@ export default function WorkerDashboard() {
                           <Button
                             size="sm"
                             className="gap-1"
-                            onClick={() => handleAcknowledgeAgreement(agreement)}
+                            disabled={!agreement.file_url && !agreement.download_url}
+                            title={(!agreement.file_url && !agreement.download_url) ? 'Handbook PDF is not available yet' : undefined}
+                            onClick={() => openHandbookAckModal(agreement)}
                           >
                             <CheckCircle className="h-3.5 w-3.5" />
                             Acknowledge
@@ -3124,6 +3176,114 @@ export default function WorkerDashboard() {
               }}
             onCancel={() => setShowSignaturePad(false)}
           />
+        </DialogContent>
+      </Dialog>
+
+      {/* Handbook Acknowledgement Dialog */}
+      <Dialog open={showHandbookAckModal} onOpenChange={(open) => { if (!open) closeHandbookAckModal(); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileText className="h-5 w-5 text-primary" />
+              Acknowledge Employee Handbook
+            </DialogTitle>
+          </DialogHeader>
+          {handbookAckAgreement && (
+            <div className="space-y-4">
+              {(!handbookAckAgreement.file_url && !handbookAckAgreement.download_url) ? (
+                <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                  The handbook PDF for the version you are being asked to acknowledge is not available yet.
+                  You cannot acknowledge until it is ready. Please refresh shortly.
+                </div>
+              ) : (
+                <>
+                  <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                    <p className="font-medium text-slate-900 mb-1">Step 1 — Read the handbook</p>
+                    <p className="text-xs text-slate-600">
+                      Open the full handbook PDF and read it in full before acknowledging.
+                      This is the exact version you are signing.
+                    </p>
+                    <div className="flex flex-wrap gap-2 mt-3">
+                      <Button
+                        size="sm"
+                        className="gap-1"
+                        onClick={viewHandbookPdfFromModal}
+                      >
+                        <Eye className="h-3.5 w-3.5" />
+                        View Handbook PDF
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="gap-1"
+                        onClick={() => downloadAgreement(handbookAckAgreement)}
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                        Download PDF
+                      </Button>
+                    </div>
+                    {handbookAckAgreement.template_version && (
+                      <p className="text-[11px] text-slate-500 mt-2">
+                        Version {handbookAckAgreement.template_version}
+                        {handbookAckAgreement.rendered_at && ` • prepared ${formatDate(handbookAckAgreement.rendered_at)}`}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="rounded-md border border-slate-200 p-3 text-sm">
+                    <p className="font-medium text-slate-900 mb-1">Step 2 — Confirm</p>
+                    <label className={`flex items-start gap-2 ${handbookPdfViewed ? '' : 'opacity-60'}`}>
+                      <input
+                        type="checkbox"
+                        className="mt-1"
+                        disabled={!handbookPdfViewed}
+                        checked={handbookAckConfirmed}
+                        onChange={(e) => setHandbookAckConfirmed(e.target.checked)}
+                      />
+                      <span className="text-xs text-slate-700">
+                        I confirm that I have opened and read the Employee Handbook PDF above
+                        (Version {handbookAckAgreement.template_version || '—'}), that I understand its contents,
+                        and that I agree to abide by the policies, procedures and expectations set out in it.
+                        I am providing this acknowledgement as {employee?.name || 'the named employee'}.
+                      </span>
+                    </label>
+                    {!handbookPdfViewed && (
+                      <p className="text-[11px] text-amber-700 mt-2">
+                        Open the handbook PDF first — the confirmation is locked until you have viewed it.
+                      </p>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={closeHandbookAckModal}
+              disabled={submittingHandbookAck}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={submitHandbookAck}
+              disabled={
+                submittingHandbookAck
+                || !handbookAckAgreement
+                || (!handbookAckAgreement.file_url && !handbookAckAgreement.download_url)
+                || !handbookPdfViewed
+                || !handbookAckConfirmed
+              }
+              className="gap-1"
+            >
+              {submittingHandbookAck ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <CheckCircle className="h-3.5 w-3.5" />
+              )}
+              Acknowledge Handbook
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
       

@@ -337,13 +337,21 @@ async def get_worker_cv_extraction_status(user: dict = Depends(get_current_worke
     
     # Count gaps needing explanation
     unexplained_gaps = [g for g in cv_gaps if not g.get("explanation") and g.get("needs_explanation", True)]
-    
+
+    # Explicit CV truth rule (keep in sync with admin): a worker is said to
+    # HAVE a CV only when a canonical active reviewable PDF CV exists AND
+    # the admin has not marked the current one for replacement. Any stale,
+    # non-PDF, rejected or invalidated linked document must yield
+    # has_cv=False, can_upload_cv=True so the worker sees the upload card.
+    has_cv = bool(active_cv_exists and not replacement_required)
+    can_upload_cv = (not active_cv_exists) or replacement_required
+
     return {
-        "has_cv": not replacement_required,
+        "has_cv": has_cv,
         "extraction_status": "approved" if cv_status == "approved" else ("replacement_required" if replacement_required else "awaiting_admin_review"),
         "needs_verification": False,
         "replacement_required": replacement_required,
-        "can_upload_cv": replacement_required,
+        "can_upload_cv": can_upload_cv,
         "cv_status": cv_status or "uploaded",
         # verified means admin-approved only — cv_status = "approved" is set exclusively by the admin approve endpoint
         "verified": cv_status == "approved",
@@ -655,12 +663,16 @@ async def admin_reject_cv(
         }}
     )
     
-    # Create notification for worker
+    # Create notification for worker.
+    # Must land in db.worker_notifications (keyed by employee_id) — that is
+    # what GET /api/worker/notifications reads and what the WorkerDashboard
+    # suppression gate inspects (`n.type === 'cv_rejected' && !n.resolved`).
+    # A mismatch here would cause the worker to see the generic missing-CV
+    # card instead of the separate CV-rejection upload action.
     notification_id = str(uuid.uuid4())
-    await db.notifications.insert_one({
+    await db.worker_notifications.insert_one({
         "id": notification_id,
-        "recipient_id": employee_id,
-        "recipient_type": "employee",
+        "employee_id": employee_id,
         "type": "cv_rejected",
         "title": "CV Requires Attention",
         "message": f"Your CV has been reviewed: {request.reason}",
@@ -669,6 +681,7 @@ async def admin_reject_cv(
             "action_required": request.request_action
         },
         "read": False,
+        "resolved": False,
         "created_at": now
     })
     

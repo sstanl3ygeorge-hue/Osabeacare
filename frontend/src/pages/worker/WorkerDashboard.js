@@ -774,25 +774,6 @@ export default function WorkerDashboard() {
     }
   }, [dashboard, fetchCvStatus]);
 
-  useEffect(() => {
-    if (!cvStatus) return;
-    const hasUnresolvedCvRejection = notifications.some(
-      (n) => n.type === 'cv_rejected' && !n.resolved,
-    );
-    console.info('[WorkerDashboard] CV status gate', {
-      employeeId: dashboard?.employee?.id || null,
-      cvStatus,
-      notifications,
-      hasUnresolvedCvRejection,
-      showCvUploadCard: Boolean(
-        cvStatus
-        && !cvStatus.has_cv
-        && cvStatus.can_upload_cv
-        && !hasUnresolvedCvRejection
-      ),
-    });
-  }, [cvStatus, notifications, dashboard]);
-
   // Fetch reference-employment mismatches
   const fetchReferenceMismatches = async () => {
     try {
@@ -1792,7 +1773,6 @@ export default function WorkerDashboard() {
         {cvStatus
           && !cvStatus.has_cv
           && cvStatus.can_upload_cv
-          && !notifications.some(n => n.type === 'cv_rejected' && !n.resolved)
           && (
           <Card
             className="shadow-md border-0 border-l-4 border-l-purple-500 bg-purple-50/40"

@@ -36561,13 +36561,39 @@ async def get_compliance_file(
                 if a.get("agreement_type") == agreement_type]
         pending_reqs = [r for r in agreements.get("pending_requests", [])
                        if r.get("agreement_type") == agreement_type]
-        
+
+        # Canonical-row precedence picker — mirrors worker_dashboard.py so
+        # admin reads the same row the worker does when duplicates exist
+        # (e.g. the `ensure_agreement_rendered` canonical id row plus a
+        # legacy `agr_ack_<uuid>` row minted by admin-assisted completion).
+        # Precedence: verified > acknowledged/signed > pending > rejected,
+        # tie-broken by most recent timestamp. Do NOT pick by created_at alone.
+        if len(acks) > 1:
+            def _ack_rank(row):
+                vs = row.get("verification_status")
+                ts = (
+                    row.get("verified_at")
+                    or row.get("acknowledged_at")
+                    or row.get("rejected_at")
+                    or row.get("updated_at")
+                    or row.get("created_at")
+                    or ""
+                )
+                if vs == "verified":
+                    return (3, ts)
+                if row.get("acknowledged") or row.get("status") == "signed":
+                    return (2, ts)
+                if vs == "rejected":
+                    return (0, ts)
+                return (1, ts)
+            acks = sorted(acks, key=_ack_rank, reverse=True)
+
         # Find new-style submission for this type
         template_id = AGREEMENT_TYPE_TO_TEMPLATE.get(agreement_type)
         submission = submissions_by_template.get(template_id) if template_id else None
         
         has_acknowledgement = len(acks) > 0 or submission is not None
-        latest_ack = acks[0] if len(acks) > 0 else None  # Already sorted desc
+        latest_ack = acks[0] if len(acks) > 0 else None  # canonical row per precedence above
         
         # Determine verification status (prefer new submission over old ack)
         if submission:

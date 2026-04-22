@@ -496,7 +496,7 @@ export default function DualRowComplianceSection({
                 <span className="font-medium">Agreements readiness impact:</span>{' '}
                 {blockers.length} blocking readiness &nbsp;|&nbsp;
                 {agreementPendingReviewCount} awaiting admin review &nbsp;|&nbsp;
-                {agreementMissingCount} missing/not submitted &nbsp;|&nbsp;
+                {agreementMissingCount} awaiting worker &nbsp;|&nbsp;
                 {agreementSatisfiedCount} checks complete
               </div>
             )}

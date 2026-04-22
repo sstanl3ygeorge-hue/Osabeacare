@@ -103,7 +103,7 @@ export default function AgreementRow({
       case 'in_progress':
         return { color: 'purple', bgColor: 'bg-purple-100', textColor: 'text-purple-700', icon: Edit, label: 'Submitted, not reviewed' };
       default:
-        return { color: 'gray', bgColor: 'bg-gray-100', textColor: 'text-gray-700', icon: FileSignature, label: 'Missing' };
+        return { color: 'gray', bgColor: 'bg-gray-100', textColor: 'text-gray-700', icon: FileSignature, label: 'Awaiting worker' };
     }
   };
 
@@ -371,23 +371,10 @@ export default function AgreementRow({
         <div className="flex items-center gap-2 ml-4">
           {!isAuditor && (
             <>
-              {/* Open Form - for not started or to redo */}
-              {lifecycleStatus === 'not_sent' && templateId && (
-                <Button
-                  size="sm"
-                  variant="default"
-                  onClick={(e) => { 
-                    e.stopPropagation(); 
-                    if (onOpenForm) onOpenForm(key, title, templateId, 'create');
-                  }}
-                  className="h-8 text-xs bg-primary hover:bg-primary-hover text-white rounded-lg"
-                  data-testid={`open-form-${key}`}
-                >
-                  <Edit className="h-3.5 w-3.5 mr-1" />
-                  Fill Agreement
-                </Button>
-              )}
-              
+              {/* Agreements are worker-owned. Admin never fills them.
+                  When lifecycleStatus === 'not_sent' the admin sees the
+                  'Awaiting worker' status badge and no action button. */}
+
               {/* View Submission - for submitted/verified */}
               {(lifecycleStatus === 'submitted' || lifecycleStatus === 'verified' || lifecycleStatus === 'rejected') && (
                 <Button

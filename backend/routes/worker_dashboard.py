@@ -1434,7 +1434,7 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             submission = await db.form_submissions.find_one({
                 "employee_id": employee_id,
                 "form_type": form_id,
-                "status": {"$in": ["submitted", "verified"]}
+                "status": {"$in": FORM_LOCKED_STATUSES}
             }, {"_id": 0})
             
             form_status = "not_started"

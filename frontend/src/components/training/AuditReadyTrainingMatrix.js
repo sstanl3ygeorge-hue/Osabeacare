@@ -61,6 +61,10 @@ import { formatBackendDate } from '../../lib/dateUtils';
 import TrainingDetailDrawer from './TrainingDetailDrawer';
 import TrainingCertificateExtractor from './TrainingCertificateExtractor';
 import EvidenceReviewViewerDialog from '../compliance/EvidenceReviewViewerDialog';
+import {
+  getPendingProposedTrainingItems,
+  getTrainingLibraryBannerState,
+} from './trainingLibraryBanner';
 
 const API = process.env.REACT_APP_BACKEND_URL;
 
@@ -839,6 +843,11 @@ export default function AuditReadyTrainingMatrix({
     return Boolean(item?.is_required || item?.is_mandatory || item?.required || item?.mandatory || mandatoryKeys.has(key));
   };
   const cannotAssessCount = (sourceErrors.certificates ? 1 : 0) + (sourceErrors.proposedItems ? 1 : 0) + (sourceErrors.trainingRecords ? 1 : 0);
+  const pendingProposedItems = getPendingProposedTrainingItems(proposedItems);
+  const trainingLibraryBanner = getTrainingLibraryBannerState({
+    proposedItems,
+    proposedItemsErrored: sourceErrors.proposedItems,
+  });
   const trainingDecisionState = sourceErrors.matrix || loadError
     ? 'Cannot assess'
     : mandatoryBlockers.length > 0
@@ -1261,20 +1270,19 @@ export default function AuditReadyTrainingMatrix({
               </div>
             </CardHeader>
             <CardContent>
-              <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
-                <p className="font-medium">How training evidence becomes compliant</p>
+              <div className={cn(
+                'mb-4 rounded-lg p-3 text-sm',
+                trainingLibraryBanner.tone === 'instructional' && 'border border-blue-200 bg-blue-50 text-blue-800',
+                trainingLibraryBanner.tone === 'clear' && 'border border-emerald-200 bg-emerald-50 text-emerald-800',
+                trainingLibraryBanner.tone === 'error' && 'border border-red-200 bg-red-50 text-red-700',
+              )}>
+                <p className="font-medium">{trainingLibraryBanner.title}</p>
                 <p className="mt-1">
-                  Certificates are evidence only. Extracted items appear below for review, then become canonical qualifications only after admin approval. Mandatory compliance still requires verified and current training records.
+                  {trainingLibraryBanner.body}
                 </p>
               </div>
-              {/* Proposed Items Needing Review */}
-              {sourceErrors.proposedItems && (
-                <div className="mb-6 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-                  <span className="font-medium">Cannot assess pending reviews.</span> Extracted training review data did not load, so awaiting-review counts are unavailable.
-                </div>
-              )}
               {(() => {
-                const pendingItems = proposedItems.filter(p => p.status === 'proposed');
+                const pendingItems = pendingProposedItems;
                 if (pendingItems.length === 0) return null;
 
                 // Group by source_document_id to expose batch opportunities

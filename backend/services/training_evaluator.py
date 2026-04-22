@@ -361,6 +361,50 @@ LEGACY_REQUIREMENT_TO_CANONICAL = {
 # - combined: legacy generic safeguarding evidence can satisfy both components
 SAFEGUARDING_COMPOSITE_POLICY = os.environ.get("SAFEGUARDING_COMPOSITE_POLICY", "dual").strip().lower()
 
+_SAFEGUARDING_CHILD_ROLE_KEYWORDS = (
+    "child",
+    "children",
+    "young_people",
+    "young_people",
+    "paediatric",
+    "pediatric",
+    "nursery",
+    "school",
+    "family_support",
+    "childcare",
+    "fostering",
+)
+_SAFEGUARDING_BOTH_ROLE_KEYWORDS = (
+    "mixed",
+    "adult_and_child",
+    "adults_and_children",
+    "adult_child",
+    "children_and_adults",
+    "children_adults",
+)
+
+
+def get_safeguarding_requirement_mode(role: str = "") -> str:
+    """Return the safeguarding mode for the supplied role.
+
+    Modes:
+      - adult_only
+      - children_only
+      - both
+      - generic_or_adult (safe default for adult-care workflows)
+    """
+    role_key = normalize_training_text(role).replace(" ", "_")
+    if not role_key:
+        return "generic_or_adult"
+
+    if any(keyword in role_key for keyword in _SAFEGUARDING_BOTH_ROLE_KEYWORDS):
+        return "both"
+
+    if any(keyword in role_key for keyword in _SAFEGUARDING_CHILD_ROLE_KEYWORDS):
+        return "children_only"
+
+    return "generic_or_adult"
+
 
 # ---------------------------------------------------------------------------
 # Training name aliases — maps variant names to canonical requirement IDs.
@@ -730,12 +774,7 @@ async def evaluate_employee_training_status(employee_id: str, role: str = "") ->
             adults_record = resolve_training_record(records_by_req, "safeguarding_adults", "Safeguarding Adults")
             children_record = resolve_training_record(records_by_req, "safeguarding_children", "Safeguarding Children")
             generic_record = resolve_training_record(records_by_req, "safeguarding", "Safeguarding")
-
-            if SAFEGUARDING_COMPOSITE_POLICY == "combined" and generic_record:
-                if not adults_record:
-                    adults_record = generic_record
-                if not children_record:
-                    children_record = generic_record
+            safeguarding_mode = get_safeguarding_requirement_mode(role)
 
             def _component_status(record: Optional[dict], label: str) -> str:
                 if not record or not record.get("completion_date"):
@@ -753,22 +792,62 @@ async def evaluate_employee_training_status(employee_id: str, role: str = "") ->
                     return "due_soon"
                 return "verified"
 
+            generic_status = _component_status(generic_record, "generic")
             adults_status = _component_status(adults_record, "adults")
             children_status = _component_status(children_record, "children")
 
+            generic_ok = generic_status in _SATISFIED_STATUSES
             adults_ok = adults_status in _SATISFIED_STATUSES
             children_ok = children_status in _SATISFIED_STATUSES
-            if adults_ok and children_ok:
+
+            if SAFEGUARDING_COMPOSITE_POLICY == "combined" and generic_ok:
                 status = "verified"
-                detail = "Safeguarding Adults and Children verified"
-            elif adults_status == "missing" and children_status == "missing":
-                status = "missing"
-                detail = "Safeguarding Adults and Safeguarding Children training not recorded"
-                has_missing = True
-            else:
-                status = "partial"
-                detail = "Safeguarding partially complete - both Adults and Children are required"
-                has_missing = True
+                detail = "Safeguarding verified"
+            elif safeguarding_mode in ("generic_or_adult", "adult_only"):
+                if generic_ok:
+                    status = "verified"
+                    detail = "Safeguarding verified"
+                elif adults_ok:
+                    status = "verified"
+                    detail = "Safeguarding Adults verified"
+                elif children_ok:
+                    status = "missing"
+                    detail = "Safeguarding Adults or generic Safeguarding required for this role"
+                    has_missing = True
+                else:
+                    status = "missing"
+                    detail = "Safeguarding training not recorded"
+                    has_missing = True
+            elif safeguarding_mode == "children_only":
+                if generic_ok:
+                    status = "verified"
+                    detail = "Safeguarding verified"
+                elif children_ok:
+                    status = "verified"
+                    detail = "Safeguarding Children verified"
+                elif adults_ok:
+                    status = "missing"
+                    detail = "Safeguarding Children or generic Safeguarding required for this role"
+                    has_missing = True
+                else:
+                    status = "missing"
+                    detail = "Safeguarding training not recorded"
+                    has_missing = True
+            else:  # both
+                if generic_ok:
+                    status = "verified"
+                    detail = "Safeguarding verified"
+                elif adults_ok and children_ok:
+                    status = "verified"
+                    detail = "Safeguarding Adults and Children verified"
+                elif adults_ok or children_ok:
+                    status = "partial"
+                    detail = "Safeguarding partially complete - both Adults and Children are required"
+                    has_missing = True
+                else:
+                    status = "missing"
+                    detail = "Safeguarding training not recorded"
+                    has_missing = True
 
             if is_blocker and status not in _SATISFIED_STATUSES:
                 blocker_count += 1
@@ -786,9 +865,17 @@ async def evaluate_employee_training_status(employee_id: str, role: str = "") ->
                 "expires_at": None,
                 "verified": status in _SATISFIED_STATUSES,
                 "evidence_required": evidence_required,
-                "record_id": adults_record.get("id") if adults_record else (children_record.get("id") if children_record else None),
+                "record_id": (
+                    generic_record.get("id") if generic_record else (
+                        adults_record.get("id") if adults_record else (
+                            children_record.get("id") if children_record else None
+                        )
+                    )
+                ),
                 "rejection_reason": None,
                 "breakdown": {
+                    "mode": safeguarding_mode,
+                    "generic": generic_status,
                     "adults": adults_status,
                     "children": children_status,
                 },

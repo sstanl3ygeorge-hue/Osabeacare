@@ -8012,94 +8012,31 @@ async def compute_unified_progress_internal(employee_id: str, employee: dict = N
     Internal unified progress computation - SINGLE SOURCE OF TRUTH.
     This is the same calculation as GET /employees/{id}/unified-progress but as a callable function.
     Used by both Admin views and Worker Dashboard to ensure progress percentage consistency.
-    
-    P0 FIX: Now uses calculate_employee_compliance for consistent counts across all views.
     """
     if not employee:
         employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
     
     if not employee:
         return {"overall_percentage": 0, "total_requirements": 0, "completed_requirements": 0, "blockers": []}
-    
-    job_role = (employee.get("job_role") or employee.get("role") or "").lower()
-    
-    # P0 FIX: Use the SAME compliance calculation as admin view for consistency
-    compliance_data = await calculate_employee_compliance(employee_id, job_role)
-    
-    # Extract counts from unified compliance calculation
-    total_requirements = compliance_data.get("total_items", 0)
-    completed_requirements = compliance_data.get("complete_count", 0)
-    overall_percentage = compliance_data.get("completion_percentage", 0)
-    
-    # Build blockers list from missing items
-    blockers = []
-    for item in compliance_data.get("items", []):
-        if item.get("status") == "missing" and not item.get("optional", False):
-            blockers.append(item.get("name", item.get("requirement_id", "Unknown")))
-    
-    # Add specific blockers for references if not verified
-    ref_1_verified = employee.get("reference_1_verified", False)
-    ref_2_verified = employee.get("reference_2_verified", False)
-    if not ref_1_verified:
-        if "Reference 1" not in blockers:
-            blockers.append("Reference 1")
-    if not ref_2_verified:
-        if "Reference 2" not in blockers:
-            blockers.append("Reference 2")
-    
-    # Check contract
-    contract_signed = employee.get("contract_signed", False)
-    if not contract_signed:
-        if "Employment Contract" not in blockers:
-            blockers.append("Employment Contract")
-    
-    # Build categories for detailed breakdown (same structure as before)
+
+    unified_status = await get_unified_employee_status(employee_id, db, user_role="admin", include_details=True)
+    if unified_status.get("error"):
+        return {"overall_percentage": 0, "total_requirements": 0, "completed_requirements": 0, "blockers": []}
+
     categories = {
-        "documents": {"completed": 0, "total": 0},
-        "forms": {"completed": 0, "total": 0},
-        "training": {"completed": 0, "total": 0},
-        "references": {"completed": 0, "total": 2},
-        "agreements": {"completed": 0, "total": 2},
-        "induction": {"completed": 0, "total": 0}
+        cat_name: {
+            "completed": cat_data.get("completed", 0),
+            "total": cat_data.get("total", 0),
+        }
+        for cat_name, cat_data in (unified_status.get("categories") or {}).items()
     }
-    
-    # Populate categories from compliance items
-    for item in compliance_data.get("items", []):
-        req_type = item.get("type", "document")
-        is_complete = item.get("status") in ["complete", "expiring", "expired"]
-        
-        if req_type == "document":
-            categories["documents"]["total"] += 1
-            if is_complete:
-                categories["documents"]["completed"] += 1
-        elif req_type == "form":
-            categories["forms"]["total"] += 1
-            if is_complete:
-                categories["forms"]["completed"] += 1
-        elif req_type == "training":
-            categories["training"]["total"] += 1
-            if is_complete:
-                categories["training"]["completed"] += 1
-    
-    # References from employee data
-    categories["references"]["completed"] = (1 if ref_1_verified else 0) + (1 if ref_2_verified else 0)
-    
-    # Agreements
-    if contract_signed:
-        categories["agreements"]["completed"] += 1
-    
-    # Induction - canonical function (Stage 2: no more direct DB reads)
-    from induction_definitions import get_employee_induction_status
-    induction_canonical = await get_employee_induction_status(db, employee_id)
-    categories["induction"]["total"] = induction_canonical["total"]
-    categories["induction"]["completed"] = induction_canonical["completed"]
-    
+
     return {
-        "overall_percentage": overall_percentage,
-        "completed_requirements": completed_requirements,
-        "total_requirements": total_requirements,
+        "overall_percentage": unified_status["progress"]["percentage"],
+        "completed_requirements": unified_status["progress"]["completed"],
+        "total_requirements": unified_status["progress"]["total"],
         "categories": categories,
-        "blockers": blockers
+        "blockers": [blocker.get("reason") or blocker.get("label") or "Unknown blocker" for blocker in unified_status.get("blockers", [])],
     }
 
 

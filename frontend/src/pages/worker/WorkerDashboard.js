@@ -639,13 +639,6 @@ export default function WorkerDashboard() {
     const [provideNewRefNum, setProvideNewRefNum] = useState(null);
     const [provideNewForm, setProvideNewForm] = useState({ name: '', email: '', phone: '', organisation: '', position: '', relationship: '' });
     const [provideNewLoading, setProvideNewLoading] = useState(false);
-    // "Justify existing referee" (only relevant when admin has used the
-    // "Request different referee" action — the slot has replacement_requested
-    // set but the worker wishes to keep the current referee with a written
-    // justification instead of replacing them).
-    const [justifyRefNum, setJustifyRefNum] = useState(null);
-    const [justifyReason, setJustifyReason] = useState('');
-    const [justifyLoading, setJustifyLoading] = useState(false);
   const [mismatchExplanationType, setMismatchExplanationType] = useState('');
   const [mismatchExplanationText, setMismatchExplanationText] = useState('');
   const [submittingMismatchExplanation, setSubmittingMismatchExplanation] = useState(false);
@@ -819,34 +812,6 @@ export default function WorkerDashboard() {
         toast.error(typeof detail === 'string' ? detail : 'Failed to submit referee details');
       } finally {
         setProvideNewLoading(false);
-      }
-    };
-
-    // Worker submits a justification to keep the existing referee (admin used
-    // the distinct "Request different referee" action; policy allows the
-    // worker to push back with an explanation rather than replace).
-    const handleJustifyExistingSubmit = async (refNum) => {
-      const reason = (justifyReason || '').trim();
-      if (reason.length < 10) {
-        toast.error('Please provide a justification of at least 10 characters.');
-        return;
-      }
-      setJustifyLoading(true);
-      try {
-        await axios.post(
-          `${API}/worker/references/${refNum}/justify-existing`,
-          { reason },
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
-        toast.success('Justification submitted. Your manager will review.');
-        setJustifyRefNum(null);
-        setJustifyReason('');
-        fetchDashboard();
-      } catch (err) {
-        const detail = err.response?.data?.detail;
-        toast.error(typeof detail === 'string' ? detail : 'Failed to submit justification');
-      } finally {
-        setJustifyLoading(false);
       }
     };
 
@@ -1754,17 +1719,9 @@ export default function WorkerDashboard() {
           </Card>
         )}
 
-        {/* ========== CV UPLOAD CARD (shown whenever backend CV truth says CV is missing/replacement required) ========== */}
-        {/*
-          Gate is driven by backend truth from /api/worker/cv-extraction-status
-          (has_cv, can_upload_cv). Lifecycle stage is intentionally not part of
-          the gate: an active worker can still be missing a CV or have a
-          replacement-required CV, and must be able to upload in that case.
-          The cv-rejected branch is excluded here because the dedicated
-          cv_rejected notification alert above already carries its own
-          Upload CTA.
-        */}
-        {cvStatus
+        {/* ========== CV UPLOAD CARD (onboarding only — when CV missing/replacement required) ========== */}
+        {!isActiveEmployee
+          && cvStatus
           && !cvStatus.has_cv
           && cvStatus.can_upload_cv
           && !notifications.some(n => n.type === 'cv_rejected' && !n.resolved)
@@ -2420,16 +2377,7 @@ export default function WorkerDashboard() {
         )}
 
         {/* ========== REFERENCES STATUS (P1: Worker Dashboard Sync) ========== */}
-        {/*
-          Normally references are an onboarding-only surface. But if an admin
-          later uses the dedicated "Request different referee" action (or a
-          reference is rejected post-activation), the worker must still see
-          and action the affected slot even when already active.
-        */}
-        {references && references.length > 0
-          && (!isActiveEmployee
-              || references.some(r => r.replacement_requested || r.can_provide_new || r.can_justify_existing))
-          && (
+        {!isActiveEmployee && references && references.length > 0 && (
           <Card className="shadow-md border-0" data-testid="references-section">
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between">
@@ -2502,20 +2450,6 @@ export default function WorkerDashboard() {
                               Reason: {ref.rejection_reason}
                             </p>
                           )}
-                          {/* Admin has asked the worker to supply a different referee */}
-                          {ref.replacement_requested && (
-                            <p
-                              className="text-xs text-amber-700 mt-1"
-                              data-testid={`replacement-requested-reason-${ref.reference_number}`}
-                            >
-                              Admin requested a different referee: {ref.replacement_requested_reason || '(no reason given)'}
-                            </p>
-                          )}
-                          {ref.justification_reason && (
-                            <p className="text-xs text-slate-600 mt-1 italic">
-                              Your justification: "{ref.justification_reason}" — awaiting admin review
-                            </p>
-                          )}
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
@@ -2525,31 +2459,10 @@ export default function WorkerDashboard() {
                             size="sm"
                             variant="outline"
                             className="text-xs border-primary text-primary hover:bg-primary hover:text-white"
-                            onClick={() => {
-                              setJustifyRefNum(null);
-                              setProvideNewRefNum(prev => prev === ref.reference_number ? null : ref.reference_number);
-                            }}
+                            onClick={() => setProvideNewRefNum(prev => prev === ref.reference_number ? null : ref.reference_number)}
                             data-testid={`provide-new-ref-${ref.reference_number}`}
                           >
-                            {provideNewRefNum === ref.reference_number ? 'Cancel' : 'Provide Different Referee'}
-                          </Button>
-                        )}
-                        {/* Worker may keep the existing referee with a written justification
-                            — only when admin used "Request different referee" AND no prior justification
-                            has been submitted yet. */}
-                        {ref.can_justify_existing && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="text-xs border-amber-500 text-amber-700 hover:bg-amber-50"
-                            onClick={() => {
-                              setProvideNewRefNum(null);
-                              setJustifyRefNum(prev => prev === ref.reference_number ? null : ref.reference_number);
-                              setJustifyReason('');
-                            }}
-                            data-testid={`justify-existing-ref-${ref.reference_number}`}
-                          >
-                            {justifyRefNum === ref.reference_number ? 'Cancel' : 'Keep Existing (Justify)'}
+                            {provideNewRefNum === ref.reference_number ? 'Cancel' : 'Provide New Referee'}
                           </Button>
                         )}
                         <Badge className={`text-xs ${
@@ -2633,37 +2546,6 @@ export default function WorkerDashboard() {
                                 className="mt-2"
                               >
                                 {provideNewLoading ? 'Submitting…' : 'Submit Referee Details'}
-                              </Button>
-                            </div>
-                          )}
-                          {/* Inline justify-existing-referee form */}
-                          {justifyRefNum === ref.reference_number && (
-                            <div
-                              className="mt-4 pt-4 border-t border-slate-200 space-y-2"
-                              data-testid={`justify-existing-form-${ref.reference_number}`}
-                            >
-                              <p className="text-sm font-medium text-slate-700">
-                                Explain why this referee should be kept
-                              </p>
-                              <p className="text-xs text-slate-500">
-                                Your manager will review your justification and decide whether to
-                                accept the existing referee or require a replacement.
-                              </p>
-                              <textarea
-                                className="w-full mt-1 px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400/30"
-                                rows={4}
-                                placeholder="e.g. This referee was my direct line manager for 3 years and is the only person who can attest to my clinical practice in that role."
-                                value={justifyReason}
-                                onChange={e => setJustifyReason(e.target.value)}
-                              />
-                              <Button
-                                size="sm"
-                                disabled={justifyLoading || justifyReason.trim().length < 10}
-                                onClick={() => handleJustifyExistingSubmit(ref.reference_number)}
-                                className="mt-2 bg-amber-600 hover:bg-amber-700"
-                                data-testid={`submit-justification-${ref.reference_number}`}
-                              >
-                                {justifyLoading ? 'Submitting…' : 'Submit Justification'}
                               </Button>
                             </div>
                           )}

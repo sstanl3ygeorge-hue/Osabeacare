@@ -30338,7 +30338,46 @@ class AgreementAcknowledgementService:
             "created_by": completed_by
         }
         
-        await db.agreement_acknowledgements.insert_one(acknowledgement)
+        # Handbook acknowledgements share a canonical (employee_id,
+        # agreement_type) row with `ensure_agreement_rendered` — that is the
+        # row that carries rendered_file_url / template_version. Minting a
+        # fresh `agr_ack_*` row here splits state across two rows for the
+        # same employee and leaves the worker dashboard reading one row while
+        # admin verifies another. Upsert the canonical row instead so the
+        # acknowledgement metadata lands on the same record as the render
+        # artefacts. Non-handbook agreement types keep the original insert
+        # behaviour to preserve their workflows untouched.
+        if data.get("agreement_type") == "handbook_acknowledgement":
+            canonical_id = f"agr_handbook_acknowledgement_{employee_id}"
+            ack_id = canonical_id
+            acknowledgement["id"] = canonical_id
+            ack_set = {k: v for k, v in acknowledgement.items() if k != "created_at"}
+            await db.agreement_acknowledgements.update_one(
+                {
+                    "employee_id": employee_id,
+                    "agreement_type": "handbook_acknowledgement",
+                },
+                {
+                    "$set": ack_set,
+                    "$setOnInsert": {
+                        "id": canonical_id,
+                        "created_at": now,
+                    },
+                },
+                upsert=True,
+            )
+            canonical_row = await db.agreement_acknowledgements.find_one(
+                {
+                    "employee_id": employee_id,
+                    "agreement_type": "handbook_acknowledgement",
+                },
+                {"_id": 0},
+            )
+            if canonical_row:
+                acknowledgement = canonical_row
+                ack_id = canonical_row.get("id", canonical_id)
+        else:
+            await db.agreement_acknowledgements.insert_one(acknowledgement)
         
         # Mark any pending request as completed
         await db.agreement_requests.update_many(

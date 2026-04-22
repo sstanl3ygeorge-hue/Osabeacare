@@ -2266,7 +2266,18 @@ async def worker_upload_document(
             {"$set": {
                 "extraction_status": "pending_admin_review",
                 "document_subtype": "cv",
-                "requires_admin_extraction": True
+                "requires_admin_extraction": True,
+                # Canonicalise metadata so a worker-uploaded CV is
+                # indistinguishable from an application-submitted CV on
+                # admin compliance surfaces. The canonical write path for
+                # CVs (see POST /applications/cv-upload in server.py) sets
+                # these fields; mirror them here so admin queries filtering
+                # on requirement_name / document_type_name / category /
+                # upload_source treat worker fallback uploads identically.
+                "requirement_name": "CV / Resume",
+                "document_type_name": "CV / Resume",
+                "category": "Application Documents",
+                "upload_source": "application_cv",
             }}
         )
         await db.employees.update_one(

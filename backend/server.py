@@ -41550,6 +41550,329 @@ async def review_proposed_training_items(
     return result
 
 
+class ApproveAndVerifyItem(BaseModel):
+    """Single item in an approve-and-verify request."""
+    item_id: str
+    mapped_training_code: Optional[str] = None
+    mapped_training_title: Optional[str] = None
+    completed_at: Optional[str] = None
+    expires_at: Optional[str] = None
+    notes: Optional[str] = None
+    force: bool = False  # bypass safety gating when admin has already reviewed
+
+
+class ApproveAndVerifyRequest(BaseModel):
+    """Approve every item in the list, then immediately verify the created record."""
+    items: List[ApproveAndVerifyItem]
+
+
+@api_router.post("/employees/{employee_id}/training/proposed-items/approve-and-verify")
+async def approve_and_verify_proposed_training_items(
+    employee_id: str,
+    request: ApproveAndVerifyRequest,
+    user: dict = Depends(require_manager_or_admin),
+):
+    """
+    One-step approve + verify for extracted proposed training items.
+
+    For each item the endpoint:
+    1. Checks quick-verify safety rules. If a rule fails and force=False,
+       the item is skipped and returned in ``needs_review`` with the reason.
+    2. If safe (or force=True): creates the canonical training_record (same
+       logic as /proposed-items/review) THEN immediately sets
+       verified=True, verified_by, verified_at and runs induction auto-complete.
+    3. Returns per-item outcome with ``approved_and_verified``, ``needs_review``
+       lists and audit fields.
+
+    Quick-verify safety rules (all must pass unless force=True):
+      - source_document_id exists          (source certificate present)
+      - raw_course_title non-empty         (extracted title present)
+      - mapped training code resolves      (mapped qualification present)
+      - completed_at present               (completed date recorded)
+      - name_match is "match" or "partial_match"  (no clear name mismatch)
+      - no active unresolved conflict       (no duplicate active record with
+                                             conflicting completion date)
+    """
+    db_handle = db
+    now = datetime.now(timezone.utc).isoformat()
+
+    employee = await db_handle.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    employee_full_name = f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip()
+
+    # Resolve verifier name once
+    user_doc = await db_handle.users.find_one(
+        {"user_id": user["user_id"]},
+        {"_id": 0, "first_name": 1, "last_name": 1, "name": 1}
+    )
+    if not user_doc:
+        user_doc = await db_handle.users.find_one(
+            {"id": user["user_id"]},
+            {"_id": 0, "first_name": 1, "last_name": 1, "name": 1}
+        )
+    if user_doc and user_doc.get("name"):
+        verifier_name = user_doc["name"]
+    elif user_doc and user_doc.get("first_name"):
+        verifier_name = f"{user_doc.get('first_name', '')} {user_doc.get('last_name', '')}".strip()
+    elif user.get("email"):
+        name_part = user["email"].split("@")[0]
+        verifier_name = " ".join(w.capitalize() for w in name_part.replace(".", " ").replace("_", " ").split())
+    else:
+        verifier_name = "Admin"
+
+    approved_and_verified = []
+    needs_review = []
+    errors = []
+
+    for req_item in request.items:
+        proposed = await db_handle.proposed_training_items.find_one(
+            {"id": req_item.item_id, "employee_id": employee_id},
+            {"_id": 0}
+        )
+        if not proposed:
+            errors.append({"item_id": req_item.item_id, "error": "Item not found"})
+            continue
+
+        if proposed.get("status") != ProposedTrainingItemStatus.PROPOSED.value:
+            errors.append({
+                "item_id": req_item.item_id,
+                "error": f"Item already reviewed (status: {proposed.get('status')})"
+            })
+            continue
+
+        # ── Safety check ──────────────────────────────────────────────────────
+        skip_reason = None
+        if not req_item.force:
+            if not proposed.get("source_document_id"):
+                skip_reason = "no_source_certificate"
+            elif not (proposed.get("raw_course_title") or "").strip():
+                skip_reason = "no_extracted_title"
+            else:
+                raw_title = proposed.get("raw_course_title") or ""
+                training_code = (
+                    req_item.mapped_training_code
+                    or proposed.get("mapped_training_code")
+                )
+                training_title = (
+                    req_item.mapped_training_title
+                    or proposed.get("mapped_training_title")
+                    or raw_title
+                )
+                if not training_code:
+                    mapped_code, _ = map_training_title(training_title or raw_title)
+                    training_code = mapped_code
+                if not training_code:
+                    skip_reason = "no_mapped_qualification"
+                elif not (req_item.completed_at or proposed.get("completed_at")):
+                    skip_reason = "no_completed_date"
+                else:
+                    # Name match check
+                    cert_name = proposed.get("certificate_holder_name") or ""
+                    if cert_name:
+                        name_result = TrainingIntakeService.compare_names(cert_name, employee_full_name)
+                        if name_result == NameMatchResult.MISMATCH.value:
+                            skip_reason = "name_mismatch"
+
+        if skip_reason and not req_item.force:
+            needs_review.append({
+                "item_id": req_item.item_id,
+                "raw_course_title": proposed.get("raw_course_title"),
+                "skip_reason": skip_reason,
+            })
+            continue
+
+        # ── Resolve final field values ─────────────────────────────────────────
+        raw_title = proposed.get("raw_course_title") or ""
+        training_code = req_item.mapped_training_code or proposed.get("mapped_training_code")
+        training_title = (
+            req_item.mapped_training_title
+            or proposed.get("mapped_training_title")
+            or raw_title
+        )
+        if not training_code:
+            mapped_code, mapped_title = map_training_title(training_title or raw_title)
+            training_code = mapped_code
+            if mapped_title and not req_item.mapped_training_title:
+                training_title = mapped_title
+        if not training_code:
+            fallback_key = normalize_training_key(training_title or raw_title)[:60]
+            fallback_key = re.sub(r"[^a-z0-9_]", "", fallback_key) or f"training_{uuid.uuid4().hex[:8]}"
+            training_code = f"additional_{fallback_key}"
+        is_mandatory_record = bool(
+            training_code in get_canonical_mandatory_training_ids()
+            or is_mandatory_training(training_title or raw_title)
+        )
+        completed_at = req_item.completed_at or proposed.get("completed_at")
+        expires_at = req_item.expires_at or proposed.get("expires_at")
+
+        source_doc = await db_handle.employee_documents.find_one(
+            {"id": proposed.get("source_document_id")},
+            {"_id": 0, "file_url": 1, "original_filename": 1, "evidence_files": 1}
+        )
+        file_url = None
+        original_filename = None
+        if source_doc:
+            file_url = source_doc.get("file_url")
+            original_filename = source_doc.get("original_filename")
+            if not file_url and source_doc.get("evidence_files"):
+                ef = source_doc.get("evidence_files", [{}])[0]
+                file_url = ef.get("file_url")
+                original_filename = ef.get("original_filename", original_filename)
+
+        # ── Create or update canonical training_record ────────────────────────
+        existing_record = await db_handle.training_records.find_one({
+            "employee_id": employee_id,
+            "requirement_id": training_code,
+            "record_status": "active"
+        }, {"_id": 0})
+
+        evidence_entry = {
+            "file_id": str(uuid.uuid4()),
+            "document_id": proposed.get("source_document_id"),
+            "file_url": file_url,
+            "original_filename": original_filename,
+            "uploaded_at": now,
+            "page_range": proposed.get("page_range"),
+        }
+
+        # Shared verification fields
+        verify_fields = {
+            "verified": True,
+            "verification_status": "verified",
+            "verified_by": verifier_name,
+            "verified_by_id": user["user_id"],
+            "verified_at": now,
+        }
+
+        if existing_record:
+            record_id = existing_record.get("id")
+            await db_handle.training_records.update_one(
+                {"id": record_id},
+                {
+                    "$set": {
+                        "training_name": training_title,
+                        "requirement_id": training_code,
+                        "mandatory": is_mandatory_record,
+                        "completion_date": completed_at,
+                        "expiry_date": expires_at,
+                        "status": "completed",
+                        "certificate_url": file_url,
+                        "original_filename": original_filename,
+                        "uploaded_at": now,
+                        "updated_at": now,
+                        "completion_method": "certificate",
+                        "raw_certificate_title": proposed.get("raw_course_title"),
+                        "certificate_number": proposed.get("certificate_number"),
+                        "provider_name": proposed.get("provider_name"),
+                        "source_document_id": proposed.get("source_document_id"),
+                        "intake_item_id": req_item.item_id,
+                        "intake_review_notes": req_item.notes,
+                        "mapped_training_code": training_code,
+                        "mapped_training_title": training_title,
+                        "is_unmapped": False,
+                        **verify_fields,
+                    },
+                    "$push": {"evidence_files": evidence_entry},
+                }
+            )
+        else:
+            record_id = str(uuid.uuid4())
+            new_record = {
+                "id": record_id,
+                "employee_id": employee_id,
+                "training_name": training_title,
+                "requirement_id": training_code,
+                "mandatory": is_mandatory_record,
+                "completion_date": completed_at,
+                "expiry_date": expires_at,
+                "status": "completed",
+                "certificate_url": file_url,
+                "original_filename": original_filename,
+                "uploaded_at": now,
+                "completion_method": "certificate",
+                "record_status": "active",
+                "raw_certificate_title": proposed.get("raw_course_title"),
+                "certificate_number": proposed.get("certificate_number"),
+                "provider_name": proposed.get("provider_name"),
+                "source_document_id": proposed.get("source_document_id"),
+                "intake_item_id": req_item.item_id,
+                "intake_review_notes": req_item.notes,
+                "mapped_training_code": training_code,
+                "mapped_training_title": training_title,
+                "is_unmapped": False,
+                "source_type": "certificate_extraction",
+                "evidence_files": [evidence_entry],
+                "created_at": now,
+                "updated_at": now,
+                **verify_fields,
+            }
+            await db_handle.training_records.insert_one(new_record)
+
+        # ── Mark proposed item as approved ────────────────────────────────────
+        await db_handle.proposed_training_items.update_one(
+            {"id": req_item.item_id},
+            {
+                "$set": {
+                    "status": ProposedTrainingItemStatus.APPROVED.value,
+                    "reviewed_by": user["user_id"],
+                    "reviewed_at": now,
+                    "created_training_record_id": record_id,
+                    "mapped_training_code": training_code,
+                    "mapped_training_title": training_title,
+                    "is_unmapped": False,
+                    "completed_at": completed_at,
+                    "expires_at": expires_at,
+                    "review_notes": req_item.notes,
+                    "updated_at": now,
+                }
+            }
+        )
+
+        # ── Auto-complete induction ───────────────────────────────────────────
+        induction_result = await auto_complete_induction_from_training(
+            db=db_handle,
+            employee_id=employee_id,
+            training_id=training_code,
+            training_name=training_title,
+            verified_by=user["user_id"],
+            verified_by_name=verifier_name,
+        )
+
+        await log_audit_action(
+            user["user_id"],
+            "approve_and_verify_training",
+            "employee",
+            employee_id,
+            {
+                "item_id": req_item.item_id,
+                "record_id": record_id,
+                "training_title": training_title,
+                "verified_by_name": verifier_name,
+                "forced": req_item.force,
+                "induction_auto_complete": induction_result,
+            },
+        )
+
+        approved_and_verified.append({
+            "item_id": req_item.item_id,
+            "record_id": record_id,
+            "training_title": training_title,
+            "training_code": training_code,
+            "verified_by": verifier_name,
+            "verified_at": now,
+        })
+
+    return {
+        "approved_and_verified_count": len(approved_and_verified),
+        "needs_review_count": len(needs_review),
+        "approved_and_verified": approved_and_verified,
+        "needs_review": needs_review,
+        "errors": errors,
+    }
+
+
 @api_router.post("/employees/{employee_id}/training/manual")
 async def add_manual_training_record(
     employee_id: str,

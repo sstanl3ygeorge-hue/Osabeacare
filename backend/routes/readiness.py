@@ -926,3 +926,77 @@ async def get_audit_readiness_dashboard(user: dict = Depends(require_manager_or_
             policies_missing, insurance_missing, missing_critical
         )
     }
+
+
+# ==============================================================================
+# DEBUG READINESS PAYLOAD — QA use; admin-only
+# GET /employees/{employee_id}/readiness-debug
+# ==============================================================================
+
+@router.get("/employees/{employee_id}/readiness-debug")
+async def get_readiness_debug(
+    employee_id: str,
+    user: dict = Depends(require_admin),
+):
+    """
+    QA debug endpoint: returns every requirement evaluated for this employee,
+    the source collection, verification status, and whether it is counted as
+    complete.  Used to validate genuine 100% cases.
+
+    Access: admin only.
+    """
+    db = get_db()
+
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    from unified_compliance_engine import get_unified_employee_status
+
+    progress = await get_unified_employee_status(db, employee_id)
+
+    categories = progress.get("category_details") or {}
+    blockers = progress.get("blockers") or []
+    blocker_ids = {b.get("id") for b in blockers}
+
+    # Build per-requirement debug rows from each category
+    rows = []
+    for category_name, cat_data in categories.items():
+        for item in cat_data.get("items", []):
+            req_id = item.get("id") or item.get("requirement") or ""
+            rows.append({
+                "requirement_key": req_id,
+                "category": category_name,
+                "name": item.get("name") or item.get("title") or req_id,
+                "counted_as_complete": bool(item.get("completed")),
+                "verified": bool(item.get("verified")),
+                "status": item.get("status") or ("complete" if item.get("completed") else "incomplete"),
+                "has_record": item.get("has_record", None),
+                "expiry_date": item.get("expiry_date"),
+                "is_blocker": req_id in blocker_ids,
+                "blocker_detail": next(
+                    (b.get("reason") for b in blockers if b.get("id") == req_id), None
+                ),
+            })
+
+    # Summary
+    overall_pct = progress.get("overall_percentage", 0) or 0
+    completed_req = progress.get("completed_requirements", 0) or 0
+    total_req = progress.get("total_requirements", 0) or 0
+    awaiting = [b for b in blockers if b.get("severity") == "pending"]
+
+    return {
+        "employee_id": employee_id,
+        "name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
+        "evaluated_at": datetime.now(timezone.utc).isoformat(),
+        "summary": {
+            "overall_percentage": overall_pct,
+            "completed_requirements": completed_req,
+            "total_requirements": total_req,
+            "blockers_count": len(blockers),
+            "awaiting_review_count": len(awaiting),
+            "is_100_percent_genuine": overall_pct == 100 and len(blockers) == 0,
+        },
+        "requirements": rows,
+        "blockers": blockers,
+    }

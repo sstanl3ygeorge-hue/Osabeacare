@@ -236,6 +236,11 @@ export default function AuditReadyTrainingMatrix({
   // Remove certificate state
   const [removeCertDialogCert, setRemoveCertDialogCert] = useState(null);
   const [removingCert, setRemovingCert] = useState(false);
+
+  // Approve-and-verify state
+  const [quickVerifying, setQuickVerifying] = useState({}); // itemId → bool
+  const [selectedForBatch, setSelectedForBatch] = useState(new Set());
+  const [batchVerifying, setBatchVerifying] = useState(false);
   
   const isAdmin = user?.role === 'admin' || user?.role === 'superadmin' || user?.role === 'super_admin';
 
@@ -458,6 +463,111 @@ export default function AuditReadyTrainingMatrix({
       toast.error(err.response?.data?.detail || 'Failed to reject item');
     }
   };
+
+  // Quick-verify eligibility check (mirrors backend safety rules)
+  const canQuickVerify = (item) => (
+    Boolean(item?.source_document_id) &&         // source certificate present
+    Boolean((item?.raw_course_title || '').trim()) &&  // extracted title present
+    Boolean(item?.mapped_training_code || item?.mapped_training_title) && // mapped
+    Boolean(item?.completed_at) &&               // completed date present
+    !item?.is_unmapped                           // not flagged unmapped
+  );
+
+  // One-step approve + verify a single extracted item
+  const handleApproveAndVerify = async (item, force = false) => {
+    if (sourceErrors.proposedItems) {
+      toast.error('Cannot assess pending reviews until training review data loads.');
+      return;
+    }
+    setQuickVerifying(prev => ({ ...prev, [item.id]: true }));
+    try {
+      const res = await axios.post(
+        `${API}/api/employees/${employeeId}/training/proposed-items/approve-and-verify`,
+        {
+          items: [{
+            item_id: item.id,
+            mapped_training_code: item.mapped_training_code,
+            mapped_training_title: item.mapped_training_title,
+            completed_at: item.completed_at,
+            expires_at: item.expires_at,
+            force,
+          }]
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      const data = res.data;
+      if (data.approved_and_verified_count > 0) {
+        toast.success(`${item.raw_course_title || 'Item'} approved and verified`);
+      } else if (data.needs_review?.length > 0) {
+        const reason = data.needs_review[0]?.skip_reason || 'review_required';
+        toast.warning(`Needs manual review: ${reason.replace(/_/g, ' ')}`);
+        // Fall back to evidence-review modal
+        openTrainingEvidenceReview(item);
+      }
+      fetchTrainingData();
+      onRefresh?.();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to approve and verify item');
+    } finally {
+      setQuickVerifying(prev => ({ ...prev, [item.id]: false }));
+    }
+  };
+
+  // Batch approve-and-verify for selected items
+  const handleBatchApproveAndVerify = async () => {
+    if (selectedForBatch.size === 0) return;
+    setBatchVerifying(true);
+    try {
+      const itemsInBatch = proposedItems
+        .filter(p => p.status === 'proposed' && selectedForBatch.has(p.id));
+      const res = await axios.post(
+        `${API}/api/employees/${employeeId}/training/proposed-items/approve-and-verify`,
+        {
+          items: itemsInBatch.map(item => ({
+            item_id: item.id,
+            mapped_training_code: item.mapped_training_code,
+            mapped_training_title: item.mapped_training_title,
+            completed_at: item.completed_at,
+            expires_at: item.expires_at,
+            force: false,
+          }))
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      const data = res.data;
+      const verifiedCount = data.approved_and_verified_count || 0;
+      const reviewCount = data.needs_review_count || 0;
+      if (verifiedCount > 0 && reviewCount === 0) {
+        toast.success(`${verifiedCount} item${verifiedCount !== 1 ? 's' : ''} approved and verified`);
+      } else if (verifiedCount > 0) {
+        toast.success(`${verifiedCount} approved and verified — ${reviewCount} still need manual review`);
+      } else {
+        toast.warning(`${reviewCount} item${reviewCount !== 1 ? 's' : ''} require manual review`);
+      }
+      setSelectedForBatch(new Set());
+      fetchTrainingData();
+      onRefresh?.();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Batch verify failed');
+    } finally {
+      setBatchVerifying(false);
+    }
+  };
+
+  const toggleBatchSelect = (itemId) => {
+    setSelectedForBatch(prev => {
+      const next = new Set(prev);
+      if (next.has(itemId)) next.delete(itemId);
+      else next.add(itemId);
+      return next;
+    });
+  };
+
+  const selectAllForBatch = (items) => {
+    setSelectedForBatch(new Set(items.map(i => i.id)));
+  };
+
+  const clearBatchSelection = () => setSelectedForBatch(new Set());
 
   // Delete training record - Admin only with audit trail
   const handleDeleteTraining = async () => {
@@ -1163,71 +1273,214 @@ export default function AuditReadyTrainingMatrix({
                   <span className="font-medium">Cannot assess pending reviews.</span> Extracted training review data did not load, so awaiting-review counts are unavailable.
                 </div>
               )}
-              {proposedItems.filter(p => p.status === 'proposed').length > 0 && (
-                <div className="mb-6">
-                  <h4 className="text-sm font-medium text-purple-800 mb-3 flex items-center gap-2">
-                    <Wand2 className="h-4 w-4" />
-                    Extracted items awaiting admin review ({proposedItems.filter(p => p.status === 'proposed').length})
-                  </h4>
-                  <p className="mb-3 text-sm text-purple-700">
-                    These items came from certificate extraction. They do not affect Mandatory compliance until reviewed, approved, and verified where required.
-                  </p>
-                  <div className="space-y-2">
-                    {proposedItems.filter(p => p.status === 'proposed').map((item) => (
-                      <div 
-                        key={item.id}
-                        className="p-3 bg-purple-50 border border-purple-200 rounded-lg flex items-center justify-between"
-                      >
-                        <div className="flex items-center gap-3">
-                          <Wand2 className="h-5 w-5 text-purple-600" />
-                          <div>
-                            <p className="font-medium text-purple-900">{item.raw_course_title}</p>
-                            <p className="text-xs text-purple-600">
-                              Extracted from certificate • 
-                              {item.mapped_training_code
-                                ? ` Mapped to: ${item.mapped_training_title || item.mapped_training_code}`
-                                : ' Unmapped - admin mapping needed'}
-                              {item.completed_at && ` • Completed: ${formatBackendDate(item.completed_at, { format: 'short' })}`}
-                              {item.expires_at && ` • Expires: ${formatBackendDate(item.expires_at, { format: 'short' })}`}
-                            </p>
-                          </div>
-                        </div>
+              {(() => {
+                const pendingItems = proposedItems.filter(p => p.status === 'proposed');
+                if (pendingItems.length === 0) return null;
+
+                // Group by source_document_id to expose batch opportunities
+                const byDoc = pendingItems.reduce((acc, item) => {
+                  const key = item.source_document_id || '__none__';
+                  if (!acc[key]) acc[key] = [];
+                  acc[key].push(item);
+                  return acc;
+                }, {});
+                const multiDocKeys = Object.keys(byDoc).filter(k => byDoc[k].length > 1 && k !== '__none__');
+
+                return (
+                  <div className="mb-6">
+                    {/* Header + batch bar */}
+                    <div className="flex items-center justify-between mb-2">
+                      <h4 className="text-sm font-medium text-purple-800 flex items-center gap-2">
+                        <Wand2 className="h-4 w-4" />
+                        Extracted items awaiting admin review ({pendingItems.length})
+                      </h4>
+                      {isAdmin && pendingItems.length > 1 && (
                         <div className="flex items-center gap-2">
-                          <Badge variant="outline" className={item.is_mandatory ? 'bg-red-50 text-red-700 border-red-200' : 'text-gray-600'}>
-                            {item.is_mandatory ? 'Required' : 'Additional'}
-                          </Badge>
-                          {item.is_unmapped && (
-                            <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">
-                              Unmapped
-                            </Badge>
+                          {selectedForBatch.size > 0 ? (
+                            <>
+                              <span className="text-xs text-purple-700">{selectedForBatch.size} selected</span>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7 text-xs border-purple-300 text-purple-700 hover:bg-purple-50"
+                                onClick={clearBatchSelection}
+                              >
+                                Clear
+                              </Button>
+                              <Button
+                                size="sm"
+                                className="h-7 text-xs bg-emerald-600 hover:bg-emerald-700 text-white"
+                                disabled={batchVerifying || sourceErrors.proposedItems}
+                                onClick={handleBatchApproveAndVerify}
+                              >
+                                {batchVerifying ? (
+                                  <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                ) : (
+                                  <CheckCircle2 className="h-3 w-3 mr-1" />
+                                )}
+                                Approve & Verify selected
+                              </Button>
+                            </>
+                          ) : (
+                            multiDocKeys.length > 0 && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 text-xs text-purple-700"
+                                onClick={() => selectAllForBatch(pendingItems)}
+                              >
+                                Select all
+                              </Button>
+                            )
                           )}
                         </div>
-                        {isAdmin && (
-                          <div className="flex items-center gap-2">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              disabled={sourceErrors.proposedItems}
-                              onClick={() => handleEditProposed(item)}
-                            >
-                              <Edit2 className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              disabled={sourceErrors.proposedItems}
-                              onClick={() => openTrainingEvidenceReview(item)}
-                            >
-                              <Eye className="h-4 w-4 mr-1" />
-                              Review evidence
-                            </Button>
+                      )}
+                    </div>
+                    <p className="mb-3 text-sm text-purple-700">
+                      Obvious items can be approved and verified in one step. Items that need correction
+                      use the <span className="font-medium">Review Evidence</span> flow.
+                    </p>
+
+                    <div className="space-y-2">
+                      {pendingItems.map((item) => {
+                        const quickOk = canQuickVerify(item);
+                        const isVerifying = quickVerifying[item.id];
+                        const isSelected = selectedForBatch.has(item.id);
+                        return (
+                          <div
+                            key={item.id}
+                            className={cn(
+                              'p-3 border rounded-lg',
+                              isSelected
+                                ? 'bg-emerald-50 border-emerald-300'
+                                : 'bg-purple-50 border-purple-200'
+                            )}
+                          >
+                            <div className="flex items-start gap-3">
+                              {/* Batch checkbox */}
+                              {isAdmin && pendingItems.length > 1 && (
+                                <input
+                                  type="checkbox"
+                                  checked={isSelected}
+                                  onChange={() => toggleBatchSelect(item.id)}
+                                  className="mt-1 h-4 w-4 rounded border-gray-300 text-emerald-600 cursor-pointer focus:ring-emerald-500"
+                                />
+                              )}
+
+                              {/* Info */}
+                              <div className="flex-1 min-w-0">
+                                <p className="font-medium text-purple-900 truncate">{item.raw_course_title}</p>
+                                <p className="text-xs text-purple-600 mt-0.5">
+                                  {item.mapped_training_code
+                                    ? `Mapped → ${item.mapped_training_title || item.mapped_training_code}`
+                                    : <span className="text-amber-600 font-medium">Unmapped — needs correction</span>}
+                                  {item.completed_at && ` · Completed ${formatBackendDate(item.completed_at, { format: 'short' })}`}
+                                  {item.expires_at && ` · Expires ${formatBackendDate(item.expires_at, { format: 'short' })}`}
+                                </p>
+                                {!quickOk && (
+                                  <p className="text-xs text-amber-700 mt-0.5">
+                                    ⚠ Needs correction before fast-approval
+                                    {!item.mapped_training_code && ' — unmapped'}
+                                    {!item.completed_at && ' — no completed date'}
+                                    {!item.source_document_id && ' — no source certificate'}
+                                  </p>
+                                )}
+                              </div>
+
+                              {/* Badges */}
+                              <div className="flex items-center gap-1 flex-shrink-0">
+                                <Badge
+                                  variant="outline"
+                                  className={item.is_mandatory
+                                    ? 'bg-red-50 text-red-700 border-red-200 text-xs'
+                                    : 'text-gray-500 text-xs'}
+                                >
+                                  {item.is_mandatory ? 'Required' : 'Additional'}
+                                </Badge>
+                                {item.is_unmapped && (
+                                  <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 text-xs">
+                                    Unmapped
+                                  </Badge>
+                                )}
+                              </div>
+
+                              {/* Action buttons */}
+                              {isAdmin && (
+                                <div className="flex items-center gap-1 flex-shrink-0">
+                                  {quickOk ? (
+                                    <>
+                                      <Button
+                                        size="sm"
+                                        className="h-7 px-2 text-xs bg-emerald-600 hover:bg-emerald-700 text-white"
+                                        disabled={isVerifying || sourceErrors.proposedItems}
+                                        onClick={() => handleApproveAndVerify(item)}
+                                        title="Approve this item and mark it verified in one step"
+                                      >
+                                        {isVerifying ? (
+                                          <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                        ) : (
+                                          <CheckCircle2 className="h-3 w-3 mr-1" />
+                                        )}
+                                        Approve &amp; Verify
+                                      </Button>
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="h-7 px-2 text-xs text-red-600 border-red-200 hover:bg-red-50"
+                                        disabled={isVerifying || sourceErrors.proposedItems}
+                                        onClick={() => handleRejectProposed(item)}
+                                        title="Mark this extracted item as rejected"
+                                      >
+                                        <XCircle className="h-3 w-3 mr-1" />
+                                        Reject
+                                      </Button>
+                                      {item.source_document_id && (
+                                        <Button
+                                          size="sm"
+                                          variant="ghost"
+                                          className="h-7 px-2 text-xs text-gray-500"
+                                          disabled={sourceErrors.proposedItems}
+                                          onClick={() => openTrainingEvidenceReview(item)}
+                                          title="Open full evidence review"
+                                        >
+                                          <Eye className="h-3 w-3" />
+                                        </Button>
+                                      )}
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="h-7 px-2 text-xs"
+                                        disabled={sourceErrors.proposedItems}
+                                        onClick={() => openTrainingEvidenceReview(item)}
+                                      >
+                                        <Eye className="h-3 w-3 mr-1" />
+                                        Review Evidence
+                                      </Button>
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-7 px-2"
+                                        disabled={sourceErrors.proposedItems}
+                                        onClick={() => handleEditProposed(item)}
+                                        title="Edit extracted values"
+                                      >
+                                        <Edit2 className="h-3 w-3" />
+                                      </Button>
+                                    </>
+                                  )}
+                                </div>
+                              )}
+                            </div>
                           </div>
-                        )}
-                      </div>
-                    ))}
+                        );
+                      })}
+                    </div>
                   </div>
-                </div>
-              )}
+                );
+              })()}
 
               {/* All Training Records */}
               {sourceErrors.trainingRecords && (

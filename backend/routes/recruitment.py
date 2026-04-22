@@ -124,38 +124,36 @@ async def generate_employee_code() -> str:
     return f"EMP-{new_num:04d}"
 
 
-async def calculate_completion_percentage_simple(employee_id: str) -> int:
+async def calculate_completion_percentage_simple(employee_id: str) -> dict:
     """
-    Simple completion percentage calculation.
-    For full calculation with all requirements, the main server.py version is used.
+    Canonical completion percentage — delegates entirely to the Unified Compliance Engine
+    so that all surfaces (list, profile, pipeline) report the same numbers.
+
+    Returns a dict with: overall_percentage, completed_requirements, total_requirements,
+    blockers_count, awaiting_review_count  (all integers, never None).
     """
-    db = get_db()
-    
-    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
-    if not employee:
-        return 0
-    
-    # Basic fields completion
-    fields = ["first_name", "last_name", "email", "phone", "date_of_birth", "ni_number"]
-    completed = sum(1 for f in fields if employee.get(f))
-    
-    # Document count
-    doc_count = await db.employee_documents.count_documents({
-        "employee_id": employee_id,
-        "verified": True
-    })
-    
-    # Training count
-    training_count = await db.training_records.count_documents({
-        "employee_id": employee_id,
-        "verified": True
-    })
-    
-    # Simple calculation
-    total_weight = len(fields) + 10  # fields + docs + training
-    completed_weight = completed + min(doc_count, 5) + min(training_count, 5)
-    
-    return min(100, int((completed_weight / total_weight) * 100))
+    try:
+        from unified_compliance_engine import get_unified_employee_status
+        db = get_db()
+        progress = await get_unified_employee_status(db, employee_id)
+        blockers = progress.get("blockers", []) or []
+        awaiting = [b for b in blockers if b.get("severity") == "pending"]
+        return {
+            "overall_percentage": progress.get("overall_percentage", 0) or 0,
+            "completed_requirements": progress.get("completed_requirements", 0) or 0,
+            "total_requirements": progress.get("total_requirements", 0) or 0,
+            "blockers_count": len(blockers),
+            "awaiting_review_count": len(awaiting),
+        }
+    except Exception:
+        logger.exception("calculate_completion_percentage_simple UCE call failed for %s", employee_id)
+        return {
+            "overall_percentage": 0,
+            "completed_requirements": 0,
+            "total_requirements": 0,
+            "blockers_count": 0,
+            "awaiting_review_count": 0,
+        }
 
 
 # ==================== APPLICANT ENDPOINTS ====================
@@ -200,7 +198,7 @@ async def get_applicants(
     # Enrich with computed fields
     result = []
     for app in applicants:
-        completion = await calculate_completion_percentage_simple(app['id'])
+        progress = await calculate_completion_percentage_simple(app['id'])
         result.append({
             "id": app["id"],
             "applicant_reference": app.get("applicant_reference"),
@@ -212,7 +210,11 @@ async def get_applicants(
             "status": app["status"],
             "person_stage": PersonStage.APPLICANT,
             "recruitment_approved": app.get("recruitment_approved", False),
-            "completion_percentage": completion,
+            "completion_percentage": progress["overall_percentage"],
+            "completed_requirements": progress["completed_requirements"],
+            "total_requirements": progress["total_requirements"],
+            "blockers_count": progress["blockers_count"],
+            "awaiting_review_count": progress["awaiting_review_count"],
             "created_at": app.get("created_at"),
             "updated_at": app.get("updated_at")
         })
@@ -286,7 +288,12 @@ async def get_applicant(
         raise HTTPException(status_code=404, detail="Applicant not found")
     
     applicant["person_stage"] = PersonStage.APPLICANT
-    applicant["completion_percentage"] = await calculate_completion_percentage_simple(applicant_id)
+    _ap = await calculate_completion_percentage_simple(applicant_id)
+    applicant["completion_percentage"] = _ap["overall_percentage"]
+    applicant["completed_requirements"] = _ap["completed_requirements"]
+    applicant["total_requirements"] = _ap["total_requirements"]
+    applicant["blockers_count"] = _ap["blockers_count"]
+    applicant["awaiting_review_count"] = _ap["awaiting_review_count"]
     
     return applicant
 
@@ -335,7 +342,12 @@ async def get_staff_employees(
     # Enrich with basic computed fields
     for emp in employees:
         emp['person_stage'] = PersonStage.EMPLOYEE
-        emp['completion_percentage'] = await calculate_completion_percentage_simple(emp['id'])
+        _ep = await calculate_completion_percentage_simple(emp['id'])
+        emp['completion_percentage'] = _ep['overall_percentage']
+        emp['completed_requirements'] = _ep['completed_requirements']
+        emp['total_requirements'] = _ep['total_requirements']
+        emp['blockers_count'] = _ep['blockers_count']
+        emp['awaiting_review_count'] = _ep['awaiting_review_count']
     
     return employees
 

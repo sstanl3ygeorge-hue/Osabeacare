@@ -41635,6 +41635,20 @@ async def approve_and_verify_proposed_training_items(
             errors.append({"item_id": req_item.item_id, "error": "Item not found"})
             continue
 
+        # ── Idempotency check: if already reviewed, return its record ID ───────
+        if proposed.get("status") == ProposedTrainingItemStatus.APPROVED.value:
+            # Already approved in a prior call; return success without re-processing
+            approved_and_verified.append({
+                "item_id": req_item.item_id,
+                "record_id": proposed.get("created_training_record_id"),
+                "training_title": proposed.get("mapped_training_title"),
+                "training_code": proposed.get("mapped_training_code"),
+                "verified_by": proposed.get("reviewed_by"),  # user ID or name
+                "verified_at": proposed.get("reviewed_at"),
+                "idempotent_retry": True,
+            })
+            continue
+
         if proposed.get("status") != ProposedTrainingItemStatus.PROPOSED.value:
             errors.append({
                 "item_id": req_item.item_id,
@@ -41722,11 +41736,39 @@ async def approve_and_verify_proposed_training_items(
                 original_filename = ef.get("original_filename", original_filename)
 
         # ── Create or update canonical training_record ────────────────────────
+        # DUPLICATE PROTECTION: Check for existing active verified record with same code
         existing_record = await db_handle.training_records.find_one({
             "employee_id": employee_id,
             "requirement_id": training_code,
-            "record_status": "active"
+            "record_status": "active",
+            "verified": True  # Only conflict if already verified
         }, {"_id": 0})
+
+        # If an existing verified record exists with a conflicting completion date, skip
+        if existing_record and existing_record.get("completion_date") != completed_at:
+            needs_review.append({
+                "item_id": req_item.item_id,
+                "raw_course_title": proposed.get("raw_course_title"),
+                "skip_reason": "duplicate_conflict",
+                "conflict_detail": f"Existing verified record has completion date {existing_record.get('completion_date')} but this item has {completed_at}"
+            })
+            continue
+
+        # For safe reuse: if completion_date matches, update the verified record if needed
+        # If it doesn't exist, create new one
+        record_id = None
+        if existing_record:
+            record_id = existing_record.get("id")
+        else:
+            # Also check for unverified active records with same code (may update existing unverified)
+            unverified_record = await db_handle.training_records.find_one({
+                "employee_id": employee_id,
+                "requirement_id": training_code,
+                "record_status": "active",
+                "verified": {"$ne": True}  # Not verified yet
+            }, {"_id": 0})
+            if unverified_record:
+                record_id = unverified_record.get("id")
 
         evidence_entry = {
             "file_id": str(uuid.uuid4()),
@@ -41746,8 +41788,8 @@ async def approve_and_verify_proposed_training_items(
             "verified_at": now,
         }
 
-        if existing_record:
-            record_id = existing_record.get("id")
+        if record_id:
+            # Update existing record (whether verified or unverified)
             await db_handle.training_records.update_one(
                 {"id": record_id},
                 {
@@ -41778,6 +41820,7 @@ async def approve_and_verify_proposed_training_items(
                 }
             )
         else:
+            # Create new record
             record_id = str(uuid.uuid4())
             new_record = {
                 "id": record_id,

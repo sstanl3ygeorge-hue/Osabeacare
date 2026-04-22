@@ -13,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 import logging
 import re
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -294,6 +295,74 @@ def normalize_training_key(value: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Canonical mandatory training equivalencies
+# ---------------------------------------------------------------------------
+CANONICAL_TRAINING_EQUIVALENCIES = {
+    "basic_life_support": [
+        "Basic Life Support",
+        "BLS",
+        "CSTF Resuscitation Adults",
+        "CSTF Resuscitation Adults Levels 1, 2 & 3",
+        "CSTF Resuscitation Adults Levels 1, 2 & 3 (Practical)",
+    ],
+    "manual_handling": [
+        "Manual Handling",
+        "Moving and Handling",
+        "CSTF Moving & Handling Levels 1 & 2",
+        "CSTF Manual Handling & Moving of People",
+    ],
+    "fire_safety": [
+        "Fire Safety",
+        "CSTF Fire Safety",
+        "CSTF Fire Safety Online Training Module",
+    ],
+    "infection_control": [
+        "Infection Control",
+        "Infection Prevention and Control",
+        "CSTF Infection Prevention & Control",
+        "CSTF Infection Prevention and Control (Levels 1 & 2)",
+    ],
+    "information_governance": [
+        "Information Governance",
+        "Handling Information",
+        "CSTF Information Governance",
+    ],
+    "prevent": [
+        "Prevent",
+        "CSTF Preventing Radicalisation",
+    ],
+    "safeguarding_adults": [
+        "Safeguarding Adults",
+        "CSTF Safeguarding Adults",
+        "Adult Safeguarding Level 1",
+        "Adult Safeguarding Level 2",
+    ],
+    "safeguarding_children": [
+        "Safeguarding Children",
+        "CSTF Safeguarding Children",
+        "Safeguarding Children Levels 1 & 2",
+    ],
+    "health_and_safety": [
+        "Health and Safety",
+        "Health & Safety",
+        "Health Safety and Welfare",
+        "CSTF Health, Safety and Welfare",
+    ],
+}
+
+# Legacy mandatory IDs in MANDATORY_ITEMS still use these names.
+LEGACY_REQUIREMENT_TO_CANONICAL = {
+    "bls": "basic_life_support",
+    "health_safety": "health_and_safety",
+}
+
+# Safeguarding policy:
+# - dual (default): safeguarding = adults AND children
+# - combined: legacy generic safeguarding evidence can satisfy both components
+SAFEGUARDING_COMPOSITE_POLICY = os.environ.get("SAFEGUARDING_COMPOSITE_POLICY", "dual").strip().lower()
+
+
+# ---------------------------------------------------------------------------
 # Training name aliases — maps variant names to canonical requirement IDs.
 # Used by resolve_training_record to match extracted names to mandatory codes.
 # ---------------------------------------------------------------------------
@@ -383,6 +452,26 @@ TRAINING_ALIASES = {
     "nhs_conflict_resolution": "conflict_resolution",
     "conflict_resolution": "conflict_resolution",
 }
+
+# Apply explicit canonical equivalencies (single source of truth layer).
+for canonical_code, aliases in CANONICAL_TRAINING_EQUIVALENCIES.items():
+    TRAINING_ALIASES[canonical_code] = canonical_code
+    for alias in aliases:
+        key = normalize_training_key(alias)
+        TRAINING_ALIASES[key] = canonical_code
+
+# Legacy ID compatibility aliases.
+for legacy_code, canonical_code in LEGACY_REQUIREMENT_TO_CANONICAL.items():
+    TRAINING_ALIASES[legacy_code] = canonical_code
+
+# Strict safeguarding separation by default.
+TRAINING_ALIASES["safeguarding_adults"] = "safeguarding_adults"
+TRAINING_ALIASES["safeguarding_children"] = "safeguarding_children"
+TRAINING_ALIASES["cstf_safeguarding_adults"] = "safeguarding_adults"
+TRAINING_ALIASES["cstf_safeguarding_children"] = "safeguarding_children"
+TRAINING_ALIASES["adult_safeguarding_level_1"] = "safeguarding_adults"
+TRAINING_ALIASES["adult_safeguarding_level_2"] = "safeguarding_adults"
+TRAINING_ALIASES["safeguarding_children_levels_1_2"] = "safeguarding_children"
 
 
 def _record_quality_score(record: dict) -> int:
@@ -510,10 +599,11 @@ def is_mandatory_training_canonical(training_id: str) -> bool:
 
 # Keyword map used by resolve_mandatory_training_code to find canonical codes.
 _MANDATORY_KEYWORD_MAP = {
-    "safeguarding": ["safeguarding", "safeguard", "protection of adults"],
+    "safeguarding_adults": ["safeguarding adults", "adult safeguarding", "protection of adults"],
+    "safeguarding_children": ["safeguarding children", "child safeguarding", "child protection"],
     "manual_handling": ["manual handling", "moving and handling", "people handling", "moving & handling"],
     "fire_safety": ["fire safety", "fire awareness", "fire marshal", "fire warden"],
-    "health_safety": ["health and safety", "health safety", "health safety and welfare", "health and safety and welfare", "h s awareness"],
+    "health_and_safety": ["health and safety", "health safety", "health safety and welfare", "health and safety and welfare", "h s awareness"],
     "basic_life_support": ["basic life support", "bls", "first aid", "resuscitation", "cpr"],
     "infection_control": ["infection control", "infection prevention", "ipc"],
     "information_governance": ["information governance", "data protection", "gdpr", "confidentiality"],
@@ -531,15 +621,18 @@ def resolve_mandatory_training_code(training_name: str):
     if not training_name:
         return None
     name_lower = normalize_training_text(training_name)
+    # Alias match
+    normalised = normalize_training_key(name_lower)
+    canon = TRAINING_ALIASES.get(normalised)
+    if canon:
+        # keep explicit safeguards strict unless combined policy is configured
+        if canon == "safeguarding" and SAFEGUARDING_COMPOSITE_POLICY != "combined":
+            return None
+        return canon
     # Keyword match
     for code, keywords in _MANDATORY_KEYWORD_MAP.items():
         if any(kw in name_lower for kw in keywords):
             return code
-    # Alias match
-    normalised = normalize_training_key(name_lower)
-    canon = TRAINING_ALIASES.get(normalised)
-    if canon and canon in get_canonical_mandatory_training_ids():
-        return canon
     return None
 
 
@@ -549,6 +642,21 @@ def resolve_mandatory_training_code(training_name: str):
 
 # Statuses that mean the requirement is currently satisfied (not blocking).
 _SATISFIED_STATUSES = frozenset({"verified", "due_soon"})
+
+
+def _record_requires_reverification(record: Optional[dict]) -> bool:
+    if not record:
+        return False
+    if record.get("source_evidence_removed"):
+        return True
+    if record.get("needs_review"):
+        return True
+    reason = (record.get("needs_review_reason") or "").strip().lower()
+    return reason in {
+        "source_certificate_deleted",
+        "certificate_evidence_removed_by_admin",
+        "evidence_replaced_reverification_required",
+    }
 
 
 async def get_required_training_for_employee(employee_id: str, role: str) -> List[dict]:
@@ -618,6 +726,75 @@ async def evaluate_employee_training_status(employee_id: str, role: str = "") ->
         is_blocker = blocker_config.get("blocker_for_work", False)
         evidence_required = blocker_config.get("evidence_required", True)
 
+        if req_id == "safeguarding":
+            adults_record = resolve_training_record(records_by_req, "safeguarding_adults", "Safeguarding Adults")
+            children_record = resolve_training_record(records_by_req, "safeguarding_children", "Safeguarding Children")
+            generic_record = resolve_training_record(records_by_req, "safeguarding", "Safeguarding")
+
+            if SAFEGUARDING_COMPOSITE_POLICY == "combined" and generic_record:
+                if not adults_record:
+                    adults_record = generic_record
+                if not children_record:
+                    children_record = generic_record
+
+            def _component_status(record: Optional[dict], label: str) -> str:
+                if not record or not record.get("completion_date"):
+                    return "missing"
+                if record.get("verification_status") == "rejected":
+                    return "rejected"
+                if _record_requires_reverification(record):
+                    return "awaiting_review"
+                if not record.get("verified", False):
+                    return "awaiting_review"
+                computed = compute_training_record_status(record)
+                if computed.get("computed_status") == "expired":
+                    return "expired"
+                if computed.get("computed_status") == "needs_renewal":
+                    return "due_soon"
+                return "verified"
+
+            adults_status = _component_status(adults_record, "adults")
+            children_status = _component_status(children_record, "children")
+
+            adults_ok = adults_status in _SATISFIED_STATUSES
+            children_ok = children_status in _SATISFIED_STATUSES
+            if adults_ok and children_ok:
+                status = "verified"
+                detail = "Safeguarding Adults and Children verified"
+            elif adults_status == "missing" and children_status == "missing":
+                status = "missing"
+                detail = "Safeguarding Adults and Safeguarding Children training not recorded"
+                has_missing = True
+            else:
+                status = "partial"
+                detail = "Safeguarding partially complete - both Adults and Children are required"
+                has_missing = True
+
+            if is_blocker and status not in _SATISFIED_STATUSES:
+                blocker_count += 1
+            elif status not in _SATISFIED_STATUSES:
+                warning_count += 1
+
+            items.append({
+                "code": req_id,
+                "requirement": req_id,
+                "title": training_name,
+                "status": status,
+                "blocker": is_blocker,
+                "is_currently_blocking": is_blocker and status not in _SATISFIED_STATUSES,
+                "detail": detail,
+                "expires_at": None,
+                "verified": status in _SATISFIED_STATUSES,
+                "evidence_required": evidence_required,
+                "record_id": adults_record.get("id") if adults_record else (children_record.get("id") if children_record else None),
+                "rejection_reason": None,
+                "breakdown": {
+                    "adults": adults_status,
+                    "children": children_status,
+                },
+            })
+            continue
+
         record = resolve_training_record(records_by_req, req_id, training_name)
 
         if not record:
@@ -661,6 +838,17 @@ async def evaluate_employee_training_status(employee_id: str, role: str = "") ->
                 blocker_count += 1
             else:
                 warning_count += 1
+        elif _record_requires_reverification(record):
+            if evidence_required:
+                status = "awaiting_review"
+                detail = f"{training_name} evidence replaced/removed - awaiting re-verification"
+            else:
+                status = "completed"
+                detail = f"{training_name} evidence replaced/removed - awaiting re-verification"
+            if is_blocker:
+                blocker_count += 1
+            else:
+                warning_count += 1
         elif not verified:
             # Policy: only verified records are compliant.
             # Unverified records (completed, awaiting_review) are visible but non-compliant.
@@ -694,6 +882,7 @@ async def evaluate_employee_training_status(employee_id: str, role: str = "") ->
 
         items.append({
             "code": req_id,
+            "requirement": req_id,
             "title": training_name,
             "status": status,
             "blocker": is_blocker,

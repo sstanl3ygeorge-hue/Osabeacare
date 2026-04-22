@@ -18,6 +18,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Depends, Query
+from stageGates import StageGateService
 
 from .dependencies import (
     get_db,
@@ -480,8 +481,116 @@ async def check_recruitment_approval(
     compliance_file = await get_compliance_file_data(employee_id, employee)
     sections = compliance_file.get("sections", {})
     
-    # Evaluate approval readiness
+    # Evaluate approval readiness (existing contract)
     evaluation = evaluate_recruitment_approval(employee, sections)
+
+    # Attach canonical interview truth from stage-gate resolver.
+    stage_gate = StageGateService(db)
+    gate = await stage_gate.evaluate_recruitment_gate(employee_id)
+    interview = gate.get("interview") or {
+        "exists": False,
+        "completed": False,
+        "passed": None,
+        "score": None,
+        "pass_mark": None,
+        "reviewed_at": None,
+        "source_record_id": None,
+    }
+
+    blockers = list(evaluation.get("blockers", []))
+    blockers = [b for b in blockers if b.get("requirement_key") != "interview_record"]
+
+    if not interview.get("exists"):
+        blockers.append({
+            "requirement_key": "interview_record",
+            "label": "Interview Record",
+            "reason": "No interview assessment record found",
+            "section": "forms",
+        })
+    elif not interview.get("completed"):
+        blockers.append({
+            "requirement_key": "interview_record",
+            "label": "Interview Record",
+            "reason": "Interview record exists but is still draft/incomplete",
+            "section": "forms",
+        })
+    elif interview.get("passed") is False:
+        blockers.append({
+            "requirement_key": "interview_record",
+            "label": "Interview Record",
+            "reason": "Interview outcome is failed",
+            "section": "forms",
+        })
+    elif interview.get("passed") is None:
+        blockers.append({
+            "requirement_key": "interview_record",
+            "label": "Interview Record",
+            "reason": "Interview completed but no pass/fail outcome is recorded",
+            "section": "forms",
+        })
+
+    required_keys = list(evaluation.get("required_keys", []))
+    verified_keys = [k for k in evaluation.get("verified_keys", []) if k != "interview_record"]
+    if interview.get("exists") and interview.get("completed") and interview.get("passed") is True and "interview_record" in required_keys:
+        verified_keys.append("interview_record")
+
+    blocker_count = len(blockers)
+    required_count = int(evaluation.get("required_count", len(required_keys)))
+    verified_count = len(set(verified_keys))
+
+    evaluation["blockers"] = blockers
+    evaluation["blocker_count"] = blocker_count
+    evaluation["verified_keys"] = list(dict.fromkeys(verified_keys))
+    evaluation["verified_count"] = verified_count
+    evaluation["required_count"] = required_count
+    evaluation["can_approve"] = blocker_count == 0
+
+    evaluation["interview"] = interview
+    evaluation["gate"] = gate
+    evaluation["source_of_truth"] = {
+        "interview": "form_submissions.requirement_id=interview_record"
+    }
+
+    # Domain-level blocker slices for UI summaries.
+    get_unified_employee_status = get_unified_employee_status_func()
+    unified_status = await get_unified_employee_status(
+        employee_id,
+        db,
+        user_role="admin",
+        include_details=False,
+    )
+    uce_blockers = unified_status.get("blockers", []) if isinstance(unified_status, dict) else []
+
+    def _domain_entries(domain_name: str):
+        return [
+            {
+                "id": b.get("id") or b.get("gate"),
+                "label": b.get("label"),
+                "reason": b.get("reason"),
+                "severity": b.get("severity", "critical"),
+            }
+            for b in uce_blockers
+            if (b.get("category") or "").lower() == domain_name
+        ]
+
+    evaluation["domains"] = {
+        "documents": {"blockers": _domain_entries("documents")},
+        "references": {"blockers": _domain_entries("references")},
+        "training": {"blockers": _domain_entries("training")},
+        "agreements": {"blockers": _domain_entries("agreements")},
+        "employment_history": {
+            "blockers": [
+                {
+                    "id": b.get("id") or b.get("gate"),
+                    "label": b.get("label"),
+                    "reason": b.get("reason"),
+                    "severity": b.get("severity", "critical"),
+                }
+                for b in uce_blockers
+                if (b.get("id") or b.get("gate")) in {"employment_gaps", "employment_history_verification"}
+            ]
+        },
+    }
     
     return evaluation
 

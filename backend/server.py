@@ -10922,6 +10922,8 @@ async def get_employee_training_matrix(
             record.get('verified', False) or 
             record.get('verification_status') == 'verified'
         )
+        evidence_removed = bool(record.get('source_evidence_removed'))
+        needs_review = bool(record.get('needs_review'))
         
         # Get blocker config
         blocker_config = get_training_blocker_config(code)
@@ -10942,6 +10944,9 @@ async def get_employee_training_matrix(
             "has_evidence": has_evidence,
             "is_verified": is_verified,
             "verified": is_verified,
+            "source_evidence_removed": evidence_removed,
+            "needs_review": needs_review,
+            "needs_review_reason": record.get('needs_review_reason'),
             "verified_by": record.get('verified_by'),
             "verified_at": record.get('verified_at'),
             "record_id": record.get('id'),
@@ -10950,6 +10955,7 @@ async def get_employee_training_matrix(
             "source_document_id": record.get('source_document_id') or record.get('certificate_document_id'),
             "certificate_url": record.get('certificate_url'),
             "rejection_reason": item.get('rejection_reason'),
+            "breakdown": item.get('breakdown'),
             "history_count": len(training_history.get(_canonical_key(record), [])) if record else 0
         }
         matrix_items.append(matrix_item)
@@ -10960,7 +10966,7 @@ async def get_employee_training_matrix(
             total_current += 1
         elif status == 'due_soon':
             total_expiring += 1
-        elif status in ['missing', 'expired', 'rejected', 'awaiting_review', 'completed']:
+        elif status in ['missing', 'partial', 'expired', 'rejected', 'awaiting_review', 'completed']:
             total_missing += 1
         
         if item.get('is_currently_blocking', False):
@@ -10973,6 +10979,8 @@ async def get_employee_training_matrix(
         computed_status = computed.get('computed_status', 'completed')
         expires_at = record.get('expiry_date') or record.get('expires_at')
         verified = record.get('verified', False)
+        evidence_removed = bool(record.get('source_evidence_removed'))
+        needs_review = bool(record.get('needs_review'))
 
         # Map compute_training_record_status vocab — verified-only = compliant
         if computed_status == 'not_started':
@@ -10981,6 +10989,9 @@ async def get_employee_training_matrix(
         elif record.get('verification_status') == 'rejected':
             status = 'rejected'
             detail = f"{record.get('training_name', 'Training')} rejected: {record.get('rejection_reason', 'see admin')}"
+        elif evidence_removed or needs_review:
+            status = 'completed'
+            detail = f"{record.get('training_name', 'Training')} evidence replaced/removed - awaiting re-verification"
         elif not verified:
             status = 'completed'
             detail = f"{record.get('training_name', 'Training')} completed — awaiting verification"
@@ -11010,6 +11021,9 @@ async def get_employee_training_matrix(
             "has_evidence": bool(record.get('certificate_url') or record.get('evidence_files') or record.get('certificate_document_id')),
             "is_verified": verified,
             "verified": verified,
+            "source_evidence_removed": evidence_removed,
+            "needs_review": needs_review,
+            "needs_review_reason": record.get('needs_review_reason'),
             "verified_by": record.get('verified_by'),
             "verified_at": record.get('verified_at'),
             "record_id": record.get('id'),
@@ -11169,16 +11183,24 @@ async def delete_training_certificate(
         now_iso = datetime.now(timezone.utc).isoformat()
         await db.training_records.update_one(
             {"id": certificate_id, "employee_id": employee_id},
-            {"$set": {
-                "certificate_url": None,
-                "original_filename": None,
-                "source_evidence_removed": True,
-                "source_evidence_removed_at": now_iso,
-                "source_evidence_removed_by": user.get("user_id"),
-                "needs_review": True,
-                "needs_review_reason": "certificate_evidence_removed_by_admin",
-                "updated_at": now_iso,
-            }}
+            {
+                "$set": {
+                    "certificate_url": None,
+                    "original_filename": None,
+                    "source_evidence_removed": True,
+                    "source_evidence_removed_at": now_iso,
+                    "source_evidence_removed_by": user.get("user_id"),
+                    "needs_review": True,
+                    "needs_review_reason": "certificate_evidence_removed_by_admin",
+                    "verified": False,
+                    "verification_status": "awaiting_review",
+                    "updated_at": now_iso,
+                },
+                "$unset": {
+                    "verified_by": "",
+                    "verified_at": "",
+                },
+            }
         )
         await log_audit_action(
             user["user_id"], "delete_training_certificate_legacy", "training_records", employee_id,
@@ -11218,15 +11240,23 @@ async def delete_training_certificate(
                 "source_document_id": doc_id,
                 "record_status": {"$nin": ["superseded", "deleted"]},
             },
-            {"$set": {
-                "source_evidence_removed": True,
-                "source_evidence_removed_at": now_iso,
-                "source_evidence_removed_by": user.get("user_id"),
-                "source_document_id_removed": doc_id,
-                "needs_review": True,
-                "needs_review_reason": "source_certificate_deleted",
-                "updated_at": now_iso,
-            }}
+            {
+                "$set": {
+                    "source_evidence_removed": True,
+                    "source_evidence_removed_at": now_iso,
+                    "source_evidence_removed_by": user.get("user_id"),
+                    "source_document_id_removed": doc_id,
+                    "needs_review": True,
+                    "needs_review_reason": "source_certificate_deleted",
+                    "verified": False,
+                    "verification_status": "awaiting_review",
+                    "updated_at": now_iso,
+                },
+                "$unset": {
+                    "verified_by": "",
+                    "verified_at": "",
+                },
+            }
         )
 
     # --- 3. Delete un-approved proposed items linked to this certificate ---
@@ -40324,11 +40354,36 @@ TRAINING_CODE_MAPPING = {
     "conflict resolution": "conflict_resolution",
 }
 
+# Canonical equivalency overrides (explicit policy layer).
+TRAINING_CODE_MAPPING.update({
+    # Composite safeguarding components
+    "safeguarding adults": "safeguarding_adults",
+    "cstf safeguarding adults": "safeguarding_adults",
+    "adult safeguarding level 1": "safeguarding_adults",
+    "adult safeguarding level 2": "safeguarding_adults",
+    "safeguarding children": "safeguarding_children",
+    "cstf safeguarding children": "safeguarding_children",
+    "safeguarding children levels 1 and 2": "safeguarding_children",
+    # Explicit mandatory equivalencies
+    "cstf resuscitation adults levels 1 2 and 3": "basic_life_support",
+    "cstf resuscitation adults levels 1 2 and 3 practical": "basic_life_support",
+    "cstf manual handling and moving of people": "manual_handling",
+    "cstf fire safety online training module": "fire_safety",
+    "cstf infection prevention and control levels 1 and 2": "infection_control",
+    "handling information": "information_governance",
+    "health and safety": "health_and_safety",
+    "health safety": "health_and_safety",
+    "health safety and welfare": "health_and_safety",
+    "cstf health safety and welfare": "health_and_safety",
+})
+
 TRAINING_TITLES = {
     "fire_safety": "Fire Safety",
     "infection_control": "Infection Prevention and Control",
     "manual_handling": "Manual Handling & Moving",
     "safeguarding": "Safeguarding",
+    "safeguarding_adults": "Safeguarding Adults",
+    "safeguarding_children": "Safeguarding Children",
     "basic_life_support": "Basic Life Support",
     "food_hygiene": "Food Hygiene & Safety",
     "equality_diversity": "Equality, Diversity & Human Rights",

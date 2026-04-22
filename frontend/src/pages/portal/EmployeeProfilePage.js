@@ -5021,7 +5021,17 @@ export default function EmployeeProfilePage() {
             const interviewExists = Boolean(interviewSubmission);
             const interviewDecision = interviewSubmission?.form_data?.decision || interviewSubmission?.data?.decision || interviewSubmission?.form_data?.overall_decision || null;
             const interviewScore = interviewSubmission?.form_data?.total_score || interviewSubmission?.data?.total_score || null;
-            const interviewPassed = interviewScore !== null ? interviewScore >= 11 : null;
+            const interviewPassMark = interviewSubmission?.form_data?.pass_score
+              || interviewSubmission?.data?.pass_score
+              || interviewSubmission?.form_data?.pass_mark
+              || interviewSubmission?.data?.pass_mark
+              || 11;
+            const interviewStoredPassed = interviewSubmission?.form_data?.passed ?? interviewSubmission?.data?.passed;
+            const interviewPassed = interviewStoredPassed ?? (
+              interviewScore !== null && interviewScore !== undefined
+                ? Number(interviewScore) >= Number(interviewPassMark)
+                : null
+            );
             const interviewAdminStatus = interviewDecision
               ? (['Reject', 'Not Suitable'].includes(interviewDecision) ? 'reviewed_rejected' : 'reviewed_approved')
               : interviewPassed !== null
@@ -5141,7 +5151,7 @@ export default function EmployeeProfilePage() {
                           </Badge>
                           {interviewPassed !== null && (
                             <span className={`text-xs font-medium ${interviewPassed ? 'text-green-600' : 'text-red-600'}`}>
-                              Score: {interviewScore}/24 — {interviewPassed ? 'Passed' : 'Failed'}
+                              Score: {interviewScore}/{interviewSubmission?.form_data?.max_score || interviewSubmission?.data?.max_score || 24} — {interviewPassed ? 'Passed' : 'Failed'}
                             </span>
                           )}
                         </div>

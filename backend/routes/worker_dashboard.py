@@ -1879,6 +1879,13 @@ async def worker_upload_document(
                             
                             update_fields = {
                                 "certificate_urls": certificates,
+                                "certificate_url": file_url,
+                                "source_document_id": doc_id,
+                                "source_evidence_removed": False,
+                                "needs_review": True,
+                                "needs_review_reason": "evidence_replaced_reverification_required",
+                                "verified": False,
+                                "verification_status": "awaiting_review",
                                 "updated_at": now,
                                 "additional_documents": existing_record.get("additional_documents", []) + [{
                                     "document_id": doc_id,
@@ -1897,7 +1904,13 @@ async def worker_upload_document(
                             
                             await db.training_records.update_one(
                                 {"id": existing_record["id"]},
-                                {"$set": update_fields}
+                                {
+                                    "$set": update_fields,
+                                    "$unset": {
+                                        "verified_by": "",
+                                        "verified_at": "",
+                                    },
+                                }
                             )
                             updated_items.append(training_name)
                         else:

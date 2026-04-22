@@ -46,6 +46,7 @@ class GateResult(TypedDict):
     warning_items: list    # Non-blocking but worth surfacing
     passed_items: list     # {key, label}
     missing_requirements: list  # requirement_key slots that were never created
+    interview: dict  # Canonical interview assessment summary
 
 
 class StageGateService:
@@ -56,6 +57,71 @@ class StageGateService:
     
     def __init__(self, db):
         self.db = db
+
+    async def get_canonical_interview_status(self, employee_id: str) -> dict:
+        """
+        Resolve the latest canonical interview assessment from interview_record submissions.
+        """
+        record = await self.db.form_submissions.find_one(
+            {
+                "employee_id": employee_id,
+                "requirement_id": "interview_record",
+            },
+            {"_id": 0},
+            sort=[("submitted_at", -1), ("updated_at", -1), ("created_at", -1)],
+        )
+
+        if not record:
+            return {
+                "exists": False,
+                "completed": False,
+                "passed": None,
+                "score": None,
+                "pass_mark": None,
+                "reviewed_at": None,
+                "source_record_id": None,
+            }
+
+        form_data = record.get("form_data") or record.get("data") or {}
+        status = str(record.get("status") or "").lower()
+        completed = status not in {"", "draft", "not_started", "in_progress"}
+
+        decision = form_data.get("decision") or form_data.get("overall_decision")
+        score = form_data.get("total_score")
+        pass_mark = form_data.get("pass_score") or form_data.get("pass_mark")
+        passed = form_data.get("passed")
+
+        if isinstance(decision, str):
+            decision_lc = decision.strip().lower()
+            if decision_lc in {"reject", "not suitable", "fail", "failed"}:
+                passed = False
+            elif decision_lc in {"approve", "approved", "hire", "strong hire", "pass", "passed"}:
+                passed = True
+
+        if passed is None and score is not None:
+            try:
+                numeric_score = float(score)
+                numeric_pass = float(pass_mark) if pass_mark is not None else 11.0
+                passed = numeric_score >= numeric_pass
+            except (TypeError, ValueError):
+                passed = None
+
+        return {
+            "exists": True,
+            "completed": bool(completed),
+            "passed": passed,
+            "score": score,
+            "pass_mark": pass_mark,
+            "reviewed_at": (
+                record.get("reviewed_at")
+                or record.get("verified_at")
+                or record.get("signed_off_at")
+                or record.get("submitted_at")
+                or record.get("updated_at")
+                or record.get("created_at")
+            ),
+            "source_record_id": record.get("id"),
+        }
     
     # =========================================================================
     # REQUIREMENT GENERATION
@@ -633,7 +699,16 @@ class StageGateService:
                 blocking_items=[{"key": "employee", "label": "Employee", "reason": "Employee record not found"}],
                 warning_items=[],
                 passed_items=[],
-                missing_requirements=[]
+                missing_requirements=[],
+                interview={
+                    "exists": False,
+                    "completed": False,
+                    "passed": None,
+                    "score": None,
+                    "pass_mark": None,
+                    "reviewed_at": None,
+                    "source_record_id": None,
+                },
             )
 
         role = employee.get("role", "healthcare_assistant")
@@ -837,21 +912,19 @@ class StageGateService:
                     _pass(ref_key)
 
         # ------------------------------------------------------------------
-        # 4. Interview (check for submission with a decision)
+        # 4. Interview (canonical interview_record source)
         # ------------------------------------------------------------------
-        interview_sub = await self.db.form_submissions.find_one({
-            "employee_id": employee_id,
-            "form_type": {"$in": ["interview", "interview_questions"]},
-            "status": {"$in": ["submitted", "verified", "interview_completed"]},
-        })
-        if not interview_sub:
-            _warn("interview", "No completed interview record found")
+        interview = await self.get_canonical_interview_status(employee_id)
+        if not interview.get("exists"):
+            _block("interview_record", "No interview assessment record found")
+        elif not interview.get("completed"):
+            _block("interview_record", "Interview record exists but is still draft/incomplete")
+        elif interview.get("passed") is False:
+            _block("interview_record", "Interview outcome is failed")
+        elif interview.get("passed") is None:
+            _warn("interview_record", "Interview completed but no pass/fail outcome is recorded")
         else:
-            decision = (interview_sub.get("answers") or {}).get("decision") or interview_sub.get("decision")
-            if not decision:
-                _warn("interview", "Interview exists but no decision has been recorded")
-            else:
-                _pass("interview")
+            _pass("interview_record")
 
         # ------------------------------------------------------------------
         # 5. Employment history / 10-year gap review
@@ -887,5 +960,6 @@ class StageGateService:
             warning_items=warning_items,
             passed_items=passed_items,
             missing_requirements=missing_requirements,
+            interview=interview,
         )
 

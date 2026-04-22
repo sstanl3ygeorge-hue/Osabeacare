@@ -76,6 +76,7 @@ const STATUS_STYLES = {
   missing: { bg: 'bg-gray-100', text: 'text-gray-600', border: 'border-gray-200', icon: XCircle, label: 'Missing' },
   pending: { bg: 'bg-blue-50', text: 'text-blue-700', border: 'border-blue-200', icon: Clock, label: 'Awaiting admin review' },
   awaiting_review: { bg: 'bg-purple-50', text: 'text-purple-700', border: 'border-purple-200', icon: Clock, label: 'Awaiting admin review' },
+  partial: { bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-200', icon: AlertTriangle, label: 'Partial' },
   rejected: { bg: 'bg-orange-50', text: 'text-orange-700', border: 'border-orange-200', icon: XCircle, label: 'Rejected / action required' },
   proposed: { bg: 'bg-purple-50', text: 'text-purple-700', border: 'border-purple-200', icon: Wand2, label: 'Awaiting admin review' },
   cannot_assess: { bg: 'bg-red-50', text: 'text-red-700', border: 'border-red-200', icon: AlertTriangle, label: 'Cannot assess' },
@@ -87,7 +88,17 @@ const TIMING_EXPIRED_STATUSES = new Set(['expired', 'overdue']);
 const PENDING_REVIEW_STATUSES = new Set(['completed', 'pending', 'awaiting_review', 'proposed']);
 const REJECTED_STATUSES = new Set(['rejected', 'action_required']);
 
-const isTrainingVerified = (item) => Boolean(item?.verified || item?.is_verified || item?.status === 'verified');
+const requiresReverification = (item) => Boolean(
+  item?.source_evidence_removed ||
+  item?.needs_review ||
+  item?.needs_review_reason === 'source_certificate_deleted' ||
+  item?.needs_review_reason === 'certificate_evidence_removed_by_admin' ||
+  item?.needs_review_reason === 'evidence_replaced_reverification_required'
+);
+const isTrainingVerified = (item) => {
+  if (requiresReverification(item)) return false;
+  return Boolean(item?.verified || item?.is_verified || item?.status === 'verified');
+};
 const getTrainingTimingStatus = (item) => (
   item?.status_band ||
   item?.renewal_status ||
@@ -128,10 +139,13 @@ const isEvidenceOnFile = (item) => Boolean(
 
 const normaliseCanonicalTrainingRecord = (record) => {
   const expiryDate = record?.expiry_date || record?.expires_at;
-  const verified = Boolean(record?.verified || record?.is_verified || record?.verification_status === 'verified');
+  const needsReverification = requiresReverification(record);
+  const verified = !needsReverification && Boolean(record?.verified || record?.is_verified || record?.verification_status === 'verified');
   const timingStatus = isExpiryDatePast(expiryDate) ? 'expired' : 'valid';
   const status = record?.verification_status === 'rejected'
     ? 'rejected'
+    : needsReverification
+      ? 'completed'
     : verified
       ? (timingStatus === 'expired' ? 'expired' : 'verified')
       : (record?.status || 'completed');

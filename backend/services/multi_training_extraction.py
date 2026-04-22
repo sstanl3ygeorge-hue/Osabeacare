@@ -27,20 +27,22 @@ from services.training_evaluator import normalize_training_text, normalize_train
 
 MANDATORY_TRAINING_BY_ROLE = {
     "healthcare_assistant": [
-        "safeguarding",  # Matches: Safeguarding Adults, Safeguarding Children, etc.
+        "safeguarding_adults",
+        "safeguarding_children",
         "manual_handling",  # Matches: Manual Handling, Moving & Handling
         "fire_safety",  # Matches: Fire Safety
-        "health_safety",  # Matches: Health & Safety
+        "health_and_safety",  # Matches: Health & Safety
         "basic_life_support",  # Matches: BLS, Basic Life Support, Resuscitation
         "infection_control",  # Matches: Infection Control, Infection Prevention
         "information_governance",  # Matches: Information Governance, GDPR, Data Protection
         "prevent",  # Matches: Prevent, Counter-Terrorism Awareness
     ],
     "nurse": [
-        "safeguarding",
+        "safeguarding_adults",
+        "safeguarding_children",
         "manual_handling",
         "fire_safety", 
-        "health_safety",
+        "health_and_safety",
         "basic_life_support",
         "infection_control",
         "information_governance",
@@ -48,10 +50,11 @@ MANDATORY_TRAINING_BY_ROLE = {
         # NMC registration is tracked separately, not as training
     ],
     "senior_carer": [
-        "safeguarding",
+        "safeguarding_adults",
+        "safeguarding_children",
         "manual_handling",
         "fire_safety",
-        "health_safety",
+        "health_and_safety",
         "basic_life_support",
         "infection_control",
         "information_governance",
@@ -59,20 +62,22 @@ MANDATORY_TRAINING_BY_ROLE = {
         "medication",  # Medication Administration required for senior carers
     ],
     "support_worker": [
-        "safeguarding",
+        "safeguarding_adults",
+        "safeguarding_children",
         "manual_handling",
         "fire_safety",
-        "health_safety",
+        "health_and_safety",
         "basic_life_support",
         "infection_control",
         "information_governance",
         "prevent",
     ],
     "default": [  # Fallback for unknown roles
-        "safeguarding",
+        "safeguarding_adults",
+        "safeguarding_children",
         "manual_handling",
         "fire_safety",
-        "health_safety",
+        "health_and_safety",
         "basic_life_support",
         "infection_control",
         "information_governance",
@@ -87,16 +92,19 @@ MANDATORY_TRAINING_BY_ROLE = {
 
 TRAINING_NAME_MAPPING = {
     # Safeguarding
-    "safeguarding adults": "safeguarding",
-    "cstf. safeguarding adults": "safeguarding",
-    "cstf safeguarding adults": "safeguarding",
-    "safeguarding adults level": "safeguarding",
-    "safeguarding adults levels 1 and 2": "safeguarding",
-    "cstf safeguarding adults levels 1 and 2": "safeguarding",
-    "safeguarding children": "safeguarding",
-    "cstf. safeguarding children": "safeguarding",
-    "cstf safeguarding children": "safeguarding",
-    "safeguarding children level": "safeguarding",
+    "safeguarding adults": "safeguarding_adults",
+    "cstf. safeguarding adults": "safeguarding_adults",
+    "cstf safeguarding adults": "safeguarding_adults",
+    "safeguarding adults level": "safeguarding_adults",
+    "safeguarding adults levels 1 and 2": "safeguarding_adults",
+    "cstf safeguarding adults levels 1 and 2": "safeguarding_adults",
+    "adult safeguarding level 1": "safeguarding_adults",
+    "adult safeguarding level 2": "safeguarding_adults",
+    "safeguarding children": "safeguarding_children",
+    "cstf. safeguarding children": "safeguarding_children",
+    "cstf safeguarding children": "safeguarding_children",
+    "safeguarding children level": "safeguarding_children",
+    "safeguarding children levels 1 and 2": "safeguarding_children",
     
     # Manual Handling
     "manual handling": "manual_handling",
@@ -118,15 +126,15 @@ TRAINING_NAME_MAPPING = {
     "fire awareness": "fire_safety",
     
     # Health & Safety
-    "health & safety": "health_safety",
-    "health and safety": "health_safety",
-    "cstf - health & safety": "health_safety",
-    "cstf health, safety and welfare": "health_safety",
-    "health, safety and welfare": "health_safety",
-    "cstf health safety and welfare": "health_safety",
-    "health safety and welfare": "health_safety",
-    "cstf health and safety and welfare": "health_safety",
-    "health and safety and welfare": "health_safety",
+    "health & safety": "health_and_safety",
+    "health and safety": "health_and_safety",
+    "cstf - health & safety": "health_and_safety",
+    "cstf health, safety and welfare": "health_and_safety",
+    "health, safety and welfare": "health_and_safety",
+    "cstf health safety and welfare": "health_and_safety",
+    "health safety and welfare": "health_and_safety",
+    "cstf health and safety and welfare": "health_and_safety",
+    "health and safety and welfare": "health_and_safety",
     
     # Basic Life Support / Resuscitation
     "basic life support": "basic_life_support",
@@ -249,8 +257,8 @@ def normalize_training_name(name: str) -> tuple:
             # Check if this is a mandatory training type
             is_mandatory = any(
                 standard_id.startswith(m) 
-                for m in ["safeguarding", "manual_handling", "fire_safety", 
-                          "health_safety", "basic_life_support", "infection_control",
+                for m in ["safeguarding_adults", "safeguarding_children", "manual_handling", "fire_safety", 
+                          "health_and_safety", "basic_life_support", "infection_control",
                           "information_governance", "prevent"]
             )
             return (standard_id, name.strip(), is_mandatory)

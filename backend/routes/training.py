@@ -102,6 +102,11 @@ class TrainingRecordResponse(BaseModel):
     verified_by: Optional[str] = None
     verified_at: Optional[str] = None
     record_status: Optional[str] = "active"
+    source_evidence_removed: Optional[bool] = False
+    source_evidence_removed_at: Optional[str] = None
+    source_evidence_removed_by: Optional[str] = None
+    needs_review: Optional[bool] = False
+    needs_review_reason: Optional[str] = None
     notes: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None

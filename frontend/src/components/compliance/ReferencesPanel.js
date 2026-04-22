@@ -97,6 +97,15 @@ export default function ReferencesPanel({ employeeId, employee, onRefresh, onEdi
   // Recent-employer mismatch flag state
   const [flaggingMismatch, setFlaggingMismatch] = useState(null); // ref_num being flagged
 
+  // "Request different referee" state (distinct admin action — preserves the
+  // original referee; does NOT open the Edit modal, which is for corrections
+  // only. This marks the slot as replacement_requested so the worker dashboard
+  // surfaces a dedicated CTA.).
+  const [requestDiffOpen, setRequestDiffOpen] = useState(false);
+  const [requestDiffRefNum, setRequestDiffRefNum] = useState(null);
+  const [requestDiffReason, setRequestDiffReason] = useState('');
+  const [requestDiffLoading, setRequestDiffLoading] = useState(false);
+
   // Mismatch explanation review state (admin reviews worker explanation)
   const [reviewExplanationOpen, setReviewExplanationOpen] = useState(false);
   const [reviewExplanationRef, setReviewExplanationRef] = useState(null);
@@ -333,6 +342,48 @@ export default function ReferencesPanel({ employeeId, employee, onRefresh, onEdi
       }
     } finally {
       setVerifyLoading(false);
+    }
+  };
+
+  // Open the "Request different referee" dialog. Distinct from the Edit modal
+  // (which is for correcting typos / audit-safe amendments) and distinct from
+  // Reject (which clears referee data). This action preserves the original
+  // referee and their status history, flags the slot for replacement, and
+  // lets the worker either supply a different referee or justify the existing
+  // one.
+  const openRequestDifferentRefereeDialog = (refNum) => {
+    setRequestDiffRefNum(refNum);
+    setRequestDiffReason('');
+    setRequestDiffOpen(true);
+  };
+
+  const handleRequestDifferentReferee = async () => {
+    const reason = (requestDiffReason || '').trim();
+    if (reason.length < 10) {
+      toast.error('Please provide a reason of at least 10 characters.');
+      return;
+    }
+    setRequestDiffLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      await axios.post(
+        `${API}/employees/${employeeId}/references/${requestDiffRefNum}/verify`,
+        { action: 'request_different_referee', notes: reason },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success(
+        `Different referee requested for Reference ${requestDiffRefNum}. ` +
+        'The original referee remains on file; the worker has been notified.'
+      );
+      setRequestDiffOpen(false);
+      setRequestDiffRefNum(null);
+      setRequestDiffReason('');
+      await fetchReferences();
+      if (onRefresh) await onRefresh();
+    } catch (error) {
+      toast.error(extractErrorMessage(error, 'Failed to request a different referee'));
+    } finally {
+      setRequestDiffLoading(false);
     }
   };
 
@@ -592,8 +643,24 @@ export default function ReferencesPanel({ employeeId, employee, onRefresh, onEdi
                           onClick={() => onEditReference(refNum, declared)}
                           className="h-7 px-2 text-gray-500 hover:text-primary"
                           data-testid={`edit-reference-btn-${refNum}`}
+                          title="Correct referee details (audit-safe amendment)"
                         >
                           <Edit className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
+                      {declared.name
+                        && displayStatus !== 'rejected'
+                        && !ref?.replacement_requested && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => openRequestDifferentRefereeDialog(refNum)}
+                          className="h-7 px-2 text-amber-700 hover:text-amber-900 hover:bg-amber-50"
+                          data-testid={`request-different-referee-btn-${refNum}`}
+                          title="Ask the worker to provide a different referee for this slot (keeps original on file)"
+                        >
+                          <RefreshCw className="h-3.5 w-3.5 mr-1" />
+                          Request different
                         </Button>
                       )}
                       <Badge className={`${config.color} flex items-center gap-1`}>
@@ -605,6 +672,28 @@ export default function ReferencesPanel({ employeeId, employee, onRefresh, onEdi
 
                   {/* Content */}
                   <div className="p-4 space-y-4">
+                    {ref?.replacement_requested && (
+                      <div
+                        className="bg-amber-50 border border-amber-200 rounded-lg p-3"
+                        data-testid={`replacement-pending-banner-${refNum}`}
+                      >
+                        <p className="text-sm font-medium text-amber-800 flex items-center gap-2">
+                          <RefreshCw className="h-4 w-4" />
+                          Different referee requested — awaiting worker response
+                        </p>
+                        {ref.replacement_requested_reason && (
+                          <p className="text-xs text-amber-700 mt-1">
+                            Reason given to worker: <em>{ref.replacement_requested_reason}</em>
+                          </p>
+                        )}
+                        {ref.justification?.reason && (
+                          <div className="mt-2 pt-2 border-t border-amber-200">
+                            <p className="text-xs font-semibold text-amber-800">Worker justification submitted:</p>
+                            <p className="text-xs text-amber-700 mt-1 italic">"{ref.justification.reason}"</p>
+                          </div>
+                        )}
+                      </div>
+                    )}
                     {/* Declared Info */}
                     {declared.name ? (
                       <div className="space-y-3">
@@ -1388,6 +1477,54 @@ export default function ReferencesPanel({ employeeId, employee, onRefresh, onEdi
                 <XCircle className="h-4 w-4 mr-2" />
               )}
               {verifyAction === 'verify' ? 'Mark Satisfactory' : 'Mark Unsatisfactory'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Request Different Referee Dialog (distinct from Edit / Reject) */}
+      <Dialog open={requestDiffOpen} onOpenChange={setRequestDiffOpen}>
+        <DialogContent className="sm:max-w-md bg-white" data-testid="request-different-referee-dialog">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <RefreshCw className="h-5 w-5 text-amber-600" />
+              Request a Different Referee
+            </DialogTitle>
+            <DialogDescription>
+              Ask the worker to provide a different referee for Reference {requestDiffRefNum}.
+              The <strong>original referee details will be preserved</strong> on file and in the
+              audit history. This is different from editing minor details or rejecting a reference.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <Label>Reason for requesting a different referee *</Label>
+            <Textarea
+              value={requestDiffReason}
+              onChange={(e) => setRequestDiffReason(e.target.value)}
+              placeholder="e.g. Referee unreachable after 3 attempts; referee declined to provide a reference; referee is not a valid employment source; etc."
+              rows={4}
+              data-testid="request-different-referee-reason"
+            />
+            <p className="text-xs text-gray-500">
+              This reason will be shown to the worker and recorded in the audit trail.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRequestDiffOpen(false)} disabled={requestDiffLoading}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleRequestDifferentReferee}
+              disabled={requestDiffLoading || requestDiffReason.trim().length < 10}
+              className="bg-amber-600 hover:bg-amber-700"
+              data-testid="request-different-referee-submit"
+            >
+              {requestDiffLoading ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4 mr-2" />
+              )}
+              Request Different Referee
             </Button>
           </DialogFooter>
         </DialogContent>

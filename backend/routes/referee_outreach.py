@@ -611,10 +611,10 @@ async def verify_or_reject_reference(
     if reference_num not in [1, 2]:
         raise HTTPException(status_code=400, detail="reference_num must be 1 or 2")
 
-    if request.action not in ['verify', 'reject', 'request_replacement']:
-        raise HTTPException(status_code=400, detail="action must be 'verify', 'reject', or 'request_replacement'")
+    if request.action not in ['verify', 'reject', 'request_replacement', 'request_different_referee']:
+        raise HTTPException(status_code=400, detail="action must be 'verify', 'reject', 'request_replacement', or 'request_different_referee'")
 
-    if request.action in ['reject', 'request_replacement'] and not request.notes:
+    if request.action in ['reject', 'request_replacement', 'request_different_referee'] and not request.notes:
         raise HTTPException(status_code=400, detail="Reason (notes) is required")
 
     # Verify employee exists
@@ -632,11 +632,22 @@ async def verify_or_reject_reference(
 
     ref_data = references_doc.get(ref_key) or {}
     response_data = ref_data.get("response") or {}
+    declared_data = ref_data.get("declared") or {}
 
-    if not response_data:
+    # 'request_different_referee' does NOT require a returned response — admin
+    # may ask for a new referee as soon as a referee is declared (e.g. referee
+    # unreachable, employer-of-record confirms they never worked there, etc).
+    if request.action not in ('request_different_referee',) and not response_data:
         raise HTTPException(
             status_code=400,
             detail="Cannot verify or reject a reference without a returned response"
+        )
+
+    # For request_different_referee we only require that a referee was declared.
+    if request.action == 'request_different_referee' and not declared_data.get("name"):
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot request a different referee until the current referee has been declared"
         )
 
     if request.action == 'verify':
@@ -885,6 +896,79 @@ async def verify_or_reject_reference(
             "status": "success",
             "message": f"Replacement requested for Reference {reference_num}. Worker has been notified to provide new referee details.",
             "replacement_requested_at": now
+        }
+
+
+    elif request.action == 'request_different_referee':
+        # Distinct from 'request_replacement'. PRESERVES declared/response/
+        # verification/review/mismatch so the original referee + their status
+        # history remain intact in the document until the worker either:
+        #   (a) provides a different referee — at which point the current slot
+        #       is snapshotted into refN.history[] before being overwritten, or
+        #   (b) justifies the existing referee (worker_justify_existing_referee)
+        #       which leaves the slot untouched and records the justification.
+        #
+        # Flat employee fields get a new reference_N_request_status value of
+        # 'replacement_requested' so work_readiness / worker dashboard can
+        # surface the action-required state without pretending the reference
+        # was rejected.
+        prefix = f"reference_{reference_num}_"
+
+        nested_fields = {
+            f"{ref_key}.replacement_requested": True,
+            f"{ref_key}.replacement_requested_by": user['user_id'],
+            f"{ref_key}.replacement_requested_at": now,
+            f"{ref_key}.replacement_requested_reason": request.notes,
+            # Mirror into verification sub-doc for backwards-compat readers.
+            f"{ref_key}.verification.replacement_requested_at": now,
+            f"{ref_key}.verification.replacement_requested_by": user['user_id'],
+            f"{ref_key}.verification.replacement_reason": request.notes,
+            # Flip request.status so downstream surfaces recognise action-required.
+            f"{ref_key}.request.status": "replacement_requested",
+            # Clear any stale justification from a prior cycle.
+            f"{ref_key}.justification": None,
+        }
+        await db.references.update_one({"employee_id": employee_id}, {"$set": nested_fields})
+
+        await db.employees.update_one(
+            {"id": employee_id},
+            {"$set": {
+                f"{prefix}replacement_requested": True,
+                f"{prefix}replacement_requested_by": user['user_id'],
+                f"{prefix}replacement_requested_at": now,
+                f"{prefix}replacement_requested_reason": request.notes,
+                f"{prefix}request_status": "replacement_requested",
+                f"{prefix}justification_reason": None,
+                f"{prefix}justification_submitted_at": None,
+                "updated_at": now,
+            }}
+        )
+
+        await log_audit_action(
+            user['user_id'],
+            "request_different_referee",
+            "employee",
+            employee_id,
+            {
+                "reference_num": reference_num,
+                "reason": request.notes,
+                "employee_id": employee_id,
+                "original_referee_name": declared_data.get("name"),
+                "original_referee_email": declared_data.get("email"),
+                "original_request_status_before": ref_data.get("request", {}).get("status"),
+                "original_verification_status_before": (ref_data.get("verification") or {}).get("status"),
+                "data_preserved": True,
+            }
+        )
+
+        return {
+            "status": "success",
+            "message": (
+                f"A different referee has been requested for Reference {reference_num}. "
+                "The original referee details remain on file and the worker has been notified."
+            ),
+            "replacement_requested_at": now,
+            "original_referee_preserved": True,
         }
 
 

@@ -11452,6 +11452,105 @@ async def verify_training(
                 else:
                     record = pick_best_training_record(matching)
 
+    # Final fallback: if there is still no canonical training_record but a
+    # matching proposed_training_item exists (extracted certificate already
+    # mapped to the same canonical qualification), auto-promote the proposed
+    # item into a canonical training_record here so the single-item verify
+    # modal no longer fails with "Training record not found" for safeguarding
+    # _children / _adults / any other canonical mandatory code where the admin
+    # had reviewed only the extraction, not explicitly approve-and-verified.
+    #
+    # This reuses the extraction's evidence chain (source_document_id,
+    # certificate_holder_name, completed_at) so CQC traceability is preserved.
+    if not record:
+        canonical_code = canonical_training_key(record_id)
+        if canonical_code:
+            proposed_item = None
+            candidates = await db.proposed_training_items.find(
+                {
+                    "employee_id": employee_id,
+                    "status": ProposedTrainingItemStatus.PROPOSED.value,
+                    "source_document_id": {"$exists": True, "$ne": None},
+                },
+                {"_id": 0},
+            ).to_list(length=50)
+            for cand in candidates:
+                cand_canonical = canonical_training_key({
+                    "training_name": cand.get("mapped_training_title")
+                        or cand.get("raw_course_title"),
+                    "requirement_id": cand.get("mapped_training_code"),
+                    "mapped_training_code": cand.get("mapped_training_code"),
+                })
+                if cand_canonical == canonical_code:
+                    proposed_item = cand
+                    break
+
+            if proposed_item and proposed_item.get("completed_at"):
+                new_record_id = str(uuid.uuid4())
+                training_title = (
+                    proposed_item.get("mapped_training_title")
+                    or proposed_item.get("raw_course_title")
+                    or canonical_code.replace("_", " ").title()
+                )
+
+                # Pull certificate file from the source document for evidence.
+                source_doc = await db.employee_documents.find_one(
+                    {"id": proposed_item.get("source_document_id")},
+                    {"_id": 0, "file_url": 1, "original_filename": 1},
+                )
+                file_url = (source_doc or {}).get("file_url")
+                original_filename = (source_doc or {}).get("original_filename")
+
+                now_iso = datetime.now(timezone.utc).isoformat()
+                new_record = {
+                    "id": new_record_id,
+                    "employee_id": employee_id,
+                    "training_name": training_title,
+                    "requirement_id": canonical_code,
+                    "mapped_training_code": canonical_code,
+                    "mapped_training_title": training_title,
+                    "is_unmapped": False,
+                    "mandatory": bool(
+                        canonical_code in get_canonical_mandatory_training_ids()
+                        or is_mandatory_training(training_title)
+                    ),
+                    "completion_date": proposed_item.get("completed_at"),
+                    "expiry_date": proposed_item.get("expires_at"),
+                    "status": "completed",
+                    "certificate_url": file_url,
+                    "verified": False,
+                    "verification_status": "pending",
+                    "source_type": "certificate_extraction",
+                    "source_proposed_item_id": proposed_item.get("id"),
+                    "source_document_id": proposed_item.get("source_document_id"),
+                    "evidence_files": (
+                        [{
+                            "document_id": proposed_item.get("source_document_id"),
+                            "file_url": file_url,
+                            "original_filename": original_filename,
+                            "added_at": now_iso,
+                        }]
+                        if proposed_item.get("source_document_id") else []
+                    ),
+                    "created_at": now_iso,
+                    "updated_at": now_iso,
+                }
+                await db.training_records.insert_one(new_record)
+
+                # Link the proposed item to the new canonical record so
+                # subsequent approve-and-verify calls stay idempotent.
+                await db.proposed_training_items.update_one(
+                    {"id": proposed_item.get("id")},
+                    {"$set": {
+                        "status": ProposedTrainingItemStatus.APPROVED.value,
+                        "created_training_record_id": new_record_id,
+                        "reviewed_by": user["user_id"],
+                        "reviewed_at": now_iso,
+                        "auto_promoted_by_verify": True,
+                    }},
+                )
+                record = new_record
+
     if not record:
         raise HTTPException(status_code=404, detail="Training record not found")
 

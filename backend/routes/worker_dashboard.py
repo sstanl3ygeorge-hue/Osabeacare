@@ -1522,6 +1522,19 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             response_data = ref_data.get("response") or {}
             verification_data = ref_data.get("verification") or {}
             mismatch_data = ref_data.get("mismatch") or {}
+            justification_data = ref_data.get("justification") or {}
+            replacement_requested = bool(
+                ref_data.get("replacement_requested")
+                or verification_data.get("replacement_requested_at")
+            )
+            replacement_reason = (
+                ref_data.get("replacement_requested_reason")
+                or verification_data.get("replacement_reason")
+            )
+            replacement_requested_at = (
+                ref_data.get("replacement_requested_at")
+                or verification_data.get("replacement_requested_at")
+            )
 
             referee_name = declared_data.get("name", "")
             referee_email = declared_data.get("email", "")
@@ -1583,10 +1596,23 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             mismatch_explanation_status = employee.get(f"{prefix}mismatch_explanation_status", "not_submitted")
             mismatch_admin_decision = employee.get(f"{prefix}mismatch_admin_decision")
             referee_company = employee.get(f"{prefix}company", "")
+            justification_data = {
+                "reason": employee.get(f"{prefix}justification_reason"),
+                "submitted_at": employee.get(f"{prefix}justification_submitted_at"),
+            } if employee.get(f"{prefix}justification_reason") else {}
+            replacement_requested = bool(employee.get(f"{prefix}replacement_requested"))
+            replacement_reason = employee.get(f"{prefix}replacement_requested_reason")
+            replacement_requested_at = employee.get(f"{prefix}replacement_requested_at")
         
         if is_verified:
             ref_status = "verified"
             status_label = "Verified"
+        elif replacement_requested:
+            # Distinct from 'rejected'. Original referee preserved; worker
+            # must either provide a different referee or justify keeping
+            # the existing one.
+            ref_status = "replacement_requested"
+            status_label = "Different referee requested by admin"
         elif data_cleared:
             ref_status = "needs_new_input"
             status_label = "Please provide new referee details"
@@ -1619,7 +1645,13 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             "status": ref_status,
             "status_label": status_label,
             "rejection_reason": rejection_reason if (is_rejected or data_cleared) else None,
-            "can_provide_new": data_cleared or ref_status == "not_declared",
+            "can_provide_new": data_cleared or ref_status == "not_declared" or replacement_requested,
+            "replacement_requested": replacement_requested,
+            "replacement_requested_reason": replacement_reason if replacement_requested else None,
+            "replacement_requested_at": replacement_requested_at if replacement_requested else None,
+            "can_justify_existing": bool(replacement_requested and not justification_data.get("reason")),
+            "justification_reason": justification_data.get("reason") if justification_data else None,
+            "justification_submitted_at": justification_data.get("submitted_at") if justification_data else None,
             "verified_at": verified_at,
             "verified_by_name": verified_by_name,
             "response_received_at": response_received_at,
@@ -2914,11 +2946,12 @@ async def worker_provide_new_referee(
     prefix = f"reference_{ref_num}_"
     current_status = emp.get(f"{prefix}request_status")
     current_name = emp.get(f"{prefix}name")
+    replacement_requested = bool(emp.get(f"{prefix}replacement_requested"))
 
     # Gate: only allowed when worker can provide new details
     data_cleared = (current_status == "rejected" and not current_name)
     not_declared = (current_name is None and current_status not in ["verified", "requested", "awaiting_response", "submitted", "awaiting_review"])
-    if not (data_cleared or not_declared):
+    if not (data_cleared or not_declared or replacement_requested):
         raise HTTPException(
             status_code=400,
             detail=f"Reference {ref_num} does not require new referee details at this time."
@@ -2926,6 +2959,37 @@ async def worker_provide_new_referee(
 
     now = datetime.now(timezone.utc).isoformat()
     employee_id = worker["employee_id"]
+
+    # If the admin asked for a different referee, snapshot the current slot
+    # (declared/response/verification/review/mismatch/request) into
+    # db.references.refN.history[] BEFORE overwriting, so the original referee
+    # details + their full status history are preserved for audit.
+    archived_snapshot = None
+    if replacement_requested:
+        current_ref_doc = await db.references.find_one(
+            {"employee_id": employee_id}, {"_id": 0}
+        ) or {}
+        current_slot = current_ref_doc.get(f"ref{ref_num}") or {}
+        archived_snapshot = {
+            "declared": current_slot.get("declared") or {},
+            "response": current_slot.get("response") or {},
+            "verification": current_slot.get("verification") or {},
+            "review": current_slot.get("review") or {},
+            "mismatch": current_slot.get("mismatch") or {},
+            "request": current_slot.get("request") or {},
+            "type": current_slot.get("type"),
+            "is_employment_reference": current_slot.get("is_employment_reference"),
+            "archived_at": now,
+            "archived_reason": "replaced_by_worker_after_admin_request_different_referee",
+            "archived_by": f"worker_{employee_id}",
+            "replacement_requested_at": current_slot.get("replacement_requested_at"),
+            "replacement_requested_by": current_slot.get("replacement_requested_by"),
+            "replacement_requested_reason": current_slot.get("replacement_requested_reason"),
+        }
+        await db.references.update_one(
+            {"employee_id": employee_id},
+            {"$push": {f"ref{ref_num}.history": archived_snapshot}},
+        )
 
     # 1. Write to db.employees flat fields and reset status
     emp_update = {
@@ -2959,11 +3023,19 @@ async def worker_provide_new_referee(
         f"{prefix}replacement_requested_at": None,
         f"{prefix}replacement_requested_by": None,
         f"{prefix}replacement_reason": None,
+        f"{prefix}replacement_requested": False,
+        f"{prefix}replacement_requested_reason": None,
+        f"{prefix}justification_reason": None,
+        f"{prefix}justification_submitted_at": None,
         "updated_at": now,
     }
     await db.employees.update_one({"id": employee_id}, {"$set": emp_update})
 
-    # 2. Write to db.references nested doc (upsert)
+    # 2. Write to db.references nested doc (upsert). When we snapshotted the
+    # old referee above (admin-requested replacement path), wipe response /
+    # verification / review / mismatch / request / justification on the live
+    # slot so the new referee starts from a clean "declared" state. The
+    # archived copy in refN.history preserves the original full trail.
     ref_nested = {
         f"ref{ref_num}.declared.name": request.name,
         f"ref{ref_num}.declared.email": request.email,
@@ -2972,8 +3044,23 @@ async def worker_provide_new_referee(
         f"ref{ref_num}.declared.position": request.position,
         f"ref{ref_num}.declared.relationship": request.relationship,
         f"ref{ref_num}.verification_status": "declared",
+        f"ref{ref_num}.replacement_requested": False,
+        f"ref{ref_num}.replacement_requested_by": None,
+        f"ref{ref_num}.replacement_requested_at": None,
+        f"ref{ref_num}.replacement_requested_reason": None,
+        f"ref{ref_num}.justification": None,
         "updated_at": now,
     }
+    if archived_snapshot is not None:
+        ref_nested.update({
+            f"ref{ref_num}.response": {},
+            f"ref{ref_num}.verification": {},
+            f"ref{ref_num}.review": {},
+            f"ref{ref_num}.mismatch": {},
+            f"ref{ref_num}.request": {},
+            f"ref{ref_num}.type": None,
+            f"ref{ref_num}.is_employment_reference": None,
+        })
     await db.references.update_one(
         {"employee_id": employee_id},
         {"$set": ref_nested},
@@ -3017,12 +3104,103 @@ async def worker_provide_new_referee(
             "reference_number": ref_num,
             "referee_name": request.name,
             "referee_email": request.email,
+            "replaced_previous_referee": archived_snapshot is not None,
+            "previous_referee_name": (archived_snapshot or {}).get("declared", {}).get("name") if archived_snapshot else None,
+            "previous_referee_email": (archived_snapshot or {}).get("declared", {}).get("email") if archived_snapshot else None,
+            "archived_to_history": archived_snapshot is not None,
         }
     )
 
     return {
         "success": True,
         "message": f"Reference {ref_num} details submitted. Your manager will send the reference request shortly.",
+        "reference_number": ref_num,
+    }
+
+
+# ==================== WORKER JUSTIFY EXISTING REFEREE ====================
+# Companion to worker_provide_new_referee: when an admin has used the
+# "Request different referee" action, the worker may (if policy allows) submit
+# a written justification for keeping the existing referee instead of replacing
+# them. The slot is NOT cleared — admin reviews the justification and then
+# either verifies the existing reference or escalates to a hard rejection.
+class JustifyExistingRefereeRequest(BaseModel):
+    reason: str
+
+
+@router.post("/worker/references/{ref_num}/justify-existing")
+async def worker_justify_existing_referee(
+    ref_num: int,
+    request: JustifyExistingRefereeRequest,
+    worker: dict = Depends(get_current_worker)
+):
+    db = get_db()
+    if ref_num not in [1, 2]:
+        raise HTTPException(status_code=400, detail="ref_num must be 1 or 2")
+
+    reason = (request.reason or "").strip()
+    if len(reason) < 10:
+        raise HTTPException(
+            status_code=400,
+            detail="Please provide a justification of at least 10 characters.",
+        )
+
+    employee_id = worker["employee_id"]
+    emp = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    prefix = f"reference_{ref_num}_"
+    replacement_requested = bool(emp.get(f"{prefix}replacement_requested"))
+    if not replacement_requested:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Reference {ref_num} has not been flagged for replacement. No justification required.",
+        )
+
+    now = datetime.now(timezone.utc).isoformat()
+    actor = _worker_actor_id(employee_id)
+
+    await db.references.update_one(
+        {"employee_id": employee_id},
+        {"$set": {
+            f"ref{ref_num}.justification": {
+                "reason": reason,
+                "submitted_at": now,
+                "submitted_by": actor,
+                "decision": "pending_admin_review",
+            },
+            "updated_at": now,
+        }},
+        upsert=True,
+    )
+
+    await db.employees.update_one(
+        {"id": employee_id},
+        {"$set": {
+            f"{prefix}justification_reason": reason,
+            f"{prefix}justification_submitted_at": now,
+            "updated_at": now,
+        }}
+    )
+
+    await log_audit_action(
+        employee_id,
+        "worker_justified_existing_referee",
+        "employee",
+        employee_id,
+        {
+            "reference_number": ref_num,
+            "justification_reason": reason,
+        }
+    )
+
+    return {
+        "success": True,
+        "message": (
+            f"Justification for Reference {ref_num} submitted. "
+            "Your manager will review and decide whether to keep the existing referee or require a replacement."
+        ),
         "reference_number": ref_num,
     }
 

@@ -36550,56 +36550,32 @@ async def get_compliance_file(
         "handbook_acknowledgement": "EMPLOYEE_HANDBOOK_ACKNOWLEDGEMENT_V1"
     }
     
-    def build_agreement_row(
+    async def build_agreement_row(
         key: str,
         title: str,
         agreement_type: str
     ) -> dict:
         """Build an agreement row (form acknowledgement)."""
+        from agreement_document_service import resolve_employee_agreement_state
         # Find acknowledgements for this type (old format)
         acks = [a for a in agreements.get("acknowledgements", []) 
                 if a.get("agreement_type") == agreement_type]
         pending_reqs = [r for r in agreements.get("pending_requests", [])
                        if r.get("agreement_type") == agreement_type]
 
-        # Canonical-row precedence picker — mirrors worker_dashboard.py so
-        # admin reads the same row the worker does when duplicates exist
-        # (e.g. the `ensure_agreement_rendered` canonical id row plus a
-        # legacy `agr_ack_<uuid>` row minted by admin-assisted completion).
-        # Precedence: verified > acknowledged/signed > pending > rejected,
-        # tie-broken by most recent timestamp. Do NOT pick by created_at alone.
-        if len(acks) > 1:
-            def _ack_rank(row):
-                vs = row.get("verification_status")
-                ts = (
-                    row.get("verified_at")
-                    or row.get("acknowledged_at")
-                    or row.get("rejected_at")
-                    or row.get("updated_at")
-                    or row.get("created_at")
-                    or ""
-                )
-                if vs == "verified":
-                    return (3, ts)
-                if row.get("acknowledged") or row.get("status") == "signed":
-                    return (2, ts)
-                if vs == "rejected":
-                    return (0, ts)
-                return (1, ts)
-            acks = sorted(acks, key=_ack_rank, reverse=True)
-
         # Find new-style submission for this type
         template_id = AGREEMENT_TYPE_TO_TEMPLATE.get(agreement_type)
         submission = submissions_by_template.get(template_id) if template_id else None
-        
-        has_acknowledgement = len(acks) > 0 or submission is not None
-        latest_ack = acks[0] if len(acks) > 0 else None  # canonical row per precedence above
+
+        agreement_state = await resolve_employee_agreement_state(db, employee, agreement_type)
+        latest_ack = agreement_state.get("acknowledgement") or (acks[0] if len(acks) > 0 else None)
+        has_acknowledgement = bool(agreement_state.get("has_acknowledgement")) or submission is not None
         
         # Determine verification status (prefer new submission over old ack)
         if submission:
             is_verified = submission.get("verification_status") == "verified"
         else:
-            is_verified = has_acknowledgement and latest_ack and latest_ack.get("verification_status") == "verified"
+            is_verified = bool(agreement_state.get("verified"))
         
         # Status summary - prefer new submission data over old ack
         if submission and is_verified:
@@ -36615,16 +36591,9 @@ async def get_compliance_file(
             vs = (submission.get("verification_status", "unknown") or "unknown").replace("_", " ").title()
             status_summary = vs
             status = "recorded"
-        elif is_verified and latest_ack:
-            version = latest_ack.get("version_acknowledged", "")
-            completed_at = (latest_ack.get("completed_at", "") or "")[:10] if latest_ack.get("completed_at") else ""
-            mode = (latest_ack.get("completion_mode", "") or "").replace("_", " ").title()
-            status_summary = f"Verified • {version} • {mode} on {completed_at}"
-            status = "verified"
         elif has_acknowledgement and latest_ack:
-            verification_status = (latest_ack.get("verification_status", "unknown") or "unknown").replace("_", " ").title()
-            status_summary = verification_status
-            status = "awaiting_review" if latest_ack.get("verification_status") == "awaiting_review" else "recorded"
+            status_summary = agreement_state.get("state_label") or ((latest_ack.get("verification_status", "unknown") or "unknown").replace("_", " ").title())
+            status = agreement_state.get("status") or ("awaiting_review" if latest_ack.get("verification_status") == "awaiting_review" else "recorded")
         elif len(pending_reqs) > 0:
             status_summary = f"Sent, awaiting completion"
             status = "sent"
@@ -36681,6 +36650,18 @@ async def get_compliance_file(
                 "worker_signer_name": latest_ack.get("worker_signer_name") if latest_ack else None,
                 "company_signed_at": latest_ack.get("company_signed_at") if latest_ack else None,
                 "company_signer_name": latest_ack.get("company_signer_name") if latest_ack else None,
+                "rejection_reason": agreement_state.get("rejection_reason"),
+                "rejected_at": agreement_state.get("rejected_at"),
+                "rejected_by_name": agreement_state.get("rejected_by_name"),
+                "state_label": agreement_state.get("state_label"),
+                "status": agreement_state.get("status"),
+                "signed": agreement_state.get("signed"),
+                "verified": agreement_state.get("verified"),
+                "can_sign": agreement_state.get("can_sign"),
+                "file_url": agreement_state.get("file_url"),
+                "download_url": agreement_state.get("download_url"),
+                "render_issue": agreement_state.get("render_issue"),
+                "system_issue": agreement_state.get("system_issue"),
                 # Link to new-style submission if available
                 "submission_id": str(submission.get("_id")) if submission else None
             } if latest_ack or submission else None,
@@ -37401,12 +37382,12 @@ async def get_compliance_file(
         "agreements": {
             "title": "Agreements",
             "rows": [
-                build_agreement_row(
+                await build_agreement_row(
                     key="contract_acceptance",
                     title="Contract Acceptance",
                     agreement_type="contract_acceptance"
                 ),
-                build_agreement_row(
+                await build_agreement_row(
                     key="handbook_acknowledgement",
                     title="Employee Handbook Acknowledgement",
                     agreement_type="handbook_acknowledgement"

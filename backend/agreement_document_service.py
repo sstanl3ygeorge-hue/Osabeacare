@@ -639,6 +639,168 @@ def current_contract_artifact(agreement: Dict[str, Any]) -> Optional[str]:
     return agreement.get("rendered_contract_pdf_url") or agreement.get("rendered_file_url")
 
 
+def _agreement_rank(row: Dict[str, Any]) -> tuple:
+    verification_status = row.get("verification_status")
+    timestamp = (
+        row.get("verified_at")
+        or row.get("worker_signed_at")
+        or row.get("acknowledged_at")
+        or row.get("rejected_at")
+        or row.get("updated_at")
+        or row.get("created_at")
+        or ""
+    )
+    if verification_status == "verified":
+        return (4, timestamp)
+    if row.get("contract_state") == "fully_executed":
+        return (4, timestamp)
+    if row.get("contract_state") == "awaiting_company_countersignature":
+        return (3, timestamp)
+    if row.get("acknowledged") or row.get("status") == "signed":
+        return (2, timestamp)
+    if verification_status == "rejected":
+        return (0, timestamp)
+    return (1, timestamp)
+
+
+async def resolve_employee_agreement_state(db, employee: Dict[str, Any], agreement_type: str) -> Dict[str, Any]:
+    employee_id = employee["id"]
+    render_error_detail = None
+    try:
+        agreement = await ensure_agreement_rendered(db, employee, agreement_type)
+    except HandbookRenderError as exc:
+        render_error_detail = str(exc)
+        agreement = await db.agreement_acknowledgements.find_one(
+            {"employee_id": employee_id, "agreement_type": agreement_type},
+            {"_id": 0},
+        ) or {}
+    except Exception as exc:
+        render_error_detail = str(exc)
+        agreement = await db.agreement_acknowledgements.find_one(
+            {"employee_id": employee_id, "agreement_type": agreement_type},
+            {"_id": 0},
+        ) or {}
+
+    rows = await db.agreement_acknowledgements.find(
+        {"employee_id": employee_id, "agreement_type": agreement_type},
+        {"_id": 0},
+    ).to_list(20)
+    if rows:
+        rows = sorted(rows, key=_agreement_rank, reverse=True)
+        canonical = dict(rows[0])
+        for field_name in (
+            "rendered_file_url",
+            "rendered_contract_pdf_url",
+            "worker_signed_contract_pdf_url",
+            "executed_contract_pdf_url",
+            "signed_document_url",
+            "template_version",
+            "rendered_at",
+            "employee_name",
+        ):
+            if not canonical.get(field_name):
+                for sibling in rows[1:]:
+                    if sibling.get(field_name):
+                        canonical[field_name] = sibling[field_name]
+                        break
+        agreement = canonical
+
+    verification_status = (agreement or {}).get("verification_status")
+    rejected = verification_status == "rejected"
+
+    if agreement_type == CONTRACT_AGREEMENT_TYPE:
+        contract_state = agreement.get("contract_state") or "awaiting_worker_signature"
+        worker_signed = bool(
+            contract_state in ("awaiting_company_countersignature", "fully_executed")
+            or agreement.get("worker_signed_at")
+        )
+        fully_executed = bool(contract_state == "fully_executed" or verification_status == "verified")
+        if rejected:
+            state_label = "Action required: please re-sign the updated contract"
+        elif fully_executed:
+            state_label = "Contract fully executed"
+        elif worker_signed:
+            state_label = "Signed by you — awaiting Osabea countersignature"
+        else:
+            state_label = "Action required: please review and sign your contract"
+        return {
+            "agreement_type": agreement_type,
+            "acknowledgement": agreement or {},
+            "render_issue": render_error_detail,
+            "rejected": rejected,
+            "rejection_reason": agreement.get("rejection_reason"),
+            "rejected_at": agreement.get("rejected_at"),
+            "rejected_by_name": agreement.get("rejected_by_name"),
+            "signed": worker_signed,
+            "worker_signed": worker_signed,
+            "verified": fully_executed,
+            "fully_executed": fully_executed,
+            "state_label": state_label,
+            "can_sign": bool(rejected) or contract_state in (None, "", "draft_rendered", "awaiting_worker_signature", "rejected_reopen_required"),
+            "status": "rejected" if rejected else contract_state,
+            "contract_state": contract_state,
+            "file_url": current_contract_artifact(agreement),
+            "download_url": current_contract_artifact(agreement),
+            "rendered_file_url": agreement.get("rendered_contract_pdf_url") or agreement.get("rendered_file_url"),
+            "worker_signed_contract_pdf_url": agreement.get("worker_signed_contract_pdf_url"),
+            "executed_contract_pdf_url": agreement.get("executed_contract_pdf_url"),
+            "signed_document_url": agreement.get("signed_document_url"),
+            "template_version": agreement.get("template_version"),
+            "rendered_at": agreement.get("rendered_at"),
+            "employee_name": agreement.get("employee_name"),
+            "signed_at": agreement.get("worker_signed_at") or agreement.get("signed_at") or agreement.get("acknowledged_at"),
+            "worker_signed_at": agreement.get("worker_signed_at"),
+            "worker_signer_name": agreement.get("worker_signer_name"),
+            "company_signed_at": agreement.get("company_signed_at"),
+            "company_signer_name": agreement.get("company_signer_name"),
+            "verified_at": agreement.get("verified_at"),
+            "verified_by_name": agreement.get("verified_by_name"),
+            "verification_status": verification_status,
+            "has_acknowledgement": bool(agreement),
+        }
+
+    acknowledged = bool(agreement and agreement.get("acknowledged") and verification_status != "rejected")
+    verified = bool(agreement and verification_status == "verified")
+    system_issue = bool(render_error_detail) and not (verified or acknowledged)
+    if rejected:
+        state_label = "Your handbook is being updated. You will be asked to review and sign once ready."
+    elif system_issue:
+        state_label = "System issue — Osabea is preparing your handbook. No action needed from you."
+    elif verified:
+        state_label = "Handbook acknowledged and verified"
+    elif acknowledged:
+        state_label = "Handbook acknowledged — awaiting admin verification"
+    else:
+        state_label = "Action required: please review and acknowledge the handbook"
+    return {
+        "agreement_type": agreement_type,
+        "acknowledgement": agreement or {},
+        "render_issue": render_error_detail,
+        "rejected": rejected,
+        "rejection_reason": agreement.get("rejection_reason"),
+        "rejected_at": agreement.get("rejected_at"),
+        "rejected_by_name": agreement.get("rejected_by_name"),
+        "signed": acknowledged,
+        "worker_acknowledged": acknowledged,
+        "verified": verified,
+        "system_issue": system_issue,
+        "state_label": state_label,
+        "can_sign": False if system_issue else (rejected or not acknowledged),
+        "status": "system_issue" if system_issue else ("rejected" if rejected else ("verified" if verified else ("signed" if acknowledged else "pending"))),
+        "file_url": agreement.get("rendered_file_url"),
+        "download_url": agreement.get("rendered_file_url"),
+        "rendered_file_url": agreement.get("rendered_file_url"),
+        "template_version": agreement.get("template_version"),
+        "rendered_at": agreement.get("rendered_at"),
+        "employee_name": agreement.get("employee_name"),
+        "signed_at": agreement.get("acknowledged_at"),
+        "verified_at": agreement.get("verified_at"),
+        "verified_by_name": agreement.get("verified_by_name"),
+        "verification_status": verification_status,
+        "has_acknowledgement": bool(agreement),
+    }
+
+
 async def build_agreement_rendering(db, employee: Dict[str, Any], agreement_type: str) -> Dict[str, Any]:
     template_bytes, source_name, source_path = await _load_template_bytes(db, agreement_type)
     version = _template_version(template_bytes, agreement_type)

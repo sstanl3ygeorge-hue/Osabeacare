@@ -33,11 +33,8 @@ from .employment_gaps import _ensure_gap_record
 from agreement_document_service import (
     CONTRACT_AGREEMENT_TYPE,
     HANDBOOK_AGREEMENT_TYPE,
-    ContractRenderError,
-    HandbookRenderError,
     _employee_name,
-    current_contract_artifact,
-    ensure_agreement_rendered,
+    resolve_employee_agreement_state,
 )
 
 # Reference status enum (shared with stageGates)
@@ -1101,214 +1098,20 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
     agreements_status = []
     employee_min_result = await db.employees.find_one({"id": employee_id}, {"_id": 0})
     employee_min = employee_min_result if employee_min_result is not None else {"id": employee_id}
-    try:
-        contract_ack = await ensure_agreement_rendered(db, employee_min, CONTRACT_AGREEMENT_TYPE)
-    except Exception as e:
-        logger.warning(f"Could not render contract agreement for {employee_id}: {e}")
-        contract_ack_result = await db.agreement_acknowledgements.find_one({
-            "employee_id": employee_id,
-            "agreement_type": CONTRACT_AGREEMENT_TYPE
-        }, {"_id": 0})
-        contract_ack = contract_ack_result if contract_ack_result is not None else {}
-    
-    contract_state = contract_ack.get("contract_state")
-    _contract_verification_status = (contract_ack or {}).get("verification_status")
-    _contract_rejected = _contract_verification_status == "rejected"
-    _contract_worker_signed = bool(
-        contract_state in ("awaiting_company_countersignature", "fully_executed")
-        or (contract_ack or {}).get("worker_signed_at")
-    )
-    _contract_fully_executed = bool(
-        contract_state == "fully_executed"
-        or _contract_verification_status == "verified"
-    )
-    # Worker-facing state_label — used by UI to avoid saying "Blocked" when the
-    # worker has done their part and the delay is company/admin-side.
-    if _contract_rejected:
-        _contract_state_label = "Action required: please re-sign the updated contract"
-    elif _contract_fully_executed:
-        _contract_state_label = "Contract fully executed"
-    elif _contract_worker_signed:
-        _contract_state_label = "Signed by you — awaiting Osabea countersignature"
-    else:
-        _contract_state_label = "Action required: please review and sign your contract"
-    contract_status = {
+    contract_status = await resolve_employee_agreement_state(db, employee_min, CONTRACT_AGREEMENT_TYPE)
+    contract_status.update({
         "id": "contract_acceptance",
         "name": "Contract Acceptance",
         "type": "contract_acceptance",
-        "rejected": _contract_rejected,
-        "rejection_reason": contract_ack.get("rejection_reason"),
-        "rejected_at": contract_ack.get("rejected_at"),
-        "rejected_by_name": contract_ack.get("rejected_by_name"),
-        # NOTE: `signed` kept for backward compatibility (true once worker has signed).
-        # Prefer the explicit `worker_signed` / `fully_executed` booleans in new code.
-        "signed": _contract_worker_signed,
-        "worker_signed": _contract_worker_signed,
-        "fully_executed": _contract_fully_executed,
-        "state_label": _contract_state_label,
-        "signed_at": contract_ack.get("worker_signed_at") or contract_ack.get("signed_at") or contract_ack.get("acknowledged_at"),
-        "verified": _contract_fully_executed,
-        "verified_at": contract_ack.get("verified_at") if contract_ack else None,
-        "verified_by_name": contract_ack.get("verified_by_name") if contract_ack else None,
-        "can_sign": bool(contract_ack.get("verification_status") == "rejected") or contract_state in (None, "", "draft_rendered", "awaiting_worker_signature", "rejected_reopen_required"),
-        "status": "rejected" if (contract_ack and contract_ack.get("verification_status") == "rejected") else (contract_state or "pending"),
-        "contract_state": contract_state or "awaiting_worker_signature",
-        "file_url": current_contract_artifact(contract_ack),
-        "rendered_file_url": contract_ack.get("rendered_contract_pdf_url") or contract_ack.get("rendered_file_url"),
-        "worker_signed_contract_pdf_url": contract_ack.get("worker_signed_contract_pdf_url"),
-        "executed_contract_pdf_url": contract_ack.get("executed_contract_pdf_url"),
-        "signed_document_url": contract_ack.get("signed_document_url"),
-        "download_url": current_contract_artifact(contract_ack),
-        "template_version": contract_ack.get("template_version"),
-        "rendered_at": contract_ack.get("rendered_at"),
-        "employee_name": contract_ack.get("employee_name"),
-        "worker_signer_name": contract_ack.get("worker_signer_name"),
-        "worker_signed_at": contract_ack.get("worker_signed_at"),
-        "company_signer_name": contract_ack.get("company_signer_name"),
-        "company_signed_at": contract_ack.get("company_signed_at"),
-    }
+    })
     agreements_status.append(contract_status)
     contract_signed = contract_status["contract_state"] == "fully_executed"
-    handbook_render_error_detail = None
-    try:
-        handbook_ack = await ensure_agreement_rendered(db, employee_min, HANDBOOK_AGREEMENT_TYPE)
-    except HandbookRenderError as e:
-        # Do not fail the whole dashboard if handbook org fields are incomplete.
-        # Keep dashboard usable and surface handbook as pending with an issue.
-        handbook_render_error_detail = str(e)
-        logger.warning(f"Handbook render blocked for {employee_id}: {e}")
-        handbook_ack_result = await db.agreement_acknowledgements.find_one({
-            "employee_id": employee_id,
-            "agreement_type": HANDBOOK_AGREEMENT_TYPE
-        }, {"_id": 0})
-        handbook_ack = handbook_ack_result if handbook_ack_result is not None else {}
-    except Exception as e:
-        logger.warning(f"Could not render handbook agreement for {employee_id}: {e}")
-        handbook_ack_result = await db.agreement_acknowledgements.find_one({
-            "employee_id": employee_id,
-            "agreement_type": HANDBOOK_AGREEMENT_TYPE
-        }, {"_id": 0})
-        handbook_ack = handbook_ack_result if handbook_ack_result is not None else {}
-
-    # Canonical-row selection for handbook display.
-    #
-    # Duplicate rows in `agreement_acknowledgements` can exist for the same
-    # (employee_id, agreement_type) because two write paths mint distinct ids:
-    #   * `ensure_agreement_rendered` upserts id `agr_<type>_<employee_id>`
-    #     (carries rendered_file_url / template_version / rendered_at).
-    #   * `AgreementAcknowledgementService.complete_agreement` (admin-assisted
-    #     or phone-assisted completion) inserts id `agr_ack_<uuid>` with the
-    #     acknowledgement / verification state but no render artefacts.
-    # Admin verifies the admin-assisted row, but `ensure_agreement_rendered`
-    # uses `find_one` without a sort and may return the render-only row,
-    # leaving the worker dashboard showing "being prepared" even though the
-    # authoritative record is verified. Pick the highest-precedence row and
-    # carry render artefacts across so the worker view matches admin truth.
-    try:
-        _hb_rows = await db.agreement_acknowledgements.find(
-            {"employee_id": employee_id, "agreement_type": HANDBOOK_AGREEMENT_TYPE},
-            {"_id": 0},
-        ).to_list(20)
-    except Exception:
-        _hb_rows = []
-    if len(_hb_rows) > 1:
-        def _hb_rank(row):
-            vs = row.get("verification_status")
-            ts = (
-                row.get("verified_at")
-                or row.get("acknowledged_at")
-                or row.get("rejected_at")
-                or row.get("updated_at")
-                or row.get("created_at")
-                or ""
-            )
-            if vs == "verified":
-                return (3, ts)
-            if row.get("acknowledged") or row.get("status") == "signed":
-                return (2, ts)
-            if vs == "rejected":
-                return (0, ts)
-            return (1, ts)
-        _hb_rows.sort(key=_hb_rank, reverse=True)
-        _canonical = dict(_hb_rows[0])
-        # Back-fill render artefacts from any sibling row that has them, so
-        # the worker can still view/download the current PDF even when the
-        # canonical (verified) row is the admin-assisted one with no render
-        # fields of its own.
-        for _k in ("rendered_file_url", "template_version", "rendered_at", "employee_name"):
-            if not _canonical.get(_k):
-                for _sib in _hb_rows[1:]:
-                    _v = _sib.get(_k)
-                    if _v:
-                        _canonical[_k] = _v
-                        break
-        handbook_ack = _canonical
-
-    _handbook_verification_status = (handbook_ack or {}).get("verification_status")
-    _handbook_acknowledged = bool(
-        handbook_ack
-        and handbook_ack.get("acknowledged")
-        and _handbook_verification_status != "rejected"
-    )
-    _handbook_rejected = bool(handbook_ack and _handbook_verification_status == "rejected")
-    _handbook_verified = bool(handbook_ack and _handbook_verification_status == "verified")
-    # A transient re-render failure must not mask an already-verified or
-    # already-acknowledged handbook. Admin truth wins; only surface "being
-    # prepared" when there is nothing verified/acknowledged on file.
-    _handbook_system_issue = bool(handbook_render_error_detail) and not (
-        _handbook_verified or _handbook_acknowledged
-    )
-
-    if _handbook_rejected:
-        _handbook_state_label = "Your handbook is being updated. You will be asked to review and sign once ready."
-    elif _handbook_system_issue:
-        _handbook_state_label = "System issue — Osabea is preparing your handbook. No action needed from you."
-    elif _handbook_verified:
-        _handbook_state_label = "Handbook acknowledged and verified"
-    elif _handbook_acknowledged:
-        _handbook_state_label = "Handbook acknowledged — awaiting admin verification"
-    else:
-        _handbook_state_label = "Action required: please review and acknowledge the handbook"
-
-    handbook_status = {
+    handbook_status = await resolve_employee_agreement_state(db, employee_min, HANDBOOK_AGREEMENT_TYPE)
+    handbook_status.update({
         "id": "handbook_acknowledgement",
         "name": "Employee Handbook Acknowledgement",
         "type": "handbook_acknowledgement",
-        "rejected": _handbook_rejected,
-        "rejection_reason": handbook_ack.get("rejection_reason"),
-        "rejected_at": handbook_ack.get("rejected_at"),
-        "rejected_by_name": handbook_ack.get("rejected_by_name"),
-        "signed": _handbook_acknowledged,
-        "worker_acknowledged": _handbook_acknowledged,
-        "verified": _handbook_verified,
-        "system_issue": _handbook_system_issue,
-        "state_label": _handbook_state_label,
-        "signed_at": handbook_ack.get("acknowledged_at") if handbook_ack else None,
-        "verified_at": handbook_ack.get("verified_at") if handbook_ack else None,
-        "verified_by_name": handbook_ack.get("verified_by_name") if handbook_ack else None,
-        # Worker must not be asked to sign when the underlying template cannot
-        # even be rendered — that is a system/admin issue, not a worker action.
-        "can_sign": (
-            False if _handbook_system_issue else (
-                _handbook_rejected or not _handbook_acknowledged
-            )
-        ),
-        "status": (
-            "system_issue" if _handbook_system_issue
-            else "rejected" if _handbook_rejected
-            else "verified" if _handbook_verified
-            else "signed" if _handbook_acknowledged
-            else "pending"
-        ),
-        "file_url": handbook_ack.get("rendered_file_url"),
-        "rendered_file_url": handbook_ack.get("rendered_file_url"),
-        "download_url": handbook_ack.get("rendered_file_url"),
-        "template_version": handbook_ack.get("template_version"),
-        "rendered_at": handbook_ack.get("rendered_at"),
-        "employee_name": handbook_ack.get("employee_name"),
-    }
-    if handbook_render_error_detail:
-        handbook_status["render_issue"] = handbook_render_error_detail
+    })
     agreements_status.append(handbook_status)
     
     # Unified progress

@@ -313,14 +313,17 @@ async def get_worker_cv_extraction_status(user: dict = Depends(get_current_worke
             "can_upload_cv": True,
             "cv_status": "missing",
         }
-    
+
     # Get CV document info
     cv_doc = await db.employee_documents.find_one({"id": cv_document_id}, {"_id": 0})
+    cv_doc_is_pdf = _looks_like_pdf_document(cv_doc)
     active_cv_exists = bool(
         cv_doc
         and cv_doc.get("file_url")
         and cv_doc.get("status") not in ["superseded", "archived", "deleted", "rejected", "invalidated"]
+        and cv_doc.get("review_status") not in ["rejected", "amendment_requested", "invalidated"]
         and cv_doc.get("is_active") is not False
+        and cv_doc_is_pdf
     )
     if not active_cv_exists:
         return {

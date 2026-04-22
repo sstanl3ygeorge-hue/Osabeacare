@@ -82,6 +82,134 @@ logger = logging.getLogger(__name__)
 FORM_LOCKED_STATUSES = ["submitted", "verified", "signed_off", "reviewed", "approved"]
 FORM_CORRECTION_STATUSES = ["rejected", "amendment_requested", "returned_for_correction", "reopened_for_worker_correction"]
 
+
+# ── Employment-readiness canonical state model ───────────────────────────────
+# Pure, testable helper kept at module scope so tests can exercise every branch
+# without spinning up the DB.  The worker_dashboard endpoint delegates to this.
+EMPLOYMENT_READINESS_STATES = (
+    "ready_for_work",
+    "awaiting_final_company_action",
+    "action_required_from_you",
+    "admin_review_in_progress",
+    "system_issue_preventing_completion",
+)
+_EMPLOYMENT_READINESS_LABELS = {
+    "ready_for_work": "Ready for Work",
+    "awaiting_final_company_action": "Awaiting final company action",
+    "action_required_from_you": "Action required from you",
+    "admin_review_in_progress": "Admin review in progress",
+    "system_issue_preventing_completion": "System issue preventing completion",
+}
+
+
+def compute_employment_readiness(
+    *,
+    is_active_employee: bool,
+    contract_worker_signed: bool,
+    contract_fully_executed: bool,
+    contract_rejected: bool,
+    handbook_acknowledged: bool,
+    handbook_verified: bool,
+    handbook_rejected: bool,
+    handbook_system_issue: bool,
+) -> tuple:
+    """Classify employment readiness into one of five canonical states with
+    per-blocker classification so worker UI never blames the worker for
+    admin/company/system-side delays.
+
+    Returns (state, label, blockers) where each blocker is a dict with keys
+    ``type``, ``label``, ``classification`` and ``actor``.
+    """
+    blockers: list = []
+
+    if handbook_system_issue:
+        blockers.append({
+            "type": "handbook_system_issue",
+            "classification": "system_issue",
+            "label": "Handbook cannot be prepared yet — Osabea is completing setup",
+            "actor": "system",
+        })
+    if contract_rejected:
+        blockers.append({
+            "type": "contract_rejected",
+            "classification": "worker_action",
+            "label": "Contract was returned — please review and re-sign",
+            "actor": "worker",
+        })
+    if handbook_rejected and not handbook_system_issue:
+        blockers.append({
+            "type": "handbook_rejected",
+            "classification": "worker_action",
+            "label": "Handbook acknowledgement was returned — please review and re-acknowledge",
+            "actor": "worker",
+        })
+    if (
+        not contract_rejected
+        and not contract_fully_executed
+        and not contract_worker_signed
+    ):
+        blockers.append({
+            "type": "contract_unsigned",
+            "classification": "worker_action",
+            "label": "Please review and sign your contract",
+            "actor": "worker",
+        })
+    if (
+        contract_worker_signed
+        and not contract_fully_executed
+        and not contract_rejected
+    ):
+        blockers.append({
+            "type": "contract_awaiting_company_countersignature",
+            "classification": "company_action",
+            "label": "Contract signed — awaiting Osabea countersignature",
+            "actor": "company",
+        })
+    if (
+        not handbook_system_issue
+        and not handbook_rejected
+        and not handbook_acknowledged
+    ):
+        blockers.append({
+            "type": "handbook_unacknowledged",
+            "classification": "worker_action",
+            "label": "Please review and acknowledge the employee handbook",
+            "actor": "worker",
+        })
+    if (
+        not handbook_system_issue
+        and handbook_acknowledged
+        and not handbook_verified
+    ):
+        blockers.append({
+            "type": "handbook_awaiting_verification",
+            "classification": "admin_action",
+            "label": "Handbook acknowledged — awaiting admin verification",
+            "actor": "admin",
+        })
+
+    classifications = {b["classification"] for b in blockers}
+
+    if is_active_employee:
+        state = "ready_for_work"
+        blockers = []
+    elif contract_fully_executed and handbook_acknowledged and not classifications:
+        state = "ready_for_work"
+        blockers = []
+    elif "system_issue" in classifications:
+        state = "system_issue_preventing_completion"
+    elif "worker_action" in classifications:
+        state = "action_required_from_you"
+    elif "company_action" in classifications:
+        state = "awaiting_final_company_action"
+    elif "admin_action" in classifications:
+        state = "admin_review_in_progress"
+    else:
+        state = "admin_review_in_progress"
+
+    return state, _EMPLOYMENT_READINESS_LABELS[state], blockers
+# ─────────────────────────────────────────────────────────────────────────────
+
 # Live evidence statuses only (everything else is historical/non-counting)
 _LIVE_EXCLUDED_STATUSES = frozenset({
     "deleted", "superseded", "rejected", "amendment_requested",
@@ -976,17 +1104,42 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
         contract_ack = contract_ack_result if contract_ack_result is not None else {}
     
     contract_state = contract_ack.get("contract_state")
+    _contract_verification_status = (contract_ack or {}).get("verification_status")
+    _contract_rejected = _contract_verification_status == "rejected"
+    _contract_worker_signed = bool(
+        contract_state in ("awaiting_company_countersignature", "fully_executed")
+        or (contract_ack or {}).get("worker_signed_at")
+    )
+    _contract_fully_executed = bool(
+        contract_state == "fully_executed"
+        or _contract_verification_status == "verified"
+    )
+    # Worker-facing state_label — used by UI to avoid saying "Blocked" when the
+    # worker has done their part and the delay is company/admin-side.
+    if _contract_rejected:
+        _contract_state_label = "Action required: please re-sign the updated contract"
+    elif _contract_fully_executed:
+        _contract_state_label = "Contract fully executed"
+    elif _contract_worker_signed:
+        _contract_state_label = "Signed by you — awaiting Osabea countersignature"
+    else:
+        _contract_state_label = "Action required: please review and sign your contract"
     contract_status = {
         "id": "contract_acceptance",
         "name": "Contract Acceptance",
         "type": "contract_acceptance",
-        "rejected": bool(contract_ack and contract_ack.get("verification_status") == "rejected"),
+        "rejected": _contract_rejected,
         "rejection_reason": contract_ack.get("rejection_reason"),
         "rejected_at": contract_ack.get("rejected_at"),
         "rejected_by_name": contract_ack.get("rejected_by_name"),
-        "signed": bool(contract_state in ("awaiting_company_countersignature", "fully_executed")),
+        # NOTE: `signed` kept for backward compatibility (true once worker has signed).
+        # Prefer the explicit `worker_signed` / `fully_executed` booleans in new code.
+        "signed": _contract_worker_signed,
+        "worker_signed": _contract_worker_signed,
+        "fully_executed": _contract_fully_executed,
+        "state_label": _contract_state_label,
         "signed_at": contract_ack.get("worker_signed_at") or contract_ack.get("signed_at") or contract_ack.get("acknowledged_at"),
-        "verified": bool(contract_state == "fully_executed" or (contract_ack and contract_ack.get("verification_status") == "verified")),
+        "verified": _contract_fully_executed,
         "verified_at": contract_ack.get("verified_at") if contract_ack else None,
         "verified_by_name": contract_ack.get("verified_by_name") if contract_ack else None,
         "can_sign": bool(contract_ack.get("verification_status") == "rejected") or contract_state in (None, "", "draft_rendered", "awaiting_worker_signature", "rejected_reopen_required"),
@@ -1029,24 +1182,56 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
         }, {"_id": 0})
         handbook_ack = handbook_ack_result if handbook_ack_result is not None else {}
     
+    _handbook_verification_status = (handbook_ack or {}).get("verification_status")
+    _handbook_acknowledged = bool(
+        handbook_ack
+        and handbook_ack.get("acknowledged")
+        and _handbook_verification_status != "rejected"
+    )
+    _handbook_rejected = bool(handbook_ack and _handbook_verification_status == "rejected")
+    _handbook_verified = bool(handbook_ack and _handbook_verification_status == "verified")
+    _handbook_system_issue = bool(handbook_render_error_detail)
+
+    if _handbook_system_issue:
+        _handbook_state_label = "System issue — Osabea is preparing your handbook. No action needed from you."
+    elif _handbook_rejected:
+        _handbook_state_label = "Action required: please review and re-acknowledge the updated handbook"
+    elif _handbook_verified:
+        _handbook_state_label = "Handbook acknowledged and verified"
+    elif _handbook_acknowledged:
+        _handbook_state_label = "Handbook acknowledged — awaiting admin verification"
+    else:
+        _handbook_state_label = "Action required: please review and acknowledge the handbook"
+
     handbook_status = {
         "id": "handbook_acknowledgement",
         "name": "Employee Handbook Acknowledgement",
         "type": "handbook_acknowledgement",
-        "rejected": bool(handbook_ack and handbook_ack.get("verification_status") == "rejected"),
+        "rejected": _handbook_rejected,
         "rejection_reason": handbook_ack.get("rejection_reason"),
         "rejected_at": handbook_ack.get("rejected_at"),
         "rejected_by_name": handbook_ack.get("rejected_by_name"),
-        "signed": bool(handbook_ack and handbook_ack.get("acknowledged") and handbook_ack.get("verification_status") != "rejected"),
+        "signed": _handbook_acknowledged,
+        "worker_acknowledged": _handbook_acknowledged,
+        "verified": _handbook_verified,
+        "system_issue": _handbook_system_issue,
+        "state_label": _handbook_state_label,
         "signed_at": handbook_ack.get("acknowledged_at") if handbook_ack else None,
-        "verified": bool(handbook_ack and handbook_ack.get("verification_status") == "verified"),
         "verified_at": handbook_ack.get("verified_at") if handbook_ack else None,
         "verified_by_name": handbook_ack.get("verified_by_name") if handbook_ack else None,
-        "can_sign": bool(handbook_ack.get("verification_status") == "rejected") or not bool(handbook_ack and handbook_ack.get("acknowledged")),
-        "status": "rejected" if (handbook_ack and handbook_ack.get("verification_status") == "rejected") else (
-            "verified" if (handbook_ack and handbook_ack.get("verification_status") == "verified") else (
-            "signed" if (handbook_ack and handbook_ack.get("acknowledged")) else "pending"
+        # Worker must not be asked to sign when the underlying template cannot
+        # even be rendered — that is a system/admin issue, not a worker action.
+        "can_sign": (
+            False if _handbook_system_issue else (
+                _handbook_rejected or not _handbook_acknowledged
             )
+        ),
+        "status": (
+            "system_issue" if _handbook_system_issue
+            else "rejected" if _handbook_rejected
+            else "verified" if _handbook_verified
+            else "signed" if _handbook_acknowledged
+            else "pending"
         ),
         "file_url": handbook_ack.get("rendered_file_url"),
         "rendered_file_url": handbook_ack.get("rendered_file_url"),
@@ -1066,6 +1251,8 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
         total_required = unified_status["progress"]["total"]
         total_completed = unified_status["progress"]["completed"]
         unified_blockers = unified_status.get("blockers", [])
+        legal_blockers = unified_status.get("legal_blockers", [])
+        internal_blockers = unified_status.get("internal_blockers", [])
         has_blockers = len(unified_blockers) > 0 or not contract_signed
         
         rtw_canonical_item = next(
@@ -1098,6 +1285,8 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
         progress_percentage = round((total_completed / total_required) * 100) if total_required > 0 else 0
         has_blockers = len(missing_docs) > 0 or len(missing_trainings) > 0 or len(expired_trainings) > 0 or not contract_signed
         unified_blockers = []
+        legal_blockers = []
+        internal_blockers = []
         dbs_canonical_item = None
         identity_canonical_item = None
 
@@ -1194,70 +1383,29 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
 
     status = "READY" if is_active_employee else ("NOT_READY" if has_blockers else "READY")
 
-    # ── Employment Readiness ─────────────────────────────────────────────────
-    # Separate from onboarding progress (which counts docs/training/forms).
-    # Employment readiness is ONLY unblocked when both agreements are fully
-    # executed/verified.  Rejected, pending, or awaiting-countersignature states
-    # all result in a BLOCKED employment status.
-    contract_fully_executed = contract_state == "fully_executed" or bool(
-        contract_ack and contract_ack.get("verification_status") == "verified"
-    ) if 'contract_ack' in dir() else False
-
-    handbook_acknowledged = bool(
-        handbook_ack
-        and handbook_ack.get("acknowledged")
-        and handbook_ack.get("verification_status") not in ("rejected",)
-    ) if 'handbook_ack' in dir() else False
-
-    contract_rejected = bool(
-        contract_ack and contract_ack.get("verification_status") == "rejected"
-    ) if 'contract_ack' in dir() else False
-    handbook_rejected = bool(
-        handbook_ack and handbook_ack.get("verification_status") == "rejected"
-    ) if 'handbook_ack' in dir() else False
-
-    any_agreement_rejected = contract_rejected or handbook_rejected
-
+    # ── Employment Readiness (5-state truth model) ───────────────────────────
+    # Full state machine lives in `compute_employment_readiness()` at module
+    # scope so it can be unit-tested without the DB.  See that helper for the
+    # per-blocker classification / actor rules.
     if is_active_employee:
         employment_readiness = "ready_for_work"
-        employment_readiness_label = "Ready for Work"
+        employment_readiness_label = _EMPLOYMENT_READINESS_LABELS["ready_for_work"]
         employment_readiness_blockers = []
-    elif contract_fully_executed and handbook_acknowledged:
-        employment_readiness = "ready_for_work"
-        employment_readiness_label = "Ready for Work"
-        employment_readiness_blockers = []
-    elif any_agreement_rejected:
-        employment_readiness = "blocked"
-        employment_readiness_label = "Blocked"
-        employment_readiness_blockers = []
-        if contract_rejected:
-            employment_readiness_blockers.append({
-                "type": "contract_rejected",
-                "label": "Contract rejected — action required",
-            })
-        if handbook_rejected:
-            employment_readiness_blockers.append({
-                "type": "handbook_rejected",
-                "label": "Handbook acknowledgement rejected — action required",
-            })
-    elif not contract_fully_executed or not handbook_acknowledged:
-        employment_readiness = "awaiting_agreements"
-        employment_readiness_label = "Awaiting Agreements"
-        employment_readiness_blockers = []
-        if not contract_fully_executed:
-            employment_readiness_blockers.append({
-                "type": "contract_pending",
-                "label": "Contract not yet fully executed",
-            })
-        if not handbook_acknowledged:
-            employment_readiness_blockers.append({
-                "type": "handbook_pending",
-                "label": "Handbook not yet acknowledged",
-            })
     else:
-        employment_readiness = "blocked"
-        employment_readiness_label = "Blocked"
-        employment_readiness_blockers = []
+        (
+            employment_readiness,
+            employment_readiness_label,
+            employment_readiness_blockers,
+        ) = compute_employment_readiness(
+            is_active_employee=False,
+            contract_worker_signed=_contract_worker_signed,
+            contract_fully_executed=_contract_fully_executed,
+            contract_rejected=_contract_rejected,
+            handbook_acknowledged=_handbook_acknowledged,
+            handbook_verified=_handbook_verified,
+            handbook_rejected=_handbook_rejected,
+            handbook_system_issue=_handbook_system_issue,
+        )
     # ─────────────────────────────────────────────────────────────────────────
 
     
@@ -1551,6 +1699,8 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             "required": total_required
         },
         "unified_blockers": unified_blockers,
+        "legal_blockers": legal_blockers,
+        "internal_blockers": internal_blockers,
         "forms": forms_status,
         "missing_documents": missing_docs,
         "completed_documents": completed_docs,

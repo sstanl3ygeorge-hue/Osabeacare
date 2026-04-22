@@ -37,15 +37,13 @@ const TRAINING_STATUS_CONFIG = {
   missing:         { badge: 'Required',              badgeCls: 'bg-slate-100 text-slate-600',   cardBg: 'bg-slate-50 border-slate-200',   Icon: Circle,        iconCls: 'text-slate-400',  iconBg: 'bg-slate-100',  showUpload: true, uploadLabel: 'Upload' },
 };
 
-// Format date helper
+// Format date helper — guards against `new Date('bad')` which yields NaN and
+// renders literally as "Invalid Date" if passed to toLocaleDateString().
 const formatDate = (dateStr) => {
   if (!dateStr) return '-';
-  try {
-    const date = new Date(dateStr);
-    return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
-  } catch {
-    return dateStr;
-  }
+  const date = new Date(dateStr);
+  if (isNaN(date.getTime())) return '-';
+  return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 };
 
 // Operational document guidance text
@@ -166,7 +164,9 @@ function EmploymentGapsSection() {
 
   const formatGapDate = (d) => {
     if (!d) return '?';
-    try { return new Date(d).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }); } catch { return d; }
+    const date = new Date(d);
+    if (isNaN(date.getTime())) return '?';
+    return date.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' });
   };
 
   const statusBadge = (gap) => {
@@ -1552,58 +1552,86 @@ export default function WorkerDashboard() {
         )}
 
         {/* Employment Readiness Banner - shown when onboarding is in progress or complete */}
-        {!isActiveEmployee && employment_readiness && (
-          <Card className={`shadow-md border-0 border-l-4 ${
-            employment_readiness === 'ready_for_work'
-              ? 'border-l-green-500 bg-green-50/60'
-              : employment_readiness === 'blocked'
-              ? 'border-l-red-500 bg-red-50/60'
-              : 'border-l-amber-500 bg-amber-50/60'
-          }`} data-testid="employment-readiness-banner">
+        {!isActiveEmployee && employment_readiness && (() => {
+          // Canonical 5-state model — keep in sync with backend worker_dashboard.py
+          //   ready_for_work
+          //   awaiting_final_company_action
+          //   action_required_from_you
+          //   admin_review_in_progress
+          //   system_issue_preventing_completion
+          // Legacy: 'blocked', 'awaiting_agreements' — mapped to closest canonical state
+          const _canonical = (s) => {
+            if (s === 'blocked') return 'action_required_from_you';
+            if (s === 'awaiting_agreements') return 'admin_review_in_progress';
+            return s;
+          };
+          const state = _canonical(employment_readiness);
+          const READINESS_UI = {
+            ready_for_work: {
+              borderCls: 'border-l-green-500 bg-green-50/60',
+              iconBg: 'bg-green-100', Icon: ShieldCheck, iconCls: 'text-green-600',
+              textCls: 'text-green-800', badgeCls: 'bg-green-100 text-green-700',
+              badgeLabel: 'Ready for Work',
+              blockerTextCls: 'text-green-700',
+            },
+            awaiting_final_company_action: {
+              borderCls: 'border-l-blue-500 bg-blue-50/60',
+              iconBg: 'bg-blue-100', Icon: Clock, iconCls: 'text-blue-600',
+              textCls: 'text-blue-800', badgeCls: 'bg-blue-100 text-blue-700',
+              badgeLabel: 'Awaiting final company action',
+              blockerTextCls: 'text-blue-700',
+            },
+            action_required_from_you: {
+              borderCls: 'border-l-amber-500 bg-amber-50/60',
+              iconBg: 'bg-amber-100', Icon: AlertCircle, iconCls: 'text-amber-600',
+              textCls: 'text-amber-800', badgeCls: 'bg-amber-100 text-amber-700',
+              badgeLabel: 'Action required from you',
+              blockerTextCls: 'text-amber-700',
+            },
+            admin_review_in_progress: {
+              borderCls: 'border-l-purple-500 bg-purple-50/60',
+              iconBg: 'bg-purple-100', Icon: Clock, iconCls: 'text-purple-600',
+              textCls: 'text-purple-800', badgeCls: 'bg-purple-100 text-purple-700',
+              badgeLabel: 'Admin review in progress',
+              blockerTextCls: 'text-purple-700',
+            },
+            system_issue_preventing_completion: {
+              borderCls: 'border-l-slate-400 bg-slate-50/60',
+              iconBg: 'bg-slate-100', Icon: AlertTriangle, iconCls: 'text-slate-600',
+              textCls: 'text-slate-800', badgeCls: 'bg-slate-100 text-slate-700',
+              badgeLabel: 'System issue preventing completion',
+              blockerTextCls: 'text-slate-700',
+            },
+          };
+          const ui = READINESS_UI[state] || READINESS_UI.admin_review_in_progress;
+          const IconCmp = ui.Icon;
+          // Per-blocker colour driven by classification — never blame worker for
+          // admin/company/system-side delays.
+          const BLOCKER_CLS = {
+            worker_action:  'text-amber-700',
+            company_action: 'text-blue-700',
+            admin_action:   'text-purple-700',
+            system_issue:   'text-slate-700',
+          };
+          return (
+          <Card className={`shadow-md border-0 border-l-4 ${ui.borderCls}`} data-testid="employment-readiness-banner">
             <CardContent className="py-4">
               <div className="flex items-center gap-3">
-                <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${
-                  employment_readiness === 'ready_for_work'
-                    ? 'bg-green-100'
-                    : employment_readiness === 'blocked'
-                    ? 'bg-red-100'
-                    : 'bg-amber-100'
-                }`}>
-                  {employment_readiness === 'ready_for_work'
-                    ? <ShieldCheck className="h-5 w-5 text-green-600" />
-                    : employment_readiness === 'blocked'
-                    ? <AlertCircle className="h-5 w-5 text-red-600" />
-                    : <Clock className="h-5 w-5 text-amber-600" />
-                  }
+                <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${ui.iconBg}`}>
+                  <IconCmp className={`h-5 w-5 ${ui.iconCls}`} />
                 </div>
                 <div className="flex-1">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className={`font-semibold text-sm ${
-                      employment_readiness === 'ready_for_work'
-                        ? 'text-green-800'
-                        : employment_readiness === 'blocked'
-                        ? 'text-red-800'
-                        : 'text-amber-800'
-                    }`}>
-                      Employment Status: {employment_readiness_label || employment_readiness}
+                    <span className={`font-semibold text-sm ${ui.textCls}`}>
+                      Employment Status: {employment_readiness_label || ui.badgeLabel}
                     </span>
-                    <Badge className={`text-xs ${
-                      employment_readiness === 'ready_for_work'
-                        ? 'bg-green-100 text-green-700'
-                        : employment_readiness === 'blocked'
-                        ? 'bg-red-100 text-red-700'
-                        : 'bg-amber-100 text-amber-700'
-                    }`}>
-                      {employment_readiness === 'ready_for_work' ? 'Ready for Work'
-                        : employment_readiness === 'blocked' ? 'Blocked'
-                        : 'Awaiting Agreements'}
-                    </Badge>
+                    <Badge className={`text-xs ${ui.badgeCls}`}>{ui.badgeLabel}</Badge>
                   </div>
                   {employment_readiness_blockers.length > 0 && (
                     <ul className="mt-1 space-y-0.5">
                       {employment_readiness_blockers.map((b, i) => (
                         <li key={i} className={`text-xs flex items-center gap-1 ${
-                          employment_readiness === 'blocked' ? 'text-red-700' : 'text-amber-700'
+                          BLOCKER_CLS[b.classification] || ui.blockerTextCls
                         }`}>
                           <AlertTriangle className="h-3 w-3 flex-shrink-0" />
                           {b.label}
@@ -1611,14 +1639,15 @@ export default function WorkerDashboard() {
                       ))}
                     </ul>
                   )}
-                  {employment_readiness === 'ready_for_work' && (
+                  {state === 'ready_for_work' && (
                     <p className="text-xs text-green-700 mt-0.5">All agreements complete — you are cleared for employment.</p>
                   )}
                 </div>
               </div>
             </CardContent>
           </Card>
-        )}
+          );
+        })()}
 
         {/* Forms Section - Only for onboarding */}
         {!isActiveEmployee && <FormsSection />}
@@ -2637,7 +2666,9 @@ export default function WorkerDashboard() {
                           )}
                             {!agreement.signed && !agreement.verified && (
                               <p className="text-xs text-slate-500 mt-0.5">
-                                {agreement.id === 'contract_acceptance'
+                                {agreement.system_issue
+                                  ? 'Osabea is preparing this document. No action needed from you right now.'
+                                  : agreement.id === 'contract_acceptance'
                                   ? (contractEligibility?.can_sign
                                     ? 'Review the contract PDF, then sign when you are ready.'
                                     : 'You can review the contract now. Signing unlocks when earlier onboarding steps are complete.')
@@ -2677,7 +2708,7 @@ export default function WorkerDashboard() {
                             </Button>
                           </>
                         )}
-                        {agreement.id === 'handbook_acknowledgement' && !agreement.signed && !agreement.verified && (
+                        {agreement.id === 'handbook_acknowledgement' && !agreement.signed && !agreement.verified && !agreement.system_issue && (
                           <Button
                             size="sm"
                             className="gap-1"
@@ -2689,11 +2720,13 @@ export default function WorkerDashboard() {
                         )}
                         <Badge className={`text-xs ${
                           agreement.verified ? 'bg-green-100 text-green-700' :
+                          agreement.system_issue ? 'bg-slate-100 text-slate-700' :
                           agreement.rejected ? 'bg-red-100 text-red-700' :
                           agreement.signed ? 'bg-blue-100 text-blue-700' :
                           'bg-slate-100 text-slate-600'
                         }`}>
                             {agreement.verified ? 'Fully executed' :
+                             agreement.system_issue ? 'Being prepared by Osabea' :
                              agreement.rejected ? 'Action required' :
                              agreement.contract_state === 'awaiting_company_countersignature' ? 'Waiting for Osabea signature' :
                              agreement.signed ? 'Signed' :

@@ -40,6 +40,11 @@ from induction_definitions import (
     get_induction_item_for_training,
     get_employee_induction_status,
 )
+from agreement_document_service import (
+    HANDBOOK_AGREEMENT_TYPE,
+    HandbookRenderError,
+    build_agreement_rendering,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -161,10 +166,65 @@ CLEAR_LABELS = {
     "prevent": "Prevent Training",
 }
 
+LEGAL_BLOCKER_IDS: frozenset[str] = frozenset({
+    "right_to_work",
+    "dbs",
+    "identity",
+    "proof_of_address",
+    "reference_1",
+    "reference_2",
+    "interview_record",
+    "staff_health_questionnaire",
+    "employment_gaps",
+    "induction",
+    "mandatory_training",
+    "nmc_registration",
+    "professional_indemnity",
+    "medication_competency",
+    "clinical_competency",
+})
+
+INTERNAL_BLOCKER_IDS: frozenset[str] = frozenset({
+    "contract",
+    "handbook",
+    "internal_policy_acknowledgement",
+})
+
 
 def get_clear_label(item_id: str) -> str:
     """Get user-friendly label for an item (Easy to Learn - 5 E's)"""
     return CLEAR_LABELS.get(item_id, item_id.replace("_", " ").title())
+
+
+def _classify_blocker(item_id: str, category: str) -> str:
+    """Return the canonical blocker class for readiness/audit surfaces."""
+    if item_id in INTERNAL_BLOCKER_IDS or category == "agreements":
+        return "internal"
+    if item_id in LEGAL_BLOCKER_IDS:
+        return "legal"
+    return "legal"
+
+
+def _build_blocker(
+    item_id: str,
+    gate: str,
+    label: str,
+    reason: str,
+    category: str,
+    severity: str,
+    **extra: Any,
+) -> dict:
+    blocker = {
+        "id": item_id,
+        "gate": gate,
+        "label": label,
+        "reason": reason,
+        "category": category,
+        "severity": severity,
+        "blocker_class": _classify_blocker(item_id, category),
+    }
+    blocker.update(extra)
+    return blocker
 
 
 # =============================================================================
@@ -957,17 +1017,17 @@ async def get_unified_employee_status(
                 blocker_msg = f"{get_clear_label(req_id)}: Missing"
                 severity = "critical"
             
-            blockers.append({
-                "id": req_id,
-                "gate": req_id,
-                "label": get_clear_label(req_id),
-                "reason": blocker_msg,
-                "category": "documents",
-                "has_upload": len(matching_docs) > 0,
-                "has_verification": req_id in [v.get("requirement_id") for v in verification_docs],
-                "verification_status": verification_status,
-                "severity": severity
-            })
+            blockers.append(_build_blocker(
+                req_id,
+                req_id,
+                get_clear_label(req_id),
+                blocker_msg,
+                "documents",
+                severity,
+                has_upload=len(matching_docs) > 0,
+                has_verification=req_id in [v.get("requirement_id") for v in verification_docs],
+                verification_status=verification_status,
+            ))
     
     # ==========================================================================
     # CHECK 2: REFERENCES (2 required)
@@ -1021,23 +1081,23 @@ async def get_unified_employee_status(
     categories["references"]["completed"] = (1 if ref1_verified else 0) + (1 if ref2_verified else 0)
     
     if not ref1_verified:
-        blockers.append({
-            "id": "reference_1",
-            "gate": "reference_1",
-            "label": "Reference 1",
-            "reason": "Reference 1: Not verified",
-            "category": "references",
-            "severity": "critical"
-        })
+        blockers.append(_build_blocker(
+            "reference_1",
+            "reference_1",
+            "Reference 1",
+            "Reference 1: Not verified",
+            "references",
+            "critical",
+        ))
     if not ref2_verified:
-        blockers.append({
-            "id": "reference_2",
-            "gate": "reference_2",
-            "label": "Reference 2",
-            "reason": "Reference 2: Not verified",
-            "category": "references",
-            "severity": "critical"
-        })
+        blockers.append(_build_blocker(
+            "reference_2",
+            "reference_2",
+            "Reference 2",
+            "Reference 2: Not verified",
+            "references",
+            "critical",
+        ))
     
     # ==========================================================================
     # CHECK 3: MANDATORY TRAINING (8 items)
@@ -1077,27 +1137,27 @@ async def get_unified_employee_status(
             })
 
             if is_blocking:
-                blockers.append({
-                    "id": t_id,
-                    "gate": "mandatory_training",
-                    "label": t_name,
-                    "reason": training_item.get("detail") or f"{t_name}: Not compliant",
-                    "category": "training",
-                    "severity": "pending" if status in {"awaiting_review", "completed"} else "critical"
-                })
+                blockers.append(_build_blocker(
+                    t_id,
+                    "mandatory_training",
+                    t_name,
+                    training_item.get("detail") or f"{t_name}: Not compliant",
+                    "training",
+                    "pending" if status in {"awaiting_review", "completed"} else "critical",
+                ))
 
         checks["mandatory_training"] = training_eval.get("blockerCount", 0) == 0
     except Exception as exc:
         categories["training"]["completed"] = 0
         checks["mandatory_training"] = False
-        blockers.append({
-            "id": "mandatory_training",
-            "gate": "mandatory_training",
-            "label": "Mandatory Training",
-            "reason": f"Cannot assess mandatory training: {str(exc)}",
-            "category": "training",
-            "severity": "critical"
-        })
+        blockers.append(_build_blocker(
+            "mandatory_training",
+            "mandatory_training",
+            "Mandatory Training",
+            f"Cannot assess mandatory training: {str(exc)}",
+            "training",
+            "critical",
+        ))
     
     # ==========================================================================
     # CHECK 4: INDUCTION CHECKLIST (15 Care Certificate Standards)
@@ -1120,14 +1180,14 @@ async def get_unified_employee_status(
     checks["induction"] = not induction_status["blocking"]
     
     if induction_status["blocking"]:
-        blockers.append({
-            "id": "induction",
-            "gate": "induction",
-            "label": f"Induction Checklist ({induction_status['completed']}/15 complete)",
-            "reason": f"Induction: {induction_status['completed']} of 15 Care Certificate standards complete",
-            "category": "induction",
-            "severity": "pending" if induction_status["completed"] > 0 else "critical"
-        })
+        blockers.append(_build_blocker(
+            "induction",
+            "induction",
+            f"Induction Checklist ({induction_status['completed']}/15 complete)",
+            f"Induction: {induction_status['completed']} of 15 Care Certificate standards complete",
+            "induction",
+            "pending" if induction_status["completed"] > 0 else "critical",
+        ))
     
     # ==========================================================================
     # CHECK 5: FORMS (Interview Record, Health Questionnaire)
@@ -1188,14 +1248,14 @@ async def get_unified_employee_status(
             # Determine severity based on submission status
             severity = "pending" if is_submitted else "critical"
             reason = f"{get_clear_label(form_id)}: Awaiting verification" if is_submitted else f"{get_clear_label(form_id)}: Not completed"
-            blockers.append({
-                "id": form_id,
-                "gate": form_id,
-                "label": get_clear_label(form_id),
-                "reason": reason,
-                "category": "forms",
-                "severity": severity
-            })
+            blockers.append(_build_blocker(
+                form_id,
+                form_id,
+                get_clear_label(form_id),
+                reason,
+                "forms",
+                severity,
+            ))
     
     # ==========================================================================
     # CHECK 6: AGREEMENTS (Contract, Handbook)
@@ -1207,7 +1267,14 @@ async def get_unified_employee_status(
     for ack in agreements:
         ack_type = (ack.get("agreement_type") or "").lower()
         if "contract" in ack_type:
-            if ack.get("status") in ["signed", "submitted", "verified"]:
+            if ack.get("status") in [
+                "signed",
+                "submitted",
+                "verified",
+                "awaiting_company_countersignature",
+                "fully_executed",
+                "rejected",
+            ]:
                 contract_ack = ack
                 break
 
@@ -1230,8 +1297,20 @@ async def get_unified_employee_status(
         if _contract_sub:
             contract_ack = _contract_sub  # treat as signed
 
-    contract_signed = bool(contract_ack) or employee.get("contract_signed", False)
-    checks["contract"] = contract_signed
+    contract_state = (contract_ack or {}).get("contract_state")
+    contract_verification_status = (contract_ack or {}).get("verification_status")
+    contract_worker_signed = bool(
+        (contract_ack or {}).get("worker_signed_contract_pdf_url")
+        or (contract_ack or {}).get("worker_signed_at")
+        or contract_state == "awaiting_company_countersignature"
+        or contract_state == "fully_executed"
+    )
+    contract_fully_executed = bool(
+        contract_state == "fully_executed"
+        or contract_verification_status == "verified"
+    )
+    contract_rejected = bool(contract_verification_status == "rejected")
+    checks["contract"] = contract_fully_executed
     
     # Handbook
     # Check legacy acknowledgements first, then template-based submissions.
@@ -1239,7 +1318,7 @@ async def get_unified_employee_status(
     for ack in agreements:
         ack_type = (ack.get("agreement_type") or "").lower()
         if "handbook" in ack_type:
-            if ack.get("status") in ["acknowledged", "signed", "submitted"]:
+            if ack.get("status") in ["acknowledged", "signed", "submitted", "verified", "rejected"]:
                 handbook_ack = ack
                 break
 
@@ -1255,33 +1334,109 @@ async def get_unified_employee_status(
         if _handbook_sub:
             handbook_ack = _handbook_sub
 
-    handbook_acknowledged = bool(handbook_ack)
+    handbook_render_issue = None
+    try:
+        await build_agreement_rendering(db, employee, HANDBOOK_AGREEMENT_TYPE)
+    except HandbookRenderError as exc:
+        handbook_render_issue = str(exc)
+    except Exception:
+        # Keep UCE resilient; an unexpected render exception should not break readiness computation.
+        handbook_render_issue = None
+
+    handbook_acknowledged = bool(
+        handbook_ack
+        and handbook_ack.get("acknowledged")
+        and handbook_ack.get("verification_status") != "rejected"
+    )
+    handbook_rejected = bool(handbook_ack and handbook_ack.get("verification_status") == "rejected")
     checks["handbook"] = handbook_acknowledged
 
     categories["agreements"]["items"] = [
-        {"id": "contract", "name": "Employment Contract", "completed": contract_signed},
-        {"id": "handbook", "name": "Employee Handbook", "completed": handbook_acknowledged},
-    ]
-    categories["agreements"]["completed"] = (1 if contract_signed else 0) + (1 if handbook_acknowledged else 0)
-
-    if not contract_signed:
-        blockers.append({
+        {
             "id": "contract",
-            "gate": "contract_signed",
-            "label": "Employment Contract",
-            "reason": "Employment Contract: Not signed by worker",
-            "category": "agreements",
-            "severity": "critical"
-        })
-    if not handbook_acknowledged:
-        blockers.append({
+            "name": "Employment Contract",
+            "completed": contract_fully_executed,
+            "status": contract_state or ("rejected" if contract_rejected else "awaiting_worker_signature"),
+            "worker_signed": contract_worker_signed,
+            "awaiting_company_countersignature": contract_state == "awaiting_company_countersignature",
+        },
+        {
             "id": "handbook",
-            "gate": "handbook_acknowledged",
-            "label": "Employee Handbook",
-            "reason": "Employee Handbook: Not acknowledged by worker",
-            "category": "agreements",
-            "severity": "required"
-        })
+            "name": "Employee Handbook",
+            "completed": handbook_acknowledged,
+            "status": "rejected" if handbook_rejected else ("acknowledged" if handbook_acknowledged else "pending"),
+            "render_issue": handbook_render_issue,
+        },
+    ]
+    categories["agreements"]["completed"] = (1 if contract_fully_executed else 0) + (1 if handbook_acknowledged else 0)
+
+    if contract_rejected:
+        blockers.append(_build_blocker(
+            "contract",
+            "contract_signed",
+            "Employment Contract",
+            "Employment Contract: Rejected and reopened for worker signature",
+            "agreements",
+            "required",
+            contract_state=contract_state,
+        ))
+    elif contract_state == "awaiting_company_countersignature":
+        blockers.append(_build_blocker(
+            "contract",
+            "contract_countersignature",
+            "Employment Contract",
+            "Employment Contract: Awaiting company countersignature",
+            "agreements",
+            "required",
+            contract_state=contract_state,
+        ))
+    elif not contract_fully_executed:
+        blockers.append(_build_blocker(
+            "contract",
+            "contract_signed",
+            "Employment Contract",
+            "Employment Contract: Awaiting worker signature",
+            "agreements",
+            "critical",
+            contract_state=contract_state or "awaiting_worker_signature",
+        ))
+
+    if handbook_render_issue and handbook_rejected:
+        blockers.append(_build_blocker(
+            "handbook",
+            "handbook_acknowledged",
+            "Employee Handbook",
+            f"Employee Handbook: Acknowledgement rejected and PDF unavailable because {handbook_render_issue}",
+            "agreements",
+            "required",
+        ))
+    elif handbook_render_issue:
+        blockers.append(_build_blocker(
+            "handbook",
+            "handbook_render",
+            "Employee Handbook",
+            f"Employee Handbook: PDF unavailable because {handbook_render_issue}",
+            "agreements",
+            "required",
+        ))
+    elif handbook_rejected:
+        blockers.append(_build_blocker(
+            "handbook",
+            "handbook_acknowledged",
+            "Employee Handbook",
+            "Employee Handbook: Acknowledgement rejected - worker action required",
+            "agreements",
+            "required",
+        ))
+    elif not handbook_acknowledged:
+        blockers.append(_build_blocker(
+            "handbook",
+            "handbook_acknowledged",
+            "Employee Handbook",
+            "Employee Handbook: Awaiting worker acknowledgement",
+            "agreements",
+            "required",
+        ))
     
     # ==========================================================================
     # CHECK 7: EMPLOYMENT GAPS (if applicable)
@@ -1321,15 +1476,15 @@ async def get_unified_employee_status(
             blocker_reason = f"{gap_evaluation.get('rejected_count')} employment gap explanation(s) rejected"
         elif gap_evaluation.get("needs_info_count", 0) > 0:
             blocker_reason = f"More information requested for {gap_evaluation.get('needs_info_count')} employment gap(s)"
-        blockers.append({
-            "id": "employment_gaps",
-            "gate": "employment_gaps",
-            "label": "Employment Gaps",
-            "reason": f"Employment Gaps: {blocker_reason}",
-            "category": "other",
-            "severity": "pending",
-            "count": gap_count
-        })
+        blockers.append(_build_blocker(
+            "employment_gaps",
+            "employment_gaps",
+            "Employment Gaps",
+            f"Employment Gaps: {blocker_reason}",
+            "other",
+            "pending",
+            count=gap_count,
+        ))
     
     # ==========================================================================
     # CHECK 8: PROFESSIONAL REGISTRATION (Nurse-specific)
@@ -1365,14 +1520,14 @@ async def get_unified_employee_status(
         checks["professional_registration"] = nmc_verified
         
         if not nmc_verified:
-            blockers.append({
-                "id": "nmc_registration",
-                "gate": "nmc_registration",
-                "label": "NMC Registration",
-                "reason": "NMC Registration: Not verified or expired",
-                "category": "professional",
-                "severity": "critical"
-            })
+            blockers.append(_build_blocker(
+                "nmc_registration",
+                "nmc_registration",
+                "NMC Registration",
+                "NMC Registration: Not verified or expired",
+                "professional",
+                "critical",
+            ))
         
         # Professional Indemnity Insurance
         indemnity_docs = find_docs_for_requirement("professional_indemnity")
@@ -1380,14 +1535,14 @@ async def get_unified_employee_status(
         checks["professional_indemnity"] = indemnity_verified
         
         if not indemnity_verified:
-            blockers.append({
-                "id": "professional_indemnity",
-                "gate": "professional_indemnity",
-                "label": "Professional Indemnity Insurance",
-                "reason": "Professional Indemnity Insurance: Not uploaded or verified",
-                "category": "professional",
-                "severity": "critical"
-            })
+            blockers.append(_build_blocker(
+                "professional_indemnity",
+                "professional_indemnity",
+                "Professional Indemnity Insurance",
+                "Professional Indemnity Insurance: Not uploaded or verified",
+                "professional",
+                "critical",
+            ))
 
         # Medication Administration Competency (nurse-specific gate)
         # All resolution logic is delegated to get_employee_competency() — do NOT inline here.
@@ -1395,14 +1550,14 @@ async def get_unified_employee_status(
         checks["medication_competency"] = med_comp_complete
 
         if not med_comp_complete:
-            blockers.append({
-                "id": "medication_competency",
-                "gate": "medication_competency",
-                "label": "Medication Administration Competency",
-                "reason": "Medication Administration Competency: Not completed or verified",
-                "category": "competency",
-                "severity": "critical"
-            })
+            blockers.append(_build_blocker(
+                "medication_competency",
+                "medication_competency",
+                "Medication Administration Competency",
+                "Medication Administration Competency: Not completed or verified",
+                "competency",
+                "critical",
+            ))
 
         # Clinical Competency Assessment (nurse-specific gate)
         # All resolution logic is delegated to get_employee_competency() — do NOT inline here.
@@ -1410,14 +1565,14 @@ async def get_unified_employee_status(
         checks["clinical_competency"] = clin_comp_complete
 
         if not clin_comp_complete:
-            blockers.append({
-                "id": "clinical_competency",
-                "gate": "clinical_competency",
-                "label": "Clinical Competency Assessment",
-                "reason": "Clinical Competency Assessment: Not completed or verified",
-                "category": "competency",
-                "severity": "critical"
-            })
+            blockers.append(_build_blocker(
+                "clinical_competency",
+                "clinical_competency",
+                "Clinical Competency Assessment",
+                "Clinical Competency Assessment: Not completed or verified",
+                "competency",
+                "critical",
+            ))
     
     # ==========================================================================
     # CALCULATE OVERALL PROGRESS
@@ -1463,6 +1618,8 @@ async def get_unified_employee_status(
     # Sort blockers by severity (critical first)
     severity_order = {"critical": 0, "pending": 1, "warning": 2}
     blockers.sort(key=lambda b: severity_order.get(b.get("severity", "warning"), 2))
+    legal_blockers = [b for b in blockers if b.get("blocker_class") == "legal"]
+    internal_blockers = [b for b in blockers if b.get("blocker_class") == "internal"]
     
     result = {
         "employee_id": emp_id,
@@ -1479,6 +1636,10 @@ async def get_unified_employee_status(
         # SINGLE blocker list (ONLY truly incomplete items)
         "blockers": blockers,
         "blocker_count": len(blockers),
+        "legal_blockers": legal_blockers,
+        "legal_blocker_count": len(legal_blockers),
+        "internal_blockers": internal_blockers,
+        "internal_blocker_count": len(internal_blockers),
         
         # Category breakdown
         "categories": {
@@ -1546,6 +1707,10 @@ def filter_for_worker(data: dict) -> dict:
         "progress": data.get("progress"),
         "blockers": data.get("blockers"),  # Same blockers so worker knows what to do
         "blocker_count": data.get("blocker_count"),
+        "legal_blockers": data.get("legal_blockers"),
+        "legal_blocker_count": data.get("legal_blocker_count"),
+        "internal_blockers": data.get("internal_blockers"),
+        "internal_blocker_count": data.get("internal_blocker_count"),
         "categories": data.get("categories"),
         "category_details": data.get("category_details"),  # Worker needs this for dashboard sync
         "is_work_ready": data.get("is_work_ready"),

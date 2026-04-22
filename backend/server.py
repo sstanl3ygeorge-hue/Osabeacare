@@ -23799,6 +23799,10 @@ async def get_unified_progress(employee_id: str, user: dict = Depends(get_curren
         "category_details": unified_status.get("category_details", {}),  # Include full details
         "blockers": [b["reason"] for b in unified_status["blockers"]],  # String list for compatibility
         "blocker_details": unified_status["blockers"],  # Full blocker objects with severity
+        "legal_blockers": [b["reason"] for b in unified_status.get("legal_blockers", [])],
+        "legal_blocker_details": unified_status.get("legal_blockers", []),
+        "internal_blockers": [b["reason"] for b in unified_status.get("internal_blockers", [])],
+        "internal_blocker_details": unified_status.get("internal_blockers", []),
         "is_work_ready": unified_status["is_work_ready"],
         "can_promote": unified_status["can_promote"],
         "role_requires_professional_registration": requires_prof_reg,

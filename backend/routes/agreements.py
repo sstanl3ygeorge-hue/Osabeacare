@@ -29,6 +29,11 @@ from .dependencies import (
 
 logger = logging.getLogger(__name__)
 
+AGREEMENT_TEMPLATE_IDS = {
+    "contract_acceptance": "ZERO_HOUR_CONTRACT_V1",
+    "handbook_acknowledgement": "EMPLOYEE_HANDBOOK_ACKNOWLEDGEMENT_V1",
+}
+
 # ==================== ROUTER ====================
 router = APIRouter(tags=["Agreements"])
 
@@ -254,8 +259,13 @@ async def regenerate_agreement_acknowledgement(
     )
     if not existing:
         raise HTTPException(status_code=404, detail="Acknowledgement not found")
+    if not employee_id:
+        raise HTTPException(status_code=400, detail="Employee ID is required")
 
     agreement_type = existing.get("agreement_type")
+    template_id = existing.get("template_id") or AGREEMENT_TEMPLATE_IDS.get(agreement_type)
+    if not template_id:
+        raise HTTPException(status_code=400, detail="Agreement template is not configured")
     # CQC: do not let regenerate be used to bypass a worker-signed contract.
     if agreement_type == "contract_acceptance":
         raise HTTPException(
@@ -272,19 +282,33 @@ async def regenerate_agreement_acknowledgement(
 
     now_iso = datetime.now(timezone.utc).isoformat()
 
-    # Snapshot the old row into the audit log then delete it, so that
-    # ensure_agreement_rendered() below is free to create a fresh row under
-    # the unique (employee_id, agreement_type) filter without collision.
+    # Snapshot the old row into the audit log and reset rejected rows back to a
+    # generation-ready pending state before re-rendering.
     snapshot = {k: v for k, v in existing.items() if k != "_id"}
+    if existing.get("status") == "rejected" or existing.get("verification_status") == "rejected":
+        await db.agreement_acknowledgements.update_one(
+            {"id": acknowledgement_id, "employee_id": employee_id},
+            {
+                "$set": {
+                    "status": "pending",
+                    "verification_status": "pending",
+                    "template_id": template_id,
+                    "updated_at": now_iso,
+                }
+            },
+        )
 
-    await db.agreement_acknowledgements.delete_one(
-        {"id": acknowledgement_id, "employee_id": employee_id},
-    )
-
-    # Re-render cleanly. ensure_agreement_rendered() will upsert a fresh row
-    # because no active row now exists for (employee_id, agreement_type).
     from agreement_document_service import ensure_agreement_rendered
-    fresh = await ensure_agreement_rendered(db, employee, agreement_type)
+    try:
+        fresh = await ensure_agreement_rendered(db, employee, agreement_type)
+    except Exception as exc:
+        logger.exception(
+            "Failed to regenerate agreement employee_id=%s acknowledgement_id=%s agreement_type=%s",
+            employee_id,
+            acknowledgement_id,
+            agreement_type,
+        )
+        raise HTTPException(status_code=500, detail="Failed to regenerate agreement") from exc
 
     await log_audit_action(
         user["user_id"],

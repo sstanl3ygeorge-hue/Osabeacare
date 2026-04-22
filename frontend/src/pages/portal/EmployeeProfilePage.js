@@ -58,7 +58,7 @@ import {
   MoreHorizontal, MoreVertical, Edit, Archive, Trash2, RotateCcw, FileDown, Save,
   Download, RefreshCw, FileArchive, FileSpreadsheet, Printer, FileSearch,
   Camera, Replace, FileX, ClipboardCheck, FormInput, ChevronRight,
-  Briefcase, UserCheck, FileWarning, CalendarClock, Send, ExternalLink
+  Briefcase, UserCheck, FileWarning, CalendarClock, Send
 } from 'lucide-react';
 import { FileUploaderInline } from '../../components/ui/file-uploader';
 import { formatBackendDate, formatBackendDateTime, parseBackendDate } from '../../lib/dateUtils';
@@ -780,16 +780,6 @@ export default function EmployeeProfilePage() {
     }
   };
 
-  const handleCopyWorkerCvUploadLink = async () => {
-    const workerUploadUrl = `${window.location.origin}/worker/login`;
-    try {
-      await navigator.clipboard.writeText(workerUploadUrl);
-      toast.success('Worker upload link copied');
-    } catch (err) {
-      window.prompt('Copy the worker upload link:', workerUploadUrl);
-    }
-  };
-  
   // Admin approves CV after review
   const handleApproveCv = async () => {
     setCvReviewLoading(true);
@@ -5942,15 +5932,10 @@ export default function EmployeeProfilePage() {
                             {cvReviewLoading ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <FileCheck className="h-4 w-4 mr-1" />}
                             Link existing CV
                           </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={handleCopyWorkerCvUploadLink}
-                          >
-                            <ExternalLink className="h-4 w-4 mr-1" />
-                            Copy worker upload link
-                          </Button>
                         </div>
+                        <p className="mt-3 text-xs text-blue-700">
+                          If no linked PDF is available, the worker uploads the CV from their own dashboard.
+                        </p>
                       </div>
                     ) : cvLegacyNonPdfOnly ? (
                       <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4">
@@ -5958,16 +5943,9 @@ export default function EmployeeProfilePage() {
                         <p className="mt-1 text-xs text-amber-700">
                           A DOC or DOCX CV-like file exists as supporting evidence, but only a PDF worker upload can become the canonical CV for employment review.
                         </p>
-                        <div className="mt-3">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={handleCopyWorkerCvUploadLink}
-                          >
-                            <ExternalLink className="h-4 w-4 mr-1" />
-                            Copy worker upload link
-                          </Button>
-                        </div>
+                        <p className="mt-3 text-xs text-amber-700">
+                          Ask the worker to upload a PDF CV from their dashboard to continue the standard review flow.
+                        </p>
                       </div>
                     ) : (
                       <div className="mt-4 rounded-lg border border-dashed border-gray-300 bg-white p-4">
@@ -5975,16 +5953,9 @@ export default function EmployeeProfilePage() {
                         <p className="mt-1 text-xs text-text-muted">
                           Worker has not uploaded a CV yet. The CV is supporting evidence — employment history is taken from the application form.
                         </p>
-                        <div className="mt-3">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={handleCopyWorkerCvUploadLink}
-                          >
-                            <ExternalLink className="h-4 w-4 mr-1" />
-                            Copy worker upload link
-                          </Button>
-                        </div>
+                        <p className="mt-3 text-xs text-text-muted">
+                          The worker uploads the CV from their own dashboard.
+                        </p>
                       </div>
                     )}
                   </div>

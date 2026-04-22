@@ -1727,7 +1727,6 @@ export default function WorkerDashboard() {
           && (
           <Card
             className="shadow-md border-0 border-l-4 border-l-purple-500 bg-purple-50/40"
-            data-testid="cv-upload-card"
           >
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between">
@@ -1758,7 +1757,6 @@ export default function WorkerDashboard() {
                   onClick={triggerCvFileInput}
                   disabled={uploading === 'cv'}
                   className="bg-purple-600 hover:bg-purple-700"
-                  data-testid="cv-upload-btn"
                 >
                   {uploading === 'cv' ? (
                     <Loader2 className="h-4 w-4 mr-1 animate-spin" />

@@ -35,6 +35,26 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["CV Extractions"])
 
 
+def _looks_like_pdf_document(document: dict) -> bool:
+    if not isinstance(document, dict):
+        return False
+    filename = (
+        document.get("original_filename")
+        or document.get("file_name")
+        or document.get("file_url")
+        or ""
+    )
+    content_type = (
+        document.get("mime_type")
+        or document.get("content_type")
+        or document.get("file_type")
+        or ""
+    )
+    filename = str(filename).lower()
+    content_type = str(content_type).lower()
+    return content_type == "application/pdf" or filename.endswith(".pdf") or ".pdf?" in filename
+
+
 # ==================== PYDANTIC MODELS ====================
 
 class CVRejectRequest(BaseModel):
@@ -189,9 +209,11 @@ async def link_cv_document(
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
 
-    # Find the best CV-like document for this employee
+    # Find the best active PDF CV-like document for this employee.
+    # Legacy DOC/DOCX uploads may exist as supporting evidence, but they must
+    # never become the canonical review CV.
     cv_requirement_ids = ["cv", "resume", "curriculum_vitae"]
-    cv_doc = await db.employee_documents.find_one(
+    cv_docs = await db.employee_documents.find(
         {
             "employee_id": employee_id,
             "requirement_id": {"$in": cv_requirement_ids},
@@ -199,11 +221,15 @@ async def link_cv_document(
             "$or": [{"is_active": True}, {"is_active": {"$exists": False}}],
         },
         {"_id": 0},
-        sort=[("uploaded_at", -1)],
-    )
+    ).sort("uploaded_at", -1).to_list(20)
+
+    cv_doc = next((doc for doc in cv_docs if _looks_like_pdf_document(doc)), None)
 
     if not cv_doc:
-        raise HTTPException(status_code=404, detail="No CV document found for this employee")
+        raise HTTPException(
+            status_code=404,
+            detail="No active PDF CV document found for this employee",
+        )
 
     now = datetime.now(timezone.utc).isoformat()
     doc_id = cv_doc["id"]
@@ -251,7 +277,7 @@ async def get_worker_cv_extraction_status(user: dict = Depends(get_current_worke
             return {
                 "has_cv": False,
                 "extraction_status": "no_cv_uploaded",
-                "needs_verification": False
+                "needs_verification": False,
             }
     
     employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
@@ -259,7 +285,7 @@ async def get_worker_cv_extraction_status(user: dict = Depends(get_current_worke
         return {
             "has_cv": False,
             "extraction_status": "no_cv_uploaded",
-            "needs_verification": False
+            "needs_verification": False,
         }
     
     cv_document_id = employee.get("cv_document_id")

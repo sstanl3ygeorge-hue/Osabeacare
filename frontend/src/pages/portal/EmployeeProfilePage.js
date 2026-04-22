@@ -779,6 +779,16 @@ export default function EmployeeProfilePage() {
       setCvReviewLoading(false);
     }
   };
+
+  const handleCopyWorkerCvUploadLink = async () => {
+    const workerUploadUrl = `${window.location.origin}/worker/login`;
+    try {
+      await navigator.clipboard.writeText(workerUploadUrl);
+      toast.success('Worker upload link copied');
+    } catch (err) {
+      window.prompt('Copy the worker upload link:', workerUploadUrl);
+    }
+  };
   
   // Admin approves CV after review
   const handleApproveCv = async () => {
@@ -3358,6 +3368,21 @@ export default function EmployeeProfilePage() {
     ) || null;
   const applicationPdfDocument = documents.find((document) => document?.requirement_id === 'application_form_pdf') || null;
   const rtwSummary = complianceRequirements?.rtw_summary || {};
+  const isPdfLikeDocument = (document) => {
+    const fileName = document?.original_filename || document?.file_name || document?.file_url || '';
+    const mimeType = (document?.mime_type || document?.content_type || document?.file_type || '').toLowerCase();
+    return mimeType === 'application/pdf' || /\.pdf(?:$|\?)/i.test(fileName);
+  };
+  const isActiveDocumentCandidate = (document) => {
+    const status = (document?.status || '').toLowerCase();
+    return (
+      document &&
+      !['superseded', 'archived', 'deleted'].includes(status) &&
+      !document?.superseded_at &&
+      !document?.deleted_at &&
+      document?.is_active !== false
+    );
+  };
   const isLinkedActiveCvDocument = (document) => Boolean(
     employee?.cv_document_id &&
     [document?.id, document?.file_id, document?.document_id].filter(Boolean).includes(employee.cv_document_id)
@@ -3384,6 +3409,12 @@ export default function EmployeeProfilePage() {
   // Opening the wrong file would silently mismatch what the backend's Review CV operates on.
   const cvDocumentIdIsSet = Boolean(employee?.cv_document_id);
   const cvDocument = activeCvDocument || (cvDocumentIdIsSet ? null : cvDocuments[0] || null);
+  const activePdfCvCandidates = cvDocuments.filter((document) => isActiveDocumentCandidate(document) && isPdfLikeDocument(document));
+  const fallbackPdfCvDocument =
+    activePdfCvCandidates.find((document) => !isLinkedActiveCvDocument(document)) ||
+    activePdfCvCandidates[0] ||
+    null;
+  const activeNonPdfCvCandidates = cvDocuments.filter((document) => isActiveDocumentCandidate(document) && !isPdfLikeDocument(document));
   const complianceEmploymentHistoryGapRow = complianceFile?.sections?.employment_history?.rows?.[0] || null;
   // Canonical admin read source: persisted employment_review first, compliance-file row fallback during rollout.
   const hasPersistedEmploymentReview = Boolean(employmentReviewPersisted && employmentReview?.id);
@@ -3478,11 +3509,22 @@ export default function EmployeeProfilePage() {
   );
   const cvLinkedForReview = Boolean(employee?.cv_document_id && activeCvDocument);
   const cvReviewReady = Boolean(cvLinkedForReview && activeCvDocument && cvIsPdf);
-  const cvStatusLabel = cvFileExists ? 'On file' : 'Missing';
-  const cvStatusBadgeClass =
-    cvFileExists
-      ? 'bg-green-100 text-green-700 border-green-200'
-      : 'bg-gray-100 text-gray-600 border-gray-200';
+  const cvLinkRecoveryAvailable = Boolean(fallbackPdfCvDocument && !cvReviewReady);
+  const cvLegacyNonPdfOnly = Boolean(!cvReviewReady && !cvLinkRecoveryAvailable && activeNonPdfCvCandidates.length > 0);
+  const cvStatusLabel = cvReviewReady
+    ? 'On file'
+    : cvLinkRecoveryAvailable
+      ? 'Link existing PDF'
+      : cvLegacyNonPdfOnly
+        ? 'PDF required'
+        : 'Missing';
+  const cvStatusBadgeClass = cvReviewReady
+    ? 'bg-green-100 text-green-700 border-green-200'
+    : cvLinkRecoveryAvailable
+      ? 'bg-blue-100 text-blue-700 border-blue-200'
+      : cvLegacyNonPdfOnly
+        ? 'bg-amber-100 text-amber-700 border-amber-200'
+        : 'bg-gray-100 text-gray-600 border-gray-200';
   const gapVerifiedCount = employmentGapEvaluation?.verified_count;
   const gapNeedsReviewCount = employmentGapEvaluation
     ? (employmentGapEvaluation?.pending_count || 0) +
@@ -5864,12 +5906,12 @@ export default function EmployeeProfilePage() {
                         <h4 className="font-medium text-gray-800">CV / Resume</h4>
                         <p className="mt-1 text-xs text-text-muted">Supporting evidence — view alongside the structured employment history below.</p>
                       </div>
-                      <Badge variant="outline" className={cvFileExists ? 'bg-green-50 text-green-700 border-green-200' : 'bg-slate-50 text-slate-600 border-slate-200'}>
-                        {cvFileExists ? 'On file' : 'Missing'}
+                      <Badge variant="outline" className={cvStatusBadgeClass}>
+                        {cvStatusLabel}
                       </Badge>
                     </div>
 
-                    {cvFileExists ? (
+                    {cvReviewReady ? (
                       <div className="mt-4">
                         <Button
                           size="sm"
@@ -5884,12 +5926,65 @@ export default function EmployeeProfilePage() {
                           Compare the CV against the structured employment history from the application form to verify accuracy.
                         </p>
                       </div>
+                    ) : cvLinkRecoveryAvailable ? (
+                      <div className="mt-4 rounded-lg border border-blue-200 bg-blue-50 p-4">
+                        <p className="text-sm font-medium text-blue-800">Active PDF CV found but not linked for review</p>
+                        <p className="mt-1 text-xs text-blue-700">
+                          A PDF CV-like document is already on file, but it is not linked as the active review CV. Link it to restore the normal review flow.
+                        </p>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={handleLinkCv}
+                            disabled={cvReviewLoading}
+                          >
+                            {cvReviewLoading ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <FileCheck className="h-4 w-4 mr-1" />}
+                            Link existing CV
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={handleCopyWorkerCvUploadLink}
+                          >
+                            <ExternalLink className="h-4 w-4 mr-1" />
+                            Copy worker upload link
+                          </Button>
+                        </div>
+                      </div>
+                    ) : cvLegacyNonPdfOnly ? (
+                      <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4">
+                        <p className="text-sm font-medium text-amber-800">Legacy CV file does not count as the canonical review CV</p>
+                        <p className="mt-1 text-xs text-amber-700">
+                          A DOC or DOCX CV-like file exists as supporting evidence, but only a PDF worker upload can become the canonical CV for employment review.
+                        </p>
+                        <div className="mt-3">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={handleCopyWorkerCvUploadLink}
+                          >
+                            <ExternalLink className="h-4 w-4 mr-1" />
+                            Copy worker upload link
+                          </Button>
+                        </div>
+                      </div>
                     ) : (
                       <div className="mt-4 rounded-lg border border-dashed border-gray-300 bg-white p-4">
                         <p className="text-sm font-medium text-gray-700">CV not uploaded</p>
                         <p className="mt-1 text-xs text-text-muted">
                           Worker has not uploaded a CV yet. The CV is supporting evidence — employment history is taken from the application form.
                         </p>
+                        <div className="mt-3">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={handleCopyWorkerCvUploadLink}
+                          >
+                            <ExternalLink className="h-4 w-4 mr-1" />
+                            Copy worker upload link
+                          </Button>
+                        </div>
                       </div>
                     )}
                   </div>

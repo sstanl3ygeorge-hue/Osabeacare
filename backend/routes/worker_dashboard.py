@@ -1550,8 +1550,22 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             mismatch_explanation = mismatch_data.get("reason") or mismatch_data.get("notes")
             mismatch_explanation_status = "documented" if mismatch_data.get("documented") else "not_submitted"
             # Admin writes decision to employee flat fields only; db.references.mismatch.detected is a bool flag.
-            mismatch_admin_decision = employee.get(f"{prefix}mismatch_admin_decision")
+            mismatch_admin_decision = (
+                mismatch_data.get("admin_decision")
+                or employee.get(f"{prefix}mismatch_admin_decision")
+            )
             referee_company = declared_data.get("organisation") or declared_data.get("company", "")
+
+            # Canonical mismatch read: db.references is source of truth.
+            # A reference must NOT be shown as "verified" to the worker while
+            # a mismatch is unresolved — worker and admin must see the same truth.
+            mismatch_is_detected = bool(mismatch_data.get("detected"))
+            mismatch_is_resolved = bool(
+                mismatch_data.get("resolved")
+                or mismatch_admin_decision == "accepted"
+            )
+            if is_verified and mismatch_is_detected and not mismatch_is_resolved:
+                is_verified = False
         else:
             referee_name = employee.get(f"{prefix}name", "")
             referee_email = employee.get(f"{prefix}email", "")
@@ -1583,6 +1597,13 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             mismatch_explanation_status = employee.get(f"{prefix}mismatch_explanation_status", "not_submitted")
             mismatch_admin_decision = employee.get(f"{prefix}mismatch_admin_decision")
             referee_company = employee.get(f"{prefix}company", "")
+
+            # Canonical mismatch rule also applied on the legacy flat-field path.
+            if is_verified and employee.get(f"{prefix}mismatch_detected") and not (
+                mismatch_admin_decision == "accepted"
+                or employee.get(f"{prefix}mismatch_override_reason")
+            ):
+                is_verified = False
         
         if is_verified:
             ref_status = "verified"

@@ -26,26 +26,35 @@ const STATUS_CONFIG = {
   verified: { label: 'Satisfactory', color: 'bg-green-100 text-green-700', icon: CheckCircle },
   rejected: { label: 'Unsatisfactory / action required', color: 'bg-red-100 text-red-700', icon: XCircle },
   legacy_unverified: { label: 'Declared referee on file — response evidence not found', color: 'bg-amber-100 text-amber-700', icon: AlertTriangle },
+  mismatch: { label: 'Mismatch — investigation required', color: 'bg-amber-100 text-amber-800', icon: AlertTriangle },
 };
 
 /**
  * Derive the display status for a reference, accounting for legacy data.
- * A reference is only "satisfactory" if it has:
- *  1. A real response on file (response object with at least one key beyond submitted_at)
- *  2. An admin verification stamp (verified_by or verified_at)
- *  3. Status === 'verified'
+ * A reference is only "satisfactory" if the backend says counts_toward_readiness=true.
+ * This ensures admin + worker see the same truth and that an unresolved mismatch
+ * (e.g. not from the most recent employer) never renders as green "Satisfactory".
  * Legacy employee-level "verified" flags without canonical evidence are downgraded.
  */
 function deriveDisplayStatus(ref) {
   const status = ref?.status || 'not_declared';
   const response = ref?.response;
   const verification = ref?.verification || {};
+  const mismatch = ref?.mismatch || {};
   const hasCanonicalResponse = Boolean(
     response && typeof response === 'object' && Object.keys(response).length > 0
   );
   const hasAdminStamp = Boolean(verification.verified_by || verification.verified_at);
 
   if (status === 'verified') {
+    // Backend is the source of truth for readiness. If it says this reference
+    // does NOT count toward readiness (unresolved mismatch), never show green.
+    if (ref && ref.counts_toward_readiness === false) {
+      return 'mismatch';
+    }
+    if (mismatch.detected && !mismatch.resolved) {
+      return 'mismatch';
+    }
     if (!hasCanonicalResponse && !hasAdminStamp) {
       return 'legacy_unverified';
     }
@@ -483,27 +492,30 @@ export default function ReferencesPanel({ employeeId, employee, onRefresh, onEdi
   const displayStatuses = referenceValues.map(deriveDisplayStatus);
 
   // ── Readiness counts ──
-  // A reference only counts toward readiness when: response received + admin reviewed + satisfactory (verified)
-  // AND it truly has canonical response evidence (not legacy shortcut)
-  const satisfactoryCount = displayStatuses.filter((s) => s === 'verified').length;
+  // Backend is the source of truth. A reference only counts toward readiness
+  // when `counts_toward_readiness === true` (verified AND no unresolved mismatch).
+  // Never infer satisfactory from the raw "verified" status — that allowed the
+  // contradictory "2/2 satisfactory" + "mismatch investigation required" state.
+  const satisfactoryCount = referenceValues.filter((r) => r && r.counts_toward_readiness === true).length;
   const missingCount = displayStatuses.filter((s) => s === 'not_declared').length;
   const requestNotSentCount = displayStatuses.filter((s) => s === 'declared').length;
   const awaitingResponseCount = displayStatuses.filter((s) => s === 'sent').length;
   const awaitingAdminReviewCount = displayStatuses.filter((s) => s === 'response_received').length;
   const rejectedCount = displayStatuses.filter((s) => s === 'rejected').length;
   const legacyUnverifiedCount = displayStatuses.filter((s) => s === 'legacy_unverified').length;
+  const mismatchCount = displayStatuses.filter((s) => s === 'mismatch').length;
   const cannotAssessCount = legacyUnverifiedCount;
   const hasBlockers = satisfactoryCount < 2;
 
   // Summary banner colour
   const summaryBorderClass = satisfactoryCount >= 2
     ? 'border-green-200 bg-green-50'
-    : (rejectedCount > 0 || cannotAssessCount > 0)
+    : (rejectedCount > 0 || cannotAssessCount > 0 || mismatchCount > 0)
       ? 'border-red-200 bg-red-50'
       : 'border-amber-200 bg-amber-50';
   const summaryTextClass = satisfactoryCount >= 2
     ? 'text-green-800'
-    : (rejectedCount > 0 || cannotAssessCount > 0)
+    : (rejectedCount > 0 || cannotAssessCount > 0 || mismatchCount > 0)
       ? 'text-red-800'
       : 'text-amber-800';
 
@@ -551,6 +563,7 @@ export default function ReferencesPanel({ employeeId, employee, onRefresh, onEdi
                     {awaitingResponseCount > 0 && <p>Awaiting response: {awaitingResponseCount}</p>}
                     {awaitingAdminReviewCount > 0 && <p>Response received — awaiting admin review: {awaitingAdminReviewCount}</p>}
                     {rejectedCount > 0 && <p className="text-red-700 font-medium">Unsatisfactory / action required: {rejectedCount}</p>}
+                    {mismatchCount > 0 && <p className="text-amber-800 font-medium">Mismatch — investigation required: {mismatchCount}</p>}
                     {cannotAssessCount > 0 && <p className="text-red-700 font-medium">Cannot assess (legacy data, no response evidence): {cannotAssessCount}</p>}
                   </div>
                 )}
@@ -694,15 +707,17 @@ export default function ReferencesPanel({ employeeId, employee, onRefresh, onEdi
                           </div>
                           {/* Stage 4: Admin reviewed */}
                           <div className="flex items-center gap-2 text-xs">
-                            {(displayStatus === 'verified' || displayStatus === 'rejected')
-                              ? <CheckCircle className={`h-3.5 w-3.5 shrink-0 ${displayStatus === 'verified' ? 'text-green-500' : 'text-red-500'}`} />
+                            {(displayStatus === 'verified' || displayStatus === 'rejected' || displayStatus === 'mismatch')
+                              ? <CheckCircle className={`h-3.5 w-3.5 shrink-0 ${displayStatus === 'verified' ? 'text-green-500' : displayStatus === 'rejected' ? 'text-red-500' : 'text-amber-500'}`} />
                               : <Clock className="h-3.5 w-3.5 text-gray-300 shrink-0" />}
-                            <span className={(displayStatus === 'verified' || displayStatus === 'rejected') ? 'text-gray-700' : 'text-gray-400'}>
+                            <span className={(displayStatus === 'verified' || displayStatus === 'rejected' || displayStatus === 'mismatch') ? 'text-gray-700' : 'text-gray-400'}>
                               {displayStatus === 'verified'
                                 ? `Satisfactory${verification.verified_by ? ` — ${verification.verified_by}` : ''}${verification.verified_at ? ` on ${formatBackendDate(verification.verified_at)}` : ''}`
                                 : displayStatus === 'rejected'
                                   ? 'Unsatisfactory / action required'
-                                  : 'Awaiting admin review'}
+                                  : displayStatus === 'mismatch'
+                                    ? 'Reviewed — blocked by unresolved mismatch'
+                                    : 'Awaiting admin review'}
                             </span>
                           </div>
                         </div>
@@ -720,8 +735,8 @@ export default function ReferencesPanel({ employeeId, employee, onRefresh, onEdi
                           </div>
                         )}
 
-                        {/* Response detail view (only when canonical response exists) */}
-                        {hasCanonicalResponse && displayStatus !== 'verified' && (
+                        {/* Response detail view (only when canonical response exists AND admin has not stamped) */}
+                        {hasCanonicalResponse && displayStatus !== 'verified' && !ref?.verification?.verified_at && (
                           <div className="bg-purple-50 rounded-lg p-3 border border-purple-200">
                             <div className="flex items-center justify-between">
                               <p className="text-sm font-medium text-purple-700 flex items-center gap-2">
@@ -742,7 +757,7 @@ export default function ReferencesPanel({ employeeId, employee, onRefresh, onEdi
                           </div>
                         )}
 
-                        {/* Verification status (satisfactory) */}
+                        {/* Verification status (satisfactory) — only when truly satisfactory */}
                         {displayStatus === 'verified' && (
                           <div className="bg-green-50 rounded-lg p-3 border border-green-200">
                             <p className="text-sm font-medium text-green-700 flex items-center gap-2">
@@ -762,28 +777,46 @@ export default function ReferencesPanel({ employeeId, employee, onRefresh, onEdi
                           </div>
                         )}
 
-                        {/* Actions — guard verify/reject behind canonical response */}
-                        {displayStatus !== 'verified' && declared.email && (
-                          <div className="pt-2 border-t space-y-2">
-                            {displayStatus === 'declared' || displayStatus === 'sent' || displayStatus === 'legacy_unverified' ? (
-                              <Button
-                                size="sm"
-                                className="w-full rounded-lg"
-                                onClick={() => openSendDialog(refNum)}
-                                disabled={sendingRequest === refNum}
-                                data-testid={`send-request-btn-${refNum}`}
-                              >
-                                {sendingRequest === refNum ? (
-                                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                ) : (
-                                  <Send className="h-4 w-4 mr-2" />
-                                )}
-                                {displayStatus === 'sent' ? 'Resend Request'
-                                  : displayStatus === 'legacy_unverified' ? 'Re-request Reference'
-                                  : 'Send Request'}
-                              </Button>
-                            ) : displayStatus === 'response_received' && hasCanonicalResponse ? (
-                              <>
+                        {/*
+                          ── Admin actions ──
+                          Gating is driven by explicit backend capabilities, NOT by the
+                          display badge. This keeps the admin operable when the ref is
+                          in the 'mismatch' display state (raw status is 'verified' but
+                          counts_toward_readiness is false): they can still review the
+                          response, review the worker explanation, or reject.
+                        */}
+                        {declared.email && (() => {
+                          const canSendRequest = !hasCanonicalResponse
+                            && !ref?.verification?.verified_at
+                            && ref?.status !== 'rejected'
+                            && (displayStatus === 'declared' || displayStatus === 'sent' || displayStatus === 'legacy_unverified');
+                          const canReviewResponse = Boolean(ref?.can_review_response ?? hasCanonicalResponse);
+                          const canVerify = Boolean(ref?.can_verify_reference);
+                          const canReject = Boolean(ref?.can_reject_reference ?? (ref?.status !== 'rejected'));
+                          const canReviewMismatch = Boolean(ref?.can_review_mismatch_explanation);
+                          const showActionBar = canSendRequest || canReviewResponse || canVerify || canReject || canReviewMismatch;
+                          if (!showActionBar) return null;
+                          return (
+                            <div className="pt-2 border-t space-y-2">
+                              {canSendRequest && (
+                                <Button
+                                  size="sm"
+                                  className="w-full rounded-lg"
+                                  onClick={() => openSendDialog(refNum)}
+                                  disabled={sendingRequest === refNum}
+                                  data-testid={`send-request-btn-${refNum}`}
+                                >
+                                  {sendingRequest === refNum ? (
+                                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                  ) : (
+                                    <Send className="h-4 w-4 mr-2" />
+                                  )}
+                                  {displayStatus === 'sent' ? 'Resend Request'
+                                    : displayStatus === 'legacy_unverified' ? 'Re-request Reference'
+                                    : 'Send Request'}
+                                </Button>
+                              )}
+                              {canReviewResponse && (!canVerify && !canReject ? (
                                 <Button
                                   size="sm"
                                   variant="outline"
@@ -794,37 +827,67 @@ export default function ReferencesPanel({ employeeId, employee, onRefresh, onEdi
                                   <Eye className="h-4 w-4 mr-2" />
                                   Review Response
                                 </Button>
+                              ) : (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="w-full rounded-lg"
+                                  onClick={() => openReviewDialog(refNum)}
+                                  data-testid={`review-response-btn-${refNum}`}
+                                >
+                                  <Eye className="h-4 w-4 mr-2" />
+                                  Review Response
+                                </Button>
+                              ))}
+                              {(canVerify || canReject) && (
                                 <div className="flex gap-2">
-                                  <Button
-                                    size="sm"
-                                    className="flex-1 rounded-lg bg-green-600 hover:bg-green-700"
-                                    onClick={() => openVerifyDialog(refNum, 'verify')}
-                                    data-testid={`verify-reference-btn-${refNum}`}
-                                  >
-                                    <CheckCircle className="h-4 w-4 mr-2" />
-                                    Mark Satisfactory
-                                  </Button>
-                                  <Button
-                                    size="sm"
-                                    variant="destructive"
-                                    className="flex-1 rounded-lg"
-                                    onClick={() => openVerifyDialog(refNum, 'reject')}
-                                    data-testid={`reject-reference-btn-${refNum}`}
-                                  >
-                                    <XCircle className="h-4 w-4 mr-2" />
-                                    Unsatisfactory
-                                  </Button>
+                                  {canVerify && (
+                                    <Button
+                                      size="sm"
+                                      className="flex-1 rounded-lg bg-green-600 hover:bg-green-700"
+                                      onClick={() => openVerifyDialog(refNum, 'verify')}
+                                      data-testid={`verify-reference-btn-${refNum}`}
+                                    >
+                                      <CheckCircle className="h-4 w-4 mr-2" />
+                                      Mark Satisfactory
+                                    </Button>
+                                  )}
+                                  {canReject && (
+                                    <Button
+                                      size="sm"
+                                      variant="destructive"
+                                      className="flex-1 rounded-lg"
+                                      onClick={() => openVerifyDialog(refNum, 'reject')}
+                                      data-testid={`reject-reference-btn-${refNum}`}
+                                    >
+                                      <XCircle className="h-4 w-4 mr-2" />
+                                      Unsatisfactory
+                                    </Button>
+                                  )}
                                 </div>
-                              </>
-                            ) : displayStatus === 'response_received' && !hasCanonicalResponse ? (
-                              <div className="bg-amber-50 rounded-lg p-3 border border-amber-200">
-                                <p className="text-xs text-amber-700">
-                                  Response status set but no canonical response data found. Re-request or manually set response source before review.
-                                </p>
-                              </div>
-                            ) : null}
-                          </div>
-                        )}
+                              )}
+                              {canReviewMismatch && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="w-full rounded-lg border-amber-300 text-amber-800 hover:bg-amber-50"
+                                  onClick={() => openReviewExplanation(refNum)}
+                                  data-testid={`review-explanation-inline-btn-${refNum}`}
+                                >
+                                  <MessageSquare className="h-4 w-4 mr-2" />
+                                  Review Mismatch Explanation
+                                </Button>
+                              )}
+                              {displayStatus === 'response_received' && !hasCanonicalResponse && (
+                                <div className="bg-amber-50 rounded-lg p-3 border border-amber-200">
+                                  <p className="text-xs text-amber-700">
+                                    Response status set but no canonical response data found. Re-request or manually set response source before review.
+                                  </p>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
 
                         {/* ── Mismatch panel ── */}
                         {ref?.integrity?.mismatch_detected && (

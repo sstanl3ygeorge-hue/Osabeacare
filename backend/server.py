@@ -32369,7 +32369,29 @@ async def review_mismatch_explanation(
         {"id": employee_id},
         {"$set": update_fields}
     )
-    
+
+    # Mirror mismatch resolution state to canonical db.references so that
+    # the admin references panel, worker dashboard and readiness engine all
+    # agree on whether the mismatch is still blocking.
+    ref_key = f"ref{ref_num}"
+    ref_mismatch_update = {
+        f"{ref_key}.mismatch.admin_decision": review.decision,
+        f"{ref_key}.mismatch.reviewed_at": now,
+        f"{ref_key}.mismatch.reviewed_by": user['user_id'],
+    }
+    if review.decision == "accepted":
+        ref_mismatch_update[f"{ref_key}.mismatch.resolved"] = True
+        ref_mismatch_update[f"{ref_key}.mismatch.resolved_at"] = now
+    else:
+        # rejected / needs_clarification → still unresolved
+        ref_mismatch_update[f"{ref_key}.mismatch.resolved"] = False
+    await db.references.update_one(
+        {"employee_id": employee_id},
+        {"$set": ref_mismatch_update,
+         "$setOnInsert": {"employee_id": employee_id}},
+        upsert=True,
+    )
+
     # Log audit trail
     await log_audit_action(
         user['user_id'],
@@ -32548,9 +32570,104 @@ async def get_employee_references(
             (response_data.get("submitted_at") if isinstance(response_data, dict) else None) or
             employee.get(f"reference_{ref_num}_response_received_at")
         )
-        
+
+        # ──────────────────────────────────────────────────────────────────
+        # Mismatch truth (canonical): merge db.references.ref{n}.mismatch
+        # with legacy employee flat fields. A reference only counts toward
+        # readiness when verified AND (no mismatch OR mismatch resolved).
+        # This prevents the contradictory "Satisfactory 2/2" + "mismatch
+        # investigation required" state.
+        # ──────────────────────────────────────────────────────────────────
+        ref_mismatch = ref_data.get("mismatch") or {}
+        emp_mismatch_detected = bool(employee.get(f"reference_{ref_num}_mismatch_detected"))
+        mismatch_detected = bool(ref_mismatch.get("detected")) or emp_mismatch_detected
+
+        admin_decision = (
+            ref_mismatch.get("admin_decision")
+            or employee.get(f"reference_{ref_num}_mismatch_admin_decision")
+        )
+        mismatch_resolved = bool(
+            ref_mismatch.get("resolved")
+            or admin_decision == "accepted"
+            or employee.get(f"reference_{ref_num}_mismatch_override_reason")
+        )
+
+        mismatch_reason = (
+            ref_mismatch.get("reason")
+            or employee.get(f"reference_{ref_num}_mismatch_notes")
+            or (", ".join(ref_mismatch.get("reasons", [])) if ref_mismatch.get("reasons") else None)
+        )
+
+        mismatch_obj = {
+            "detected": mismatch_detected,
+            "resolved": mismatch_resolved if mismatch_detected else False,
+            "reason": mismatch_reason if mismatch_detected else None,
+        }
+
+        counts_toward_readiness = (status == "verified") and (
+            (not mismatch_detected) or mismatch_resolved
+        )
+
+        # ──────────────────────────────────────────────────────────────────
+        # Explicit action capabilities. The frontend MUST use these instead
+        # of inferring from a display badge, so an unresolved-mismatch state
+        # never strands the admin without actions.
+        # ──────────────────────────────────────────────────────────────────
+        has_canonical_response = bool(
+            isinstance(response_data, dict) and len(response_data) > 0
+        )
+        worker_explanation_submitted = bool(
+            employee.get(f"reference_{ref_num}_mismatch_explanation")
+        )
+        admin_decision_made = bool(admin_decision)
+        currently_verified_raw = verification_status == "verified"
+        currently_rejected = verification_status == "rejected"
+
+        # Resolution path for an unresolved mismatch is the
+        # review-mismatch-explanation endpoint (accepted/rejected).
+        can_review_mismatch_explanation = (
+            mismatch_detected
+            and not mismatch_resolved
+            and worker_explanation_submitted
+            and not admin_decision_made
+        )
+        # Admin can always re-open the response once it exists.
+        can_review_response = has_canonical_response
+        # Mark Satisfactory is only offered for a reference that has not yet
+        # been verified. An already-verified reference that is now blocked by
+        # an unresolved mismatch is resolved via the explanation flow (or by
+        # rejection), NOT by re-verifying. Additionally, an unresolved
+        # mismatch must never be promotable to satisfactory from any UI path
+        # — even pre-verification — so verification is blocked while a
+        # mismatch is detected and not resolved.
+        can_verify_reference = (
+            has_canonical_response
+            and not currently_verified_raw
+            and not currently_rejected
+            and not (mismatch_detected and not mismatch_resolved)
+        )
+        # Admin can always mark unsatisfactory while a ref exists and has not
+        # already been rejected — this is the canonical escape hatch.
+        can_reject_reference = bool(declared.get("name")) and not currently_rejected
+
+        # Integrity object kept in sync for the existing admin panel UI
+        # (ReferencesPanel reads ref.integrity.mismatch_*).
+        integrity_obj = {
+            "mismatch_detected": mismatch_detected,
+            "mismatch_resolved": mismatch_resolved if mismatch_detected else False,
+            "mismatch_notes": mismatch_reason,
+            "mismatch_reasons": ref_mismatch.get("reasons") or [],
+            "mismatch_explanation": employee.get(f"reference_{ref_num}_mismatch_explanation"),
+            "mismatch_explanation_type": employee.get(f"reference_{ref_num}_mismatch_explanation_type"),
+            "mismatch_explanation_status": employee.get(f"reference_{ref_num}_mismatch_explanation_status"),
+            "mismatch_admin_decision": admin_decision,
+            "mismatch_admin_notes": employee.get(f"reference_{ref_num}_mismatch_admin_notes"),
+        }
+
         result["references"][f"reference_{ref_num}"] = {
+            "reference_number": ref_num,
             "status": status,
+            "verification_status": verification_status,
             "declared": declared,
             "request": {
                 "sent_at": request_sent_at,
@@ -32565,9 +32682,17 @@ async def get_employee_references(
                 "verified_by": verification.get("verified_by") or ref_data.get("verified_by") or emp_verified_by,
                 "verified_at": verification.get("verified_at") or ref_data.get("verified_at") or emp_verified_at,
                 "notes": verification.get("notes") or ref_data.get("notes") or employee.get(f"reference_{ref_num}_verification_notes")
-            }
+            },
+            "mismatch": mismatch_obj,
+            "integrity": integrity_obj,
+            "counts_toward_readiness": counts_toward_readiness,
+            "has_canonical_response": has_canonical_response,
+            "can_review_response": can_review_response,
+            "can_review_mismatch_explanation": can_review_mismatch_explanation,
+            "can_verify_reference": can_verify_reference,
+            "can_reject_reference": can_reject_reference,
         }
-    
+
     return result
 
 

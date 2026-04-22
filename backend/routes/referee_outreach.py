@@ -1171,19 +1171,39 @@ async def flag_recent_employer_mismatch(
     now = datetime.now(timezone.utc).isoformat()
     prefix = f"reference_{ref_num}_"
 
+    mismatch_reason_text = (
+        "This reference does not appear to be from the most recent employer. "
+        "NHS Safer Recruitment requires at least one reference from the most recent employer. "
+        "Please provide an explanation or nominate a replacement referee."
+    )
+
     await db.employees.update_one(
         {"id": employee_id},
         {"$set": {
             f"{prefix}mismatch_detected": True,
-            f"{prefix}mismatch_notes": (
-                "This reference does not appear to be from the most recent employer. "
-                "NHS Safer Recruitment requires at least one reference from the most recent employer. "
-                "Please provide an explanation or nominate a replacement referee."
-            ),
+            f"{prefix}mismatch_notes": mismatch_reason_text,
             f"{prefix}mismatch_flagged_by": user['user_id'],
             f"{prefix}mismatch_flagged_at": now,
             "updated_at": now,
         }}
+    )
+
+    # Mirror to canonical db.references so readiness, worker dashboard and the
+    # admin references panel all read the same truth. Upsert because the doc
+    # may not yet exist for legacy employees.
+    ref_key = f"ref{ref_num}"
+    await db.references.update_one(
+        {"employee_id": employee_id},
+        {"$set": {
+            f"{ref_key}.mismatch.detected": True,
+            f"{ref_key}.mismatch.resolved": False,
+            f"{ref_key}.mismatch.reason": mismatch_reason_text,
+            f"{ref_key}.mismatch.kind": "recent_employer",
+            f"{ref_key}.mismatch.flagged_by": user['user_id'],
+            f"{ref_key}.mismatch.flagged_at": now,
+        },
+         "$setOnInsert": {"employee_id": employee_id}},
+        upsert=True,
     )
 
     await log_audit_action(

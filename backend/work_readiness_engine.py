@@ -813,18 +813,49 @@ async def can_promote_to_active_legacy(employee_id: str, db) -> Tuple[bool, dict
     poa_stamped_count = sum(1 for d in poa_docs if d.get("verification_stamp") and d.get("verification_stamp") != "not_verified")
     checks["proof_of_address"] = poa_stamped_count >= 2
     
-    # 5. References - both verified
-    ref1_verified = employee.get("reference_1_verified", False)
-    ref2_verified = employee.get("reference_2_verified", False)
+    # 5. References - both verified AND no unresolved mismatch
+    # A reference must NOT count as verified if it has an unresolved mismatch
+    # (e.g. flagged as not from the most recent employer). Admin must accept
+    # the worker's explanation (which sets resolved=True / admin_decision=accepted
+    # / override_reason) before it counts toward readiness.
+    def _ref_counts(ref_data: dict, n: int) -> bool:
+        ref_data = ref_data or {}
+        is_verified = ref_data.get("verification_status") == "verified" or \
+            (ref_data.get("verification") or {}).get("status") == "verified"
+        if not is_verified:
+            return False
+        mismatch = ref_data.get("mismatch") or {}
+        detected = bool(mismatch.get("detected")) or bool(
+            employee.get(f"reference_{n}_mismatch_detected")
+        )
+        if not detected:
+            return True
+        resolved = bool(
+            mismatch.get("resolved")
+            or mismatch.get("admin_decision") == "accepted"
+            or employee.get(f"reference_{n}_mismatch_admin_decision") == "accepted"
+            or employee.get(f"reference_{n}_mismatch_override_reason")
+        )
+        return resolved
+
     ref_doc = await db.references.find_one({"employee_id": emp_id_str})
     if ref_doc:
-        # Use `or {}` to handle None values (not just missing keys)
-        ref1_data = ref_doc.get("ref1") or {}
-        ref2_data = ref_doc.get("ref2") or {}
-        if ref1_data.get("verification_status") == "verified":
-            ref1_verified = True
-        if ref2_data.get("verification_status") == "verified":
-            ref2_verified = True
+        ref1_verified = _ref_counts(ref_doc.get("ref1"), 1)
+        ref2_verified = _ref_counts(ref_doc.get("ref2"), 2)
+    else:
+        # Legacy employees with only flat employee fields: fall back, but still
+        # block if a mismatch has been flagged and not resolved.
+        def _flat_counts(n: int) -> bool:
+            if not employee.get(f"reference_{n}_verified", False):
+                return False
+            if employee.get(f"reference_{n}_mismatch_detected") and not (
+                employee.get(f"reference_{n}_mismatch_admin_decision") == "accepted"
+                or employee.get(f"reference_{n}_mismatch_override_reason")
+            ):
+                return False
+            return True
+        ref1_verified = _flat_counts(1)
+        ref2_verified = _flat_counts(2)
     checks["references"] = ref1_verified and ref2_verified
     
     # 6. Mandatory Training - all complete and not expired

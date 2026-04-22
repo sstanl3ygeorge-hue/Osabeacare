@@ -1719,9 +1719,8 @@ export default function WorkerDashboard() {
           </Card>
         )}
 
-        {/* ========== CV UPLOAD CARD (onboarding only — when CV missing/replacement required) ========== */}
-        {!isActiveEmployee
-          && cvStatus
+        {/* ========== CV UPLOAD CARD (shown whenever backend CV truth says CV is missing/replacement required) ========== */}
+        {cvStatus
           && !cvStatus.has_cv
           && cvStatus.can_upload_cv
           && !notifications.some(n => n.type === 'cv_rejected' && !n.resolved)

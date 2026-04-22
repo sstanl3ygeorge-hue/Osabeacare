@@ -2725,7 +2725,9 @@ export default function WorkerDashboard() {
                           )}
                             {!agreement.signed && !agreement.verified && (
                               <p className="text-xs text-slate-500 mt-0.5">
-                                {agreement.system_issue
+                                {agreement.rejected
+                                  ? 'Your handbook is being updated. You will be asked to review and sign once ready.'
+                                  : agreement.system_issue
                                   ? 'Osabea is preparing this document. No action needed from you right now.'
                                   : agreement.id === 'contract_acceptance'
                                   ? (contractEligibility?.can_sign

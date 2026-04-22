@@ -1200,10 +1200,10 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
     _handbook_verified = bool(handbook_ack and _handbook_verification_status == "verified")
     _handbook_system_issue = bool(handbook_render_error_detail)
 
-    if _handbook_system_issue:
+    if _handbook_rejected:
+        _handbook_state_label = "Your handbook is being updated. You will be asked to review and sign once ready."
+    elif _handbook_system_issue:
         _handbook_state_label = "System issue — Osabea is preparing your handbook. No action needed from you."
-    elif _handbook_rejected:
-        _handbook_state_label = "Action required: please review and re-acknowledge the updated handbook"
     elif _handbook_verified:
         _handbook_state_label = "Handbook acknowledged and verified"
     elif _handbook_acknowledged:

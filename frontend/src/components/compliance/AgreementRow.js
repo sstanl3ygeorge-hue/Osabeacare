@@ -253,6 +253,35 @@ export default function AgreementRow({
     }
   };
 
+  const handleRegenerate = async () => {
+    const acknowledgementId = acknowledgement_data?.id;
+    if (!acknowledgementId) {
+      toast.error('No acknowledgement record available to regenerate');
+      return;
+    }
+
+    const reason = prompt('Enter regeneration reason (min 3 characters):');
+    if (!reason || reason.trim().length < 3) {
+      if (reason) toast.error('Reason must be at least 3 characters');
+      return;
+    }
+
+    setIsProcessing(true);
+    try {
+      await axios.post(
+        `${API}/employees/${employeeId}/agreements/${acknowledgementId}/regenerate`,
+        { reason: reason.trim() },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success('Handbook regenerated. Worker can review it again once ready.');
+      if (onRefresh) onRefresh();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to regenerate handbook');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   // Handle PDF export
   const handleExportPDF = async () => {
     if (key === 'contract_acceptance' && contractArtifactUrl) {
@@ -434,6 +463,19 @@ export default function AgreementRow({
                   title="Unverify agreement (for error correction)"
                 >
                   {isProcessing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
+                </Button>
+              )}
+
+              {lifecycleStatus === 'rejected' && key === 'handbook_acknowledgement' && acknowledgement_data?.id && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={(e) => { e.stopPropagation(); handleRegenerate(); }}
+                  disabled={isProcessing}
+                  className="h-8 text-xs rounded-lg"
+                >
+                  {isProcessing ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <RotateCcw className="h-3.5 w-3.5 mr-1" />}
+                  Regenerate Handbook
                 </Button>
               )}
             </>

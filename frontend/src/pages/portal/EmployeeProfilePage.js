@@ -28,6 +28,7 @@ import ConsolidatedStatusPanel from '../../components/compliance/ConsolidatedSta
 import EmploymentGapPanel from '../../components/compliance/EmploymentGapPanel';
 import CompetencyAssessmentsPanel from '../../components/compliance/CompetencyAssessmentsPanel';
 import SpotChecksPanel from '../../components/compliance/SpotChecksPanel';
+import SupervisionsPanel from '../../components/compliance/SupervisionsPanel';
 import PendingVerificationBanner from '../../components/compliance/PendingVerificationBanner';
 import { SendReminderButton, RequestRenewalButton } from '../../components/admin/AdminActionButtons';
 import EditPersonalDetailsDialog from '../../components/admin/EditPersonalDetailsDialog';
@@ -4717,6 +4718,12 @@ export default function EmployeeProfilePage() {
               Spot Checks
             </TabsTrigger>
           )}
+          {lifecycleStage === 'active' && !isRecruitmentView && (
+            <TabsTrigger value="supervisions" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
+              <Calendar className="h-4 w-4 mr-2" />
+              Supervisions
+            </TabsTrigger>
+          )}
           <TabsTrigger value="audit" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
             <History className="h-4 w-4 mr-2" />
             Audit
@@ -6400,6 +6407,16 @@ export default function EmployeeProfilePage() {
                 fetchComplianceFile();
                 fetchRecruitmentStatus();
               }}
+            />
+          </TabsContent>
+        )}
+
+        {/* ========== TAB: SUPERVISIONS ========== */}
+        {lifecycleStage === 'active' && !isRecruitmentView && (
+          <TabsContent value="supervisions" data-testid="section-supervisions-root">
+            <SupervisionsPanel
+              employeeId={employeeId}
+              employeeName={employee ? `${employee.first_name} ${employee.last_name}` : ''}
             />
           </TabsContent>
         )}

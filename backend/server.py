@@ -135,6 +135,7 @@ from routes.policy_assignments import router as policy_assignments_router
 from routes.bulk_schedules import router as bulk_schedules_router
 from routes.employment_gaps import router as employment_gaps_router
 from routes.recurring_compliance import router as recurring_compliance_router
+from routes.supervisions import router as supervisions_router
 from routes.agreements import router as agreements_router
 from routes.dbs import router as dbs_router
 from routes.verifications import router as verifications_router
@@ -11417,31 +11418,65 @@ async def verify_training(
     record = await db.training_records.find_one({
         "id": record_id,
         "employee_id": employee_id,
-        "record_status": {"$ne": "deleted"}
+        "record_status": {"$nin": ["deleted", "superseded"]}
     })
-    
-    # P0 FIX: If not found by ID, try by training code/name
+
+    # Canonical-aware fallback: if the caller passed a training code/name
+    # (e.g. "infection_control") rather than a UUID, pick the BEST unverified
+    # active record that canonicalises to it. This eliminates the three-way
+    # contradiction where `find_one` could pick an already-verified sibling
+    # and reject the click with "Training already verified" while the UI is
+    # still showing a different unverified row.
+    from governance.training_dedup import (
+        canonical_training_key,
+        find_active_canonical_records,
+        pick_best_training_record,
+        reconcile_active_training_records,
+    )
+
     if not record:
-        # Try matching by requirement_id or training_name patterns
-        code_lower = record_id.lower().replace("_", " ")
-        record = await db.training_records.find_one({
-            "employee_id": employee_id,
-            "record_status": {"$ne": "deleted"},
-            "$or": [
-                {"requirement_id": record_id},
-                {"requirement_id": {"$regex": f"^{record_id}$", "$options": "i"}},
-                {"code": record_id},
-                {"code": {"$regex": f"^{record_id}$", "$options": "i"}},
-                {"training_name": {"$regex": code_lower, "$options": "i"}}
-            ]
-        })
-    
+        canonical_code = canonical_training_key(record_id)
+        if canonical_code:
+            matching = await find_active_canonical_records(
+                db, employee_id, canonical_code
+            )
+            if matching:
+                # Prefer an unverified record so repeated clicks are idempotent
+                # against an already-verified row.
+                unverified = [
+                    r for r in matching
+                    if not (r.get("verified") or r.get("verification_status") == "verified")
+                ]
+                if unverified:
+                    record = pick_best_training_record(unverified)
+                else:
+                    record = pick_best_training_record(matching)
+
     if not record:
         raise HTTPException(status_code=404, detail="Training record not found")
-    
-    if record.get('verified'):
-        raise HTTPException(status_code=400, detail="Training already verified")
-    
+
+    if record.get('verified') or record.get('verification_status') == 'verified':
+        # IDEMPOTENT: if the canonical record is already verified, don't 400
+        # the UI — just confirm and reconcile any legacy duplicates so the
+        # Training Library stops showing a stale pending row.
+        canonical_code = canonical_training_key(record)
+        dedup_summary = await reconcile_active_training_records(
+            db,
+            employee_id,
+            canonical_code,
+            keep_record_id=record.get("id"),
+            actor_id=user['user_id'],
+            reason="verify_idempotent_reconcile",
+        )
+        return {
+            "status": "success",
+            "message": f"Training '{record.get('training_name')}' already verified",
+            "verified_by": record.get("verified_by"),
+            "verified_at": record.get("verified_at"),
+            "already_verified": True,
+            "reconciled": dedup_summary,
+        }
+
     now = datetime.now(timezone.utc).isoformat()
     
     # P0 FIX: Get user's full name for verification stamp (not email)
@@ -11494,13 +11529,29 @@ async def verify_training(
         "verified_by_name": user_name,
         "induction_auto_complete": induction_result
     })
-    
+
+    # Canonical dedup: after a successful verify, supersede any other active
+    # records that canonicalise to the same training code so the Training
+    # Library and the Mandatory table agree on a single row.
+    dedup_summary = {"kept_id": record.get("id"), "superseded_ids": []}
+    canonical_code = canonical_training_key(record)
+    if canonical_code:
+        dedup_summary = await reconcile_active_training_records(
+            db,
+            employee_id,
+            canonical_code,
+            keep_record_id=record.get("id"),
+            actor_id=user['user_id'],
+            reason="post_verify_reconcile",
+        )
+
     return {
         "status": "success",
         "message": f"Training '{record.get('training_name')}' verified",
         "verified_by": user_name,
         "verified_at": now,
-        "induction_auto_complete": induction_result
+        "induction_auto_complete": induction_result,
+        "reconciled": dedup_summary,
     }
 
 
@@ -41039,12 +41090,28 @@ Important:
                         file_url = ef.get("file_url")
                         original_filename = ef.get("original_filename", original_filename)
                 
-                # Check for existing training record to update
-                existing_record = await db.training_records.find_one({
-                    "employee_id": employee_id,
+                # Canonical-aware existing-record lookup. Previously this
+                # only matched `requirement_id == training_code`, which would
+                # MISS legacy rows stored under alias ids (e.g. "ipc",
+                # "cstf_infection_prevention_and_control") and insert a new
+                # canonical row alongside them — producing the three-surface
+                # contradiction reported against IPC.
+                from governance.training_dedup import (
+                    canonical_training_key,
+                    find_active_canonical_records,
+                    pick_best_training_record,
+                    reconcile_active_training_records,
+                )
+
+                canonical_code_for_dedup = canonical_training_key({
                     "requirement_id": training_code,
-                    "record_status": "active"
-                }, {"_id": 0})
+                    "training_name": training_title or raw_title,
+                }) or training_code
+
+                active_canonical = await find_active_canonical_records(
+                    db, employee_id, canonical_code_for_dedup
+                )
+                existing_record = pick_best_training_record(active_canonical) if active_canonical else None
                 
                 if existing_record:
                     # Update existing record
@@ -41130,7 +41197,19 @@ Important:
                     }
                     
                     await db.training_records.insert_one(new_record)
-                
+
+                # Canonical dedup: make sure only one active row survives for
+                # this (employee, canonical_code). Supersede any legacy alias
+                # rows. Idempotent when no duplicates exist.
+                await reconcile_active_training_records(
+                    db,
+                    employee_id,
+                    canonical_code_for_dedup,
+                    keep_record_id=record_id,
+                    actor_id=reviewer_id,
+                    reason="approve_proposed_item",
+                )
+
                 # Update proposed item status
                 await db.proposed_training_items.update_one(
                     {"id": item.item_id},
@@ -42006,6 +42085,9 @@ api_router.include_router(employment_gaps_router)
 
 # Include recurring compliance routes (refactored from server.py)
 api_router.include_router(recurring_compliance_router)
+
+# Include supervisions routes (Phase 1 governance — Step 2)
+api_router.include_router(supervisions_router)
 
 # Include agreements routes (refactored from server.py)
 api_router.include_router(agreements_router)

@@ -14,18 +14,22 @@ import {
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
-// Standard training types
+// Standard training types — ids MUST match canonical training requirement_ids
+// (see MANDATORY_TRAINING_HCA in backend/unified_compliance_engine.py and
+// TRAINING_ALIASES in backend/services/training_evaluator.py). These ids are
+// persisted in email_requests.context.training_types and echoed to the worker
+// upload page, so they are NOT pure display — they must stay canonical.
 const TRAINING_TYPES = [
-  { id: 'safeguarding_training', label: 'Safeguarding of Vulnerable Adults' },
-  { id: 'moving_handling_training', label: 'Moving and Handling' },
-  { id: 'medication_training', label: 'Medication Administration' },
-  { id: 'infection_control_training', label: 'Infection Control and Hygiene' },
-  { id: 'first_aid_training', label: 'First Aid / Basic Life Support' },
-  { id: 'fire_safety_training', label: 'Fire Safety' },
-  { id: 'health_safety_training', label: 'Health and Safety' },
-  { id: 'food_hygiene_training', label: 'Food Hygiene' },
-  { id: 'dementia_training', label: 'Understanding Dementia' },
-  { id: 'mental_health_training', label: 'Mental Health Awareness' }
+  { id: 'safeguarding_adults', label: 'Safeguarding of Vulnerable Adults' },
+  { id: 'manual_handling', label: 'Moving and Handling' },
+  { id: 'medication_administration', label: 'Medication Administration' },
+  { id: 'infection_control', label: 'Infection Prevention and Control' },
+  { id: 'basic_life_support', label: 'First Aid / Basic Life Support' },
+  { id: 'fire_safety', label: 'Fire Safety' },
+  { id: 'health_safety', label: 'Health and Safety' },
+  { id: 'food_hygiene', label: 'Food Hygiene' },
+  { id: 'dementia_awareness', label: 'Understanding Dementia' },
+  { id: 'mental_health', label: 'Mental Health Awareness' }
 ];
 
 /**

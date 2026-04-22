@@ -232,7 +232,17 @@ async def get_training_records(
         elif not employee_id:
             continue
         filtered_records.append(record)
-    
+
+    # Canonical dedup: when scoped to a single employee, collapse active
+    # records that share a canonical training key (e.g. legacy "ipc" +
+    # canonical "infection_control") down to the single best record.
+    # This prevents the Training Library from showing a stale pending row
+    # next to an already-verified canonical row. Superseded/deleted rows
+    # are already excluded above; only active rows are deduped.
+    if employee_id and not include_superseded:
+        from governance.training_dedup import dedupe_records_by_canonical_key
+        filtered_records = dedupe_records_by_canonical_key(filtered_records)
+
     return [TrainingRecordResponse(**r) for r in filtered_records]
 
 

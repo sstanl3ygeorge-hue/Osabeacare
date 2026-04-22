@@ -1189,7 +1189,61 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             "agreement_type": HANDBOOK_AGREEMENT_TYPE
         }, {"_id": 0})
         handbook_ack = handbook_ack_result if handbook_ack_result is not None else {}
-    
+
+    # Canonical-row selection for handbook display.
+    #
+    # Duplicate rows in `agreement_acknowledgements` can exist for the same
+    # (employee_id, agreement_type) because two write paths mint distinct ids:
+    #   * `ensure_agreement_rendered` upserts id `agr_<type>_<employee_id>`
+    #     (carries rendered_file_url / template_version / rendered_at).
+    #   * `AgreementAcknowledgementService.complete_agreement` (admin-assisted
+    #     or phone-assisted completion) inserts id `agr_ack_<uuid>` with the
+    #     acknowledgement / verification state but no render artefacts.
+    # Admin verifies the admin-assisted row, but `ensure_agreement_rendered`
+    # uses `find_one` without a sort and may return the render-only row,
+    # leaving the worker dashboard showing "being prepared" even though the
+    # authoritative record is verified. Pick the highest-precedence row and
+    # carry render artefacts across so the worker view matches admin truth.
+    try:
+        _hb_rows = await db.agreement_acknowledgements.find(
+            {"employee_id": employee_id, "agreement_type": HANDBOOK_AGREEMENT_TYPE},
+            {"_id": 0},
+        ).to_list(20)
+    except Exception:
+        _hb_rows = []
+    if len(_hb_rows) > 1:
+        def _hb_rank(row):
+            vs = row.get("verification_status")
+            ts = (
+                row.get("verified_at")
+                or row.get("acknowledged_at")
+                or row.get("rejected_at")
+                or row.get("updated_at")
+                or row.get("created_at")
+                or ""
+            )
+            if vs == "verified":
+                return (3, ts)
+            if row.get("acknowledged") or row.get("status") == "signed":
+                return (2, ts)
+            if vs == "rejected":
+                return (0, ts)
+            return (1, ts)
+        _hb_rows.sort(key=_hb_rank, reverse=True)
+        _canonical = dict(_hb_rows[0])
+        # Back-fill render artefacts from any sibling row that has them, so
+        # the worker can still view/download the current PDF even when the
+        # canonical (verified) row is the admin-assisted one with no render
+        # fields of its own.
+        for _k in ("rendered_file_url", "template_version", "rendered_at", "employee_name"):
+            if not _canonical.get(_k):
+                for _sib in _hb_rows[1:]:
+                    _v = _sib.get(_k)
+                    if _v:
+                        _canonical[_k] = _v
+                        break
+        handbook_ack = _canonical
+
     _handbook_verification_status = (handbook_ack or {}).get("verification_status")
     _handbook_acknowledged = bool(
         handbook_ack
@@ -1198,7 +1252,12 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
     )
     _handbook_rejected = bool(handbook_ack and _handbook_verification_status == "rejected")
     _handbook_verified = bool(handbook_ack and _handbook_verification_status == "verified")
-    _handbook_system_issue = bool(handbook_render_error_detail)
+    # A transient re-render failure must not mask an already-verified or
+    # already-acknowledged handbook. Admin truth wins; only surface "being
+    # prepared" when there is nothing verified/acknowledged on file.
+    _handbook_system_issue = bool(handbook_render_error_detail) and not (
+        _handbook_verified or _handbook_acknowledged
+    )
 
     if _handbook_rejected:
         _handbook_state_label = "Your handbook is being updated. You will be asked to review and sign once ready."

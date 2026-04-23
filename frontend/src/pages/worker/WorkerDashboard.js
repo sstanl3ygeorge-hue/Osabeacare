@@ -23,6 +23,10 @@ import { Textarea } from '../../components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
 import ProfileCompletionWizard from '../../components/worker/ProfileCompletionWizard';
 import CareCertificateInductionPanel from '../../components/worker/CareCertificateInductionPanel';
+import WorkerDashboardPage from '../../components/worker/WorkerDashboardPage';
+import DashboardHeader from '../../components/worker/DashboardHeader';
+import NextActionCard from '../../components/worker/NextActionCard';
+import { getAgreementDisplay, getCvDisplay, getTrainingDisplay, getNextAction } from '../../components/worker/dashboardStatus';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -1299,41 +1303,161 @@ export default function WorkerDashboard() {
     : isPreEmploymentEmployee
       ? 'pre_employment'
       : 'recruitment';
-  const showOnboardingContractSection = !isActiveEmployee && !contract_signed;
+  const showOnboardingContractSection = false;
+  const handbookAgreement = agreements.find((agreement) => agreement.id === 'handbook_acknowledgement');
+  const contractDisplay = getAgreementDisplay(contractAgreement, { contractEligibility });
+  const handbookDisplay = getAgreementDisplay(handbookAgreement, { contractEligibility });
+  const cvDisplay = getCvDisplay(cvStatus);
+  const trainingDisplay = getTrainingDisplay({
+    missingTrainings: missing_trainings,
+    expiredTrainings: expired_trainings,
+    allMandatoryTrainings: all_mandatory_trainings,
+  });
+  const referencesNeedAction = references.some((reference) => {
+    const mismatch = reference?.mismatch;
+    return reference?.status !== 'verified' || (mismatch && mismatch.resolved !== true);
+  }) || Boolean(referenceMismatches?.has_mismatches);
+  const nextAction = getNextAction({
+    cv: cvDisplay,
+    contract: contractDisplay,
+    handbook: handbookDisplay,
+    missingDocuments: missing_documents,
+    missingTrainings: missing_trainings,
+    expiredTrainings: expired_trainings,
+    referencesNeedAction,
+    gapsNeedAction: employment_readiness_blockers.some((blocker) => /employment|gap/i.test(blocker?.label || '')),
+  });
+
+  const scrollToSection = (selector) => {
+    const node = document.querySelector(selector);
+    if (node) {
+      node.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return true;
+    }
+    return false;
+  };
+
+  const handleNextAction = (action) => {
+    switch (action?.route) {
+      case '#documents-cv':
+        triggerCvFileInput();
+        return;
+      case '#agreements-contract':
+        if (contractDisplay.workerActionable && contractEligibility?.can_sign) {
+          setShowSignaturePad(true);
+          return;
+        }
+        scrollToSection('[data-testid="agreements-section"]');
+        return;
+      case '#agreements-handbook':
+        if (handbookAgreement && handbookDisplay.workerActionable && (handbookAgreement.file_url || handbookAgreement.download_url)) {
+          openHandbookAckModal(handbookAgreement);
+          return;
+        }
+        scrollToSection('[data-testid="agreements-section"]');
+        return;
+      case '#documents':
+        scrollToSection('[data-testid="documents-card"]') || scrollToSection('[data-testid="missing-documents-section"]');
+        return;
+      case '#training':
+        scrollToSection('[data-testid="training-card"]') || scrollToSection('[data-testid="recommended-training-section"]');
+        return;
+      case '#checks':
+        scrollToSection('[data-testid="checks-card"]') || scrollToSection('[data-testid="references-section"]') || scrollToSection('[data-testid="employment-gaps-section"]');
+        return;
+      default:
+        scrollToSection('[data-testid="employment-readiness-checklist"]');
+    }
+  };
+
+  const readinessTone = progress.percentage === 100 && employment_readiness_blockers.length === 0 ? 'green' : employment_readiness_blockers.length > 0 ? 'amber' : 'blue';
+  const readinessChecklist = (
+    <Card
+      className={`border shadow-sm ${
+        readinessTone === 'green'
+          ? 'border-green-200 bg-green-50/60'
+          : readinessTone === 'amber'
+            ? 'border-amber-200 bg-amber-50/60'
+            : 'border-blue-200 bg-blue-50/60'
+      }`}
+      data-testid="employment-readiness-checklist"
+    >
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <CardTitle className="text-lg text-slate-900">Readiness checklist</CardTitle>
+            <p className="mt-1 text-sm text-slate-600">
+              {progress.completed} of {progress.required} required items complete
+            </p>
+          </div>
+          <Badge className={readinessTone === 'green' ? 'bg-green-100 text-green-700' : readinessTone === 'amber' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}>
+            {progress.percentage}%
+          </Badge>
+        </div>
+      </CardHeader>
+      <CardContent className="pt-0">
+        <Progress value={progress.percentage} className="h-2.5" />
+        {employment_readiness_blockers.length > 0 ? (
+          <ul className="mt-3 space-y-2">
+            {employment_readiness_blockers.map((blocker, index) => (
+              <li key={`${blocker.label}-${index}`} className="flex items-start gap-2 text-sm text-slate-700">
+                <AlertTriangle className="mt-0.5 h-4 w-4 text-amber-500" />
+                <span>{blocker.label}</span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="mt-3 text-sm text-green-700">Everything required from you is complete.</p>
+        )}
+      </CardContent>
+    </Card>
+  );
+
+  const supportCard = (
+    <Card className="border border-slate-200 shadow-sm">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-lg text-slate-900">Support</CardTitle>
+        <p className="mt-1 text-sm text-slate-600">Need help with your file? Refresh your dashboard or contact Osabea.</p>
+      </CardHeader>
+      <CardContent className="pt-0">
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Button variant="outline" className="w-full sm:w-auto" onClick={fetchDashboard}>
+            <RefreshCw className="mr-2 h-4 w-4" />
+            Refresh dashboard
+          </Button>
+          <Button variant="outline" className="w-full sm:w-auto" onClick={() => setShowSetPasswordModal(true)}>
+            <Lock className="mr-2 h-4 w-4" />
+            {accountStatus.has_password ? 'Change password' : 'Set password'}
+          </Button>
+          <Button variant="outline" className="w-full sm:w-auto" onClick={() => setShowNotificationsPanel((current) => !current)}>
+            <Bell className="mr-2 h-4 w-4" />
+            Notifications
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      {/* Header */}
-      <div className="bg-white border-b border-slate-200 sticky top-0 z-10 shadow-sm">
-        <div className="max-w-4xl mx-auto px-4 py-4 flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-bold text-slate-800">{orgSettings.organisation_name || 'Healthcare Portal'}</h1>
-            <p className="text-sm text-slate-500">Welcome, {employee?.name || 'Worker'}</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm" onClick={fetchDashboard} className="gap-1">
-              <RefreshCw className="h-4 w-4" />
-            </Button>
-            {/* Notifications Bell */}
-            <div className="relative">
-              <Button 
-                variant="ghost" 
-                size="sm" 
-                onClick={() => setShowNotificationsPanel(!showNotificationsPanel)}
-                className="relative"
-                data-testid="notifications-btn"
-              >
-                <Bell className="h-4 w-4" />
-                {unreadCount > 0 && (
-                  <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-xs rounded-full flex items-center justify-center font-bold">
-                    {unreadCount > 9 ? '9+' : unreadCount}
-                  </span>
-                )}
-              </Button>
-              
-              {/* Notifications Dropdown */}
-              {showNotificationsPanel && (
-                <div className="absolute right-0 top-full mt-2 w-80 bg-white rounded-lg shadow-lg border border-slate-200 z-50">
+    <WorkerDashboardPage
+      header={(
+        <DashboardHeader
+          orgName={orgSettings.organisation_name || 'Healthcare Portal'}
+          workerName={employee?.name || 'Worker'}
+          subtitle={isActiveEmployee ? 'Your staff file and employment record live here.' : 'We will guide you through your onboarding steps one at a time.'}
+          progressLabel={`${progress.completed} of ${progress.required} required items complete`}
+          unreadCount={unreadCount}
+          onRefresh={fetchDashboard}
+          onToggleNotifications={() => setShowNotificationsPanel(!showNotificationsPanel)}
+          onLogout={handleLogout}
+        />
+      )}
+      nextAction={<NextActionCard action={nextAction} onPrimaryAction={handleNextAction} />}
+      readinessChecklist={readinessChecklist}
+      support={supportCard}
+    >
+      {showNotificationsPanel && (
+        <div className="fixed inset-x-4 top-20 z-50 mx-auto max-w-sm rounded-lg border border-slate-200 bg-white shadow-lg">
                   <div className="p-3 border-b border-slate-200 flex items-center justify-between">
                     <h3 className="font-semibold text-slate-800">Notifications</h3>
                     {unreadCount > 0 && (
@@ -1386,38 +1510,8 @@ export default function WorkerDashboard() {
                       </button>
                     </div>
                   )}
-                </div>
-              )}
-            </div>
-            {!accountStatus.has_password && (
-              <Button 
-                variant="outline" 
-                size="sm" 
-                onClick={() => setShowSetPasswordModal(true)} 
-                className="gap-1 text-purple-600 border-purple-200 hover:bg-purple-50"
-                data-testid="set-password-btn"
-              >
-                <Lock className="h-4 w-4" />
-                Set Password
-              </Button>
-            )}
-            {accountStatus.has_password && (
-              <Button 
-                variant="ghost" 
-                size="sm" 
-                onClick={() => setShowSetPasswordModal(true)} 
-                className="gap-1 text-slate-600"
-              >
-                <Lock className="h-4 w-4" />
-              </Button>
-            )}
-            <Button variant="ghost" size="sm" onClick={handleLogout} className="gap-1 text-slate-600">
-              <LogOut className="h-4 w-4" />
-              Logout
-            </Button>
           </div>
-        </div>
-      </div>
+      )}
 
       {/* Set Password Modal */}
       <Dialog open={showSetPasswordModal} onOpenChange={setShowSetPasswordModal}>
@@ -1489,71 +1583,7 @@ export default function WorkerDashboard() {
         </DialogContent>
       </Dialog>
 
-      <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
-        {/* Status Banner - Enhanced with "Cleared to Work" messaging */}
-        {isActiveEmployee ? (
-          <div className="bg-gradient-to-r from-green-500 to-emerald-600 rounded-2xl p-6 text-white shadow-lg" data-testid="status-banner-active">
-            <div className="flex items-center gap-4">
-              <div className="w-14 h-14 bg-white/20 rounded-xl flex items-center justify-center">
-                <Shield className="h-8 w-8" />
-              </div>
-              <div className="flex-1">
-                <div className="flex items-center gap-2">
-                  <h3 className="font-bold text-xl">Cleared to Work</h3>
-                  <Badge className="bg-white/20 text-white text-xs">Active Employee</Badge>
-                </div>
-                <p className="text-green-100 mt-1">
-                  Your Osabea staff file is complete and you are authorised to work.
-                </p>
-              </div>
-            </div>
-            {/* Mini stats for active employees */}
-            {alerts.length === 0 && (
-              <div className="mt-4 pt-4 border-t border-white/20 flex items-center gap-2">
-                <CheckCircle className="h-4 w-4" />
-                <span className="text-sm text-green-100">All documents current • No renewals due</span>
-              </div>
-            )}
-          </div>
-        ) : employee?.status === 'READY' ? (
-          <div className="bg-gradient-to-r from-blue-500 to-blue-600 rounded-2xl p-6 text-white shadow-lg" data-testid="status-banner-ready">
-            <div className="flex items-center gap-4">
-              <div className="w-14 h-14 bg-white/20 rounded-xl flex items-center justify-center">
-                <CheckCircle className="h-8 w-8" />
-              </div>
-              <div>
-                <h3 className="font-bold text-xl">Staff File Submitted</h3>
-                <p className="text-blue-100">Your items are with Osabea for final review before you are cleared for work.</p>
-              </div>
-            </div>
-          </div>
-        ) : lifecycleStage === 'recruitment' ? (
-          <div className="bg-gradient-to-r from-amber-500 to-orange-500 rounded-2xl p-6 text-white shadow-lg" data-testid="status-banner-recruitment">
-            <div className="flex items-center gap-4">
-              <div className="w-14 h-14 bg-white/20 rounded-xl flex items-center justify-center">
-                <AlertCircle className="h-8 w-8" />
-              </div>
-              <div>
-                <h3 className="font-bold text-xl">Recruitment Details In Progress</h3>
-                <p className="text-amber-100">Start with your forms and employment history below. Later onboarding checks come after review.</p>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div className="bg-gradient-to-r from-amber-500 to-orange-500 rounded-2xl p-6 text-white shadow-lg" data-testid="status-banner-onboarding">
-            <div className="flex items-center gap-4">
-              <div className="w-14 h-14 bg-white/20 rounded-xl flex items-center justify-center">
-                <AlertCircle className="h-8 w-8" />
-              </div>
-              <div>
-                <h3 className="font-bold text-xl">Onboarding In Progress</h3>
-                <p className="text-amber-100">Complete the items below to become work-ready.</p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Profile Completion Banner - for offline PDF imports */}
+      {/* Profile Completion Banner - for offline PDF imports */}
         {profileCompletionStatus?.needs_wizard && !isActiveEmployee && (
           <Card className="border-purple-200 bg-purple-50 shadow-sm" data-testid="profile-completion-banner">
             <CardContent className="py-4">
@@ -1583,121 +1613,32 @@ export default function WorkerDashboard() {
           </Card>
         )}
 
-        {/* Progress Card - Only for onboarding */}
-        {!isActiveEmployee && (
-          <Card className="shadow-md border-0">
-            <CardContent className="pt-6">
-              <div className="flex justify-between items-center mb-3">
-                <span className="text-sm font-medium text-slate-600">
-                  {lifecycleStage === 'recruitment' ? 'Your Recruitment Progress' : 'Your Onboarding Progress'}
-                </span>
-                <span className="text-3xl font-bold text-blue-600">{progress.percentage}%</span>
+        <Card className="border border-slate-200 shadow-sm" data-testid="checks-card">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-lg text-slate-900">Checks</CardTitle>
+            <p className="mt-1 text-sm text-slate-600">References, employment history, and onboarding forms.</p>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <div className="space-y-2 text-sm text-slate-700">
+              <div className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2">
+                <span>Forms</span>
+                <Badge className="bg-slate-100 text-slate-700">{forms.filter((form) => form.status === 'verified').length}/{forms.length || 0} complete</Badge>
               </div>
-              <Progress value={progress.percentage} className="h-3" />
-              <p className="text-sm text-slate-500 mt-3">
-                {progress.completed} of {progress.required} requirements completed
-              </p>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Employment Readiness Banner - shown when onboarding is in progress or complete */}
-        {!isActiveEmployee && employment_readiness && (() => {
-          // Canonical 5-state model — keep in sync with backend worker_dashboard.py
-          //   ready_for_work
-          //   awaiting_final_company_action
-          //   action_required_from_you
-          //   admin_review_in_progress
-          //   system_issue_preventing_completion
-          // Legacy: 'blocked', 'awaiting_agreements' — mapped to closest canonical state
-          const _canonical = (s) => {
-            if (s === 'blocked') return 'action_required_from_you';
-            if (s === 'awaiting_agreements') return 'admin_review_in_progress';
-            return s;
-          };
-          const state = _canonical(employment_readiness);
-          const READINESS_UI = {
-            ready_for_work: {
-              borderCls: 'border-l-green-500 bg-green-50/60',
-              iconBg: 'bg-green-100', Icon: ShieldCheck, iconCls: 'text-green-600',
-              textCls: 'text-green-800', badgeCls: 'bg-green-100 text-green-700',
-              badgeLabel: 'Ready for Work',
-              blockerTextCls: 'text-green-700',
-            },
-            awaiting_final_company_action: {
-              borderCls: 'border-l-blue-500 bg-blue-50/60',
-              iconBg: 'bg-blue-100', Icon: Clock, iconCls: 'text-blue-600',
-              textCls: 'text-blue-800', badgeCls: 'bg-blue-100 text-blue-700',
-              badgeLabel: 'Awaiting final company action',
-              blockerTextCls: 'text-blue-700',
-            },
-            action_required_from_you: {
-              borderCls: 'border-l-amber-500 bg-amber-50/60',
-              iconBg: 'bg-amber-100', Icon: AlertCircle, iconCls: 'text-amber-600',
-              textCls: 'text-amber-800', badgeCls: 'bg-amber-100 text-amber-700',
-              badgeLabel: 'Action required from you',
-              blockerTextCls: 'text-amber-700',
-            },
-            admin_review_in_progress: {
-              borderCls: 'border-l-purple-500 bg-purple-50/60',
-              iconBg: 'bg-purple-100', Icon: Clock, iconCls: 'text-purple-600',
-              textCls: 'text-purple-800', badgeCls: 'bg-purple-100 text-purple-700',
-              badgeLabel: 'Admin review in progress',
-              blockerTextCls: 'text-purple-700',
-            },
-            system_issue_preventing_completion: {
-              borderCls: 'border-l-slate-400 bg-slate-50/60',
-              iconBg: 'bg-slate-100', Icon: AlertTriangle, iconCls: 'text-slate-600',
-              textCls: 'text-slate-800', badgeCls: 'bg-slate-100 text-slate-700',
-              badgeLabel: 'System issue preventing completion',
-              blockerTextCls: 'text-slate-700',
-            },
-          };
-          const ui = READINESS_UI[state] || READINESS_UI.admin_review_in_progress;
-          const IconCmp = ui.Icon;
-          // Per-blocker colour driven by classification — never blame worker for
-          // admin/company/system-side delays.
-          const BLOCKER_CLS = {
-            worker_action:  'text-amber-700',
-            company_action: 'text-blue-700',
-            admin_action:   'text-purple-700',
-            system_issue:   'text-slate-700',
-          };
-          return (
-          <Card className={`shadow-md border-0 border-l-4 ${ui.borderCls}`} data-testid="employment-readiness-banner">
-            <CardContent className="py-4">
-              <div className="flex items-center gap-3">
-                <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${ui.iconBg}`}>
-                  <IconCmp className={`h-5 w-5 ${ui.iconCls}`} />
-                </div>
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className={`font-semibold text-sm ${ui.textCls}`}>
-                      Employment Status: {employment_readiness_label || ui.badgeLabel}
-                    </span>
-                    <Badge className={`text-xs ${ui.badgeCls}`}>{ui.badgeLabel}</Badge>
-                  </div>
-                  {employment_readiness_blockers.length > 0 && (
-                    <ul className="mt-1 space-y-0.5">
-                      {employment_readiness_blockers.map((b, i) => (
-                        <li key={i} className={`text-xs flex items-center gap-1 ${
-                          BLOCKER_CLS[b.classification] || ui.blockerTextCls
-                        }`}>
-                          <AlertTriangle className="h-3 w-3 flex-shrink-0" />
-                          {b.label}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                  {state === 'ready_for_work' && (
-                    <p className="text-xs text-green-700 mt-0.5">All agreements complete — you are cleared for employment.</p>
-                  )}
-                </div>
+              <div className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2">
+                <span>References</span>
+                <Badge className={referencesNeedAction ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}>
+                  {referencesNeedAction ? 'Needs attention' : 'Complete'}
+                </Badge>
               </div>
-            </CardContent>
-          </Card>
-          );
-        })()}
+              <div className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2">
+                <span>Employment history</span>
+                <Badge className={employment_readiness_blockers.some((blocker) => /employment|gap/i.test(blocker?.label || '')) ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}>
+                  {employment_readiness_blockers.some((blocker) => /employment|gap/i.test(blocker?.label || '')) ? 'Needs attention' : 'Complete'}
+                </Badge>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
         {/* Forms Section - Only for onboarding */}
         {!isActiveEmployee && <FormsSection />}
@@ -1814,6 +1755,66 @@ export default function WorkerDashboard() {
                   )}
                   {uploading === 'cv' ? 'Uploading…' : 'Upload CV (PDF)'}
                 </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {cvStatus && (
+          <Card className="shadow-sm border border-slate-200" data-testid="documents-card">
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <CardTitle className="flex items-center gap-2 text-lg">
+                    <FileText className="h-5 w-5 text-slate-700" />
+                    Documents
+                  </CardTitle>
+                  <p className="mt-1 text-xs text-slate-500">Your CV and onboarding evidence in one place.</p>
+                </div>
+                <Badge className={
+                  cvDisplay.tone === 'success' ? 'bg-green-100 text-green-700' :
+                  cvDisplay.tone === 'critical' ? 'bg-red-100 text-red-700' :
+                  'bg-blue-100 text-blue-700'
+                }>
+                  {cvDisplay.badge}
+                </Badge>
+              </div>
+            </CardHeader>
+            <CardContent className="pt-0">
+              <div className="rounded-xl border border-slate-200 bg-white p-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="font-medium text-slate-900">CV / Resume</p>
+                    <p className="mt-1 text-sm text-slate-600">{cvDisplay.description}</p>
+                  </div>
+                  <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+                    {cvDisplay.hasCv ? (
+                      <>
+                        <Button
+                          variant="outline"
+                          className="w-full sm:w-auto"
+                          onClick={() => cvStatus?.cv_document && openDocumentViewer({
+                            ...cvStatus.cv_document,
+                            name: 'CV / Resume',
+                            file_name: cvStatus.cv_document.file_name,
+                          })}
+                        >
+                          <Eye className="mr-2 h-4 w-4" />
+                          View CV
+                        </Button>
+                        <Button className="w-full sm:w-auto" onClick={triggerCvFileInput} disabled={uploading === 'cv'}>
+                          {uploading === 'cv' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
+                          Replace CV
+                        </Button>
+                      </>
+                    ) : cvDisplay.canUpload ? (
+                      <Button className="w-full sm:w-auto" onClick={triggerCvFileInput} disabled={uploading === 'cv'}>
+                        {uploading === 'cv' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
+                        {cvDisplay.primaryLabel}
+                      </Button>
+                    ) : null}
+                  </div>
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -2238,7 +2239,7 @@ export default function WorkerDashboard() {
 
         {/* Required Training Evidence */}
         {!isActiveEmployee && (
-          <Card className="shadow-md border-0">
+          <Card className="shadow-md border-0" data-testid="training-card">
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between">
                 <div>
@@ -2250,6 +2251,13 @@ export default function WorkerDashboard() {
                     {(all_mandatory_trainings?.length || 8)} required training items needed before work starts. Osabea extracts details from your certificates.
                   </p>
                 </div>
+                <Badge className={
+                  trainingDisplay.tone === 'success'
+                    ? 'bg-green-100 text-green-700'
+                    : 'bg-amber-100 text-amber-700'
+                }>
+                  {trainingDisplay.badge}
+                </Badge>
                 <Button 
                   variant="outline"
                   size="sm"
@@ -2722,37 +2730,46 @@ export default function WorkerDashboard() {
             </CardHeader>
             <CardContent>
               <div className="space-y-3">
-                {agreements.map((agreement) => (
+                {agreements.map((agreement) => {
+                  const agreementDisplay = getAgreementDisplay(agreement, { contractEligibility });
+                  const toneClasses =
+                    agreementDisplay.tone === 'critical'
+                      ? 'bg-red-50 border-red-200'
+                      : agreementDisplay.tone === 'success'
+                        ? 'bg-green-50 border-green-200'
+                        : agreementDisplay.tone === 'info'
+                          ? 'bg-blue-50 border-blue-200'
+                          : 'bg-slate-50 border-slate-200';
+                  const iconClasses =
+                    agreementDisplay.tone === 'critical'
+                      ? 'bg-red-100 text-red-600'
+                      : agreementDisplay.tone === 'success'
+                        ? 'bg-green-100 text-green-600'
+                        : agreementDisplay.tone === 'info'
+                          ? 'bg-blue-100 text-blue-600'
+                          : 'bg-slate-100 text-slate-500';
+                  return (
                   <div
                     key={agreement.id}
-                      className={`p-4 rounded-xl border ${
-                        agreement.rejected ? 'bg-red-50 border-red-300 border-2' :
-                        agreement.verified ? 'bg-green-50 border-green-200' :
-                        agreement.signed ? 'bg-blue-50 border-blue-200' :
-                        'bg-slate-50 border-slate-200'
-                      }`}
+                    className={`p-4 rounded-xl border ${toneClasses}`}
                     data-testid={`agreement-${agreement.id}`}
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
-                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
-                          agreement.verified ? 'bg-green-100' :
-                          agreement.rejected ? 'bg-red-100' :
-                          agreement.signed ? 'bg-blue-100' :
-                          'bg-slate-100'
-                        }`}>
+                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${iconClasses.split(' ')[0]}`}>
                           {agreement.verified ? (
-                            <CheckCircle className="h-5 w-5 text-green-600" />
+                            <CheckCircle className={`h-5 w-5 ${iconClasses.split(' ')[1]}`} />
                           ) : agreement.rejected ? (
-                            <AlertCircle className="h-5 w-5 text-red-600" />
-                          ) : agreement.signed ? (
-                            <PenTool className="h-5 w-5 text-blue-600" />
+                            <AlertCircle className={`h-5 w-5 ${iconClasses.split(' ')[1]}`} />
+                          ) : agreementDisplay.workerActionable ? (
+                            <PenTool className={`h-5 w-5 ${iconClasses.split(' ')[1]}`} />
                           ) : (
-                            <Clock className="h-5 w-5 text-slate-400" />
+                            <Clock className={`h-5 w-5 ${iconClasses.split(' ')[1]}`} />
                           )}
                         </div>
                         <div>
                           <span className="font-medium text-slate-700">{agreement.name}</span>
+                          <p className="text-xs text-slate-500 mt-0.5">{agreementDisplay.description}</p>
                           {agreement.verified && agreement.verified_at && (
                             <p className="text-xs text-green-600 mt-0.5">
                               Verified on {formatDate(agreement.verified_at)}
@@ -2770,21 +2787,6 @@ export default function WorkerDashboard() {
                             <p className="text-xs text-red-600 mt-0.5">
                               Rejected{agreement.rejected_at ? ` on ${formatDate(agreement.rejected_at)}` : ''}{agreement.rejected_by_name ? ` by ${agreement.rejected_by_name}` : ''}.
                               {agreement.rejection_reason ? ` ${agreement.rejection_reason}` : ''}
-                            </p>
-                          )}
-                            {!agreement.signed && !agreement.verified && (
-                              <p className="text-xs text-slate-500 mt-0.5">
-                                {agreement.rejected
-                                  ? 'Your handbook is being updated. You will be asked to review and sign once ready.'
-                                  : agreement.system_issue
-                                  ? 'Osabea is preparing this document. No action needed from you right now.'
-                                  : agreement.id === 'contract_acceptance'
-                                  ? (contractEligibility?.can_sign
-                                    ? 'Review the contract PDF, then sign when you are ready.'
-                                    : 'You can review the contract now. Signing unlocks when earlier onboarding steps are complete.')
-                                  : agreement.id === 'handbook_acknowledgement'
-                                    ? 'Open the full handbook PDF, then acknowledge once you have read it.'
-                                      : 'Awaiting completion'}
                             </p>
                           )}
                           {agreement.template_version && (
@@ -2818,7 +2820,17 @@ export default function WorkerDashboard() {
                             </Button>
                           </>
                         )}
-                        {agreement.id === 'handbook_acknowledgement' && !agreement.signed && !agreement.verified && !agreement.system_issue && (
+                        {agreement.id === 'contract_acceptance' && agreementDisplay.workerActionable && contractEligibility?.can_sign && (
+                          <Button
+                            size="sm"
+                            className="gap-1"
+                            onClick={() => setShowSignaturePad(true)}
+                          >
+                            <PenTool className="h-3.5 w-3.5" />
+                            Sign
+                          </Button>
+                        )}
+                        {agreement.id === 'handbook_acknowledgement' && handbookDisplay.workerActionable && agreement.id === handbookAgreement?.id && (
                           <Button
                             size="sm"
                             className="gap-1"
@@ -2831,24 +2843,17 @@ export default function WorkerDashboard() {
                           </Button>
                         )}
                         <Badge className={`text-xs ${
-                          agreement.verified ? 'bg-green-100 text-green-700' :
-                          agreement.system_issue ? 'bg-slate-100 text-slate-700' :
-                          agreement.rejected ? 'bg-red-100 text-red-700' :
-                          agreement.signed ? 'bg-blue-100 text-blue-700' :
+                          agreementDisplay.tone === 'critical' ? 'bg-red-100 text-red-700' :
+                          agreementDisplay.tone === 'success' ? 'bg-green-100 text-green-700' :
+                          agreementDisplay.tone === 'info' ? 'bg-blue-100 text-blue-700' :
                           'bg-slate-100 text-slate-600'
                         }`}>
-                            {agreement.verified ? 'Fully executed' :
-                             agreement.system_issue ? 'Being prepared by Osabea' :
-                             agreement.rejected ? 'Action required' :
-                             agreement.contract_state === 'awaiting_company_countersignature' ? 'Waiting for Osabea signature' :
-                             agreement.signed ? 'Signed' :
-                            agreement.id === 'contract_acceptance' && contractEligibility?.can_sign ? 'Ready to sign' :
-                            agreement.id === 'contract_acceptance' ? 'Waiting for earlier steps' : 'Pending'}
-                          </Badge>
+                          {agreementDisplay.badge}
+                        </Badge>
                       </div>
                     </div>
                   </div>
-                ))}
+                )})}
               </div>
             </CardContent>
           </Card>
@@ -3748,6 +3753,6 @@ export default function WorkerDashboard() {
           toast.success('Profile completed successfully!');
         }}
       />
-    </div>
+    </WorkerDashboardPage>
   );
 }

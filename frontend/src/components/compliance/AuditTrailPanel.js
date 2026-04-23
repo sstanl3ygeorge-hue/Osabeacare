@@ -65,6 +65,17 @@ const ACTION_CONFIG = {
   profile_updated:               { label: 'Profile updated', color: 'bg-gray-100 text-gray-600', icon: Edit },
   update_employee:               { label: 'Employee record updated', color: 'bg-gray-100 text-gray-600', icon: Edit },
   edit_personal_details:         { label: 'Personal details edited', color: 'bg-gray-100 text-gray-600', icon: Edit },
+  // ── Readiness-critical decisions (already written canonically by backend;
+  //    labels added so the panel renders them with the same Critical/Sign-off
+  //    treatment as other governance events. No new truth introduced.) ──
+  approve_for_work:              { label: 'Fit for work approval recorded', color: 'bg-emerald-100 text-emerald-700', icon: Shield },
+  auto_promoted_to_active:       { label: 'Promoted to active (auto)', color: 'bg-emerald-100 text-emerald-700', icon: ArrowRight },
+  manual_promotion_to_active:    { label: 'Promoted to active (manual override)', color: 'bg-amber-100 text-amber-700', icon: ArrowRight },
+  cv_approved:                   { label: 'CV approved', color: 'bg-green-100 text-green-700', icon: CheckCircle },
+  cv_rejected:                   { label: 'CV rejected — action required', color: 'bg-red-100 text-red-700', icon: XCircle },
+  cv_replacement_requested:      { label: 'CV replacement requested', color: 'bg-cyan-100 text-cyan-700', icon: RefreshCw },
+  cv_document_linked:            { label: 'CV document linked', color: 'bg-blue-100 text-blue-700', icon: FileText },
+  reject_reference:              { label: 'Reference rejected', color: 'bg-red-100 text-red-700', icon: XCircle },
   viewed:                        { label: 'Viewed', color: 'bg-slate-100 text-slate-600', icon: Eye },
 };
 
@@ -78,7 +89,7 @@ const CRITICAL_ACTIONS = new Set([
   'verify_and_stamp_identity', 'verify_and_stamp_address',
   'check_recorded', 'verify_requirement', 'unverify_requirement',
   'verify_training', 'training_correction',
-  'reference_verified', 'verify_reference',
+  'reference_verified', 'verify_reference', 'reject_reference',
   'signoff_form',
   'verify_agreement_submission', 'reject_agreement_submission',
   'health_declaration_reviewed',
@@ -86,6 +97,10 @@ const CRITICAL_ACTIONS = new Set([
   'mark_uploaded_in_error',
   'delete_evidence', 'remove_evidence', 'document_removed',
   'status_changed', 'status_change',
+  // Readiness-critical decisions (see ACTION_CONFIG above)
+  'approve_for_work',
+  'auto_promoted_to_active', 'manual_promotion_to_active',
+  'cv_approved', 'cv_rejected', 'cv_replacement_requested',
 ]);
 
 /* ─── Sign-off subset of critical ────────────────────────────── */
@@ -95,6 +110,8 @@ const SIGNOFF_ACTIONS = new Set([
   'check_recorded', 'verify_requirement', 'verify_training',
   'reference_verified', 'verify_reference',
   'verify_agreement_submission', 'health_declaration_reviewed',
+  'approve_for_work', 'cv_approved',
+  'auto_promoted_to_active', 'manual_promotion_to_active',
 ]);
 
 /* ─── Corrective / destructive actions that require a reason ─── */
@@ -106,6 +123,9 @@ const REASON_REQUIRED_ACTIONS = new Set([
   'training_record_updated', 'training_correction',
   'unverify_requirement',
   'delete_evidence', 'remove_evidence', 'document_removed', 'document_replaced',
+  'cv_rejected', 'cv_replacement_requested',
+  'reject_reference',
+  'manual_promotion_to_active',
 ]);
 
 /* ─── Normalise a single audit log entry ─────────────────────── *

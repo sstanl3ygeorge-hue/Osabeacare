@@ -3045,8 +3045,13 @@ def _employment_review_to_worker_payload(review: dict, reason_types: list[str]) 
         })
 
     summary = review.get("top_summary") or {}
+    # Note: the full `review` document is intentionally NOT returned to worker
+    # callers. It contains admin-internal fields (admin_review.reviewed_by admin
+    # UUIDs, gap_actions.blocked_sign_off_reasons, top_summary admin counts,
+    # raw segments incl. admin_review.notes). The structured keys below expose
+    # everything the worker UI reads; admin callers use the admin endpoint
+    # (/employees/{id}/employment-review) which returns the canonical document.
     return {
-        "employment_review": review,
         "canonical_source": "employment_reviews",
         "gaps": gaps,
         "has_gaps": bool(gaps),

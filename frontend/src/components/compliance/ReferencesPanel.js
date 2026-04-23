@@ -14,7 +14,7 @@ import {
   XCircle, Send, AlertTriangle, Loader2, RefreshCw, Calendar,
   MessageSquare, FileText, Plus, Edit, Shield, Eye, Download
 } from 'lucide-react';
-import { formatBackendDate } from '../../lib/dateUtils';
+import { formatBackendDate, formatBackendDateTime } from '../../lib/dateUtils';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -971,6 +971,101 @@ export default function ReferencesPanel({ employeeId, employee, onRefresh, onEdi
                               )}
                               Flag: not from most recent employer
                             </Button>
+                          </div>
+                        )}
+
+                        {/* ── Decision summary + history ─────────────────
+                            Admin visibility pass: show (a) the canonical
+                            one-line reason from the backend explaining why
+                            this reference does / does not currently count
+                            toward readiness, and (b) an expandable audit
+                            history of past reject / replacement actions
+                            (from db.references.ref{n}.history[], built by
+                            _build_reference_history_entry). Display-only —
+                            no truth logic is derived here. */}
+                        {declared.name && (ref?.counts_toward_readiness_reason || (ref?.history && ref.history.length > 0)) && (
+                          <div className="pt-2 border-t border-slate-100 space-y-2" data-testid={`reference-history-${refNum}`}>
+                            {ref?.counts_toward_readiness_reason && (
+                              <div className="flex items-start gap-2 text-xs">
+                                {ref.counts_toward_readiness ? (
+                                  <CheckCircle className="h-3.5 w-3.5 text-green-600 mt-0.5 flex-shrink-0" />
+                                ) : (
+                                  <AlertTriangle className="h-3.5 w-3.5 text-amber-600 mt-0.5 flex-shrink-0" />
+                                )}
+                                <span className="text-slate-600">
+                                  <span className="font-medium text-slate-700">
+                                    {ref.counts_toward_readiness ? 'Counts toward readiness.' : 'Does not count toward readiness.'}
+                                  </span>{' '}
+                                  {ref.counts_toward_readiness_reason}
+                                </span>
+                              </div>
+                            )}
+                            {ref?.history && ref.history.length > 0 && (
+                              <details className="group" data-testid={`reference-history-toggle-${refNum}`}>
+                                <summary className="cursor-pointer text-xs font-medium text-slate-600 hover:text-primary flex items-center gap-1">
+                                  <Clock className="h-3 w-3" />
+                                  Decision history ({ref.history.length})
+                                </summary>
+                                <ol className="mt-2 space-y-2 pl-4 border-l-2 border-slate-200">
+                                  {[...ref.history]
+                                    .sort((a, b) => {
+                                      const at = a?.recorded_at || '';
+                                      const bt = b?.recorded_at || '';
+                                      return bt.localeCompare(at); // newest first
+                                    })
+                                    .map((entry, idx) => {
+                                      const action = entry?.action || 'update';
+                                      const actionLabel = action === 'reject'
+                                        ? 'Rejected'
+                                        : action === 'request_replacement'
+                                          ? 'Replacement requested'
+                                          : action.replace(/_/g, ' ');
+                                      const actionCls = action === 'reject'
+                                        ? 'text-red-700'
+                                        : action === 'request_replacement'
+                                          ? 'text-amber-700'
+                                          : 'text-slate-700';
+                                      const reason = entry?.action_reason;
+                                      const when = entry?.recorded_at ? formatBackendDateTime(entry.recorded_at) : null;
+                                      const workerExpl = entry?.worker_explanation;
+                                      const adminPrior = entry?.admin_prior_decision;
+                                      const mismatchSnap = entry?.mismatch;
+                                      return (
+                                        <li
+                                          key={`${entry?.recorded_at || idx}-${idx}`}
+                                          className="text-xs"
+                                          data-testid={`reference-history-entry-${refNum}`}
+                                        >
+                                          <div className="flex items-center gap-2">
+                                            <span className={`font-medium ${actionCls}`}>{actionLabel}</span>
+                                            {when && <span className="text-slate-400">· {when}</span>}
+                                          </div>
+                                          {reason && (
+                                            <p className="text-slate-600 mt-0.5">Reason: {reason}</p>
+                                          )}
+                                          {mismatchSnap?.detected && (
+                                            <p className="text-slate-500 mt-0.5">
+                                              Mismatch at time of action{mismatchSnap.reason ? `: ${mismatchSnap.reason}` : ''}
+                                              {mismatchSnap.resolved ? ' (resolved)' : ''}
+                                            </p>
+                                          )}
+                                          {workerExpl?.submitted && workerExpl?.text && (
+                                            <p className="text-slate-500 mt-0.5 italic">
+                                              Worker explanation ({workerExpl.type || 'other'}): “{workerExpl.text}”
+                                            </p>
+                                          )}
+                                          {adminPrior?.decision && (
+                                            <p className="text-slate-500 mt-0.5">
+                                              Prior admin decision: {adminPrior.decision}
+                                              {adminPrior.notes ? ` — ${adminPrior.notes}` : ''}
+                                            </p>
+                                          )}
+                                        </li>
+                                      );
+                                    })}
+                                </ol>
+                              </details>
+                            )}
                           </div>
                         )}
                       </div>

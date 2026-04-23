@@ -32926,6 +32926,37 @@ async def get_employee_references(
             "mismatch_admin_notes": employee.get(f"reference_{ref_num}_mismatch_admin_notes"),
         }
 
+        # ──────────────────────────────────────────────────────────────────
+        # ADMIN VISIBILITY (display-only, no truth logic):
+        #   - history: canonical append-only log written by
+        #     _build_reference_history_entry in referee_outreach.py on
+        #     reject / request_replacement. Already persisted; just expose.
+        #   - counts_reason: a one-line plain-English explanation of WHY the
+        #     reference does (or does not) currently count toward readiness,
+        #     derived from the same fields admins already see above.
+        # ──────────────────────────────────────────────────────────────────
+        history_entries = list(ref_data.get("history") or [])
+
+        if counts_toward_readiness:
+            counts_reason = "Verified by admin and no unresolved mismatch."
+        elif currently_rejected:
+            counts_reason = "Rejected by admin — does not count."
+        elif mismatch_detected and not mismatch_resolved:
+            if worker_explanation_submitted and not admin_decision_made:
+                counts_reason = "Mismatch detected — worker explanation awaiting admin review."
+            elif not worker_explanation_submitted:
+                counts_reason = "Mismatch detected — awaiting worker explanation."
+            else:
+                counts_reason = "Mismatch detected — not yet resolved."
+        elif has_canonical_response and not currently_verified_raw:
+            counts_reason = "Response received — awaiting admin verification."
+        elif request_sent and not has_canonical_response:
+            counts_reason = "Request sent — awaiting referee response."
+        elif declared.get("name"):
+            counts_reason = "Referee declared — request not yet sent."
+        else:
+            counts_reason = "No referee declared."
+
         result["references"][f"reference_{ref_num}"] = {
             "reference_number": ref_num,
             "status": status,
@@ -32948,6 +32979,9 @@ async def get_employee_references(
             "mismatch": mismatch_obj,
             "integrity": integrity_obj,
             "counts_toward_readiness": counts_toward_readiness,
+            "counts_toward_readiness_reason": counts_reason,
+            "history": history_entries,
+            "history_count": len(history_entries),
             "has_canonical_response": has_canonical_response,
             "can_review_response": can_review_response,
             "can_review_mismatch_explanation": can_review_mismatch_explanation,

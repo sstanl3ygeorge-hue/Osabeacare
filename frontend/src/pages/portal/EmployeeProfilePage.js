@@ -1238,8 +1238,11 @@ export default function EmployeeProfilePage() {
     return 'bg-gray-100 text-gray-700';
   };
 
+  // NOTE: `canonicalCanPromote` is derived later from `unifiedProgress`. To avoid
+  // a temporal-dead-zone ReferenceError when this block evaluates before that
+  // derivation, read directly from the state value here. Same truth, same shape.
   const canPromoteToActiveNow = Boolean(
-    canonicalCanPromote &&
+    unifiedProgress?.can_promote === true &&
     ['ready', 'ready_with_conditions'].includes(latestWorkReadinessDecision?.outcome) &&
     employee?.status === 'onboarding'
   );
@@ -3612,20 +3615,32 @@ export default function EmployeeProfilePage() {
   const cvReviewReady = Boolean(cvLinkedForReview && activeCvDocument && cvIsPdf);
   const cvLinkRecoveryAvailable = Boolean(fallbackPdfCvDocument && !cvReviewReady);
   const cvLegacyNonPdfOnly = Boolean(!cvReviewReady && !cvLinkRecoveryAvailable && activeNonPdfCvCandidates.length > 0);
-  const cvStatusLabel = cvReviewReady
-    ? 'On file'
-    : cvLinkRecoveryAvailable
-      ? 'Link existing PDF'
-      : cvLegacyNonPdfOnly
-        ? 'PDF required'
-        : 'Missing';
-  const cvStatusBadgeClass = cvReviewReady
-    ? 'bg-green-100 text-green-700 border-green-200'
-    : cvLinkRecoveryAvailable
-      ? 'bg-blue-100 text-blue-700 border-blue-200'
-      : cvLegacyNonPdfOnly
-        ? 'bg-amber-100 text-amber-700 border-amber-200'
-        : 'bg-gray-100 text-gray-600 border-gray-200';
+  // Display-only: surface the admin-requested replacement state alongside the
+  // "On file" badge so the admin view does not silently contradict the
+  // readiness blocker ("CV was rejected — please upload a replacement") and
+  // the worker dashboard ("CV on file — replacement requested"). No new
+  // truth: reads employee.cv_status directly from the backend record.
+  const cvReplacementPending = ['rejected', 'replacement_requested'].includes(
+    (employee?.cv_status || '').toLowerCase()
+  );
+  const cvStatusLabel = cvReviewReady && cvReplacementPending
+    ? 'Replacement requested'
+    : cvReviewReady
+      ? 'On file'
+      : cvLinkRecoveryAvailable
+        ? 'Link existing PDF'
+        : cvLegacyNonPdfOnly
+          ? 'PDF required'
+          : 'Missing';
+  const cvStatusBadgeClass = cvReviewReady && cvReplacementPending
+    ? 'bg-amber-100 text-amber-700 border-amber-200'
+    : cvReviewReady
+      ? 'bg-green-100 text-green-700 border-green-200'
+      : cvLinkRecoveryAvailable
+        ? 'bg-blue-100 text-blue-700 border-blue-200'
+        : cvLegacyNonPdfOnly
+          ? 'bg-amber-100 text-amber-700 border-amber-200'
+          : 'bg-gray-100 text-gray-600 border-gray-200';
   const gapVerifiedCount = employmentGapEvaluation?.verified_count;
   const gapNeedsReviewCount = employmentGapEvaluation
     ? (employmentGapEvaluation?.pending_count || 0) +
@@ -5365,10 +5380,27 @@ export default function EmployeeProfilePage() {
               </CardContent>
             </Card>
 
+            {/* ── Recurring compliance (active workforce only, display-only surface of
+                 canonical /employees/{id}/recurring-compliance; no new truth) ── */}
+            {lifecycleStage === 'active' && (
+              <Card className="border-[#E4E8EB] shadow-sm" data-testid="section-recurring-compliance-root">
+                <CardHeader>
+                  <CardTitle className="font-heading text-lg">Recurring compliance</CardTitle>
+                  <p className="mt-1 text-sm text-text-muted">
+                    Overdue, due, and upcoming supervisions, competency assessments, spot checks, and training refreshes.
+                  </p>
+                </CardHeader>
+                <CardContent>
+                  <RecurringComplianceSection
+                    employeeId={employeeId}
+                    employeeName={employee ? `${employee.first_name} ${employee.last_name}` : ''}
+                  />
+                </CardContent>
+              </Card>
+            )}
+
           </div>
         </TabsContent>
-
-        {/* ========== TAB 3: FORMS ========== */}
         {/* Interview record + worker onboarding forms (health, personal, HMRC, declarations) */}
         <TabsContent value="forms">
           {/* ── Top-level Forms & Interview Summary ── */}

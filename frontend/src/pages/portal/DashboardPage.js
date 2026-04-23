@@ -628,7 +628,7 @@ export default function DashboardPage() {
                 {trainingSummary.blocked_employees.slice(0, 3).map((emp, idx) => (
                   <Link 
                     key={`blocked-${idx}`}
-                    to={`/portal/employees/${emp.id}?tab=training`}
+                    to={`/portal/training?employee_id=${emp.id}&filter=all`}
                     className="flex items-center justify-between p-2 rounded-lg bg-red-50 hover:bg-red-100 transition-colors"
                     data-testid={`training-blocked-${idx}`}
                   >

@@ -11,8 +11,6 @@ import { toast } from 'sonner';
 import FormFieldRenderer from '../../components/portal/FormFieldRenderer';
 import SignaturePad, { SignatureDisplay } from '../../components/portal/SignaturePad';
 import DocumentPreviewModal from '../../components/portal/DocumentPreviewModal';
-import html2canvas from 'html2canvas';
-import jsPDF from 'jspdf';
 import { 
   ArrowLeft, Save, Send, CheckCircle, Lock, Loader2, 
   FileText, User, Calendar, Building, Download, Printer,
@@ -188,49 +186,24 @@ export default function FormEditorPage() {
     }
   };
 
+  const downloadGeneratedFormPdf = async () => {
+    const response = await axios.get(`${API}/generated-forms/${formId}/pdf/download`, {
+      headers: { Authorization: `Bearer ${token}` },
+      responseType: 'blob'
+    });
+    const blob = new Blob([response.data]);
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = form?.pdf_filename || `${form?.template_name || 'form'}_${form?.employee_code || 'form'}.pdf`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
   const handleExportPDF = async () => {
-    if (!formRef.current) return;
-    
     setIsExporting(true);
     try {
-      const actionElements = formRef.current.querySelectorAll('[data-no-print]');
-      actionElements.forEach(el => el.style.display = 'none');
-      
-      const canvas = await html2canvas(formRef.current, {
-        scale: 2,
-        useCORS: true,
-        logging: false,
-        backgroundColor: '#ffffff'
-      });
-      
-      actionElements.forEach(el => el.style.display = '');
-      
-      const imgData = canvas.toDataURL('image/png');
-      const pdf = new jsPDF({
-        orientation: 'portrait',
-        unit: 'mm',
-        format: 'a4'
-      });
-      
-      const imgWidth = 210;
-      const pageHeight = 297;
-      const imgHeight = (canvas.height * imgWidth) / canvas.width;
-      let heightLeft = imgHeight;
-      let position = 0;
-      
-      pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
-      heightLeft -= pageHeight;
-      
-      while (heightLeft >= 0) {
-        position = heightLeft - imgHeight;
-        pdf.addPage();
-        pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
-        heightLeft -= pageHeight;
-      }
-      
-      const fileName = `${form.template_name.replace(/\s+/g, '_')}_${form.employee_code || 'form'}_${new Date().toISOString().split('T')[0]}.pdf`;
-      pdf.save(fileName);
-      
+      await downloadGeneratedFormPdf();
       toast.success('PDF exported successfully');
     } catch (error) {
       console.error('PDF export failed:', error);
@@ -250,17 +223,7 @@ export default function FormEditorPage() {
       return;
     }
     try {
-      const response = await axios.get(`${API}/generated-forms/${formId}/pdf/download`, {
-        headers: { Authorization: `Bearer ${token}` },
-        responseType: 'blob'
-      });
-      const blob = new Blob([response.data]);
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = form.pdf_filename || `${form.template_name}_${form.employee_code || 'form'}.pdf`;
-      link.click();
-      URL.revokeObjectURL(url);
+      await downloadGeneratedFormPdf();
       toast.success('Document downloaded');
     } catch (error) {
       toast.error('Failed to download document');

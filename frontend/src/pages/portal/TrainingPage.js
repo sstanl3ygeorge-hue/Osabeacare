@@ -69,22 +69,30 @@ export default function TrainingPage() {
   
   // Initialize filter from URL params
   const [filter, setFilter] = useState(searchParams.get('filter') || 'all');
+  const [employeeFilter, setEmployeeFilter] = useState(searchParams.get('employee_id') || 'all');
   const { token, isAuditor, loading: authLoading } = useAuth();
 
-  // Sync filter to URL - using a ref to prevent unnecessary updates
+  // Sync filter state to URL - keep deep links stable for dashboard drill-down
   useEffect(() => {
     const currentFilter = searchParams.get('filter') || 'all';
-    // Only update URL if filter actually changed from URL state
-    if (currentFilter !== filter) {
+    const currentEmployee = searchParams.get('employee_id') || 'all';
+
+    // Only update URL if state differs from URL
+    if (currentFilter !== filter || currentEmployee !== employeeFilter) {
       const newParams = new URLSearchParams(searchParams);
       if (filter && filter !== 'all') {
         newParams.set('filter', filter);
       } else {
         newParams.delete('filter');
       }
+      if (employeeFilter && employeeFilter !== 'all') {
+        newParams.set('employee_id', employeeFilter);
+      } else {
+        newParams.delete('employee_id');
+      }
       setSearchParams(newParams, { replace: true });
     }
-  }, [filter, searchParams, setSearchParams]);
+  }, [filter, employeeFilter, searchParams, setSearchParams]);
 
 
   // Correction modal state
@@ -317,6 +325,7 @@ export default function TrainingPage() {
 
   // Filter training records using backend-computed status
   const filteredTraining = training.filter(record => {
+    if (employeeFilter !== 'all' && record.employee_id !== employeeFilter) return false;
     if (filter === 'all') return true;
     
     // Use backend-computed renewal_status or computed_status
@@ -610,7 +619,7 @@ export default function TrainingPage() {
       {/* Filters */}
       <Card className="border-[#E4E8EB] shadow-sm">
         <CardContent className="p-4">
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <Filter className="h-4 w-4 text-text-muted" />
             <span className="text-sm text-text-muted">Filter:</span>
             <div className="flex flex-wrap gap-2">
@@ -651,6 +660,19 @@ export default function TrainingPage() {
                 Valid
               </Button>
             </div>
+            <Select value={employeeFilter} onValueChange={setEmployeeFilter}>
+              <SelectTrigger className="w-full sm:w-72 rounded-xl" data-testid="filter-employee">
+                <SelectValue placeholder="Filter by employee" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All employees</SelectItem>
+                {employees.map((emp) => (
+                  <SelectItem key={emp.id} value={emp.id}>
+                    {emp.first_name} {emp.last_name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </CardContent>
       </Card>
@@ -668,7 +690,11 @@ export default function TrainingPage() {
           ) : filteredTraining.length === 0 ? (
             <div className="text-center py-12 text-text-muted">
               <GraduationCap className="h-12 w-12 mx-auto mb-3 opacity-50" />
-              <p>{filter === 'all' ? 'No training records yet' : `No ${filter.replace('_', ' ')} training records`}</p>
+              <p>
+                {employeeFilter !== 'all'
+                  ? 'No training records for this employee and filter'
+                  : (filter === 'all' ? 'No training records yet' : `No ${filter.replace('_', ' ')} training records`)}
+              </p>
             </div>
           ) : (
             <div className="overflow-x-auto">

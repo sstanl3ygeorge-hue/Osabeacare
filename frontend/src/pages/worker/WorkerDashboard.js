@@ -1265,6 +1265,8 @@ export default function WorkerDashboard() {
     induction,
     competency_assessments,
     spot_checks,
+    supervisions: _supervisions,
+    recurring_compliance_summary: _recurring_compliance_summary,
     agreements: _agreements,
   } = dashboard;
 
@@ -1279,7 +1281,9 @@ export default function WorkerDashboard() {
   const recommended_trainings = _recommended_trainings || [];
   const alerts = _alerts || [];
   const references = _references || [];
+  const supervisions = _supervisions || [];
   const agreements = _agreements || [];
+  const recurring_compliance_summary = _recurring_compliance_summary || { total: 0, overdue: 0, due: 0, upcoming: 0, scheduled: 0, preview: [] };
   const employment_readiness_blockers = _employment_readiness_blockers || [];
   const contractAgreement = agreements.find((agreement) => agreement.id === 'contract_acceptance');
   
@@ -1317,6 +1321,16 @@ export default function WorkerDashboard() {
     const mismatch = reference?.mismatch;
     return reference?.status !== 'verified' || (mismatch && mismatch.resolved !== true);
   }) || Boolean(referenceMismatches?.has_mismatches);
+  const activeTrainingExpiringSoon = alerts.filter((entry) => entry?.type === 'training').length;
+  const completedCompetencyCount = (competency_assessments || []).filter(
+    (item) => item?.outcome === 'pass' || item?.status === 'completed'
+  ).length;
+  const completedSpotCheckCount = (spot_checks || []).filter(
+    (item) => ['pass', 'satisfactory', 'completed'].includes((item?.outcome || '').toLowerCase())
+  ).length;
+  const completedSupervisionCount = (supervisions || []).filter(
+    (item) => (item?.status || '').toLowerCase() === 'completed'
+  ).length;
   const nextAction = getNextAction({
     cv: cvDisplay,
     contract: contractDisplay,
@@ -1639,6 +1653,52 @@ export default function WorkerDashboard() {
             </div>
           </CardContent>
         </Card>
+
+        {isActiveEmployee && (
+          <Card className="border border-slate-200 shadow-sm" data-testid="active-obligations-card">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-lg text-slate-900">Ongoing obligations</CardTitle>
+              <p className="mt-1 text-sm text-slate-600">
+                Your active workforce compliance schedule and review activity.
+              </p>
+            </CardHeader>
+            <CardContent className="pt-0 space-y-3">
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <div className="rounded-lg border border-red-100 bg-red-50 px-3 py-2">
+                  <p className="text-xs text-red-700">Overdue</p>
+                  <p className="text-lg font-semibold text-red-800">{recurring_compliance_summary.overdue || 0}</p>
+                </div>
+                <div className="rounded-lg border border-amber-100 bg-amber-50 px-3 py-2">
+                  <p className="text-xs text-amber-700">Due now</p>
+                  <p className="text-lg font-semibold text-amber-800">{recurring_compliance_summary.due || 0}</p>
+                </div>
+                <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2">
+                  <p className="text-xs text-blue-700">Upcoming</p>
+                  <p className="text-lg font-semibold text-blue-800">{recurring_compliance_summary.upcoming || 0}</p>
+                </div>
+                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                  <p className="text-xs text-slate-600">Scheduled</p>
+                  <p className="text-lg font-semibold text-slate-800">{recurring_compliance_summary.scheduled || 0}</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                  <p className="text-xs text-slate-600">Training refresh</p>
+                  <p className="text-sm text-slate-800">
+                    {expired_trainings.length} expired, {activeTrainingExpiringSoon} expiring soon
+                  </p>
+                </div>
+                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                  <p className="text-xs text-slate-600">Supervision, spot checks, competency</p>
+                  <p className="text-sm text-slate-800">
+                    Supervisions {completedSupervisionCount}/{supervisions.length}, Spot checks {completedSpotCheckCount}/{spot_checks.length}, Competency {completedCompetencyCount}/{competency_assessments.length}
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Forms Section - Only for onboarding */}
         {!isActiveEmployee && <FormsSection />}
@@ -2195,7 +2255,7 @@ export default function WorkerDashboard() {
         )}
 
         {/* Expired Training */}
-        {expired_trainings?.length > 0 && (
+        {isActiveEmployee && expired_trainings?.length > 0 && (
           <Card className="shadow-md border-0">
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center gap-2 text-lg">

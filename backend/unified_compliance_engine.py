@@ -1225,7 +1225,35 @@ async def get_unified_employee_status(
             or matched_form.get("status") == "signed_off"
         )
         is_submitted = matched_form is not None and matched_form.get("status") in ["submitted", "verified", "signed_off"]
-        
+
+        # CQC GATE TIGHTENING: staff_health_questionnaire must also have a
+        # reviewed health declaration with an acceptable clinical outcome.
+        # A generic "verified form" stamp alone is insufficient: CQC expects
+        # an occupational health-style outcome. Require
+        # db.health_declarations.status in {"fit", "conditional"} for this
+        # employee. Pure read, additive check.
+        if form_id == "staff_health_questionnaire" and is_verified:
+            health_decl = await db.health_declarations.find_one(
+                {"employee_id": emp_id},
+                {"_id": 0, "status": 1, "reviewed_at": 1, "reviewed_by": 1},
+                sort=[("reviewed_at", -1)],
+            )
+            decl_status = (health_decl or {}).get("status")
+            if decl_status not in ("fit", "conditional"):
+                is_verified = False
+                # Surface the reason so the blocker appended below is accurate.
+                matched_form = matched_form  # unchanged; just preserve original form state
+                # Force is_submitted to keep pending severity rather than critical
+                # when a declaration exists but isn't yet reviewed.
+                if health_decl is None:
+                    health_reason = "Health declaration not reviewed"
+                else:
+                    health_reason = f"Health declaration status '{decl_status or 'unreviewed'}' — requires fit or conditional outcome"
+            else:
+                health_reason = None
+        else:
+            health_reason = None
+
         checks[form_id] = is_verified
         
         item_data = {
@@ -1247,6 +1275,12 @@ async def get_unified_employee_status(
             # Determine severity based on submission status
             severity = "pending" if is_submitted else "critical"
             reason = f"{get_clear_label(form_id)}: Awaiting verification" if is_submitted else f"{get_clear_label(form_id)}: Not completed"
+            # If this is the health questionnaire and the form was verified but
+            # the declaration outcome is not fit/conditional, surface the real
+            # reason so admins know a clinical review is still required.
+            if form_id == "staff_health_questionnaire" and health_reason:
+                reason = f"{get_clear_label(form_id)}: {health_reason}"
+                severity = "pending"
             blockers.append(_build_blocker(
                 form_id,
                 form_id,

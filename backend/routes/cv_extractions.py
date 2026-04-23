@@ -76,6 +76,10 @@ class CVRejectRequest(BaseModel):
     request_action: Optional[str] = "explain_or_reupload"  # "explain_gap", "reupload", "explain_or_reupload"
 
 
+class CVReplacementRequest(BaseModel):
+    reason: str
+
+
 class ApplyExtractionRequest(BaseModel):
     fields_to_apply: List[str]
 
@@ -359,12 +363,15 @@ async def get_worker_cv_extraction_status(
     # Count gaps needing explanation
     unexplained_gaps = [g for g in cv_gaps if not g.get("explanation") and g.get("needs_explanation", True)]
 
-    # Explicit CV truth rule (keep in sync with admin): a worker is said to
-    # HAVE a CV only when a canonical active reviewable PDF CV exists AND
-    # the admin has not marked the current one for replacement. Any stale,
-    # non-PDF, rejected or invalidated linked document must yield
-    # has_cv=False, can_upload_cv=True so the worker sees the upload card.
-    has_cv = bool(active_cv_exists and not replacement_required)
+    # Canonical CV-presence truth (must match the admin Employment Review UI):
+    # a CV is "on file" iff a linked active reviewable PDF exists on the
+    # canonical employee_documents collection. cv_status is a *secondary*
+    # signal that indicates whether admin has requested a replacement; it
+    # must NOT flip has_cv to False, otherwise admin shows "On file" while
+    # worker shows "Not uploaded" for the same employee. can_upload_cv
+    # stays True whenever the worker can act (no CV yet, or replacement
+    # requested) so the Replace CV action remains available.
+    has_cv = bool(active_cv_exists)
     can_upload_cv = (not active_cv_exists) or replacement_required
 
     return {
@@ -719,6 +726,102 @@ async def admin_reject_cv(
         "success": True,
         "message": "CV rejected and worker notified",
         "notification_created": True
+    }
+
+
+@router.post("/admin/employees/{employee_id}/cv/request-replacement")
+async def admin_request_cv_replacement(
+    employee_id: str,
+    request: CVReplacementRequest,
+    user: dict = Depends(require_admin)
+):
+    """
+    Admin requests an updated/replacement CV from the worker.
+
+    Key distinctions vs admin_reject_cv:
+    - The existing linked CV remains on file as historical evidence
+      (employee.cv_document_id is NOT cleared; the document record in
+      employee_documents is NOT deleted or marked rejected).
+    - cv_status is set to "replacement_requested" so the worker-facing
+      signal `replacement_required` surfaces, while canonical `has_cv`
+      (driven by active document presence, not cv_status) remains True.
+      Worker and admin therefore agree that a CV is on file.
+    - A history entry is appended to employee.cv_history[] so the
+      request is traceable for CQC/audit.
+    """
+    db = get_db()
+
+    if not (request.reason or "").strip():
+        raise HTTPException(status_code=400, detail="reason is required")
+
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    now = datetime.now(timezone.utc).isoformat()
+    actor_id = user.get("user_id")
+
+    history_entry = {
+        "event": "replacement_requested",
+        "requested_by": actor_id,
+        "requested_at": now,
+        "reason": request.reason,
+        "previous_cv_document_id": employee.get("cv_document_id"),
+        "previous_cv_status": employee.get("cv_status"),
+    }
+
+    # Additive: preserve existing linkage; only flip cv_status and stamp
+    # replacement metadata. Push history entry onto employee.cv_history.
+    await db.employees.update_one(
+        {"id": employee_id},
+        {
+            "$set": {
+                "cv_status": "replacement_requested",
+                "cv_replacement_requested_at": now,
+                "cv_replacement_requested_by": actor_id,
+                "cv_replacement_reason": request.reason,
+                "updated_at": now,
+            },
+            "$push": {"cv_history": history_entry},
+        },
+    )
+
+    # Notify the worker. Distinct type from "cv_rejected" so the worker
+    # dashboard can surface a replacement-requested state alongside the
+    # existing on-file CV, rather than a rejection.
+    notification_id = str(uuid.uuid4())
+    await db.worker_notifications.insert_one({
+        "id": notification_id,
+        "employee_id": employee_id,
+        "type": "cv_replacement_requested",
+        "title": "Updated CV requested",
+        "message": f"Admin has requested an updated CV: {request.reason}",
+        "data": {
+            "reason": request.reason,
+            "previous_cv_document_id": employee.get("cv_document_id"),
+        },
+        "read": False,
+        "resolved": False,
+        "created_at": now,
+    })
+
+    await log_audit_action(
+        actor_id,
+        "cv_replacement_requested",
+        "employee",
+        employee_id,
+        {
+            "reason": request.reason,
+            "previous_cv_document_id": employee.get("cv_document_id"),
+            "employee_id": employee_id,
+        },
+    )
+
+    return {
+        "success": True,
+        "message": "Replacement CV requested; existing CV retained as history.",
+        "notification_created": True,
+        "history_entry": history_entry,
     }
 
 

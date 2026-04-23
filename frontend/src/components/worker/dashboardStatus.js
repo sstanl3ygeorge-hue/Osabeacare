@@ -120,6 +120,21 @@ export function getCvDisplay(cvStatus) {
 
   if (cvStatus.has_cv) {
     const waitingReview = cvStatus.cv_status === 'uploaded' || cvStatus.extraction_status === 'awaiting_admin_review';
+    // Admin may have requested a replacement while the existing CV is still
+    // on file as historical evidence. Surface that state alongside the
+    // "CV on file" confirmation so the worker knows an updated CV is needed.
+    if (cvStatus.replacement_required) {
+      return {
+        tone: 'warning',
+        badge: 'Replacement requested',
+        title: 'CV on file — replacement requested',
+        description: 'Your existing CV is on file. Admin has requested an updated CV; upload a new PDF to replace it.',
+        hasCv: true,
+        canUpload: true,
+        primaryLabel: 'View CV',
+        secondaryLabel: 'Upload replacement CV',
+      };
+    }
     return {
       tone: waitingReview ? 'info' : 'success',
       badge: waitingReview ? 'On file' : 'Verified',

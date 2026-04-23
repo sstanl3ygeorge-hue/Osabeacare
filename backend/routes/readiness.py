@@ -1000,3 +1000,154 @@ async def get_readiness_debug(
         "requirements": rows,
         "blockers": blockers,
     }
+
+
+# ==================== WORK READINESS DECISION (Gate 2 — formal record) ====================
+
+from pydantic import BaseModel, Field  # noqa: E402  (kept local to this feature)
+
+
+_VALID_READINESS_OUTCOMES = {"ready", "ready_with_conditions", "not_ready"}
+
+
+class WorkReadinessDecisionInput(BaseModel):
+    outcome: str = Field(..., description="One of: ready, ready_with_conditions, not_ready")
+    rationale: str = Field(..., min_length=1, description="Why this decision was made")
+    conditions: Optional[list[str]] = Field(
+        default=None,
+        description="Optional list of conditions attached to a ready_with_conditions outcome",
+    )
+
+
+@router.post("/employees/{employee_id}/work-readiness/approve")
+async def approve_work_readiness(
+    employee_id: str,
+    payload: WorkReadinessDecisionInput,
+    user: dict = Depends(require_admin),
+):
+    """
+    Record a formal "fit for work" decision for an employee (CQC accountability).
+
+    - Admin only.
+    - Re-runs the canonical readiness check server-side; refuses to write a
+      "ready" / "ready_with_conditions" outcome if the employee is not actually
+      work-ready per the unified compliance engine.
+    - Appends to db.work_readiness_decisions (append-only audit collection).
+    - Emits an audit log entry so the timeline stays reconstructible.
+    """
+    import uuid
+
+    db = get_db()
+
+    if payload.outcome not in _VALID_READINESS_OUTCOMES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"outcome must be one of {sorted(_VALID_READINESS_OUTCOMES)}",
+        )
+
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "first_name": 1, "last_name": 1})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    # Canonical readiness check — UCE is the authoritative truth source.
+    get_unified_employee_status = get_unified_employee_status_func()
+    uce_status = await get_unified_employee_status(
+        employee_id, db, user_role="admin", include_details=False
+    )
+    if uce_status.get("error"):
+        raise HTTPException(
+            status_code=500,
+            detail=f"Readiness check failed: {uce_status.get('error')}",
+        )
+
+    is_work_ready = bool(uce_status.get("is_work_ready", False))
+    uce_blockers = uce_status.get("blockers", []) or []
+
+    # Refuse to write an approval outcome if the employee is not actually
+    # work-ready. "not_ready" is always allowed (it records a negative decision).
+    if payload.outcome in ("ready", "ready_with_conditions") and not is_work_ready:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "not_work_ready",
+                "message": (
+                    "Cannot record a ready outcome: the employee does not pass "
+                    "the canonical work-readiness check."
+                ),
+                "blockers": uce_blockers,
+            },
+        )
+
+    now = datetime.now(timezone.utc).isoformat()
+    decided_by_id = user.get("user_id") or user.get("id")
+    decided_by_name = (
+        user.get("full_name")
+        or user.get("name")
+        or user.get("email")
+        or decided_by_id
+    )
+
+    decision_doc = {
+        "id": str(uuid.uuid4()),
+        "employee_id": employee_id,
+        "decided_by": decided_by_id,
+        "decided_by_name": decided_by_name,
+        "decided_at": now,
+        "outcome": payload.outcome,
+        "rationale": payload.rationale,
+        "conditions": payload.conditions or [],
+        # Snapshot of the canonical check at decision time (append-only audit).
+        "readiness_snapshot": {
+            "is_work_ready": is_work_ready,
+            "overall_percentage": uce_status.get("overall_percentage"),
+            "blockers": uce_blockers,
+        },
+        "created_at": now,
+    }
+
+    await db.work_readiness_decisions.insert_one(decision_doc)
+
+    await log_audit_action(
+        decided_by_id,
+        "approve_for_work",
+        "employee",
+        employee_id,
+        {
+            "outcome": payload.outcome,
+            "rationale": payload.rationale,
+            "conditions": payload.conditions or [],
+            "employee_id": employee_id,
+            "is_work_ready_snapshot": is_work_ready,
+        },
+    )
+
+    # Strip internal fields before returning.
+    decision_doc.pop("_id", None)
+    return {
+        "status": "success",
+        "decision": decision_doc,
+    }
+
+
+@router.get("/employees/{employee_id}/work-readiness/decisions")
+async def get_work_readiness_decisions(
+    employee_id: str,
+    user: dict = Depends(require_manager_or_admin),
+):
+    """
+    Return the append-only list of formal work-readiness decisions for an
+    employee, newest first. Read-only; does not recompute readiness.
+    """
+    db = get_db()
+    cursor = db.work_readiness_decisions.find(
+        {"employee_id": employee_id},
+        {"_id": 0},
+    ).sort("decided_at", -1)
+    decisions = await cursor.to_list(length=100)
+    latest = decisions[0] if decisions else None
+    return {
+        "employee_id": employee_id,
+        "latest": latest,
+        "history": decisions,
+        "count": len(decisions),
+    }

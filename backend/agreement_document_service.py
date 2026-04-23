@@ -710,6 +710,45 @@ async def resolve_employee_agreement_state(db, employee: Dict[str, Any], agreeme
                         break
         agreement = canonical
 
+    # Cross-check new-style agreement submissions (handbook only).
+    # Admin verification for the handbook template lands in
+    # `agreement_submissions`. The linked legacy `agreement_acknowledgements`
+    # row is only kept in sync when the two were created together; older or
+    # standalone submissions can leave `agreement_acknowledgements` without a
+    # verified row, which caused the worker dashboard to show
+    # "Being prepared by Osabea" for handbooks the admin had already
+    # verified. Treat a verified submission as canonical truth so worker and
+    # admin views agree. Contract flow is intentionally not touched here.
+    if agreement_type == HANDBOOK_AGREEMENT_TYPE:
+        try:
+            handbook_submission = await db.agreement_submissions.find_one(
+                {
+                    "employee_id": employee_id,
+                    "template_id": "EMPLOYEE_HANDBOOK_ACKNOWLEDGEMENT_V1",
+                    "verification_status": "verified",
+                },
+                {"_id": 0},
+                sort=[("verified_at", -1)],
+            )
+        except Exception:
+            handbook_submission = None
+        if handbook_submission:
+            agreement = dict(agreement or {})
+            agreement["verification_status"] = "verified"
+            if not agreement.get("verified_at"):
+                agreement["verified_at"] = handbook_submission.get("verified_at")
+            if not agreement.get("verified_by_name"):
+                agreement["verified_by_name"] = handbook_submission.get("verified_by_name")
+            # A verified submission implies the compliance record is
+            # complete; mark acknowledged so downstream gating does not
+            # re-surface "Being prepared by Osabea".
+            agreement["acknowledged"] = True
+            if not agreement.get("acknowledged_at"):
+                agreement["acknowledged_at"] = (
+                    handbook_submission.get("completed_at")
+                    or handbook_submission.get("verified_at")
+                )
+
     verification_status = (agreement or {}).get("verification_status")
     rejected = verification_status == "rejected"
 

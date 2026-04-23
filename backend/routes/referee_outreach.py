@@ -37,6 +37,84 @@ logger = logging.getLogger(__name__)
 # Get portal URL from environment
 PORTAL_URL = os.environ.get('FRONTEND_URL', 'https://app.osabeacares.co.uk')
 
+
+async def _build_reference_history_entry(
+    *,
+    db,
+    employee_id: str,
+    reference_num: int,
+    ref_data: dict,
+    action: str,
+    actor_user_id: str,
+    action_reason: Optional[str],
+    now: str,
+) -> dict:
+    """
+    Build an append-only audit snapshot of a reference's mismatch/explanation
+    state before it is cleared by a reject or request_replacement action.
+
+    Snapshots the canonical db.references.{ref_key}.mismatch subdocument plus
+    the legacy db.employees.reference_{n}_mismatch_* flat fields (which hold
+    the worker's explanation text) so CQC/audit retains the full context
+    even after the active worker task is superseded.
+
+    Purely additive: intended for $push into db.references.{ref_key}.history[].
+    """
+    mismatch = dict(ref_data.get("mismatch") or {})
+
+    prefix = f"reference_{reference_num}_"
+    employee_snapshot = await db.employees.find_one(
+        {"id": employee_id},
+        {
+            "_id": 0,
+            f"{prefix}mismatch_detected": 1,
+            f"{prefix}mismatch_explanation": 1,
+            f"{prefix}mismatch_explanation_type": 1,
+            f"{prefix}mismatch_explanation_status": 1,
+            f"{prefix}mismatch_explained": 1,
+            f"{prefix}mismatch_explained_at": 1,
+            f"{prefix}mismatch_admin_decision": 1,
+            f"{prefix}mismatch_admin_notes": 1,
+            f"{prefix}mismatch_override_reason": 1,
+            f"{prefix}mismatch_notes": 1,
+        },
+    ) or {}
+
+    return {
+        "action": action,
+        "reference_num": reference_num,
+        "ref_key": f"ref{reference_num}",
+        "actor_user_id": actor_user_id,
+        "action_reason": action_reason,
+        "recorded_at": now,
+        "superseded": True,
+        "resolved_via": action,
+        # Canonical mismatch subdoc snapshot (may be empty if never detected).
+        "mismatch": {
+            "detected": mismatch.get("detected"),
+            "resolved": mismatch.get("resolved"),
+            "reason": mismatch.get("reason"),
+            "notes": mismatch.get("notes"),
+            "documented": mismatch.get("documented"),
+            "admin_decision": mismatch.get("admin_decision"),
+        },
+        # Worker explanation snapshot (from legacy employees flat fields).
+        "worker_explanation": {
+            "text": employee_snapshot.get(f"{prefix}mismatch_explanation"),
+            "type": employee_snapshot.get(f"{prefix}mismatch_explanation_type"),
+            "status": employee_snapshot.get(f"{prefix}mismatch_explanation_status"),
+            "submitted": bool(employee_snapshot.get(f"{prefix}mismatch_explained")),
+            "submitted_at": employee_snapshot.get(f"{prefix}mismatch_explained_at"),
+        },
+        # Admin-side prior decisions on the mismatch (if any).
+        "admin_prior_decision": {
+            "decision": employee_snapshot.get(f"{prefix}mismatch_admin_decision"),
+            "notes": employee_snapshot.get(f"{prefix}mismatch_admin_notes"),
+            "override_reason": employee_snapshot.get(f"{prefix}mismatch_override_reason"),
+        },
+    }
+
+
 # Referee form template - comprehensive NHS-compliant reference form
 REFEREE_FORM_TEMPLATE = {
     "id": "referee_reference_form",
@@ -794,6 +872,20 @@ async def verify_or_reject_reference(
         }
 
     elif request.action == 'reject':
+        # Build an append-only audit snapshot of the mismatch/explanation state
+        # BEFORE we clear it, so CQC/audit retains the full context even though
+        # the active worker task is superseded. Written via $push below.
+        history_entry = await _build_reference_history_entry(
+            db=db,
+            employee_id=employee_id,
+            reference_num=reference_num,
+            ref_data=ref_data,
+            action="reject",
+            actor_user_id=user['user_id'],
+            action_reason=request.notes,
+            now=now,
+        )
+
         rejection_fields = {
             f"{ref_key}.request.status": "rejected",
             f"{ref_key}.request.token": None,
@@ -811,7 +903,10 @@ async def verify_or_reject_reference(
 
         update_result = await db.references.update_one(
             {"employee_id": employee_id},
-            {"$set": rejection_fields}
+            {
+                "$set": rejection_fields,
+                "$push": {f"{ref_key}.history": history_entry},
+            }
         )
         if update_result.matched_count == 0:
             raise HTTPException(status_code=404, detail="Reference record not found")
@@ -825,6 +920,30 @@ async def verify_or_reject_reference(
                 "rejected_at": now,
                 "rejection_reason": request.notes,
                 "is_active": False
+            }}
+        )
+
+        # Supersede any stale mismatch-explanation prompt on the employee doc.
+        # Canonical db.references.{ref}.mismatch is already cleared above; the
+        # legacy flat fields drive /worker/reference-mismatches, so clear them
+        # here to prevent the worker seeing an active explanation request after
+        # the reference has been rejected. Audit trail is preserved by the
+        # log_audit_action call below and by the retained
+        # db.references.{ref}.verification.rejected_* fields.
+        await db.employees.update_one(
+            {"id": employee_id},
+            {"$set": {
+                f"reference_{reference_num}_mismatch_detected": False,
+                f"reference_{reference_num}_mismatch_explanation": None,
+                f"reference_{reference_num}_mismatch_explanation_type": None,
+                f"reference_{reference_num}_mismatch_explanation_status": None,
+                f"reference_{reference_num}_mismatch_explanation_submitted_at": None,
+                f"reference_{reference_num}_mismatch_explained": False,
+                f"reference_{reference_num}_mismatch_explained_at": None,
+                f"reference_{reference_num}_mismatch_admin_decision": None,
+                f"reference_{reference_num}_mismatch_admin_notes": None,
+                f"reference_{reference_num}_mismatch_override_reason": None,
+                f"reference_{reference_num}_mismatch_notes": None,
             }}
         )
 
@@ -843,6 +962,20 @@ async def verify_or_reject_reference(
         }
 
     elif request.action == 'request_replacement':
+        # Build an append-only audit snapshot of the mismatch/explanation state
+        # BEFORE we clear it, so CQC/audit retains the full context even though
+        # the active worker task is superseded. Written via $push below.
+        history_entry = await _build_reference_history_entry(
+            db=db,
+            employee_id=employee_id,
+            reference_num=reference_num,
+            ref_data=ref_data,
+            action="request_replacement",
+            actor_user_id=user['user_id'],
+            action_reason=request.notes,
+            now=now,
+        )
+
         replacement_fields = {
             f"{ref_key}.request.status": "rejected",
             f"{ref_key}.request.token": None,
@@ -860,7 +993,13 @@ async def verify_or_reject_reference(
             f"{ref_key}.mismatch": {},
         }
 
-        await db.references.update_one({"employee_id": employee_id}, {"$set": replacement_fields})
+        await db.references.update_one(
+            {"employee_id": employee_id},
+            {
+                "$set": replacement_fields,
+                "$push": {f"{ref_key}.history": history_entry},
+            }
+        )
 
         await db.employee_documents.update_many(
             {"employee_id": employee_id, "requirement_id": requirement_id},
@@ -871,6 +1010,31 @@ async def verify_or_reject_reference(
                 "rejected_at": now,
                 "rejection_reason": request.notes,
                 "is_active": False
+            }}
+        )
+
+        # Supersede any stale mismatch-explanation prompt on the employee doc.
+        # Requesting a replacement referee makes the earlier mismatch-explanation
+        # remediation path obsolete: the worker's sole active action must now be
+        # "provide new referee details". Canonical db.references.{ref}.mismatch
+        # is already cleared above; the legacy flat fields drive
+        # /worker/reference-mismatches, so clear them here. Audit trail is
+        # preserved by log_audit_action below and by the retained
+        # db.references.{ref}.verification.replacement_requested_* fields.
+        await db.employees.update_one(
+            {"id": employee_id},
+            {"$set": {
+                f"reference_{reference_num}_mismatch_detected": False,
+                f"reference_{reference_num}_mismatch_explanation": None,
+                f"reference_{reference_num}_mismatch_explanation_type": None,
+                f"reference_{reference_num}_mismatch_explanation_status": None,
+                f"reference_{reference_num}_mismatch_explanation_submitted_at": None,
+                f"reference_{reference_num}_mismatch_explained": False,
+                f"reference_{reference_num}_mismatch_explained_at": None,
+                f"reference_{reference_num}_mismatch_admin_decision": None,
+                f"reference_{reference_num}_mismatch_admin_notes": None,
+                f"reference_{reference_num}_mismatch_override_reason": None,
+                f"reference_{reference_num}_mismatch_notes": None,
             }}
         )
 

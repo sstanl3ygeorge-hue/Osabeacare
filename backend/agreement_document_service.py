@@ -766,6 +766,11 @@ async def resolve_employee_agreement_state(db, employee: Dict[str, Any], agreeme
 
     acknowledged = bool(agreement and agreement.get("acknowledged") and verification_status != "rejected")
     verified = bool(agreement and verification_status == "verified")
+    # If a verified handbook acknowledgement already exists, that is the
+    # canonical worker/admin truth. A later re-render failure must not knock the
+    # worker back into a "being prepared" state for the same completed record.
+    if verified:
+        render_error_detail = None
     system_issue = bool(render_error_detail) and not (verified or acknowledged)
     if rejected:
         state_label = "Your handbook is being updated. You will be asked to review and sign once ready."

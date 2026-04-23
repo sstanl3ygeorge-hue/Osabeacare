@@ -62,6 +62,7 @@ from agreement_document_service import (  # noqa: E402
     _validate_handbook_fields,
     build_agreement_rendering,
     ensure_agreement_rendered,
+    resolve_employee_agreement_state,
 )
 
 # ---------------------------------------------------------------------------
@@ -166,6 +167,23 @@ class _FakeCollection:
             for k, v in update.get("$set", {}).items():
                 new_doc[k] = v
             self._docs.append(new_doc)
+
+    def find(self, query=None, projection=None):
+        query = query or {}
+        docs = [
+            {k: v for k, v in doc.items() if k != "_id"}
+            for doc in self._docs
+            if all(doc.get(k) == v for k, v in query.items() if k != "_id")
+        ]
+
+        class _Cursor:
+            def __init__(self, items):
+                self._items = items
+
+            async def to_list(self, _length):
+                return list(self._items)
+
+        return _Cursor(docs)
 
     def with_doc(self, doc: dict):
         self._docs.append(doc)
@@ -376,3 +394,40 @@ class TestHandbookArtifactConsistency:
             assert result2.get("rendered_file_url") == original_url, (
                 "Rejection caused the rendered_file_url to change — worker would lose PDF access"
             )
+
+    def test_verified_handbook_state_wins_over_stale_render_error(self):
+        """Worker resolver must not surface 'being prepared' once handbook is verified."""
+        with _patched_storage():
+            db = _FakeDB(_ORG_SETTINGS)
+            rendered = asyncio.run(
+                ensure_agreement_rendered(db, _EMPLOYEE, HANDBOOK_AGREEMENT_TYPE)
+            )
+            asyncio.run(
+                db.agreement_acknowledgements.update_one(
+                    {"employee_id": _EMPLOYEE["id"], "agreement_type": HANDBOOK_AGREEMENT_TYPE},
+                    {
+                        "$set": {
+                            "acknowledged": True,
+                            "verification_status": "verified",
+                            "verified_at": "2026-04-23T10:00:00+00:00",
+                            "verified_by_name": "Admin User",
+                            "rendered_file_url": rendered.get("rendered_file_url"),
+                        }
+                    },
+                )
+            )
+
+            with patch(
+                "agreement_document_service.ensure_agreement_rendered",
+                side_effect=HandbookRenderError(
+                    "Cannot render handbook: required field(s) missing or unresolved: company_address"
+                ),
+            ):
+                state = asyncio.run(
+                    resolve_employee_agreement_state(db, _EMPLOYEE, HANDBOOK_AGREEMENT_TYPE)
+                )
+
+            assert state["verified"] is True
+            assert state["system_issue"] is False
+            assert state["status"] == "verified"
+            assert state["state_label"] == "Handbook acknowledged and verified"

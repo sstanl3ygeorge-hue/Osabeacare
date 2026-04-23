@@ -1268,13 +1268,13 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             employment_readiness_blockers,
         ) = compute_employment_readiness(
             is_active_employee=False,
-            contract_worker_signed=_contract_worker_signed,
-            contract_fully_executed=_contract_fully_executed,
-            contract_rejected=_contract_rejected,
-            handbook_acknowledged=_handbook_acknowledged,
-            handbook_verified=_handbook_verified,
-            handbook_rejected=_handbook_rejected,
-            handbook_system_issue=_handbook_system_issue,
+            contract_worker_signed=bool(contract_status.get("worker_signed")),
+            contract_fully_executed=bool(contract_status.get("fully_executed")),
+            contract_rejected=bool(contract_status.get("rejected")),
+            handbook_acknowledged=bool(handbook_status.get("worker_acknowledged")),
+            handbook_verified=bool(handbook_status.get("verified")),
+            handbook_rejected=bool(handbook_status.get("rejected")),
+            handbook_system_issue=bool(handbook_status.get("system_issue")),
         )
     # ─────────────────────────────────────────────────────────────────────────
 

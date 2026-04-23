@@ -14,16 +14,19 @@ They do NOT complete compliance evidence requirements.
 
 import uuid
 import logging
+import jwt
 from datetime import datetime, timezone
 from typing import Optional, List
 
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, Header
 from pydantic import BaseModel
 
 from .dependencies import (
     get_db,
     get_current_user,
     get_current_worker,
+    JWT_SECRET,
+    JWT_ALGORITHM,
     require_admin,
     require_manager_or_admin,
     log_audit_action
@@ -53,6 +56,17 @@ def _looks_like_pdf_document(document: dict) -> bool:
     filename = str(filename).lower()
     content_type = str(content_type).lower()
     return content_type == "application/pdf" or filename.endswith(".pdf") or ".pdf?" in filename
+
+
+def _decode_worker_authorization(authorization: Optional[str]) -> dict:
+    if not authorization or not authorization.startswith("Bearer "):
+        return {}
+    token = authorization.replace("Bearer ", "")
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        return payload if isinstance(payload, dict) else {}
+    except Exception:
+        return {}
 
 
 # ==================== PYDANTIC MODELS ====================
@@ -259,18 +273,25 @@ async def link_cv_document(
 # ==================== WORKER CV ENDPOINTS ====================
 
 @router.get("/worker/cv-extraction-status")
-async def get_worker_cv_extraction_status(user: dict = Depends(get_current_worker)):
+async def get_worker_cv_extraction_status(
+    user: dict = Depends(get_current_worker),
+    authorization: Optional[str] = Header(None),
+):
     """
     Get status of CV extraction including employment history and detected gaps.
     Shows worker what was extracted and what gaps need explanation.
     """
     db = get_db()
     
+    worker_payload = user if isinstance(user, dict) else _decode_worker_authorization(authorization)
+    if not isinstance(worker_payload, dict):
+        worker_payload = {}
+
     # Get worker's employee_id from user
-    employee_id = user.get("employee_id")
+    employee_id = worker_payload.get("employee_id")
     if not employee_id:
         # Fallback: check if user is linked to an employee
-        employee = await db.employees.find_one({"email": user.get("email")}, {"_id": 0, "id": 1})
+        employee = await db.employees.find_one({"email": worker_payload.get("email")}, {"_id": 0, "id": 1})
         if employee:
             employee_id = employee["id"]
         else:

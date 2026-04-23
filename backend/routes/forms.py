@@ -16,7 +16,7 @@ import uuid
 import logging
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Body
 from pydantic import BaseModel, ConfigDict
 
 from .dependencies import (
@@ -82,6 +82,11 @@ class FormSubmissionResponse(BaseModel):
     notes: Optional[str] = None
 
 
+class FormVerificationRequest(BaseModel):
+    notes: Optional[str] = None
+    health_outcome: Optional[str] = None
+
+
 class GeneratedFormCreate(BaseModel):
     template_id: str
     employee_id: str
@@ -132,6 +137,131 @@ class GeneratedFormResponse(BaseModel):
 
 
 # ==================== HELPER FUNCTIONS ====================
+
+def _normalize_health_outcome(raw: Any) -> Optional[str]:
+    """Normalize free-form/admin-entered health outcomes to canonical values."""
+    if raw is None:
+        return None
+    val = str(raw).strip().lower()
+    if not val:
+        return None
+
+    aliases = {
+        "fit": "fit",
+        "fit_to_work": "fit",
+        "fit to work": "fit",
+        "fit for work": "fit",
+        "cleared": "fit",
+        "cleared_to_work": "fit",
+        "cleared to work": "fit",
+        "conditional": "conditional",
+        "fit_with_adjustments": "conditional",
+        "fit with adjustments": "conditional",
+        "adjustments_required": "conditional",
+        "requires_adjustments": "conditional",
+        "not_fit": "not_fit",
+        "not fit": "not_fit",
+        "unfit": "not_fit",
+        "rejected": "not_fit",
+        "requires_review": "requires_review",
+        "pending": "requires_review",
+        "under_review": "requires_review",
+    }
+    return aliases.get(val)
+
+
+def _extract_health_outcome_from_submission(submission: Dict[str, Any]) -> Optional[str]:
+    """
+    Pull a canonical health outcome from known form-submission fields.
+    Returns one of: fit | conditional | not_fit | requires_review | None
+    """
+    payload = submission.get("form_data") or submission.get("data") or {}
+    if not isinstance(payload, dict):
+        return None
+
+    candidates = [
+        payload.get("health_outcome"),
+        payload.get("occupational_health_outcome"),
+        payload.get("fit_outcome"),
+        payload.get("final_decision"),
+        payload.get("review_outcome"),
+        payload.get("admin_outcome"),
+        payload.get("outcome"),
+        payload.get("status"),
+    ]
+    for candidate in candidates:
+        normalized = _normalize_health_outcome(candidate)
+        if normalized:
+            return normalized
+    return None
+
+
+async def _sync_canonical_health_from_verified_submission(
+    db,
+    submission: Dict[str, Any],
+    *,
+    reviewer_id: Optional[str],
+    reviewer_name: Optional[str],
+    reviewed_at: str,
+    explicit_outcome: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """
+    Keep health_declarations canonical outcome in sync when admin verifies the
+    Staff Health Questionnaire form.
+    """
+    form_type = (submission.get("form_type") or "").lower()
+    requirement_id = (submission.get("requirement_id") or "").lower()
+    if "staff_health_questionnaire" not in {form_type, requirement_id}:
+        return None
+
+    employee_id = submission.get("employee_id")
+    if not employee_id:
+        logger.warning("Skipping canonical health sync: submission %s missing employee_id", submission.get("id"))
+        return None
+
+    outcome = _normalize_health_outcome(explicit_outcome) or _extract_health_outcome_from_submission(submission)
+    if outcome is None:
+        return None
+    now = reviewed_at or datetime.now(timezone.utc).isoformat()
+
+    existing = await db.health_declarations.find_one(
+        {"employee_id": employee_id},
+        {"_id": 0, "id": 1},
+        sort=[("reviewed_at", -1), ("submitted_at", -1), ("declaration_date", -1)],
+    )
+
+    update_payload = {
+        "employee_id": employee_id,
+        "status": outcome,
+        "reviewed_by": reviewer_id,
+        "reviewed_by_name": reviewer_name,
+        "reviewed_at": now,
+        "updated_at": now,
+        "source": "form_submission_verification",
+        "source_submission_id": submission.get("id"),
+    }
+
+    if existing and existing.get("id"):
+        await db.health_declarations.update_one(
+            {"id": existing["id"]},
+            {"$set": update_payload},
+        )
+        declaration_id = existing["id"]
+    else:
+        declaration_id = f"health_{uuid.uuid4().hex[:12]}"
+        await db.health_declarations.insert_one({
+            "id": declaration_id,
+            "submitted_at": now,
+            "created_at": now,
+            "declaration_date": now,
+            **update_payload,
+        })
+
+    return {
+        "declaration_id": declaration_id,
+        "status": outcome,
+        "satisfies_readiness": outcome in {"fit", "conditional"},
+    }
 
 def get_form_requirements():
     """Get form-based requirements from server module"""
@@ -411,6 +541,7 @@ async def update_form_submission(
 @router.post("/form-submissions/{submission_id}/verify")
 async def verify_form_submission(
     submission_id: str,
+    verify_request: Optional[FormVerificationRequest] = Body(default=None),
     notes: Optional[str] = None,
     user: dict = Depends(require_manager_or_admin)
 ):
@@ -422,6 +553,26 @@ async def verify_form_submission(
     
     now = datetime.now(timezone.utc).isoformat()
     
+    request_notes = verify_request.notes if verify_request and verify_request.notes is not None else notes
+    request_health_outcome = verify_request.health_outcome if verify_request else None
+    normalized_request_outcome = _normalize_health_outcome(request_health_outcome) if request_health_outcome is not None else None
+    if request_health_outcome is not None and normalized_request_outcome is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid health_outcome. Use one of: fit, conditional, requires_review, not_fit",
+        )
+
+    form_type = (submission.get("form_type") or "").lower()
+    requirement_id = (submission.get("requirement_id") or "").lower()
+    is_health_questionnaire = "staff_health_questionnaire" in {form_type, requirement_id}
+    if is_health_questionnaire:
+        inferred = _extract_health_outcome_from_submission(submission)
+        if normalized_request_outcome is None and inferred is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Health outcome is required for Staff Health Questionnaire verification",
+            )
+
     await db.form_submissions.update_one(
         {"id": submission_id},
         {"$set": {
@@ -434,9 +585,18 @@ async def verify_form_submission(
             "reviewed_at": now,
             "reviewed_by": user.get("user_id"),
             "reviewed_by_name": user.get("name"),
-            "notes": notes,
+            "notes": request_notes,
             "updated_at": now
         }}
+    )
+
+    health_sync = await _sync_canonical_health_from_verified_submission(
+        db,
+        submission,
+        reviewer_id=user.get("user_id"),
+        reviewer_name=user.get("name"),
+        reviewed_at=now,
+        explicit_outcome=normalized_request_outcome,
     )
     
     await log_audit_action(
@@ -444,10 +604,16 @@ async def verify_form_submission(
         "verify_form_submission",
         "form_submission",
         submission_id,
-        {"employee_id": submission["employee_id"]}
+        {
+            "employee_id": submission["employee_id"],
+            "health_sync": health_sync,
+        }
     )
     
-    return {"message": "Form submission verified", "id": submission_id}
+    response = {"message": "Form submission verified", "id": submission_id}
+    if health_sync is not None:
+        response["health_declaration"] = health_sync
+    return response
 
 
 @router.post("/form-submissions/{submission_id}/unverify")

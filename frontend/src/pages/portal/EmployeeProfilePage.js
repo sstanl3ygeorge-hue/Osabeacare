@@ -3322,6 +3322,10 @@ export default function EmployeeProfilePage() {
   
   // Verify form submission
   const handleVerifyFormSubmission = async (submissionId) => {
+    if ((viewFormData?.form_type || '').toLowerCase() === 'staff_health_questionnaire') {
+      toast.error('Select a health outcome in the Review workflow before approving this questionnaire.');
+      return;
+    }
     try {
       await axios.post(`${API}/form-submissions/${submissionId}/verify`, {}, {
         headers: { Authorization: `Bearer ${token}` }
@@ -3849,8 +3853,6 @@ export default function EmployeeProfilePage() {
           ? { reason: blocker, label: blocker, severity: 'critical' }
           : blocker
       ));
-  const canonicalPendingBlockers = canonicalBlockerObjects.filter((blocker) => blocker?.severity === 'pending');
-  const canonicalCriticalBlockers = canonicalBlockerObjects.filter((blocker) => blocker?.severity !== 'pending');
   const canonicalIsWorkReady = canonicalProgress?.is_work_ready === true;
   const canonicalCanPromote = canonicalProgress?.can_promote === true;
   const canonicalCompletedRequirements = canonicalProgress?.completed_requirements ?? canonicalProgress?.progress?.completed ?? null;
@@ -4024,37 +4026,16 @@ export default function EmployeeProfilePage() {
                     </span>
                   )}
                   {/* Canonical Work Readiness Status Badge */}
-                  {employee.person_stage === 'employee' && (() => {
-                    const reasons = canonicalBlockerObjects.map((blocker) => blocker.reason || blocker.message || blocker.label).filter(Boolean);
-                    
-                    return (
-                      <div className="flex flex-col items-start gap-1">
-                        <span className={`px-2.5 py-1 rounded-lg text-xs font-medium flex items-center gap-1.5 ${canonicalReadinessClass}`} data-testid="work-readiness-badge">
-                          {canonicalIsWorkReady || canonicalCanPromote ? (
-                            <Shield className="h-3.5 w-3.5" />
-                          ) : (
-                            <AlertTriangle className="h-3.5 w-3.5" />
-                          )}
-                          {canonicalReadinessLabel}
-                        </span>
-                        {reasons.length > 0 && !canonicalIsWorkReady && !canonicalCanPromote && (
-                          <div className="flex flex-wrap gap-1 max-w-md">
-                            {reasons.slice(0, 3).map((reason, idx) => (
-                              <span 
-                                key={idx} 
-                                className="text-[10px] px-1.5 py-0.5 rounded bg-red-100 text-red-700"
-                              >
-                                {reason}
-                              </span>
-                            ))}
-                            {reasons.length > 3 && (
-                              <span className="text-[10px] text-gray-500">+{reasons.length - 3} more</span>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })()}
+                  {employee.person_stage === 'employee' && (
+                    <span className={`px-2.5 py-1 rounded-lg text-xs font-medium flex items-center gap-1.5 ${canonicalReadinessClass}`} data-testid="work-readiness-badge">
+                      {canonicalIsWorkReady || canonicalCanPromote ? (
+                        <Shield className="h-3.5 w-3.5" />
+                      ) : (
+                        <AlertTriangle className="h-3.5 w-3.5" />
+                      )}
+                      {canonicalReadinessLabel}
+                    </span>
+                  )}
                 </div>
               </div>
             </div>
@@ -4147,12 +4128,6 @@ export default function EmployeeProfilePage() {
             // SAFETY ENGINES - USE COMPUTED DATA FROM API (single source of truth)
             const rtwSummary = complianceRequirements?.rtw_summary || {};
             const dbsSummary = complianceRequirements?.dbs_summary || {};
-            const pendingReview = canonicalPendingBlockers.length;
-            
-            // Canonical readiness blocking status — UCE only, no safetyStatus fallback.
-            const isBlocking = !canonicalIsWorkReady && !canonicalCanPromote;
-            const blockingReasons = canonicalBlockerObjects.map((blocker) => blocker.reason || blocker.message || blocker.label).filter(Boolean);
-            
             // DBS info from safety engine
             const dbsExpiry = dbsSummary.review_due_date || dbsSummary.next_dbs_review_due;
             const dbsExpiryDays = dbsSummary.days_remaining;
@@ -4299,48 +4274,6 @@ export default function EmployeeProfilePage() {
                     )}
                   </div>
                   
-                  {/* Alerts Card - Show blocking status prominently */}
-                  <div
-                    className={`p-3 rounded-xl border w-52 shrink-0 cursor-pointer hover:shadow-md transition-shadow ${
-                      isBlocking ? 'border-red-200 bg-red-50' :
-                      pendingReview > 0 ? 'border-amber-200 bg-amber-50' : 
-                      'border-green-200 bg-green-50'
-                    }`}
-                    data-testid="alerts-card"
-                    onClick={() => setActiveTab(isBlocking || pendingReview > 0 ? 'checklist' : 'training')}
-                    title={isBlocking || pendingReview > 0 ? 'Go to Checks & Evidence' : 'Go to Training'}
-                  >
-                    <div className="flex items-center gap-2 mb-1">
-                      <AlertTriangle className={`h-4 w-4 ${
-                        isBlocking ? 'text-red-600' :
-                        pendingReview > 0 ? 'text-amber-600' : 'text-green-600'
-                      }`} />
-                      <span className="text-xs font-semibold text-text-primary">
-                        {isBlocking ? 'Action required' : 'Status'}
-                      </span>
-                    </div>
-                    {isBlocking ? (
-                      <div className="space-y-0.5">
-                        <p className="text-xs text-red-700 font-semibold">Compliance incomplete</p>
-                        {blockingReasons.slice(0, 2).map((reason, idx) => (
-                          <p key={idx} className="text-xs text-red-600 line-clamp-1" title={reason}>
-                            {reason?.split(' - ')[0] || reason}
-                          </p>
-                        ))}
-                      </div>
-                    ) : pendingReview > 0 ? (
-                      <div className="space-y-0.5">
-                        {pendingReview > 0 && (
-                          <p className="text-xs text-amber-700">{pendingReview} awaiting admin review</p>
-                        )}
-                      </div>
-                    ) : canonicalIsWorkReady || canonicalCanPromote ? (
-                      <p className="text-sm font-medium text-green-700">All checks passed</p>
-                    ) : (
-                      <p className="text-sm font-medium text-red-700">Checks incomplete</p>
-                    )}
-                  </div>
-                  
                   {/* Compliance Breakdown Card */}
                   <div
                     className="p-3 rounded-xl border border-slate-200 bg-slate-50 w-52 shrink-0 cursor-pointer hover:shadow-md transition-shadow"
@@ -4384,22 +4317,6 @@ export default function EmployeeProfilePage() {
               <span className="text-sm text-slate-500">{employee.person_stage === 'applicant' ? 'Applicant Reference:' : 'Employee ID:'}</span>
               <span className="text-sm font-semibold text-slate-700">{employee.employee_code || employee.applicant_reference || 'Not assigned'}</span>
             </div>
-            
-            {/* Missing Items */}
-            {canonicalCriticalBlockers.length > 0 && (
-              <div className="flex items-center gap-2 px-3 py-1.5 bg-red-100 rounded-lg">
-                <XCircle className="h-4 w-4 text-red-600" />
-                <span className="text-sm font-medium text-red-700">{canonicalCriticalBlockers.length} Action required</span>
-              </div>
-            )}
-            
-            {/* Pending Review — per-row has_evidence/verified are backend-set fields */}
-            {canonicalPendingBlockers.length > 0 && (
-              <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-100 rounded-lg">
-                <Clock className="h-4 w-4 text-amber-600" />
-                <span className="text-sm font-medium text-amber-700">{canonicalPendingBlockers.length} Awaiting admin review</span>
-              </div>
-            )}
             
             {/* Key Expiry - Show most critical */}
             {(() => {
@@ -5765,6 +5682,14 @@ export default function EmployeeProfilePage() {
                                                 <>
                                                   <Button size="sm" variant="outline"
                                                     onClick={async () => {
+                                                      if (form.key === 'staff_health_questionnaire') {
+                                                        setFormReviewViewer({
+                                                          isOpen: true,
+                                                          formName: form.name,
+                                                          submissionId: submission?.id,
+                                                        });
+                                                        return;
+                                                      }
                                                       try {
                                                         await axios.post(
                                                           `${API}/form-submissions/${submission.id}/verify`, {},

@@ -185,11 +185,14 @@ export default function EvidenceReviewViewerDialog({
   // Form-review mode state
   const [formRejectReason, setFormRejectReason] = useState('');
   const [showRejectInput, setShowRejectInput] = useState(false);
+  const [healthOutcome, setHealthOutcome] = useState('');
   const [trainingReviewNotes, setTrainingReviewNotes] = useState('');
 
   const isIdentity = requirementType === 'identity';
   const isAddress = requirementType === 'proof_of_address';
   const methods = isIdentity ? IDENTITY_METHODS : ADDRESS_METHODS;
+  const isHealthQuestionnaireForm =
+    isFormReview && /staff health questionnaire|health questionnaire/i.test(formName || '');
   const fileName = isFormReview ? `${(formName || 'Form').replace(/\s+/g, '_')}.pdf` : (file?.file_name || file?.name || 'Document');
   const docId = file?.id || file?.file_id;
   // Normalise file URL — backend evidence URLs are often relative (/api/...)
@@ -231,6 +234,7 @@ export default function EvidenceReviewViewerDialog({
       setStampedBlobUrl(null);
       setFormRejectReason('');
       setShowRejectInput(false);
+      setHealthOutcome('');
       setTrainingReviewNotes('');
       viewStartRef.current = Date.now();
     } else {
@@ -326,6 +330,10 @@ export default function EvidenceReviewViewerDialog({
     }
     if (isFormReview && !checklist.dateValid) {
       setChecklistError('Please confirm the declaration is signed and dated');
+      return;
+    }
+    if (isHealthQuestionnaireForm && !healthOutcome) {
+      setChecklistError('Select a health outcome before approving this questionnaire');
       return;
     }
 
@@ -447,7 +455,9 @@ export default function EvidenceReviewViewerDialog({
     try {
       await axios.post(
         `${API}/form-submissions/${formSubmissionId}/verify`,
-        {},
+        isHealthQuestionnaireForm
+          ? { health_outcome: healthOutcome }
+          : {},
         { headers: { Authorization: `Bearer ${token}` } }
       );
       setStep('complete');
@@ -813,6 +823,38 @@ export default function EvidenceReviewViewerDialog({
                           placeholder="Optional notes for accepting or rejecting this extracted item"
                           rows={3}
                         />
+                      </div>
+                    )}
+
+                    {isFormReview && isHealthQuestionnaireForm && (
+                      <div className="space-y-2">
+                        <Label className="text-sm font-medium">Health outcome (required)</Label>
+                        <RadioGroup value={healthOutcome} onValueChange={setHealthOutcome}>
+                          <div className="flex items-start gap-2">
+                            <RadioGroupItem value="fit" id="health-outcome-fit" className="mt-1" />
+                            <Label htmlFor="health-outcome-fit" className="cursor-pointer">
+                              Fit
+                            </Label>
+                          </div>
+                          <div className="flex items-start gap-2">
+                            <RadioGroupItem value="conditional" id="health-outcome-conditional" className="mt-1" />
+                            <Label htmlFor="health-outcome-conditional" className="cursor-pointer">
+                              Conditional
+                            </Label>
+                          </div>
+                          <div className="flex items-start gap-2">
+                            <RadioGroupItem value="requires_review" id="health-outcome-requires-review" className="mt-1" />
+                            <Label htmlFor="health-outcome-requires-review" className="cursor-pointer">
+                              Requires review
+                            </Label>
+                          </div>
+                          <div className="flex items-start gap-2">
+                            <RadioGroupItem value="not_fit" id="health-outcome-not-fit" className="mt-1" />
+                            <Label htmlFor="health-outcome-not-fit" className="cursor-pointer">
+                              Not fit
+                            </Label>
+                          </div>
+                        </RadioGroup>
                       </div>
                     )}
 

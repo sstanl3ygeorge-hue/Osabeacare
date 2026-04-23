@@ -286,6 +286,62 @@ def _build_blocker(
     return blocker
 
 
+def _blocker_concept_key(blocker: dict) -> str:
+    """
+    Canonical concept key for blocker de-duplication.
+
+    Health questionnaire can surface under legacy/canonical ids across
+    aggregation paths. Collapse these into one operational concept.
+    """
+    blocker_id = (blocker.get("id") or "").strip().lower()
+    gate = (blocker.get("gate") or "").strip().lower()
+
+    if blocker_id in {"staff_health_questionnaire", "health_questionnaire"} or gate in {
+        "staff_health_questionnaire",
+        "health_questionnaire",
+    }:
+        return "staff_health_questionnaire"
+
+    # Keep other concepts distinct by gate to avoid hiding separate blockers
+    # under the same requirement id.
+    return f"{blocker_id}|{gate}"
+
+
+def _dedupe_blockers(blockers: list[dict]) -> list[dict]:
+    """
+    Collapse duplicate blocker concepts while preserving the most actionable item.
+    """
+    if not blockers:
+        return blockers
+
+    severity_rank = {"critical": 3, "pending": 2, "warning": 1}
+    chosen: dict[str, dict] = {}
+
+    for blocker in blockers:
+        key = _blocker_concept_key(blocker)
+        existing = chosen.get(key)
+        if existing is None:
+            chosen[key] = blocker
+            continue
+
+        current_reason = str(blocker.get("reason") or "").lower()
+        existing_reason = str(existing.get("reason") or "").lower()
+        current_score = (
+            severity_rank.get(str(blocker.get("severity") or "warning").lower(), 0),
+            1 if "health declaration" in current_reason else 0,
+            len(current_reason),
+        )
+        existing_score = (
+            severity_rank.get(str(existing.get("severity") or "warning").lower(), 0),
+            1 if "health declaration" in existing_reason else 0,
+            len(existing_reason),
+        )
+        if current_score > existing_score:
+            chosen[key] = blocker
+
+    return list(chosen.values())
+
+
 # =============================================================================
 # VERIFICATION STATUS HELPERS
 # =============================================================================
@@ -1678,6 +1734,10 @@ async def get_unified_employee_status(
     # BUILD RESPONSE
     # ==========================================================================
     
+    # Collapse duplicate concepts (especially health questionnaire legacy/canonical
+    # id variants) before sorting, so operational checklists surface one item.
+    blockers = _dedupe_blockers(blockers)
+
     # Sort blockers by severity (critical first)
     severity_order = {"critical": 0, "pending": 1, "warning": 2}
     blockers.sort(key=lambda b: severity_order.get(b.get("severity", "warning"), 2))

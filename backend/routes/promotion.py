@@ -31,6 +31,14 @@ EMPLOYEE_STATUS_ACTIVE = "active"
 LEGACY_EMPLOYEE_STATUS_ACTIVE = "active_employee"
 
 
+async def get_latest_work_readiness_decision(employee_id: str, db) -> Optional[dict]:
+    return await db.work_readiness_decisions.find_one(
+        {"employee_id": employee_id},
+        {"_id": 0},
+        sort=[("decided_at", -1), ("created_at", -1)],
+    )
+
+
 async def get_canonical_promotion_status(employee_id: str, db) -> tuple[bool, dict]:
     unified_status = await get_unified_employee_status(
         employee_id,
@@ -40,7 +48,15 @@ async def get_canonical_promotion_status(employee_id: str, db) -> tuple[bool, di
     )
     if unified_status.get("error"):
         raise HTTPException(status_code=404, detail=unified_status["error"])
-    return unified_status.get("can_promote", False), unified_status.get("checks", {})
+    can_promote = unified_status.get("can_promote", False)
+    checks = unified_status.get("checks", {})
+    latest_decision = await get_latest_work_readiness_decision(employee_id, db)
+    decision_outcome = (latest_decision or {}).get("outcome")
+    has_fit_for_work_approval = decision_outcome in ("ready", "ready_with_conditions")
+    return can_promote and has_fit_for_work_approval, {
+        **checks,
+        "fit_for_work_approval": has_fit_for_work_approval,
+    }
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +88,7 @@ async def get_promotion_status(
         raise HTTPException(status_code=404, detail="Employee not found")
     
     can_promote, checks = await get_canonical_promotion_status(employee_id, db)
+    latest_decision = await get_latest_work_readiness_decision(employee_id, db)
     
     # Get current status
     current_status = employee.get("status", "applicant")
@@ -88,6 +105,7 @@ async def get_promotion_status(
         "employee_name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
         "current_status": current_status,
         "can_promote": can_promote,
+        "latest_work_readiness_decision": latest_decision,
         "checks": checks,
         "passed_count": passed,
         "total_count": total,
@@ -126,12 +144,14 @@ async def auto_promote_to_active(
     
     if not can_promote:
         missing = [k for k, v in checks.items() if v is False]
+        latest_decision = await get_latest_work_readiness_decision(employee_id, db)
         return {
             "success": False,
-            "message": "Cannot promote - not all checks passed",
+            "message": "Cannot promote - readiness or fit-for-work approval is incomplete",
             "promoted": False,
             "status": current_status,
-            "missing_checks": missing
+            "missing_checks": missing,
+            "latest_work_readiness_decision": latest_decision,
         }
     
     # Promote to active

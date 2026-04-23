@@ -148,7 +148,7 @@ def get_unified_employee_status_func():
     return get_unified_employee_status
 
 
-def adapt_unified_status_to_legacy_readiness(unified_status: dict, employee: dict) -> dict:
+async def adapt_unified_status_to_legacy_readiness(unified_status: dict, employee: dict) -> dict:
     """Map canonical unified status to legacy readiness response shape."""
     checks = unified_status.get("checks", {}) or {}
     blockers = unified_status.get("blockers", []) or []
@@ -209,7 +209,13 @@ def adapt_unified_status_to_legacy_readiness(unified_status: dict, employee: dic
     interview_item = _find_item(form_items, "interview_record")
 
     health_submitted = bool(health_item.get("submitted", False))
-    health_verified = bool(health_item.get("verified", checks.get("staff_health_questionnaire", False)))
+    health_decl = await db.health_declarations.find_one(
+        {"employee_id": employee.get("id")},
+        {"_id": 0, "status": 1, "reviewed_at": 1, "reviewed_by": 1},
+        sort=[("reviewed_at", -1), ("submitted_at", -1), ("declaration_date", -1)],
+    )
+    health_status = (health_decl or {}).get("status")
+    health_verified = health_status in {"fit", "conditional"}
     interview_submitted = bool(interview_item.get("submitted", False))
     interview_verified = bool(interview_item.get("verified", checks.get("interview_record", False)))
 
@@ -299,7 +305,10 @@ def adapt_unified_status_to_legacy_readiness(unified_status: dict, employee: dic
             "healthForm": {
                 "passed": health_verified,
                 "submitted": health_submitted,
-                "verified": health_verified
+                "verified": health_verified,
+                "outcome": health_status or "missing",
+                "reviewed_at": (health_decl or {}).get("reviewed_at"),
+                "reviewed_by": (health_decl or {}).get("reviewed_by"),
             },
             "interviewForm": {
                 "passed": interview_verified,
@@ -438,7 +447,7 @@ async def get_employee_readiness(employee_id: str, user: dict = Depends(get_curr
     if unified_status.get("error") == "Employee not found":
         raise HTTPException(status_code=404, detail="Employee not found")
 
-    adapted_response = adapt_unified_status_to_legacy_readiness(unified_status, employee)
+    adapted_response = await adapt_unified_status_to_legacy_readiness(unified_status, employee)
 
     # Temporary parity logging for rollout safety.
     logger.info(

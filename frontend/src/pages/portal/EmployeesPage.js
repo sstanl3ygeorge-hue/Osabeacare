@@ -40,6 +40,15 @@ const matchesReadinessFilter = (employee, filter) => {
   return true;
 };
 
+const STAGE_PRESETS = [
+  { key: 'ALL', label: 'All' },
+  { key: 'ONBOARDING', label: 'Onboarding' },
+  { key: 'READY_TO_WORK', label: 'Ready to Work' },
+  { key: 'CAN_PROMOTE', label: 'Can Promote' },
+  { key: 'ACTIVE', label: 'Active' },
+  { key: 'INACTIVE', label: 'Inactive' },
+];
+
 const statusColors = {
   new: 'status-info',
   screening: 'status-info',
@@ -64,6 +73,7 @@ export default function EmployeesPage() {
   const [statusFilter, setStatusFilter] = useState(searchParams.get('status') || '');
   const [onboardingStatusFilter, setOnboardingStatusFilter] = useState(searchParams.get('onboarding') || '');
   const [workReadinessFilter, setWorkReadinessFilter] = useState(getInitialReadinessFilter(searchParams));
+  const [stagePreset, setStagePreset] = useState(searchParams.get('stage_preset') || 'ALL');
   const [requirementFilter, setRequirementFilter] = useState(searchParams.get('requirement') || '');
   const [showArchived, setShowArchived] = useState(searchParams.get('archived') === 'true');
   const [onboardingStatuses, setOnboardingStatuses] = useState([]);
@@ -96,6 +106,7 @@ export default function EmployeesPage() {
     if (workReadinessFilter === 'READY_TO_WORK') newParams.set('is_work_ready', 'true');
     if (workReadinessFilter === 'NOT_READY') newParams.set('is_work_ready', 'false');
     if (workReadinessFilter === 'CAN_PROMOTE') newParams.set('can_promote', 'true');
+    if (stagePreset && stagePreset !== 'ALL') newParams.set('stage_preset', stagePreset);
     if (requirementFilter) newParams.set('requirement', requirementFilter);
     if (showArchived) newParams.set('archived', 'true');
     
@@ -105,7 +116,7 @@ export default function EmployeesPage() {
     if (currentString !== newString) {
       setSearchParams(newParams, { replace: true });
     }
-  }, [search, statusFilter, onboardingStatusFilter, workReadinessFilter, requirementFilter, showArchived]);
+  }, [search, statusFilter, onboardingStatusFilter, workReadinessFilter, stagePreset, requirementFilter, showArchived]);
 
   const [newEmployee, setNewEmployee] = useState({
     first_name: '',
@@ -231,6 +242,75 @@ export default function EmployeesPage() {
   };
 
   const isSuperAdmin = () => user?.role === 'super_admin';
+  const canPromoteEmployee = (emp) => {
+    const readiness = emp?.canonical_readiness || {};
+    const decision = emp?.latest_work_readiness_decision || null;
+    const hasApproval = ['ready', 'ready_with_conditions'].includes(decision?.outcome);
+    return !isAuditor() && emp?.status === 'onboarding' && readiness?.can_promote === true && hasApproval;
+  };
+
+  const getLifecycleStageLabel = (emp) => {
+    if (emp?.status === 'active' || emp?.status === 'active_employee') return 'Active Workforce';
+    if (emp?.status === 'inactive') return 'Inactive';
+    if (emp?.status === 'onboarding') {
+      return canPromoteEmployee(emp) ? 'Ready to activate' : 'Onboarding';
+    }
+    return (emp?.status || 'Unknown').replace(/_/g, ' ');
+  };
+
+  const applyStagePreset = (preset) => {
+    setStagePreset(preset);
+    setShowArchived(false);
+    setOnboardingStatusFilter('');
+    setRequirementFilter('');
+
+    if (preset === 'ALL') {
+      setStatusFilter('');
+      setWorkReadinessFilter('');
+      return;
+    }
+    if (preset === 'ONBOARDING') {
+      setStatusFilter('onboarding');
+      setWorkReadinessFilter('');
+      return;
+    }
+    if (preset === 'READY_TO_WORK') {
+      setStatusFilter('onboarding');
+      setWorkReadinessFilter('READY_TO_WORK');
+      return;
+    }
+    if (preset === 'CAN_PROMOTE') {
+      setStatusFilter('onboarding');
+      setWorkReadinessFilter('CAN_PROMOTE');
+      return;
+    }
+    if (preset === 'ACTIVE') {
+      setStatusFilter('active');
+      setWorkReadinessFilter('');
+      return;
+    }
+    if (preset === 'INACTIVE') {
+      setStatusFilter('inactive');
+      setWorkReadinessFilter('');
+    }
+  };
+
+  const handlePromoteToActive = async (emp) => {
+    try {
+      const response = await axios.post(`${API}/employees/${emp.id}/auto-promote`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (response.data?.promoted) {
+        toast.success(`${emp.first_name} ${emp.last_name} promoted to active`);
+      } else {
+        toast.error(response.data?.message || 'Promotion is not currently allowed');
+      }
+      fetchEmployees();
+    } catch (error) {
+      const detail = error.response?.data?.detail;
+      toast.error(typeof detail === 'string' ? detail : (detail?.message || 'Failed to promote employee'));
+    }
+  };
 
   // Bulk request handlers
   const toggleEmployeeSelection = (empId) => {
@@ -578,6 +658,19 @@ export default function EmployeesPage() {
           <p className="text-sm text-text-muted mb-3">
             Filter employees by work status to quickly see who can start work.
           </p>
+          <div className="mb-4 flex flex-wrap gap-2">
+            {STAGE_PRESETS.map((preset) => (
+              <Button
+                key={preset.key}
+                type="button"
+                variant={stagePreset === preset.key ? 'default' : 'outline'}
+                className="rounded-xl"
+                onClick={() => applyStagePreset(preset.key)}
+              >
+                {preset.label}
+              </Button>
+            ))}
+          </div>
           <div className="flex flex-col sm:flex-row gap-4">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
@@ -805,7 +898,10 @@ export default function EmployeesPage() {
                         </Link>
                       </td>
                       <td className="p-4 hidden md:table-cell">
-                        <span className="text-text-primary">{emp.role}</span>
+                        <div>
+                          <span className="text-text-primary">{emp.role}</span>
+                          <p className="mt-1 text-xs text-text-muted">{getLifecycleStageLabel(emp)}</p>
+                        </div>
                       </td>
                       <td className="p-4">
                         {/* Canonical Work Readiness Badge */}
@@ -883,6 +979,15 @@ export default function EmployeesPage() {
                                 <FileDown className="h-4 w-4 mr-2" />
                                 Export File
                               </DropdownMenuItem>
+                              {canPromoteEmployee(emp) && (
+                                <>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem onClick={() => handlePromoteToActive(emp)}>
+                                    <CheckCircle className="h-4 w-4 mr-2" />
+                                    Promote to Active
+                                  </DropdownMenuItem>
+                                </>
+                              )}
                               <DropdownMenuSeparator />
                               {emp.status === 'archived' ? (
                                 <DropdownMenuItem onClick={() => handleRestoreEmployee(emp)}>

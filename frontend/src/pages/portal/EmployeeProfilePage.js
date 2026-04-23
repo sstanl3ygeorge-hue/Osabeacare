@@ -350,6 +350,11 @@ export default function EmployeeProfilePage() {
   
   // Acknowledgement states (for Contract/Handbook acknowledgement flow)
   const [acknowledgementDialogOpen, setAcknowledgementDialogOpen] = useState(false);
+  const [workApprovalDialogOpen, setWorkApprovalDialogOpen] = useState(false);
+  const [workApprovalOutcome, setWorkApprovalOutcome] = useState('ready');
+  const [workApprovalRationale, setWorkApprovalRationale] = useState('');
+  const [workApprovalConditions, setWorkApprovalConditions] = useState('');
+  const [isSavingWorkApproval, setIsSavingWorkApproval] = useState(false);
   const [acknowledgingRequirement, setAcknowledgingRequirement] = useState(null);
   const [isAcknowledging, setIsAcknowledging] = useState(false);
   const [acknowledgementConfirmed, setAcknowledgementConfirmed] = useState(false);
@@ -804,6 +809,45 @@ export default function EmployeeProfilePage() {
     }
   };
 
+  const handleApproveForWork = async () => {
+    if (!canRecordWorkApproval()) return;
+    if (!canonicalIsWorkReady) {
+      toast.error('This employee is not yet canonically ready for work.');
+      return;
+    }
+
+    const rationale = workApprovalRationale.trim();
+    if (rationale.length < 3) {
+      toast.error('Please add a short rationale for the approval decision.');
+      return;
+    }
+
+    const conditions = workApprovalConditions
+      .split(/\r?\n|,/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+
+    try {
+      setIsSavingWorkApproval(true);
+      await axios.post(
+        `${API}/employees/${employeeId}/work-readiness/approve`,
+        {
+          outcome: workApprovalOutcome,
+          rationale,
+          conditions
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success('Fit-for-work approval recorded.');
+      setWorkApprovalDialogOpen(false);
+      await fetchData();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Failed to record work approval');
+    } finally {
+      setIsSavingWorkApproval(false);
+    }
+  };
+
   // Admin signs off Employment Review
   const handleSignOffEmploymentReview = async () => {
     if (!employmentReadyForSignOff) {
@@ -1157,6 +1201,73 @@ export default function EmployeeProfilePage() {
   ];
 
   const isSuperAdmin = () => user?.role === 'super_admin';
+  const canRecordWorkApproval = () => user?.role === 'admin' || user?.role === 'super_admin';
+  const latestWorkReadinessDecision = employee?.latest_work_readiness_decision || null;
+  const latestHealthDeclaration = employee?.latest_health_declaration || null;
+
+  const formatWorkApprovalOutcome = (outcome) => {
+    if (outcome === 'ready_with_conditions') return 'Ready with conditions';
+    if (outcome === 'ready') return 'Ready for work';
+    if (outcome === 'not_ready') return 'Not ready';
+    return 'No decision recorded';
+  };
+
+  const getWorkApprovalBadgeClass = (outcome) => {
+    if (outcome === 'ready') return 'bg-green-100 text-green-700';
+    if (outcome === 'ready_with_conditions') return 'bg-amber-100 text-amber-700';
+    if (outcome === 'not_ready') return 'bg-red-100 text-red-700';
+    return 'bg-gray-100 text-gray-700';
+  };
+
+  const formatHealthOutcomeLabel = (outcome) => {
+    if (outcome === 'fit') return 'Fit';
+    if (outcome === 'conditional') return 'Conditional';
+    if (outcome === 'requires_review') return 'Requires review';
+    if (outcome === 'pending') return 'Pending';
+    if (outcome === 'rejected') return 'Rejected';
+    if (outcome === 'missing') return 'Missing';
+    if (outcome === 'not_fit') return 'Not fit';
+    return 'Missing';
+  };
+
+  const getHealthOutcomeBadgeClass = (outcome) => {
+    if (outcome === 'fit') return 'bg-green-100 text-green-700';
+    if (outcome === 'conditional') return 'bg-amber-100 text-amber-700';
+    if (outcome === 'requires_review' || outcome === 'pending') return 'bg-blue-100 text-blue-700';
+    if (outcome === 'rejected' || outcome === 'not_fit') return 'bg-red-100 text-red-700';
+    return 'bg-gray-100 text-gray-700';
+  };
+
+  const canPromoteToActiveNow = Boolean(
+    canonicalCanPromote &&
+    ['ready', 'ready_with_conditions'].includes(latestWorkReadinessDecision?.outcome) &&
+    employee?.status === 'onboarding'
+  );
+
+  const openWorkApprovalDialog = () => {
+    setWorkApprovalOutcome('ready');
+    setWorkApprovalRationale('');
+    setWorkApprovalConditions('');
+    setWorkApprovalDialogOpen(true);
+  };
+
+  const handlePromoteToActive = async () => {
+    try {
+      const response = await axios.post(`${API}/employees/${employeeId}/auto-promote`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (response.data?.promoted) {
+        toast.success('Employee promoted to active');
+      } else {
+        toast.error(response.data?.message || 'Promotion is not currently allowed');
+      }
+      await fetchData();
+      await fetchComplianceFile();
+    } catch (error) {
+      const detail = error.response?.data?.detail;
+      toast.error(typeof detail === 'string' ? detail : (detail?.message || 'Failed to promote employee'));
+    }
+  };
 
   const fetchData = async () => {
     // Use Promise.allSettled to allow partial success
@@ -3878,6 +3989,25 @@ export default function EmployeeProfilePage() {
                       </span>
                     );
                   })()}
+                  {employee.person_stage === 'employee' && (
+                    <span className={`px-2 py-1 rounded-lg text-xs font-medium ${
+                      employee.status === 'active' || employee.status === 'active_employee'
+                        ? 'bg-green-100 text-green-800'
+                        : canPromoteToActiveNow
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : employee.status === 'onboarding'
+                            ? 'bg-blue-100 text-blue-800'
+                            : 'bg-gray-100 text-gray-700'
+                    }`}>
+                      {employee.status === 'active' || employee.status === 'active_employee'
+                        ? 'Lifecycle: Active Workforce'
+                        : canPromoteToActiveNow
+                          ? 'Lifecycle: Ready to activate'
+                          : employee.status === 'onboarding'
+                            ? 'Lifecycle: Onboarding'
+                            : `Lifecycle: ${(employee.status || 'unknown').replace(/_/g, ' ')}`}
+                    </span>
+                  )}
                   {/* Canonical Work Readiness Status Badge */}
                   {employee.person_stage === 'employee' && (() => {
                     const reasons = canonicalBlockerObjects.map((blocker) => blocker.reason || blocker.message || blocker.label).filter(Boolean);
@@ -4766,8 +4896,148 @@ export default function EmployeeProfilePage() {
         {/* Stable profile / core-record tab. Readiness logic lives above the tabs only. */}
         <TabsContent value="work_readiness">
           <div className="space-y-6">
+            {canRecordWorkApproval() && employee?.person_stage === 'employee' && (
+              <Card className="border-[#E4E8EB] shadow-sm">
+                <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <CardTitle className="font-heading text-lg">Fit for Work Approval</CardTitle>
+                    <p className="mt-1 text-sm text-text-muted">
+                      Record the explicit approval decision once the canonical readiness check is clear.
+                    </p>
+                  </div>
+                  <Button
+                    onClick={openWorkApprovalDialog}
+                    disabled={!canonicalIsWorkReady}
+                    className="w-full sm:w-auto"
+                  >
+                    Approve for Work
+                  </Button>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-xs uppercase tracking-wider text-text-muted">Promotion to active</p>
+                      <p className="mt-1 text-sm text-text-primary">
+                        {canPromoteToActiveNow
+                          ? 'This employee can now be promoted to active.'
+                          : 'Promotion stays locked until canonical readiness and fit-for-work approval are both complete.'}
+                      </p>
+                    </div>
+                    <Button
+                      variant="outline"
+                      onClick={handlePromoteToActive}
+                      disabled={!canPromoteToActiveNow}
+                      className="w-full sm:w-auto"
+                    >
+                      Promote to Active
+                    </Button>
+                  </div>
+
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-xs uppercase tracking-wider text-text-muted">Latest decision</p>
+                      <div className="mt-1 flex flex-wrap items-center gap-2">
+                        <Badge className={getWorkApprovalBadgeClass(latestWorkReadinessDecision?.outcome)}>
+                          {formatWorkApprovalOutcome(latestWorkReadinessDecision?.outcome)}
+                        </Badge>
+                        {!canonicalIsWorkReady && (
+                          <span className="text-xs text-red-600">
+                            Approval is locked until canonical readiness passes.
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    {latestWorkReadinessDecision?.decided_at && (
+                      <div className="text-sm text-text-muted sm:text-right">
+                        <p>Approved by {latestWorkReadinessDecision?.decided_by_name || latestWorkReadinessDecision?.decided_by || 'Unknown'}</p>
+                        <p>{formatBackendDateTime(latestWorkReadinessDecision.decided_at)}</p>
+                      </div>
+                    )}
+                  </div>
+
+                  {latestWorkReadinessDecision?.rationale ? (
+                    <div className="rounded-lg bg-gray-50 p-3">
+                      <p className="text-xs uppercase tracking-wider text-text-muted">Rationale</p>
+                      <p className="mt-1 whitespace-pre-wrap text-sm text-text-primary">
+                        {latestWorkReadinessDecision.rationale}
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-text-muted">No explicit fit-for-work decision has been recorded yet.</p>
+                  )}
+
+                  {latestWorkReadinessDecision?.conditions?.length > 0 && (
+                    <div className="rounded-lg bg-amber-50 p-3">
+                      <p className="text-xs uppercase tracking-wider text-amber-700">Conditions</p>
+                      <ul className="mt-2 space-y-1 text-sm text-amber-900">
+                        {latestWorkReadinessDecision.conditions.map((condition, index) => (
+                          <li key={`${condition}-${index}`}>- {condition}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
 
             {/* ── Personal Details ── */}
+            {employee?.person_stage === 'employee' && (
+              <Card className="border-[#E4E8EB] shadow-sm">
+                <CardHeader>
+                  <CardTitle className="font-heading text-lg">Occupational Health</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-xs uppercase tracking-wider text-text-muted">Current outcome</p>
+                      <div className="mt-1 flex flex-wrap items-center gap-2">
+                        <Badge className={getHealthOutcomeBadgeClass(latestHealthDeclaration?.status)}>
+                          {formatHealthOutcomeLabel(latestHealthDeclaration?.status || 'missing')}
+                        </Badge>
+                        <span className={`text-xs ${latestHealthDeclaration?.satisfies_readiness ? 'text-green-700' : 'text-red-600'}`}>
+                          {latestHealthDeclaration?.satisfies_readiness
+                            ? 'Satisfies readiness'
+                            : 'Does not satisfy readiness'}
+                        </span>
+                      </div>
+                    </div>
+                    {(latestHealthDeclaration?.reviewed_at || latestHealthDeclaration?.reviewed_by) && (
+                      <div className="text-sm text-text-muted sm:text-right">
+                        <p>Reviewed by {latestHealthDeclaration?.reviewed_by || 'Unknown'}</p>
+                        {latestHealthDeclaration?.reviewed_at && (
+                          <p>{formatBackendDateTime(latestHealthDeclaration.reviewed_at)}</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {latestHealthDeclaration?.review_notes && (
+                    <div className="rounded-lg bg-gray-50 p-3">
+                      <p className="text-xs uppercase tracking-wider text-text-muted">Review notes</p>
+                      <p className="mt-1 whitespace-pre-wrap text-sm text-text-primary">
+                        {latestHealthDeclaration.review_notes}
+                      </p>
+                    </div>
+                  )}
+
+                  {latestHealthDeclaration?.adjustments_required && (
+                    <div className="rounded-lg bg-amber-50 p-3">
+                      <p className="text-xs uppercase tracking-wider text-amber-700">Adjustments required</p>
+                      <p className="mt-1 whitespace-pre-wrap text-sm text-amber-900">
+                        {latestHealthDeclaration.adjustments_required}
+                      </p>
+                    </div>
+                  )}
+
+                  {!latestHealthDeclaration && (
+                    <p className="text-sm text-text-muted">
+                      No reviewed health declaration is on file yet.
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
             <Card className="border-[#E4E8EB] shadow-sm">
               <CardHeader className="flex flex-row items-center justify-between">
                 <CardTitle className="font-heading text-lg">Personal Details</CardTitle>
@@ -9315,6 +9585,63 @@ export default function EmployeeProfilePage() {
       />
 
       {/* ========== EDIT DIALOGS FOR UNIVERSAL EDITABILITY ========== */}
+
+      <Dialog open={workApprovalDialogOpen} onOpenChange={setWorkApprovalDialogOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Approve for Work</DialogTitle>
+            <DialogDescription>
+              Record the explicit fit-for-work decision after the canonical readiness check has passed.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="work-approval-outcome">Outcome</Label>
+              <Select value={workApprovalOutcome} onValueChange={setWorkApprovalOutcome}>
+                <SelectTrigger id="work-approval-outcome">
+                  <SelectValue placeholder="Select outcome" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ready">Ready for work</SelectItem>
+                  <SelectItem value="ready_with_conditions">Ready with conditions</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="work-approval-rationale">Rationale</Label>
+              <Textarea
+                id="work-approval-rationale"
+                value={workApprovalRationale}
+                onChange={(event) => setWorkApprovalRationale(event.target.value)}
+                placeholder="Summarise why this employee is approved for work."
+                rows={4}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="work-approval-conditions">Conditions (optional)</Label>
+              <Textarea
+                id="work-approval-conditions"
+                value={workApprovalConditions}
+                onChange={(event) => setWorkApprovalConditions(event.target.value)}
+                placeholder="Add one condition per line if needed."
+                rows={3}
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setWorkApprovalDialogOpen(false)} disabled={isSavingWorkApproval}>
+              Cancel
+            </Button>
+            <Button onClick={handleApproveForWork} disabled={!canonicalIsWorkReady || isSavingWorkApproval}>
+              {isSavingWorkApproval ? 'Saving...' : 'Record approval'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       
       {/* Edit Personal Details Dialog */}
       <EditPersonalDetailsDialog

@@ -5638,6 +5638,8 @@ class EmployeeResponse(BaseModel):
     recruitment_approved_by: Optional[str] = None
     recruitment_approved_at: Optional[str] = None
     recruitment_approval_notes: Optional[str] = None
+    latest_work_readiness_decision: Optional[dict] = None
+    latest_health_declaration: Optional[dict] = None
     created_at: str
     updated_at: str
     # Extended profile fields
@@ -5832,6 +5834,34 @@ class EmployeeDocumentResponse(BaseModel):
     verification_stamp_by: Optional[str] = None
     verification_stamp_by_name: Optional[str] = None
     verification_stamp_at: Optional[str] = None
+
+
+class WorkReadinessApprovalRequest(BaseModel):
+    outcome: str = Field(..., pattern="^(ready|ready_with_conditions)$")
+    rationale: str = Field(..., min_length=3)
+    conditions: Optional[List[str]] = None
+
+
+class WorkReadinessDecisionResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    employee_id: str
+    outcome: str
+    rationale: str
+    conditions: List[str] = Field(default_factory=list)
+    decided_by: str
+    decided_by_name: Optional[str] = None
+    decided_at: str
+    canonical_readiness_snapshot: Optional[dict] = None
+    created_at: str
+    updated_at: str
+
+
+class HealthDeclarationReviewRequest(BaseModel):
+    declaration_id: Optional[str] = None
+    outcome: str = Field(..., pattern="^(fit|conditional|requires_review|rejected|not_fit|pending)$")
+    review_notes: Optional[str] = None
+    adjustments_required: Optional[str] = None
 
 
 # ============================================================================
@@ -8041,6 +8071,39 @@ async def compute_unified_progress_internal(employee_id: str, employee: dict = N
     }
 
 
+async def get_latest_work_readiness_decision(employee_id: str) -> Optional[dict]:
+    return await db.work_readiness_decisions.find_one(
+        {"employee_id": employee_id},
+        {"_id": 0},
+        sort=[("decided_at", -1), ("created_at", -1)],
+    )
+
+
+async def get_latest_health_declaration_summary(employee_id: str) -> Optional[dict]:
+    declaration = await db.health_declarations.find_one(
+        {"employee_id": employee_id},
+        {
+            "_id": 0,
+            "id": 1,
+            "status": 1,
+            "reviewed_by": 1,
+            "reviewed_at": 1,
+            "review_notes": 1,
+            "adjustments_required": 1,
+            "submitted_at": 1,
+            "declaration_date": 1,
+            "conditions_disclosed": 1,
+        },
+        sort=[("reviewed_at", -1), ("submitted_at", -1), ("declaration_date", -1)],
+    )
+    if not declaration:
+        return None
+
+    status = (declaration.get("status") or "").strip().lower()
+    declaration["satisfies_readiness"] = status in {"fit", "conditional"}
+    return declaration
+
+
 # ==================== EARLY ROUTER INCLUSION ====================
 # Include readiness router BEFORE inline routes to ensure /employees/readiness-summary
 # is matched before /employees/{employee_id} (which would match "readiness-summary" as an ID)
@@ -9379,6 +9442,8 @@ async def get_employee(employee_id: str, user: dict = Depends(get_current_user))
     employee['completion_percentage'] = await calculate_completion_percentage(employee_id)
     # Derive person_stage from status (SINGLE SOURCE OF TRUTH)
     employee['person_stage'] = get_person_stage(employee.get('status', EmployeeStatus.NEW))
+    employee['latest_work_readiness_decision'] = await get_latest_work_readiness_decision(employee_id)
+    employee['latest_health_declaration'] = await get_latest_health_declaration_summary(employee_id)
     
     # Add 3-tier work readiness status
     employee['work_readiness_3tier'] = await calculate_work_readiness_3tier_quick(
@@ -9447,6 +9512,75 @@ async def get_employment_review_preview(
         },
         "employment_review": preview,
     }
+
+
+@api_router.post("/employees/{employee_id}/health-declaration/review")
+async def review_health_declaration(
+    employee_id: str,
+    request: HealthDeclarationReviewRequest,
+    user: dict = Depends(require_admin),
+):
+    """
+    Record an explicit occupational health review outcome against the canonical
+    health declaration record used by readiness.
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "id": 1, "first_name": 1, "last_name": 1})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    if request.declaration_id:
+        declaration = await db.health_declarations.find_one(
+            {"id": request.declaration_id, "employee_id": employee_id},
+            {"_id": 0},
+        )
+    else:
+        declaration = await db.health_declarations.find_one(
+            {"employee_id": employee_id},
+            {"_id": 0},
+            sort=[("reviewed_at", -1), ("submitted_at", -1), ("declaration_date", -1)],
+        )
+
+    if not declaration:
+        raise HTTPException(status_code=404, detail="Health declaration not found")
+
+    outcome_map = {
+        "fit": HealthStatus.FIT,
+        "conditional": HealthStatus.CONDITIONAL,
+        "requires_review": HealthStatus.REQUIRES_REVIEW,
+        "pending": HealthStatus.REQUIRES_REVIEW,
+        "not_fit": HealthStatus.NOT_FIT,
+        "rejected": HealthStatus.NOT_FIT,
+    }
+
+    health_service = get_health_service()
+    reviewed = await health_service.review_declaration(
+        declaration["id"],
+        outcome_map[request.outcome],
+        user["user_id"],
+        review_notes=request.review_notes,
+        adjustments_required=request.adjustments_required,
+    )
+    if not reviewed:
+        raise HTTPException(status_code=500, detail="Failed to update health declaration review")
+
+    await log_audit_action(
+        user["user_id"],
+        "review_health_declaration",
+        "employee",
+        employee_id,
+        {
+            "employee_id": employee_id,
+            "employee_name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
+            "declaration_id": declaration["id"],
+            "outcome": request.outcome,
+            "review_notes": request.review_notes,
+            "adjustments_required": request.adjustments_required,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+
+    reviewed["satisfies_readiness"] = reviewed.get("status") in {"fit", "conditional"}
+    return reviewed
 
 
 @api_router.get("/employees/{employee_id}/employment-review")
@@ -23958,6 +24092,100 @@ async def get_unified_progress(employee_id: str, user: dict = Depends(get_curren
         "role_requires_professional_registration": requires_prof_reg,
         "professional_registration_type": prof_reg_type,
         "checks": unified_status["checks"],
+    }
+
+
+@api_router.post("/employees/{employee_id}/work-readiness/approve")
+async def approve_work_readiness(
+    employee_id: str,
+    request: WorkReadinessApprovalRequest,
+    user: dict = Depends(require_admin),
+):
+    """
+    Record an explicit fit-for-work approval decision after canonical readiness passes.
+    This does not replace the readiness engine; it records the governed admin decision.
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "id": 1, "first_name": 1, "last_name": 1, "role": 1})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    unified_status = await get_unified_employee_status(employee_id, db, user_role="admin", include_details=True)
+    if unified_status.get("error"):
+        raise HTTPException(status_code=400, detail=unified_status["error"])
+
+    if not unified_status.get("is_work_ready"):
+        raise HTTPException(
+            status_code=409,
+            detail="Employee is not canonically ready for work. Resolve outstanding blockers before approval.",
+        )
+
+    now = datetime.now(timezone.utc).isoformat()
+    cleaned_conditions = [
+        str(condition).strip()
+        for condition in (request.conditions or [])
+        if str(condition).strip()
+    ]
+
+    readiness_snapshot = {
+        "is_work_ready": unified_status.get("is_work_ready") is True,
+        "can_promote": unified_status.get("can_promote") is True,
+        "progress": unified_status.get("progress", {}),
+        "checks": unified_status.get("checks", {}),
+        "blockers": unified_status.get("blockers", []),
+        "legal_blockers": unified_status.get("legal_blockers", []),
+        "internal_blockers": unified_status.get("internal_blockers", []),
+    }
+
+    decision = {
+        "id": str(uuid.uuid4()),
+        "employee_id": employee_id,
+        "outcome": request.outcome,
+        "rationale": request.rationale.strip(),
+        "conditions": cleaned_conditions,
+        "decided_by": user["user_id"],
+        "decided_by_name": user.get("name") or user.get("email"),
+        "decided_at": now,
+        "canonical_readiness_snapshot": readiness_snapshot,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+    await db.work_readiness_decisions.insert_one(decision)
+    await log_audit_action(
+        user["user_id"],
+        "approve_for_work",
+        "employee",
+        employee_id,
+        {
+            "employee_id": employee_id,
+            "employee_name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
+            "outcome": decision["outcome"],
+            "rationale": decision["rationale"],
+            "conditions": decision["conditions"],
+            "readiness_snapshot_summary": {
+                "is_work_ready": readiness_snapshot["is_work_ready"],
+                "progress_percentage": readiness_snapshot["progress"].get("percentage"),
+                "blocker_count": len(readiness_snapshot["blockers"]),
+                "legal_blocker_count": len(readiness_snapshot["legal_blockers"]),
+                "internal_blocker_count": len(readiness_snapshot["internal_blockers"]),
+            },
+            "actor_id": user["user_id"],
+            "timestamp": now,
+        },
+    )
+
+    return {
+        "decision": WorkReadinessDecisionResponse(**decision).model_dump(),
+        "readiness_summary": {
+            "employee_id": employee_id,
+            "is_work_ready": unified_status["is_work_ready"],
+            "can_promote": unified_status["can_promote"],
+            "progress": unified_status["progress"],
+            "checks": unified_status["checks"],
+            "blockers": unified_status["blockers"],
+            "legal_blockers": unified_status.get("legal_blockers", []),
+            "internal_blockers": unified_status.get("internal_blockers", []),
+        },
     }
 
 

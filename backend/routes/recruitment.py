@@ -44,6 +44,14 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Recruitment Pipeline"])
 
 
+async def get_latest_work_readiness_decision(employee_id: str, db) -> Optional[dict]:
+    return await db.work_readiness_decisions.find_one(
+        {"employee_id": employee_id},
+        {"_id": 0},
+        sort=[("decided_at", -1), ("created_at", -1)],
+    )
+
+
 # ==================== CONSTANTS ====================
 # These mirror the values in server.py for consistency
 
@@ -348,6 +356,7 @@ async def get_staff_employees(
         emp['total_requirements'] = _ep['total_requirements']
         emp['blockers_count'] = _ep['blockers_count']
         emp['awaiting_review_count'] = _ep['awaiting_review_count']
+        emp['latest_work_readiness_decision'] = await get_latest_work_readiness_decision(emp['id'], db)
     
     return employees
 

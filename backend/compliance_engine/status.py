@@ -565,7 +565,7 @@ class ComplianceStatusService:
         # Determine status based on declaration
         health_status = declaration.get("status", "requires_review")
         
-        if health_status == "fit":
+        if health_status in ("fit", "conditional"):
             status = ComplianceStatus.COMPLIANT
         elif health_status == "not_fit":
             status = ComplianceStatus.ATTENTION_REQUIRED
@@ -582,7 +582,7 @@ class ComplianceStatusService:
         
         return RequirementSummary(
             status=status,
-            is_verified=health_status == "fit",
+            is_verified=health_status in ("fit", "conditional"),
             verified_at=declaration.get("reviewed_at"),
             verified_by=declaration.get("reviewed_by"),
             blocks_work=True,

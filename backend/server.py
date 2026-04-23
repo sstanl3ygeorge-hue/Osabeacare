@@ -25371,23 +25371,18 @@ async def build_training_matrix_read_model():
         if record.get("employee_id")
     }
 
+    # Training matrix is employee-only: exclude applicant/recruitment-stage people
+    # (new, screening, interview, compliance_review). Keep current workforce
+    # (onboarding + active), excluding archived/deleted/inactive as before.
     matrix_statuses = [
         "active",
         "active_employee",
         "onboarding",
         "approved_for_onboarding",
-        "new",
-        "screening",
-        "interview",
-        "compliance_review",
     ]
     employees = await db.employees.find(
         {
-            "status": {"$nin": ["archived", "deleted", "inactive"]},
-            "$or": [
-                {"status": {"$in": matrix_statuses}},
-                {"id": {"$in": list(record_employee_ids)}},
-            ],
+            "status": {"$in": matrix_statuses},
         },
         {
             "_id": 0,

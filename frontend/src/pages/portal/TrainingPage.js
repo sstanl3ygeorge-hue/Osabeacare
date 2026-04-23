@@ -130,7 +130,8 @@ export default function TrainingPage() {
       
       const [trainingRes, employeesRes, summaryRes, extractionsRes, defsRes] = await Promise.all([
         axios.get(`${API}/training-records`, { headers }),
-        axios.get(`${API}/employees`, { headers }),
+        // Training matrix is employee-only: exclude applicant/recruitment-stage people
+        axios.get(`${API}/employees?stage=employee`, { headers }),
         axios.get(`${API}/training/matrix/summary`, { headers }).catch((err) => {
           console.warn('[TrainingPage] Matrix summary fetch failed:', err);
           return null;

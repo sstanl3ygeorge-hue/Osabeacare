@@ -3131,10 +3131,81 @@ async def get_worker_employment_review(worker: dict = Depends(get_current_worker
 
 @router.get("/worker/employment-gaps")
 async def get_worker_employment_gaps(worker: dict = Depends(get_current_worker)):
-    """Get the current worker's employment gaps and 10-year coverage for self-service clarification."""
+    """Get the current worker's employment gaps and 10-year coverage for self-service clarification.
+
+    Canonical source: employment_reviews (same source used by the admin
+    Employment Review UI). This avoids the worker/admin split-brain where the
+    worker was served raw, un-deduplicated db.employment_gaps records while
+    admin viewed canonical review segments. Each gap returned here carries a
+    stable gap_id, start_date, end_date, previous_employment, next_employment,
+    status, the worker's explanation (tied to gap_id), and admin feedback
+    (tied to the same gap_id). Falls back to db.employment_gaps only when no
+    canonical review can be built — preserves behaviour for legacy employees
+    during rollout.
+    """
     db = get_db()
     employee_id = worker.get("employee_id")
 
+    # Try the persisted canonical review first (identical to the admin view).
+    review = await db.employment_reviews.find_one(
+        {"employee_id": employee_id, "current": True},
+        {"_id": 0},
+    )
+    if not review:
+        from employment_review_persistence import build_persistable_employment_review
+        try:
+            review = await build_persistable_employment_review(db, employee_id)
+        except ValueError:
+            raise HTTPException(status_code=404, detail="Employee not found")
+        except Exception as exc:
+            # If the canonical review cannot be built, fall back gracefully.
+            logger.warning(
+                "Canonical employment review build failed for worker %s: %s; "
+                "falling back to raw db.employment_gaps",
+                employee_id, exc,
+            )
+            review = None
+
+    if review and (review.get("segments") or []):
+        # Reuse the canonical → worker shaping so gap IDs, statuses, and
+        # admin feedback all match the admin view 1:1.
+        canonical_payload = _employment_review_to_worker_payload(review, GAP_REASON_TYPES)
+        # Preserve the legacy response shape expected by WorkerDashboard.js
+        # while enriching each gap with previous_employment / next_employment
+        # taken directly from the canonical segments (same source as admin).
+        seg_by_id = {}
+        for seg in review.get("segments") or []:
+            if seg.get("type") != "gap":
+                continue
+            key = seg.get("gap_id") or seg.get("id")
+            if key:
+                seg_by_id[key] = seg
+
+        enriched_gaps = []
+        for gap in canonical_payload.get("gaps") or []:
+            seg = seg_by_id.get(gap.get("gap_id")) or seg_by_id.get(gap.get("id")) or {}
+            enriched_gaps.append({
+                **gap,
+                # Provide legacy keys alongside canonical keys so the frontend
+                # does not require a shape change (UI left untouched).
+                "start_date": gap.get("gap_start"),
+                "end_date": gap.get("gap_end"),
+                "previous_employment": seg.get("previous_employment"),
+                "next_employment": seg.get("next_employment"),
+            })
+
+        return {
+            "gaps": enriched_gaps,
+            "has_gaps": canonical_payload.get("has_gaps", False),
+            "total_gaps": canonical_payload.get("total_gaps", 0),
+            "all_explained": canonical_payload.get("all_explained", False),
+            "reason_types": GAP_REASON_TYPES,
+            "coverage": canonical_payload.get("coverage") or {},
+            "employment_entries": canonical_payload.get("employment_entries") or [],
+            "canonical_source": "employment_reviews",
+        }
+
+    # ---- Legacy fallback (no canonical review available) ----
     gap_records = await db.employment_gaps.find(
         {"employee_id": employee_id}
     ).sort("gap_start", 1).to_list(50)
@@ -3194,6 +3265,7 @@ async def get_worker_employment_gaps(worker: dict = Depends(get_current_worker))
         "reason_types": GAP_REASON_TYPES,
         "coverage": coverage,
         "employment_entries": entries_summary,
+        "canonical_source": "legacy_fallback",
     }
 
 

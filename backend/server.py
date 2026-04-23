@@ -166,6 +166,7 @@ from routes.test_cleanup import router as test_cleanup_router
 from routes.reference_comparison import router as reference_comparison_router
 from routes.cqc_evidence import router as cqc_evidence_router, CQC_EVIDENCE_MAPPING
 from routes.inspection_pack import router as inspection_pack_router
+from routes.shifts import router as shifts_router
 
 INSURANCE_TYPES = [
     {"name": "Public Liability Insurance", "type": "public_liability"},
@@ -42653,6 +42654,7 @@ api_router.include_router(test_cleanup_router)
 api_router.include_router(reference_comparison_router)
 api_router.include_router(cqc_evidence_router)
 api_router.include_router(inspection_pack_router)
+api_router.include_router(shifts_router)
 
 # NOTE: readiness_router is included early in server.py (before inline routes)
 # to ensure /employees/readiness-summary is matched before /employees/{employee_id}

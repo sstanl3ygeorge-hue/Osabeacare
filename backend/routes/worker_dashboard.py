@@ -1681,6 +1681,7 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
         "due": 0,
         "upcoming": 0,
         "scheduled": 0,
+        "items": [],
         "preview": [],
     }
     recurring_items = await db.recurring_compliance.find(
@@ -1715,6 +1716,7 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
                 x.get("days_until_due", 9999)
             )
         )
+        recurring_summary["items"] = normalized
         recurring_summary["preview"] = normalized[:5]
     
     return {

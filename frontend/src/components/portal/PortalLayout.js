@@ -16,7 +16,7 @@ import {
 } from '../ui/dropdown-menu';
 import {
   LayoutDashboard, Users, GraduationCap,
-  History, Settings, Menu, LogOut, ChevronDown, Bell, Search, UserPlus, ClipboardList, Building2, FileCheck, Shield, Heart, Eye, UserCheck, Calendar, UserCog, Upload, MessageSquare, AlertTriangle
+  History, Settings, Menu, LogOut, ChevronDown, Bell, Search, UserPlus, ClipboardList, Building2, FileCheck, Shield, Heart, Eye, UserCheck, Calendar, CalendarClock, UserCog, Upload, MessageSquare, AlertTriangle
 } from 'lucide-react';
 
 const navigation = [
@@ -25,6 +25,7 @@ const navigation = [
   { name: 'Recruitment', href: '/portal/recruitment', icon: UserCheck },
   { name: 'Bulk Import', href: '/portal/bulk-import', icon: Upload },
   { name: 'Service Users', href: '/portal/service-users', icon: Heart },
+  { name: 'Shifts', href: '/portal/shifts', icon: CalendarClock },
   // Templates hidden for Audit Mode - forms system hidden from UI
   // { name: 'Templates', href: '/portal/templates', icon: ClipboardList },
   { name: 'Compliance Centre', href: '/portal/compliance-centre', icon: Building2 },

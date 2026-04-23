@@ -11,7 +11,7 @@ import { Label } from '../../components/ui/label';
 import { 
   CheckCircle, AlertCircle, Clock, Upload, FileText, 
   LogOut, Loader2, AlertTriangle, Calendar, RefreshCw,
-  Shield, X, PenTool, Lock, Download, ExternalLink, Eye, User, Award, Bell,
+  Shield, X, PenTool, Lock, Download, ExternalLink, Eye, User, Award, Bell, ChevronDown, ChevronUp,
   ShieldCheck, Circle, Plus, Trash2
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -50,6 +50,19 @@ const formatDate = (dateStr) => {
   return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 };
 
+const formatDateTime = (dateStr) => {
+  if (!dateStr) return '-';
+  const date = new Date(dateStr);
+  if (isNaN(date.getTime())) return '-';
+  return date.toLocaleString('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+};
+
 // Operational document guidance text
 const getDocumentGuidance = (docType) => {
   const guidance = {
@@ -76,6 +89,33 @@ const DOCUMENT_WORKFLOW_UI = {
   check_in_progress: { label: 'Check In Progress', className: 'bg-blue-100 text-blue-700' },
   proof_required: { label: 'Proof Required', className: 'bg-purple-100 text-purple-700' },
   verified: { label: 'Verified', className: 'bg-green-100 text-green-700' },
+};
+
+const RECURRING_STATUS_UI = {
+  overdue: {
+    label: 'Overdue',
+    badge: 'bg-red-100 text-red-700'
+  },
+  due: {
+    label: 'Due now',
+    badge: 'bg-amber-100 text-amber-700'
+  },
+  upcoming: {
+    label: 'Upcoming',
+    badge: 'bg-blue-100 text-blue-700'
+  },
+  scheduled: {
+    label: 'Scheduled',
+    badge: 'bg-slate-100 text-slate-700'
+  },
+};
+
+const RECURRING_TYPE_LABELS = {
+  supervision: 'Supervision',
+  competency_assessment: 'Competency assessment',
+  spot_check: 'Spot check',
+  training_refresh: 'Training refresh',
+  report_followup: 'Report follow-up',
 };
 
 const getDocumentWorkflowBadgeMeta = (doc) => {
@@ -655,6 +695,16 @@ export default function WorkerDashboard() {
   const [handbookPdfViewed, setHandbookPdfViewed] = useState(false);
   const [handbookAckConfirmed, setHandbookAckConfirmed] = useState(false);
   const [submittingHandbookAck, setSubmittingHandbookAck] = useState(false);
+  const [showRecurringDetails, setShowRecurringDetails] = useState(false);
+  const [workerShifts, setWorkerShifts] = useState([]);
+  const [workerShiftsLoading, setWorkerShiftsLoading] = useState(false);
+  const [selectedWorkerShift, setSelectedWorkerShift] = useState(null);
+  const [workerShiftDetailOpen, setWorkerShiftDetailOpen] = useState(false);
+  const [workerShiftResponseOpen, setWorkerShiftResponseOpen] = useState(false);
+  const [workerShiftResponseMode, setWorkerShiftResponseMode] = useState('accept');
+  const [workerShiftResponseItem, setWorkerShiftResponseItem] = useState(null);
+  const [workerShiftResponseNote, setWorkerShiftResponseNote] = useState('');
+  const [workerShiftResponding, setWorkerShiftResponding] = useState(false);
   const navigate = useNavigate();
 
   const fetchDashboard = useCallback(async () => {
@@ -775,8 +825,82 @@ export default function WorkerDashboard() {
     if (dashboard) {
       fetchCvStatus();
       fetchReferenceMismatches();
+      fetchWorkerShifts();
     }
   }, [dashboard, fetchCvStatus]);
+
+  const fetchWorkerShifts = async () => {
+    setWorkerShiftsLoading(true);
+    try {
+      const token = localStorage.getItem('workerToken');
+      const response = await axios.get(`${API}/worker/shifts`, {
+        params: { include_completed: true },
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const rows = response.data?.shifts || [];
+      setWorkerShifts(rows);
+    } catch (error) {
+      console.error('Failed to fetch worker shifts:', error);
+    } finally {
+      setWorkerShiftsLoading(false);
+    }
+  };
+
+  const handleOpenWorkerShift = async (shiftId) => {
+    try {
+      const token = localStorage.getItem('workerToken');
+      const response = await axios.get(`${API}/worker/shifts/${shiftId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setSelectedWorkerShift(response.data || null);
+      setWorkerShiftDetailOpen(true);
+    } catch (error) {
+      const message = typeof error.response?.data?.detail === 'string'
+        ? error.response.data.detail
+        : 'Could not load shift detail';
+      toast.error(message);
+    }
+  };
+
+  const openWorkerShiftResponseModal = (item, mode) => {
+    setWorkerShiftResponseItem(item || null);
+    setWorkerShiftResponseMode(mode);
+    setWorkerShiftResponseNote('');
+    setWorkerShiftResponseOpen(true);
+  };
+
+  const handleWorkerShiftResponse = async () => {
+    const shiftId = workerShiftResponseItem?.shift?.id;
+    if (!shiftId) {
+      toast.error('Shift not found');
+      return;
+    }
+    setWorkerShiftResponding(true);
+    try {
+      const token = localStorage.getItem('workerToken');
+      const endpoint = workerShiftResponseMode === 'reject'
+        ? `${API}/worker/shifts/${shiftId}/reject`
+        : `${API}/worker/shifts/${shiftId}/accept`;
+      await axios.post(
+        endpoint,
+        { note: workerShiftResponseNote || null },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success(workerShiftResponseMode === 'reject' ? 'Shift rejected' : 'Shift accepted');
+      setWorkerShiftResponseOpen(false);
+      setWorkerShiftResponseItem(null);
+      setWorkerShiftResponseNote('');
+      fetchWorkerShifts();
+      fetchDashboard();
+    } catch (error) {
+      const message = typeof error.response?.data?.detail === 'string'
+        ? error.response.data.detail
+        : 'Could not update shift response';
+      toast.error(message);
+    } finally {
+      setWorkerShiftResponding(false);
+    }
+  };
 
   // Fetch reference-employment mismatches
   const fetchReferenceMismatches = async () => {
@@ -1284,6 +1408,13 @@ export default function WorkerDashboard() {
   const supervisions = _supervisions || [];
   const agreements = _agreements || [];
   const recurring_compliance_summary = _recurring_compliance_summary || { total: 0, overdue: 0, due: 0, upcoming: 0, scheduled: 0, preview: [] };
+  const recurringItems = recurring_compliance_summary.items || recurring_compliance_summary.preview || [];
+  const recurringItemsByStatus = {
+    overdue: recurringItems.filter((item) => item?.computed_status === 'overdue'),
+    due: recurringItems.filter((item) => item?.computed_status === 'due'),
+    upcoming: recurringItems.filter((item) => item?.computed_status === 'upcoming'),
+    scheduled: recurringItems.filter((item) => item?.computed_status === 'scheduled'),
+  };
   const employment_readiness_blockers = _employment_readiness_blockers || [];
   const contractAgreement = agreements.find((agreement) => agreement.id === 'contract_acceptance');
   
@@ -1696,6 +1827,121 @@ export default function WorkerDashboard() {
                   </p>
                 </div>
               </div>
+
+              {recurringItems.length > 0 && (
+                <div className="rounded-lg border border-slate-200 bg-white">
+                  <button
+                    type="button"
+                    onClick={() => setShowRecurringDetails((prev) => !prev)}
+                    className="flex w-full items-center justify-between px-3 py-2 text-left"
+                    data-testid="toggle-recurring-details"
+                  >
+                    <div>
+                      <p className="text-sm font-medium text-slate-900">Recurring compliance details</p>
+                      <p className="text-xs text-slate-600">Read-only schedule from Osabea compliance records</p>
+                    </div>
+                    {showRecurringDetails ? <ChevronUp className="h-4 w-4 text-slate-500" /> : <ChevronDown className="h-4 w-4 text-slate-500" />}
+                  </button>
+
+                  {showRecurringDetails && (
+                    <div className="space-y-3 border-t border-slate-100 px-3 py-3">
+                      {['overdue', 'due', 'upcoming', 'scheduled'].map((statusKey) => {
+                        const sectionItems = recurringItemsByStatus[statusKey];
+                        if (!sectionItems.length) return null;
+                        const statusMeta = RECURRING_STATUS_UI[statusKey];
+                        return (
+                          <div key={statusKey} className="space-y-2">
+                            <div className="flex items-center gap-2">
+                              <Badge className={statusMeta.badge}>{statusMeta.label}</Badge>
+                              <span className="text-xs text-slate-500">{sectionItems.length} item(s)</span>
+                            </div>
+                            <div className="space-y-1">
+                              {sectionItems.map((item) => (
+                                <div key={item.id} className="flex items-center justify-between rounded-md bg-slate-50 px-2.5 py-2">
+                                  <div>
+                                    <p className="text-sm font-medium text-slate-800">{item.item_name || RECURRING_TYPE_LABELS[item.item_type] || 'Recurring item'}</p>
+                                    <p className="text-xs text-slate-500">{RECURRING_TYPE_LABELS[item.item_type] || item.item_type || 'Recurring'} • Due {formatDate(item.next_due_date)}</p>
+                                  </div>
+                                  {(statusKey === 'due' || statusKey === 'upcoming') && typeof item.days_until_due === 'number' && (
+                                    <span className="text-xs text-slate-500">in {item.days_until_due}d</span>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {isActiveEmployee && (
+          <Card className="border border-slate-200 shadow-sm" data-testid="worker-my-shifts-card">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-lg text-slate-900">My Shifts</CardTitle>
+              <p className="mt-1 text-sm text-slate-600">Your upcoming assigned shifts.</p>
+            </CardHeader>
+            <CardContent className="pt-0">
+              {workerShiftsLoading ? (
+                <div className="flex items-center justify-center py-6">
+                  <Loader2 className="h-5 w-5 animate-spin text-slate-500" />
+                </div>
+              ) : workerShifts.length === 0 ? (
+                <p className="text-sm text-slate-600">No upcoming assigned shifts.</p>
+              ) : (
+                <div className="space-y-2">
+                  {workerShifts.map((item) => {
+                    const shift = item.shift || {};
+                    const responseStatus = item.worker_response_status || item.assignment?.worker_response_status || 'pending';
+                    const canRespond = (item.assignment_status === 'active') && (responseStatus === 'pending' || !responseStatus);
+                    return (
+                      <div key={item.assignment_id || shift.id} className="rounded-lg border border-slate-200 bg-white p-3">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="font-medium text-slate-900">{shift.location_text || 'Location pending'}</p>
+                            <p className="mt-1 text-xs text-slate-600">{formatDate(shift.start_at)} • {formatDateTime(shift.start_at).split(', ').pop()} - {formatDateTime(shift.end_at).split(', ').pop()}</p>
+                            <p className="mt-1 text-xs text-slate-600">Role: {shift.role_required || '—'}</p>
+                            {shift.notes ? <p className="mt-1 text-xs text-slate-500 line-clamp-2">Notes: {shift.notes}</p> : null}
+                            {item.worker_response_note ? <p className="mt-1 text-xs text-slate-500 line-clamp-2">Your note: {item.worker_response_note}</p> : null}
+                          </div>
+                          <div className="flex shrink-0 flex-col items-end gap-2">
+                            <Badge className={(shift.status === 'assigned' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-700')}>
+                              {shift.status || item.assignment_status || 'assigned'}
+                            </Badge>
+                            <Badge className={
+                              responseStatus === 'accepted'
+                                ? 'bg-green-100 text-green-700'
+                                : responseStatus === 'rejected'
+                                  ? 'bg-red-100 text-red-700'
+                                  : 'bg-slate-100 text-slate-700'
+                            }>
+                              {responseStatus === 'accepted' ? 'Accepted' : responseStatus === 'rejected' ? 'Rejected' : 'Awaiting response'}
+                            </Badge>
+                            {canRespond && (
+                              <div className="flex items-center gap-1">
+                                <Button variant="outline" size="sm" onClick={() => openWorkerShiftResponseModal(item, 'accept')}>
+                                  Accept
+                                </Button>
+                                <Button variant="destructive" size="sm" onClick={() => openWorkerShiftResponseModal(item, 'reject')}>
+                                  Reject
+                                </Button>
+                              </div>
+                            )}
+                            <Button variant="outline" size="sm" onClick={() => handleOpenWorkerShift(shift.id)}>
+                              <Eye className="mr-1 h-3.5 w-3.5" />
+                              View
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </CardContent>
           </Card>
         )}
@@ -3812,6 +4058,87 @@ export default function WorkerDashboard() {
           toast.success('Profile completed successfully!');
         }}
       />
+
+      <Dialog open={workerShiftDetailOpen} onOpenChange={setWorkerShiftDetailOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Shift details</DialogTitle>
+          </DialogHeader>
+          {selectedWorkerShift?.shift ? (
+            <div className="space-y-3 text-sm text-slate-700">
+              <div>
+                <p className="text-xs text-slate-500">Date</p>
+                <p className="font-medium">{formatDate(selectedWorkerShift.shift.start_at)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500">Time</p>
+                <p className="font-medium">
+                  {formatDateTime(selectedWorkerShift.shift.start_at).split(', ').pop()} - {formatDateTime(selectedWorkerShift.shift.end_at).split(', ').pop()}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500">Location</p>
+                <p className="font-medium">{selectedWorkerShift.shift.location_text || '—'}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500">Role</p>
+                <p className="font-medium">{selectedWorkerShift.shift.role_required || '—'}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500">Notes</p>
+                <p className="font-medium">{selectedWorkerShift.shift.notes || 'No notes'}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500">Status</p>
+                <Badge className={(selectedWorkerShift.shift.status === 'assigned' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-700')}>
+                  {selectedWorkerShift.shift.status || selectedWorkerShift.assignment?.status || 'assigned'}
+                </Badge>
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-slate-600">Shift detail unavailable.</p>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setWorkerShiftDetailOpen(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={workerShiftResponseOpen} onOpenChange={setWorkerShiftResponseOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{workerShiftResponseMode === 'reject' ? 'Reject shift' : 'Accept shift'}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-slate-600">
+              {workerShiftResponseMode === 'reject'
+                ? 'Add an optional note for your manager when rejecting this shift.'
+                : 'Add an optional note when accepting this shift.'}
+            </p>
+            <Textarea
+              value={workerShiftResponseNote}
+              onChange={(e) => setWorkerShiftResponseNote(e.target.value)}
+              rows={3}
+              placeholder="Optional note"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setWorkerShiftResponseOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant={workerShiftResponseMode === 'reject' ? 'destructive' : 'default'}
+              onClick={handleWorkerShiftResponse}
+              disabled={workerShiftResponding}
+            >
+              {workerShiftResponding ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+              {workerShiftResponseMode === 'reject' ? 'Reject shift' : 'Accept shift'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </WorkerDashboardPage>
   );
 }

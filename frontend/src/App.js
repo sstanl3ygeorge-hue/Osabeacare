@@ -49,6 +49,7 @@ import AdminUsersPage from "./pages/portal/AdminUsersPage";
 import CQCInspectionDashboard from "./pages/portal/CQCInspectionDashboard";
 import ServiceUserFeedbackPage from "./pages/portal/ServiceUserFeedbackPage";
 import ComplaintsHandlingPage from "./pages/portal/ComplaintsHandlingPage";
+import ShiftsPage from "./pages/portal/ShiftsPage";
 
 // Auth Context
 import { AuthProvider } from "./context/AuthContext";
@@ -129,6 +130,7 @@ function AppRouter() {
         <Route path="audit" element={<AuditViewPage />} />
         <Route path="service-users" element={<ServiceUsersPage />} />
         <Route path="service-users/:id" element={<ServiceUserProfilePage />} />
+        <Route path="shifts" element={<ShiftsPage />} />
         <Route path="scheduled-requests" element={<ScheduledRequestsPage />} />
         <Route path="admin-users" element={<AdminUsersPage />} />
         <Route path="settings" element={<SettingsPage />} />

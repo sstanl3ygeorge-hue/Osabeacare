@@ -5824,7 +5824,7 @@ class EmployeeDocumentResponse(BaseModel):
     marked_in_error_at: Optional[str] = None
     marked_in_error_reason: Optional[str] = None
     # Verification Stamp fields (ID/Document verification)
-    verification_stamp: Optional[str] = None  # original_seen, copy_verified, not_verified, online_check
+    verification_stamp: Optional[Any] = None  # legacy string or structured stamp metadata
     verification_stamp_label: Optional[str] = None
     verification_stamp_audit_text: Optional[str] = None
     verification_stamp_badge_color: Optional[str] = None

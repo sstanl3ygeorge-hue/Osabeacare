@@ -190,7 +190,7 @@ export function getNextAction(status) {
   const referencesNeedAction = Boolean(status.referencesNeedAction);
   const gapsNeedAction = Boolean(status.gapsNeedAction);
 
-  if (cv && !cv.has_cv && cv.can_upload_cv) {
+  if (cv && !cv.hasCv && cv.canUpload) {
     return {
       key: 'missing_cv',
       title: 'Upload your CV',

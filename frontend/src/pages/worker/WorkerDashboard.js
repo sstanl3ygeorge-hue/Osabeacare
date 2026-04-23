@@ -2754,9 +2754,9 @@ export default function WorkerDashboard() {
                     className={`p-4 rounded-xl border ${toneClasses}`}
                     data-testid={`agreement-${agreement.id}`}
                   >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${iconClasses.split(' ')[0]}`}>
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="flex items-start gap-3 min-w-0 flex-1">
+                        <div className={`w-10 h-10 shrink-0 rounded-lg flex items-center justify-center ${iconClasses.split(' ')[0]}`}>
                           {agreement.verified ? (
                             <CheckCircle className={`h-5 w-5 ${iconClasses.split(' ')[1]}`} />
                           ) : agreement.rejected ? (
@@ -2767,9 +2767,9 @@ export default function WorkerDashboard() {
                             <Clock className={`h-5 w-5 ${iconClasses.split(' ')[1]}`} />
                           )}
                         </div>
-                        <div>
-                          <span className="font-medium text-slate-700">{agreement.name}</span>
-                          <p className="text-xs text-slate-500 mt-0.5">{agreementDisplay.description}</p>
+                        <div className="min-w-0 flex-1">
+                          <span className="font-medium text-slate-700 break-words">{agreement.name}</span>
+                          <p className="text-xs text-slate-500 mt-0.5 break-words">{agreementDisplay.description}</p>
                           {agreement.verified && agreement.verified_at && (
                             <p className="text-xs text-green-600 mt-0.5">
                               Verified on {formatDate(agreement.verified_at)}
@@ -2797,13 +2797,13 @@ export default function WorkerDashboard() {
                           )}
                         </div>
                       </div>
-                      <div className="flex flex-wrap items-center justify-end gap-2">
+                      <div className="flex flex-wrap items-center justify-start gap-2 w-full sm:w-auto sm:justify-end sm:flex-nowrap sm:shrink-0">
                         {(agreement.file_url || agreement.download_url) && (
                           <>
                             <Button
                               size="sm"
                               variant="outline"
-                              className="gap-1"
+                              className="gap-1 flex-1 sm:flex-none min-w-0"
                               onClick={() => openDocumentViewer({ ...agreement, name: agreement.name })}
                             >
                               <Eye className="h-3.5 w-3.5" />
@@ -2812,7 +2812,7 @@ export default function WorkerDashboard() {
                             <Button
                               size="sm"
                               variant="outline"
-                              className="gap-1"
+                              className="gap-1 flex-1 sm:flex-none min-w-0"
                               onClick={() => downloadAgreement(agreement)}
                             >
                               <Download className="h-3.5 w-3.5" />
@@ -2823,7 +2823,7 @@ export default function WorkerDashboard() {
                         {agreement.id === 'contract_acceptance' && agreementDisplay.workerActionable && contractEligibility?.can_sign && (
                           <Button
                             size="sm"
-                            className="gap-1"
+                            className="gap-1 flex-1 sm:flex-none min-w-0"
                             onClick={() => setShowSignaturePad(true)}
                           >
                             <PenTool className="h-3.5 w-3.5" />
@@ -2833,7 +2833,7 @@ export default function WorkerDashboard() {
                         {agreement.id === 'handbook_acknowledgement' && handbookDisplay.workerActionable && agreement.id === handbookAgreement?.id && (
                           <Button
                             size="sm"
-                            className="gap-1"
+                            className="gap-1 flex-1 sm:flex-none min-w-0"
                             disabled={!agreement.file_url && !agreement.download_url}
                             title={(!agreement.file_url && !agreement.download_url) ? 'Handbook PDF is not available yet' : undefined}
                             onClick={() => openHandbookAckModal(agreement)}
@@ -2842,7 +2842,7 @@ export default function WorkerDashboard() {
                             Acknowledge
                           </Button>
                         )}
-                        <Badge className={`text-xs ${
+                        <Badge className={`shrink-0 text-xs ${
                           agreementDisplay.tone === 'critical' ? 'bg-red-100 text-red-700' :
                           agreementDisplay.tone === 'success' ? 'bg-green-100 text-green-700' :
                           agreementDisplay.tone === 'info' ? 'bg-blue-100 text-blue-700' :
@@ -3146,7 +3146,6 @@ export default function WorkerDashboard() {
           <p>{orgSettings.organisation_name || 'Healthcare Portal'} - Compliance Portal</p>
           <p>Employee Code: {employee.employee_code || employee.applicant_reference || '—'}</p>
         </div>
-      </div>
 
       {/* Contract Signature Dialog */}
       <Dialog open={showSignaturePad} onOpenChange={setShowSignaturePad}>

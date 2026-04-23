@@ -28,16 +28,11 @@ import {
   FileText, Users, GraduationCap, ClipboardCheck,
   Send, Eye, Plus, RefreshCw, Loader2, Shield,
   FileCheck, UserCheck, Briefcase, Heart, Calendar,
-  Clock, AlertCircle, Lock, Info, Edit, ChevronDown, ChevronUp
+  Clock, AlertCircle, Info, Edit
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '../ui/tooltip';
+
 
 const API = process.env.REACT_APP_BACKEND_URL;
 
@@ -142,7 +137,6 @@ export default function ConsolidatedStatusPanel({
   const [data, setData] = useState(null);
   const [loadError, setLoadError] = useState(null);
   const [actionLoading, setActionLoading] = useState(null);
-  const [blockersExpanded, setBlockersExpanded] = useState(null); // null = auto
   const [gateResult, setGateResult] = useState(null); // structured recruitment gate
   const [gateLoading, setGateLoading] = useState(false);
   const [gateFetchFailed, setGateFetchFailed] = useState(false); // true when gate endpoint errored
@@ -578,280 +572,36 @@ export default function ConsolidatedStatusPanel({
         </Card>
       )}
 
-      {/* BLOCKING ITEMS - ONE LIST WITH COLOR CODING */}
+      {/* OPEN ITEMS SUMMARY — compact count strip.
+          The full grouped-by-owner breakdown lives in the "What's left" panel
+          on EmployeeProfilePage. This card is intentionally a summary only to
+          avoid rendering the same blocker list twice on the same page. */}
       {blockers.length > 0 && (() => {
-        const AUTO_COLLAPSE_THRESHOLD = 5;
-        const isExpanded = blockersExpanded !== null ? blockersExpanded : blockers.length <= AUTO_COLLAPSE_THRESHOLD;
-        const visibleBlockers = isExpanded ? blockers : blockers.slice(0, 3);
         const criticalCount = blockers.filter(b => getBlockerSeverity(b, gates.gates?.[b.gate]) === 'CRITICAL').length;
         const pendingCount = blockers.length - criticalCount;
         return (
-        <Card className="border border-gray-200 shadow-sm">
-          <CardHeader className="py-3 px-4 bg-red-50/50 border-b border-red-100">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-base font-semibold text-red-800 flex items-center gap-2">
-                <XCircle className="h-5 w-5" />
-                What's left before onboarding ({blockers.length} items)
-              </CardTitle>
-              {blockers.length > AUTO_COLLAPSE_THRESHOLD && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="text-red-700 hover:bg-red-100 h-7 px-2"
-                  onClick={() => setBlockersExpanded(e => e === null ? !isExpanded : !e)}
-                  data-testid="blockers-toggle-btn"
-                >
-                  {isExpanded ? (
-                    <><ChevronUp className="h-4 w-4 mr-1" />Collapse</>
-                  ) : (
-                    <><ChevronDown className="h-4 w-4 mr-1" />Show all {blockers.length} items</>
-                  )}
-                </Button>
+          <div
+            className="flex items-center gap-3 px-4 py-2.5 rounded-lg border border-red-200 bg-red-50/40"
+            data-testid="blocker-summary-strip"
+          >
+            <XCircle className="h-4 w-4 text-red-500 shrink-0" />
+            <span className="text-sm font-medium text-red-800">
+              {blockers.length} open item{blockers.length !== 1 ? 's' : ''} remaining
+            </span>
+            <div className="flex items-center gap-1.5 ml-1">
+              {criticalCount > 0 && (
+                <span className="text-[11px] font-medium bg-red-100 text-red-700 px-1.5 py-0.5 rounded border border-red-200">
+                  {criticalCount} critical
+                </span>
+              )}
+              {pendingCount > 0 && (
+                <span className="text-[11px] font-medium bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded border border-amber-200">
+                  {pendingCount} awaiting review
+                </span>
               )}
             </div>
-            <div className="flex items-center gap-3 mt-1">
-              <p className="text-xs text-gray-600">
-                Critical = missing or unverified &nbsp;|&nbsp; Pending = waiting for Osabea review
-              </p>
-              {!isExpanded && (
-                <div className="flex items-center gap-1.5">
-                  {criticalCount > 0 && (
-                    <span className="text-[11px] font-medium bg-red-100 text-red-700 px-1.5 py-0.5 rounded">{criticalCount} critical</span>
-                  )}
-                  {pendingCount > 0 && (
-                    <span className="text-[11px] font-medium bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">{pendingCount} pending</span>
-                  )}
-                </div>
-              )}
-            </div>
-          </CardHeader>
-          <CardContent className="p-0">
-            <div className="divide-y divide-gray-100">
-              {visibleBlockers.map((blocker, idx) => {
-                const Icon = getBlockerIcon(blocker.gate);
-                const gateData = gates.gates?.[blocker.gate];
-                const severity = getBlockerSeverity(blocker, gateData);
-                const severityConfig = BLOCKER_SEVERITY[severity];
-                
-                const getAction = () => {
-                  // Reference blockers
-                  if (blocker.gate?.includes('reference')) {
-                    return { 
-                      label: 'Open Reference', 
-                      tab: 'references',
-                      sectionId: 'section-references-root',
-                      tooltip: 'Review and verify the reference response'
-                    };
-                  }
-                  // Interview Record
-                  if (blocker.gate?.includes('interview')) {
-                    return { 
-                      label: 'Complete Interview', 
-                      tab: 'forms',
-                      sectionId: 'section-forms-interview',
-                      tooltip: 'Complete the interview record form'
-                    };
-                  }
-                  // Contract: Locked until all other requirements complete
-                  if (blocker.gate?.includes('contract')) {
-                    return { 
-                      label: 'Locked', 
-                      tab: 'checklist', 
-                      sectionId: 'section-agreements',
-                      locked: true,
-                      tooltip: 'Contract signing unlocks when all other requirements are complete. Worker signs via their dashboard.'
-                    };
-                  }
-                  // Induction Checklist
-                  if (blocker.gate?.includes('induction')) {
-                    return { 
-                      label: 'Start', 
-                      tab: 'training',
-                      sectionId: 'section-training-induction',
-                      tooltip: 'Start the 15-item induction checklist'
-                    };
-                  }
-                  // Health Questionnaire
-                  if (blocker.gate?.includes('health')) {
-                    return { 
-                      label: 'Send to Worker', 
-                      tab: 'forms',
-                      sectionId: 'section-forms-core',
-                      tooltip: 'Send health questionnaire link to worker'
-                    };
-                  }
-                  // Training
-                  if (blocker.gate?.includes('training')) {
-                    return { 
-                      label: 'View Training', 
-                      tab: 'training',
-                      sectionId: 'section-training-root',
-                      tooltip: 'View and manage mandatory training records'
-                    };
-                  }
-                  // Employment Gaps
-                  if (blocker.gate?.includes('gaps')) {
-                    return { 
-                      label: 'Review Gaps', 
-                      tab: 'employment',
-                      sectionId: 'section-employment-gaps',
-                      tooltip: 'Review unexplained employment history gaps'
-                    };
-                  }
-                  // Spot check blockers
-                  if (blocker.gate?.includes('spot_check') || blocker.gate?.includes('spot check')) {
-                    return {
-                      label: 'Open Spot Checks',
-                      tab: 'spot_checks',
-                      sectionId: 'section-spot-checks-root',
-                      tooltip: 'Open spot checks and complete follow-up actions'
-                    };
-                  }
-                  // Competency blockers
-                  if (blocker.gate?.includes('competenc')) {
-                    return {
-                      label: 'Open Competencies',
-                      tab: 'competencies',
-                      sectionId: 'section-competencies-root',
-                      tooltip: 'Open competency assessments and remediation actions'
-                    };
-                  }
-                  // Document blockers: DBS, RTW, Identity, POA - use "Verify with Evidence"
-                  if (blocker.gate?.includes('dbs') || blocker.gate?.includes('rtw') || 
-                      blocker.gate?.includes('right_to_work') || blocker.gate?.includes('identity') || 
-                      blocker.gate?.includes('poa') || blocker.gate?.includes('proof_of_address')) {
-                    return { 
-                      label: 'Open Verification Steps', 
-                      tab: 'checklist',
-                      sectionId: blocker.gate?.includes('dbs') ? 'section-dbs' :
-                        blocker.gate?.includes('rtw') || blocker.gate?.includes('right_to_work') ? 'section-right_to_work' :
-                        blocker.gate?.includes('identity') ? 'section-identity' :
-                        blocker.gate?.includes('poa') || blocker.gate?.includes('proof_of_address') ? 'section-proof_of_address' :
-                        null,
-                      tooltip: 'Upload evidence and apply verification stamp'
-                    };
-                  }
-                  // Default action
-                  return { 
-                    label: severity === 'PENDING' ? 'Verify' : 'View', 
-                    tab: 'checklist',
-                    sectionId: null,
-                    tooltip: 'View and verify this requirement'
-                  };
-                };
-                const action = getAction();
-
-                return (
-                  <div 
-                    key={idx} 
-                    className={cn(
-                      "flex items-center justify-between px-4 py-3 hover:bg-gray-50",
-                      severityConfig.bgColor
-                    )}
-                    data-testid={`blocker-item-${idx}`}
-                    data-severity={severity}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className={cn(
-                        "w-8 h-8 rounded-lg flex items-center justify-center",
-                        severityConfig.iconBg
-                      )}>
-                        <Icon className={cn("h-4 w-4", severityConfig.iconColor)} />
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm">{severityConfig.dot}</span>
-                          <p className={cn("font-medium", severityConfig.textColor)}>
-                            {blocker.label}
-                          </p>
-                          <Badge 
-                            variant="outline" 
-                            className={cn(
-                              "text-[10px] px-1.5 py-0 h-4",
-                              severity === 'CRITICAL' ? 'border-red-300 text-red-600' : 'border-amber-300 text-amber-600'
-                            )}
-                          >
-                            {severityConfig.label}
-                          </Badge>
-                        </div>
-                        <p className="text-sm text-gray-500">
-                          {severity === 'PENDING' 
-                            ? blocker.gate?.includes('reference')
-                              ? 'Reference review still required'
-                              : blocker.gate?.includes('dbs') || blocker.gate?.includes('rtw') || blocker.gate?.includes('right_to_work')
-                                ? 'Evidence uploaded - verification steps still required'
-                                : 'Uploaded - awaiting admin verification'
-                            : (gateData?.requirement || 'Required for promotion')
-                          }
-                        </p>
-                      </div>
-                    </div>
-                    <TooltipProvider>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          {action.locked ? (
-                            // Contract is locked until all other requirements complete
-                            <Badge 
-                              variant="outline" 
-                              className="text-gray-500 border-gray-300 bg-gray-100 cursor-help"
-                            >
-                              <Lock className="h-3 w-3 mr-1" />
-                              Locked
-                              <Info className="h-3 w-3 ml-1 opacity-50" />
-                            </Badge>
-                          ) : (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => {
-                                // If this is a verification action and callback is provided, use it
-                                if (action.label === 'Open Verification Steps' && onVerifyWithEvidence) {
-                                  onVerifyWithEvidence(blocker.gate, gateData);
-                                } else {
-                                  if (onNavigateToItem) {
-                                    onNavigateToItem(action.tab, action.sectionId || null);
-                                  } else {
-                                    onNavigateToTab?.(action.tab);
-                                  }
-                                }
-                              }}
-                              className={cn(
-                                severity === 'CRITICAL' 
-                                  ? "text-red-600 border-red-200 hover:bg-red-50"
-                                  : "text-amber-600 border-amber-200 hover:bg-amber-50"
-                              )}
-                              data-testid={`action-btn-${blocker.gate}`}
-                            >
-                              {action.label}
-                              <ChevronRight className="h-3.5 w-3.5 ml-1" />
-                            </Button>
-                          )}
-                        </TooltipTrigger>
-                        <TooltipContent side="left" className="max-w-xs">
-                          <p>{action.tooltip}</p>
-                        </TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
-                  </div>
-                );
-              })}
-            </div>
-            {!isExpanded && blockers.length > 3 && (
-              <div className="px-4 py-2 border-t border-gray-100 bg-gray-50">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="text-gray-600 hover:text-red-700 w-full text-xs h-7"
-                  onClick={() => setBlockersExpanded(true)}
-                  data-testid="blockers-show-all-btn"
-                >
-                  <ChevronDown className="h-3.5 w-3.5 mr-1" />
-                  Show {blockers.length - 3} more items
-                </Button>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+            <span className="ml-auto text-[11px] text-gray-400">See "What's left" below for details</span>
+          </div>
         );
       })()}
 

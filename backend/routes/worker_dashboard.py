@@ -1306,6 +1306,18 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
     forms_status = []
     if not is_active_employee:
         _emp_role_for_forms = (employee.get("job_role") or employee.get("role") or "").lower()
+        # Canonical truth for forms (matches admin's UCE rules, including the
+        # CQC tightening that staff_health_questionnaire requires a reviewed
+        # health declaration with fit/conditional outcome — not just a
+        # signed-off submission). Worker must NOT show "Verified" while admin
+        # still sees a pending health declaration review.
+        try:
+            _canonical_forms_items = (
+                (unified_status or {}).get("category_details", {}).get("forms", {}).get("items", []) or []
+            )
+        except NameError:
+            _canonical_forms_items = []
+        _canonical_form_by_id = {item.get("id"): item for item in _canonical_forms_items if item.get("id")}
         for form_id, form_def in WORKER_FORM_DEFINITIONS.items():
             # Skip role-aware forms if this worker's role is not in the required list
             if form_def.get("role_aware") and form_def.get("roles_required"):
@@ -1338,6 +1350,24 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
                     filled_fields = sum(1 for v in form_data.values() if v)
                     total_fields = len(form_data) or 1
                     form_progress_pct = int((filled_fields / total_fields) * 100)
+            
+            # Canonical override: align with admin truth.
+            # If the canonical engine says this form is NOT verified (e.g. health
+            # declaration not yet reviewed for staff_health_questionnaire), the
+            # worker must not see "Verified". Downgrade to "submitted" when a
+            # locked submission exists, otherwise leave the in-progress/not_started
+            # state alone.
+            canonical_item = _canonical_form_by_id.get(form_id)
+            if canonical_item is not None:
+                canonical_verified = bool(canonical_item.get("verified") or canonical_item.get("completed"))
+                canonical_submitted = bool(canonical_item.get("submitted"))
+                if form_status == "verified" and not canonical_verified:
+                    form_status = "submitted" if canonical_submitted else form_status
+                elif form_status == "submitted" and canonical_verified:
+                    # Inverse alignment: if admin has reviewed but the local
+                    # submission row is still tagged "submitted", trust the
+                    # canonical truth.
+                    form_status = "verified"
             
             forms_status.append({
                 "id": form_id,

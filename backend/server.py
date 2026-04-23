@@ -25599,14 +25599,16 @@ async def build_training_matrix_read_model():
         if record.get("employee_id")
     }
 
-    # Training matrix is employee-only: exclude applicant/recruitment-stage people
-    # (new, screening, interview, compliance_review). Keep current workforce
-    # (onboarding + active), excluding archived/deleted/inactive as before.
+    # Training matrix is confirmed workforce only: exclude every pre-confirmation
+    # stage (applicant, onboarding, approved_for_onboarding).  Canonical lifecycle:
+    #   Applicant → Onboarding → Active (Promote to Active = confirmation event)
+    # Only "active" (and legacy "active_employee") are confirmed workers.
+    # Onboarding staff retain their training requirements on their individual
+    # profile/readiness views — they are deliberately excluded here so the
+    # workforce matrix stays focused on operational mandatory training.
     matrix_statuses = [
         "active",
         "active_employee",
-        "onboarding",
-        "approved_for_onboarding",
     ]
     employees = await db.employees.find(
         {

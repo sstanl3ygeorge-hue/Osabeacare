@@ -122,13 +122,71 @@ export function isStatusWarning(status) {
   return getStatusCategory(status) === 'warning';
 }
 
-export default {
-  COMPLIANCE_STATUS,
-  WORK_READINESS_STATUS,
-  DOCUMENT_STATUS,
-  TRAINING_STATUS,
-  getStatusCategory,
-  getStatusColors,
-  isStatusCritical,
-  isStatusWarning,
+/**
+ * Canonical status vocabulary — SHARED between admin and worker surfaces.
+ *
+ * RULE: All status chips, badges, pills, and inline status text across admin
+ * and worker UIs must use these seven phrases. Do NOT invent synonyms like
+ * "Check complete", "Pending Review", "Work Ready", "Ready to Work",
+ * "Completed" — they are mapped here so every surface says the same thing
+ * for the same concept.
+ *
+ * This helper does NOT compute status — it only maps canonical backend
+ * values (and a handful of legacy display aliases) to the canonical label.
+ */
+export const STATUS_VOCABULARY = {
+  SUBMITTED: 'Submitted',                       // worker has submitted; pre-review
+  VERIFIED: 'Verified',                         // admin has verified
+  COMPLETE: 'Complete',                         // system requirement satisfied
+  READY_FOR_WORK: 'Ready for Work',             // fit-for-work decision approved
+  NOT_READY_FOR_WORK: 'Not ready for work',     // fit-for-work decision blocked/missing
+  AWAITING_WORKER: 'Awaiting worker',           // blocker needs worker action
+  AWAITING_ADMIN_REVIEW: 'Awaiting admin review', // submitted, waiting on admin
+  SYSTEM_ISSUE: 'System issue',                 // render/config failure, not user fault
 };
+
+// Maps a backend status string (or a known legacy display phrase) to the
+// canonical label. Unknown values return null so callers can fall back to
+// their existing label logic — this is additive, not a forced takeover.
+const _STATUS_LABEL_MAP = Object.freeze({
+  // Submitted
+  submitted: STATUS_VOCABULARY.SUBMITTED,
+  uploaded: STATUS_VOCABULARY.SUBMITTED,
+  // Verified
+  verified: STATUS_VOCABULARY.VERIFIED,
+  approved: STATUS_VOCABULARY.VERIFIED,
+  // Complete
+  complete: STATUS_VOCABULARY.COMPLETE,
+  completed: STATUS_VOCABULARY.COMPLETE,
+  // Awaiting admin review
+  pending_review: STATUS_VOCABULARY.AWAITING_ADMIN_REVIEW,
+  awaiting_review: STATUS_VOCABULARY.AWAITING_ADMIN_REVIEW,
+  under_review: STATUS_VOCABULARY.AWAITING_ADMIN_REVIEW,
+  // Awaiting worker
+  awaiting_worker: STATUS_VOCABULARY.AWAITING_WORKER,
+  requested: STATUS_VOCABULARY.AWAITING_WORKER,
+  reupload_required: STATUS_VOCABULARY.AWAITING_WORKER,
+  // Ready for work
+  work_ready: STATUS_VOCABULARY.READY_FOR_WORK,
+  ready: STATUS_VOCABULARY.READY_FOR_WORK,
+  ready_to_work: STATUS_VOCABULARY.READY_FOR_WORK,
+  // Not ready for work
+  not_ready: STATUS_VOCABULARY.NOT_READY_FOR_WORK,
+  not_work_ready: STATUS_VOCABULARY.NOT_READY_FOR_WORK,
+  // System
+  system_issue: STATUS_VOCABULARY.SYSTEM_ISSUE,
+});
+
+/**
+ * Return the canonical label for a backend status value or a legacy display
+ * string. Case-insensitive. Returns null for unknown values so the caller
+ * can preserve its existing fallback.
+ *
+ * @param {string} status
+ * @returns {string|null}
+ */
+export function getStatusLabel(status) {
+  if (!status) return null;
+  const key = String(status).toLowerCase().replace(/\s+/g, '_');
+  return _STATUS_LABEL_MAP[key] || null;
+}

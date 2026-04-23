@@ -145,7 +145,7 @@ export function useComplianceWorkflow({
       finalStatusLabel = 'Follow-up Overdue';
     } else if (checkVerified && (hasProof || !proofRequired)) {
       finalStatus = 'verified';
-      finalStatusLabel = 'Check complete';
+      finalStatusLabel = 'Verified';
     }
 
     // ── Safeguard flags (used to show warning callouts in FinalStatusSection) ──

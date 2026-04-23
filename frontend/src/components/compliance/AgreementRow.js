@@ -93,7 +93,7 @@ export default function AgreementRow({
   const getStatusConfig = () => {
     switch (lifecycleStatus) {
       case 'verified':
-        return { color: 'green', bgColor: 'bg-green-100', textColor: 'text-green-700', icon: CheckCircle, label: 'Check complete' };
+        return { color: 'green', bgColor: 'bg-green-100', textColor: 'text-green-700', icon: CheckCircle, label: 'Verified' };
       case 'rejected':
         return { color: 'red', bgColor: 'bg-red-100', textColor: 'text-red-700', icon: XCircle, label: 'Rejected / action required' };
       case 'submitted':
@@ -533,7 +533,7 @@ export default function AgreementRow({
               <div className="col-span-2 p-3 bg-green-50 rounded-lg border border-green-200">
                 <div className="flex items-center gap-2">
                   <CheckCircle className="h-4 w-4 text-green-600" />
-                  <span className="font-medium text-green-800">Check complete</span>
+                  <span className="font-medium text-green-800">Verified</span>
                 </div>
                 <p className="text-sm text-green-700 mt-1">
                   {formatBackendDate(submission_data?.verified_at || acknowledgement_data?.verified_at, { format: 'medium' })}

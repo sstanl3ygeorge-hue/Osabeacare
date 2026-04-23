@@ -204,6 +204,65 @@ def _classify_blocker(item_id: str, category: str) -> str:
     return "legal"
 
 
+# Items that are always the admin's responsibility to progress
+# (worker cannot self-serve these — admin must record or verify them).
+_ADMIN_OWNED_ITEM_IDS: frozenset[str] = frozenset({
+    "interview_record",
+    "reference_1",
+    "reference_2",
+})
+
+# Items that are worker-owned to submit/upload/acknowledge in the first instance.
+# When severity is "pending" (submitted, awaiting review), ownership flips to admin.
+_WORKER_OWNED_ITEM_IDS: frozenset[str] = frozenset({
+    "right_to_work",
+    "dbs",
+    "identity",
+    "proof_of_address",
+    "contract",
+    "handbook",
+    "staff_health_questionnaire",
+    "staff_personal_info",
+    "hmrc_starter_checklist",
+    "emergency_contacts",
+    "employment_gaps",
+    "induction",
+    "mandatory_training",
+    "nmc_registration",
+    "gmc_registration",
+    "professional_indemnity",
+    "medication_competency",
+    "clinical_competency",
+    "information_governance",
+    "prevent",
+})
+
+
+def _derive_blocker_owner(item_id: str, category: str, severity: str, reason: str) -> str:
+    """
+    Derive which party must act to clear this blocker, from existing fields only.
+
+    Returns: "worker" | "admin" | "system"
+
+    Rules (no new truth — pure presentation classification):
+    - Handbook/agreement render failures (PDF unavailable because ...) → system
+    - Admin-owned items (interview_record, references) → admin
+    - Worker-owned items with severity=pending (submitted, awaiting admin review) → admin
+    - Worker-owned items otherwise → worker
+    - Unknown items fall back to admin (safe default: admin triage).
+    """
+    reason_lc = (reason or "").lower()
+    if "pdf unavailable" in reason_lc or "render" in reason_lc and "blocked" in reason_lc:
+        return "system"
+    if item_id in _ADMIN_OWNED_ITEM_IDS:
+        return "admin"
+    if item_id in _WORKER_OWNED_ITEM_IDS:
+        return "admin" if severity == "pending" else "worker"
+    if category == "documents":
+        return "admin" if severity == "pending" else "worker"
+    return "admin"
+
+
 def _build_blocker(
     item_id: str,
     gate: str,
@@ -221,6 +280,7 @@ def _build_blocker(
         "category": category,
         "severity": severity,
         "blocker_class": _classify_blocker(item_id, category),
+        "owner": _derive_blocker_owner(item_id, category, severity, reason),
     }
     blocker.update(extra)
     return blocker

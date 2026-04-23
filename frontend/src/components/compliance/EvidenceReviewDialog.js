@@ -194,8 +194,8 @@ export default function EvidenceReviewDialog({
     const status = file?.status || file?.verification_status || 'pending';
     
     const statusConfig = {
-      pending: { label: 'Pending Review', className: 'bg-amber-100 text-amber-800 border-amber-200' },
-      awaiting_review: { label: 'Awaiting Review', className: 'bg-amber-100 text-amber-800 border-amber-200' },
+      pending: { label: 'Awaiting admin review', className: 'bg-amber-100 text-amber-800 border-amber-200' },
+      awaiting_review: { label: 'Awaiting admin review', className: 'bg-amber-100 text-amber-800 border-amber-200' },
       verified: { label: 'Accepted', className: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
       accepted: { label: 'Accepted', className: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
       rejected: { label: 'Rejected', className: 'bg-red-100 text-red-800 border-red-200' },

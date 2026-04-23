@@ -43,7 +43,7 @@ const matchesReadinessFilter = (employee, filter) => {
 const STAGE_PRESETS = [
   { key: 'ALL', label: 'All' },
   { key: 'ONBOARDING', label: 'Onboarding' },
-  { key: 'READY_TO_WORK', label: 'Ready to Work' },
+  { key: 'READY_TO_WORK', label: 'Ready for Work' },
   { key: 'CAN_PROMOTE', label: 'Can Promote' },
   { key: 'ACTIVE', label: 'Active' },
   { key: 'INACTIVE', label: 'Inactive' },
@@ -850,10 +850,10 @@ export default function EmployeesPage() {
                         ? 'CAN_PROMOTE'
                         : 'NOT_READY';
                     const statusLabel = readiness.is_work_ready === true
-                      ? 'Ready to Work'
+                      ? 'Ready for Work'
                       : readiness.can_promote === true
                         ? 'Promotion Eligible'
-                        : 'Not Ready';
+                        : 'Not ready for work';
                     const statusColor = readiness.is_work_ready === true ? 'bg-success/10 text-success' :
                                       readiness.can_promote === true ? 'bg-warning/10 text-warning' :
                                       'bg-error/10 text-error';

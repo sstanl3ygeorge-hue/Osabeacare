@@ -84,7 +84,7 @@ export default function RequestLifecycleInline({
       bgClass: ''
     },
     awaiting_review: {
-      label: 'Awaiting Review',
+      label: 'Awaiting admin review',
       icon: Clock,
       color: 'bg-amber-100 text-amber-700 border-amber-200',
       bgClass: ''

@@ -87,7 +87,7 @@ export default function CheckRow({
       'verified': 'Verified',
       'failed': 'Failed',
       'follow_up_required': 'Follow-up Required',
-      'awaiting_review': 'Awaiting Review',
+      'awaiting_review': 'Awaiting admin review',
       'check_required': 'Check Required',
       'check_in_progress': 'Check In Progress',
       'proof_required': 'Proof Required',

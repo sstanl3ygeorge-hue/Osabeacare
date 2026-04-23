@@ -582,7 +582,7 @@ export default function AuditViewPage() {
                           isSupervisedStart ? 'bg-amber-100 text-amber-700' :
                           'bg-red-100 text-red-700'
                         }`}>
-                          {isReady ? 'Ready to Work' : isSupervisedStart ? 'Promotion Eligible' : 'Not Ready'}
+                          {isReady ? 'Ready for Work' : isSupervisedStart ? 'Promotion Eligible' : 'Not ready for work'}
                         </span>
                       </td>
                       <td className="p-4">

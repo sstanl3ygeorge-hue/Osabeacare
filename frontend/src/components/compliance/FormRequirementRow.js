@@ -148,7 +148,7 @@ export default function FormRequirementRow({
     switch (status) {
       case 'verified': return 'Verified';
       case 'rejected': return 'Rejected';
-      case 'awaiting_review': return 'Awaiting Review';
+      case 'awaiting_review': return 'Awaiting admin review';
       case 'recorded': return 'Draft';
       default: return 'Not Started';
     }

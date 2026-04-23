@@ -741,7 +741,7 @@ export default function DashboardPage() {
                             }`}
                             title={notReadyReason || (isReady ? 'Canonical unified readiness complete' : 'Canonical unified readiness blockers remain')}
                           >
-                            {isReady ? 'Ready to Work' : isSupervisedStart ? 'Promotion Eligible' : 'Not Ready'}
+                            {isReady ? 'Ready for Work' : isSupervisedStart ? 'Promotion Eligible' : 'Not ready for work'}
                           </span>
                           {/* UI INTEGRITY: Show WHY someone is Not Ready */}
                           {!isReady && !isSupervisedStart && notReadyReason && (

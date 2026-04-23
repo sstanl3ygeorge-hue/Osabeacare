@@ -3842,10 +3842,10 @@ export default function EmployeeProfilePage() {
   const canonicalTotalRequirements = canonicalProgress?.total_requirements ?? canonicalProgress?.progress?.total ?? null;
   const canonicalRequirementCountAvailable = Number.isFinite(canonicalTotalRequirements) && canonicalTotalRequirements > 0;
   const canonicalReadinessLabel = canonicalIsWorkReady
-    ? 'Work Ready'
+    ? 'Ready for Work'
     : canonicalCanPromote
       ? 'Ready for Promotion'
-      : 'Not Work Ready';
+      : 'Not ready for work';
   const canonicalReadinessClass = canonicalIsWorkReady || canonicalCanPromote
     ? 'bg-green-100 text-green-800'
     : 'bg-red-100 text-red-800';
@@ -4430,6 +4430,113 @@ export default function EmployeeProfilePage() {
             })()}
             
           </div>
+
+          {/* What's left — compact operational checklist grouped by owner.
+              Pure presentation over canonical UCE blockers + gates. No local
+              readiness logic: every item below reflects an existing backend
+              field (canonicalProgress.blockers[*] with backend-derived `owner`,
+              and canonicalProgress.gates for completed items). */}
+          {(() => {
+            const workerItems = [];
+            const adminItems = [];
+            const systemItems = [];
+            canonicalBlockerObjects.forEach((b) => {
+              const bucket = b?.owner === 'worker'
+                ? workerItems
+                : b?.owner === 'system'
+                  ? systemItems
+                  : adminItems; // default/admin
+              bucket.push(b);
+            });
+            const gates = canonicalProgress?.gates || {};
+            const completedGates = Object.entries(gates)
+              .filter(([, g]) => g && g.passed === true)
+              .map(([key, g]) => ({ key, label: g.label || key }));
+            const hasAnyOpen = workerItems.length + adminItems.length + systemItems.length > 0;
+            if (!hasAnyOpen && completedGates.length === 0) return null;
+
+            const ownerBadge = {
+              worker: { cls: 'bg-blue-50 text-blue-700 border-blue-200', text: 'Worker' },
+              admin:  { cls: 'bg-purple-50 text-purple-700 border-purple-200', text: 'Admin' },
+              system: { cls: 'bg-slate-100 text-slate-700 border-slate-300', text: 'System' },
+            };
+            const severityCls = (sev) => sev === 'critical'
+              ? 'text-red-700'
+              : sev === 'pending' ? 'text-amber-700' : 'text-slate-700';
+
+            const renderGroup = (title, items, owner) => {
+              if (items.length === 0) return null;
+              const badge = ownerBadge[owner];
+              return (
+                <div className="space-y-2" data-testid={`whats-left-${owner}`}>
+                  <div className="flex items-center gap-2">
+                    <span className={`text-xs font-medium px-2 py-0.5 rounded-md border ${badge.cls}`}>
+                      {badge.text}
+                    </span>
+                    <span className="text-sm font-medium text-text-primary">{title}</span>
+                    <span className="text-xs text-text-muted">({items.length})</span>
+                  </div>
+                  <ul className="space-y-1 pl-1">
+                    {items.map((b, idx) => (
+                      <li
+                        key={b.id ? `${b.id}-${idx}` : `${owner}-${idx}`}
+                        className={`text-sm flex items-start gap-2 ${severityCls(b.severity)}`}
+                        data-testid={`whats-left-item-${owner}`}
+                      >
+                        <span className="mt-0.5">•</span>
+                        <span>
+                          <span className="font-medium">{b.label || b.id}</span>
+                          {b.reason && b.reason !== b.label ? (
+                            <span className="text-text-muted"> — {b.reason}</span>
+                          ) : null}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              );
+            };
+
+            return (
+              <div
+                className="mt-4 pt-4 border-t border-[#E4E8EB]"
+                data-testid="whats-left-panel"
+              >
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-semibold text-text-primary">What's left</h3>
+                  <span className="text-xs text-text-muted">
+                    {hasAnyOpen
+                      ? `${workerItems.length + adminItems.length + systemItems.length} open`
+                      : 'All clear'}
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {renderGroup('Worker action required', workerItems, 'worker')}
+                  {renderGroup('Admin action required', adminItems, 'admin')}
+                  {renderGroup('System / company issue', systemItems, 'system')}
+                </div>
+                {completedGates.length > 0 && (
+                  <details className="mt-3" data-testid="whats-left-completed">
+                    <summary className="text-xs text-text-muted cursor-pointer hover:text-text-primary">
+                      Completed ({completedGates.length})
+                    </summary>
+                    <ul className="mt-2 pl-1 space-y-1">
+                      {completedGates.map((g) => (
+                        <li
+                          key={g.key}
+                          className="text-xs text-text-muted flex items-start gap-2"
+                          data-testid="whats-left-completed-item"
+                        >
+                          <CheckCircle className="h-3 w-3 text-green-600 mt-0.5 flex-shrink-0" />
+                          <span>{g.label}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
+              </div>
+            );
+          })()}
 
           {/* Note: Global Upload Document button removed. */}
           {/* All upload actions now live INSIDE each compliance requirement card. */}

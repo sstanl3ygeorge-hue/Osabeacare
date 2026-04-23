@@ -32,7 +32,7 @@ export const PROGRESS_METRICS = {
   },
   workReadiness: {
     label: 'Work Readiness',
-    shortLabel: 'Work Ready',
+    shortLabel: 'Ready for Work',
     tooltip: 'Work-readiness calculation. Measures whether the employee can work safely today.',
     color: 'amber',
     bgColor: 'bg-amber-50',

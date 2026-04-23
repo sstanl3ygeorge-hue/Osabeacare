@@ -47,7 +47,7 @@ const statusConfig = {
   due: { color: 'bg-amber-100 text-amber-800 border-amber-200', icon: Clock, label: 'Due' },
   upcoming: { color: 'bg-blue-100 text-blue-800 border-blue-200', icon: CalendarClock, label: 'Upcoming' },
   scheduled: { color: 'bg-gray-100 text-gray-600 border-gray-200', icon: Clock, label: 'Scheduled' },
-  completed: { color: 'bg-green-100 text-green-800 border-green-200', icon: CheckCircle, label: 'Completed' }
+  completed: { color: 'bg-green-100 text-green-800 border-green-200', icon: CheckCircle, label: 'Complete' }
 };
 
 const outcomeOptions = [

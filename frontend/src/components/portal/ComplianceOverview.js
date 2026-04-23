@@ -113,7 +113,7 @@ export default function ComplianceOverview({
               <div className="flex-1">
                 <p className="text-xs text-text-muted font-medium uppercase tracking-wide">Work Status</p>
                 <p className={`text-lg font-semibold ${workStatusColors.text} mt-0.5`}>
-                  {workReadiness3tier.label || 'Not Ready'}
+                  {workReadiness3tier.label || 'Not ready for work'}
                 </p>
                 <p className="text-xs text-text-muted mt-1">
                   Shows whether this employee can safely start work.

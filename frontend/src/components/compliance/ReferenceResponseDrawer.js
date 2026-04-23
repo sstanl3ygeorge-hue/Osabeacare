@@ -438,7 +438,7 @@ export default function ReferenceResponseDrawer({
         return { label: 'Replacement Requested', color: 'amber', icon: RefreshCw };
       case 'awaiting_review':
       case 'awaiting_verification':
-        return { label: 'Awaiting Review', color: 'purple', icon: FileText };
+        return { label: 'Awaiting admin review', color: 'purple', icon: FileText };
       case 'responded':
         return { label: 'Response Received', color: 'blue', icon: FileText };
       case 'viewed':

@@ -84,7 +84,7 @@ export default function ApprovalStatusPanel({
                 status === 'blocked' ? 'text-red-900' : 'text-amber-900'
               }`}>
                 {status === 'ready' ? 'Ready for Approval' :
-                 status === 'blocked' ? 'Not Ready' : 'Pending Review'}
+                 status === 'blocked' ? 'Not ready for work' : 'Awaiting admin review'}
               </h3>
               <p className={`text-sm ${
                 status === 'ready' ? 'text-green-700' :

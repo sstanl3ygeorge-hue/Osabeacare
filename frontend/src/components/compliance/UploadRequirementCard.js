@@ -370,7 +370,7 @@ export default function UploadRequirementCard({
       'verified': 'Verified',
       'failed': 'Failed',
       'follow_up_required': 'Follow-up Required',
-      'awaiting_review': 'Awaiting Review'
+      'awaiting_review': 'Awaiting admin review'
     };
     return outcomes[outcome] || outcome?.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) || 'Unknown';
   };

@@ -1164,12 +1164,76 @@ async def get_unified_employee_status(
             or reference.get("status") == "verified"
         )
 
+    def reference_mismatch_meta(reference: Any, ref_num: int) -> dict:
+        reference = reference if isinstance(reference, dict) else {}
+        mismatch = reference.get("mismatch")
+        if not isinstance(mismatch, dict):
+            mismatch = {}
+
+        detected = bool(mismatch.get("detected")) or bool(employee.get(f"reference_{ref_num}_mismatch_detected"))
+        kind = str(mismatch.get("kind") or "").strip().lower()
+        if not kind:
+            notes = " ".join(
+                str(v or "")
+                for v in [
+                    mismatch.get("reason"),
+                    mismatch.get("notes"),
+                    employee.get(f"reference_{ref_num}_mismatch_notes"),
+                ]
+            ).lower()
+            if "most recent employer" in notes:
+                kind = "recent_employer"
+
+        admin_accepted = bool(
+            mismatch.get("admin_decision") == "accepted"
+            or employee.get(f"reference_{ref_num}_mismatch_admin_decision") == "accepted"
+            or employee.get(f"reference_{ref_num}_mismatch_override_reason")
+        )
+        resolved = bool(mismatch.get("resolved") or admin_accepted)
+        unresolved = detected and not resolved
+        return {
+            "detected": detected,
+            "kind": kind,
+            "resolved": resolved,
+            "unresolved": unresolved,
+        }
+
+    def reference_counts_toward(reference: Any, ref_num: int) -> bool:
+        if not reference_is_verified(reference):
+            return False
+        mm = reference_mismatch_meta(reference, ref_num)
+        if not mm["unresolved"]:
+            return True
+        # Unresolved recent-employer mismatch does not invalidate this slot
+        # automatically; enforce recent-employer sufficiency at aggregate level.
+        if mm["kind"] == "recent_employer":
+            return True
+        return False
+
+    def reference_satisfies_recent_rule(reference: Any, ref_num: int) -> bool:
+        if not reference_counts_toward(reference, ref_num):
+            return False
+        mm = reference_mismatch_meta(reference, ref_num)
+        if mm["kind"] != "recent_employer":
+            return True
+        return mm["resolved"]
+
     ref1_verified = False
     ref2_verified = False
+    ref1_counts = False
+    ref2_counts = False
+    ref1_recent_ok = False
+    ref2_recent_ok = False
 
     if ref_doc:
-        ref1_verified = reference_is_verified(ref_doc.get("ref1"))
-        ref2_verified = reference_is_verified(ref_doc.get("ref2"))
+        ref1 = ref_doc.get("ref1")
+        ref2 = ref_doc.get("ref2")
+        ref1_verified = reference_is_verified(ref1)
+        ref2_verified = reference_is_verified(ref2)
+        ref1_counts = reference_counts_toward(ref1, 1)
+        ref2_counts = reference_counts_toward(ref2, 2)
+        ref1_recent_ok = reference_satisfies_recent_rule(ref1, 1)
+        ref2_recent_ok = reference_satisfies_recent_rule(ref2, 2)
     else:
         # Legacy fallback when canonical reference document does not exist.
         legacy_references = references if isinstance(references, list) else []
@@ -1177,41 +1241,61 @@ async def get_unified_employee_status(
             is_verified = reference_is_verified(ref)
             if idx == 0:
                 ref1_verified = is_verified
+                ref1_counts = is_verified
+                ref1_recent_ok = is_verified
             else:
                 ref2_verified = is_verified
+                ref2_counts = is_verified
+                ref2_recent_ok = is_verified
 
         if employee.get("reference_1_verified"):
             ref1_verified = True
+            ref1_counts = True
+            ref1_recent_ok = True
         if employee.get("reference_2_verified"):
             ref2_verified = True
-    
-    checks["reference_1"] = ref1_verified
-    checks["reference_2"] = ref2_verified
-    checks["references"] = ref1_verified and ref2_verified
+            ref2_counts = True
+            ref2_recent_ok = True
+
+    valid_reference_count = (1 if ref1_counts else 0) + (1 if ref2_counts else 0)
+    recent_employer_requirement_met = ref1_recent_ok or ref2_recent_ok
+
+    checks["reference_1"] = ref1_counts
+    checks["reference_2"] = ref2_counts
+    checks["references"] = valid_reference_count >= 2 and recent_employer_requirement_met
     
     categories["references"]["items"] = [
-        {"id": "reference_1", "name": "Reference 1", "completed": ref1_verified},
-        {"id": "reference_2", "name": "Reference 2", "completed": ref2_verified},
+        {"id": "reference_1", "name": "Reference 1", "completed": ref1_counts},
+        {"id": "reference_2", "name": "Reference 2", "completed": ref2_counts},
     ]
-    categories["references"]["completed"] = (1 if ref1_verified else 0) + (1 if ref2_verified else 0)
+    categories["references"]["completed"] = valid_reference_count
     
-    if not ref1_verified:
+    if not ref1_counts:
         blockers.append(_build_blocker(
             "reference_1",
             "reference_1",
             "Reference 1",
-            "Reference 1: Not verified",
+            "Reference 1: Not verified / unresolved mismatch",
             "references",
             "critical",
         ))
-    if not ref2_verified:
+    if not ref2_counts:
         blockers.append(_build_blocker(
             "reference_2",
             "reference_2",
             "Reference 2",
-            "Reference 2: Not verified",
+            "Reference 2: Not verified / unresolved mismatch",
             "references",
             "critical",
+        ))
+    if valid_reference_count >= 2 and not recent_employer_requirement_met:
+        blockers.append(_build_blocker(
+            "references",
+            "references",
+            "References",
+            "At least one reference must cover the most recent employer, or be explicitly accepted by admin",
+            "references",
+            "pending",
         ))
     
     # ==========================================================================

@@ -8434,11 +8434,16 @@ async def get_pre_interview_questionnaire_data(employee_id: str, worker: dict):
     questions = get_interview_questions_for_role(job_title or role)
     admin_questions = get_administrative_questions()
     
-    # Check if already submitted
-    submission = await db.form_submissions.find_one({
-        "employee_id": employee_id,
-        "form_type": "pre_interview_questionnaire"
-    }, {"_id": 0})
+    # Check active attempt first so failed historical attempts don't lock re-attempt flow
+    submission = await db.form_submissions.find_one(
+        {
+            "employee_id": employee_id,
+            "form_type": "pre_interview_questionnaire",
+            "is_active_attempt": {"$ne": False},
+        },
+        {"_id": 0},
+        sort=[("updated_at", -1), ("submitted_at", -1), ("created_at", -1)],
+    )
     
     # Build form definition with role-specific questions (needed for all return paths)
     form_definition = {

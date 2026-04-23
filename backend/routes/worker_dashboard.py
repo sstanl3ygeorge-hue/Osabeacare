@@ -2371,7 +2371,8 @@ async def get_worker_forms(worker: dict = Depends(get_current_worker)):
         submission = await db.form_submissions.find_one({
             "employee_id": employee_id,
             "form_type": form_id,
-            "status": {"$in": FORM_LOCKED_STATUSES + FORM_CORRECTION_STATUSES}
+            "status": {"$in": FORM_LOCKED_STATUSES + FORM_CORRECTION_STATUSES},
+            "is_active_attempt": {"$ne": False},
         }, {"_id": 0}, sort=[("updated_at", -1), ("submitted_at", -1), ("created_at", -1)])
         
         status = "not_started"
@@ -2440,7 +2441,8 @@ async def get_worker_form_data(form_id: str, worker: dict = Depends(get_current_
     
     submission = await db.form_submissions.find_one({
         "employee_id": employee_id,
-        "form_type": form_id
+        "form_type": form_id,
+        "is_active_attempt": {"$ne": False},
     }, {"_id": 0}, sort=[("updated_at", -1), ("submitted_at", -1), ("created_at", -1)])
     
     if submission and submission.get("status") in FORM_LOCKED_STATUSES:
@@ -2596,7 +2598,8 @@ async def save_form_progress(
     submission = await db.form_submissions.find_one({
         "employee_id": employee_id,
         "form_type": form_id,
-        "status": {"$in": FORM_LOCKED_STATUSES}
+        "status": {"$in": FORM_LOCKED_STATUSES},
+        "is_active_attempt": {"$ne": False},
     })
     
     if submission:
@@ -2683,7 +2686,8 @@ async def submit_worker_form(
     existing = await db.form_submissions.find_one({
         "employee_id": employee_id,
         "form_type": form_id,
-        "status": {"$in": FORM_LOCKED_STATUSES}
+        "status": {"$in": FORM_LOCKED_STATUSES},
+        "is_active_attempt": {"$ne": False},
     })
     
     if existing:
@@ -2765,6 +2769,26 @@ async def submit_worker_form(
             "message": f"{WORKER_FORM_DEFINITIONS[form_id]['name']} resubmitted successfully. Awaiting admin review."
         }
     
+    latest_attempt = await db.form_submissions.find_one(
+        {
+            "employee_id": employee_id,
+            "form_type": form_id,
+        },
+        {"_id": 0, "attempt_number": 1},
+        sort=[("attempt_number", -1), ("created_at", -1)],
+    )
+    next_attempt_number = int((latest_attempt or {}).get("attempt_number") or 0) + 1
+
+    # Keep a single active attempt for the worker-editable form lifecycle.
+    await db.form_submissions.update_many(
+        {
+            "employee_id": employee_id,
+            "form_type": form_id,
+            "is_active_attempt": {"$ne": False},
+        },
+        {"$set": {"is_active_attempt": False, "updated_at": now}},
+    )
+
     submission = {
         "id": f"form_{uuid.uuid4().hex[:12]}",
         "employee_id": employee_id,
@@ -2779,6 +2803,8 @@ async def submit_worker_form(
         "awaiting_admin_review": True,
         "verified": False,
         "version": 1,
+        "attempt_number": next_attempt_number,
+        "is_active_attempt": True,
         "created_at": now
     }
     

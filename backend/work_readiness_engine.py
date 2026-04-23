@@ -813,38 +813,72 @@ async def can_promote_to_active_legacy(employee_id: str, db) -> Tuple[bool, dict
     poa_stamped_count = sum(1 for d in poa_docs if d.get("verification_stamp") and d.get("verification_stamp") != "not_verified")
     checks["proof_of_address"] = poa_stamped_count >= 2
     
-    # 5. References - both verified AND no unresolved mismatch
-    # A reference must NOT count as verified if it has an unresolved mismatch
-    # (e.g. flagged as not from the most recent employer). Admin must accept
-    # the worker's explanation (which sets resolved=True / admin_decision=accepted
-    # / override_reason) before it counts toward readiness.
-    def _ref_counts(ref_data: dict, n: int) -> bool:
+    # 5. References
+    # Rule:
+    # - Need 2 valid verified references total
+    # - Need at least 1 that covers most recent employer OR has explicit
+    #   admin-accepted exception for recent-employer mismatch.
+    # - Unresolved non-recent mismatches still do not count.
+    def _mismatch_meta(ref_data: dict, n: int) -> dict:
         ref_data = ref_data or {}
-        is_verified = ref_data.get("verification_status") == "verified" or \
-            (ref_data.get("verification") or {}).get("status") == "verified"
-        if not is_verified:
-            return False
         mismatch = ref_data.get("mismatch") or {}
         detected = bool(mismatch.get("detected")) or bool(
             employee.get(f"reference_{n}_mismatch_detected")
         )
-        if not detected:
-            return True
+        kind = str(mismatch.get("kind") or "").strip().lower()
+        if not kind:
+            notes = " ".join(
+                str(v or "")
+                for v in [
+                    mismatch.get("reason"),
+                    mismatch.get("notes"),
+                    employee.get(f"reference_{n}_mismatch_notes"),
+                ]
+            ).lower()
+            if "most recent employer" in notes:
+                kind = "recent_employer"
         resolved = bool(
             mismatch.get("resolved")
             or mismatch.get("admin_decision") == "accepted"
             or employee.get(f"reference_{n}_mismatch_admin_decision") == "accepted"
             or employee.get(f"reference_{n}_mismatch_override_reason")
         )
-        return resolved
+        return {
+            "detected": detected,
+            "kind": kind,
+            "resolved": resolved,
+            "unresolved": detected and not resolved,
+        }
+
+    def _ref_counts(ref_data: dict, n: int) -> bool:
+        ref_data = ref_data or {}
+        is_verified = ref_data.get("verification_status") == "verified" or \
+            (ref_data.get("verification") or {}).get("status") == "verified"
+        if not is_verified:
+            return False
+        mm = _mismatch_meta(ref_data, n)
+        if not mm["unresolved"]:
+            return True
+        if mm["kind"] == "recent_employer":
+            return True
+        return False
+
+    def _ref_recent_ok(ref_data: dict, n: int) -> bool:
+        if not _ref_counts(ref_data, n):
+            return False
+        mm = _mismatch_meta(ref_data, n)
+        if mm["kind"] != "recent_employer":
+            return True
+        return mm["resolved"]
 
     ref_doc = await db.references.find_one({"employee_id": emp_id_str})
     if ref_doc:
         ref1_verified = _ref_counts(ref_doc.get("ref1"), 1)
         ref2_verified = _ref_counts(ref_doc.get("ref2"), 2)
+        ref1_recent_ok = _ref_recent_ok(ref_doc.get("ref1"), 1)
+        ref2_recent_ok = _ref_recent_ok(ref_doc.get("ref2"), 2)
     else:
-        # Legacy employees with only flat employee fields: fall back, but still
-        # block if a mismatch has been flagged and not resolved.
+        # Legacy employees with only flat employee fields.
         def _flat_counts(n: int) -> bool:
             if not employee.get(f"reference_{n}_verified", False):
                 return False
@@ -856,7 +890,11 @@ async def can_promote_to_active_legacy(employee_id: str, db) -> Tuple[bool, dict
             return True
         ref1_verified = _flat_counts(1)
         ref2_verified = _flat_counts(2)
-    checks["references"] = ref1_verified and ref2_verified
+        ref1_recent_ok = ref1_verified
+        ref2_recent_ok = ref2_verified
+
+    valid_reference_count = (1 if ref1_verified else 0) + (1 if ref2_verified else 0)
+    checks["references"] = valid_reference_count >= 2 and (ref1_recent_ok or ref2_recent_ok)
     
     # 6. Mandatory Training - all complete and not expired
     training_records = await db.training_records.find({

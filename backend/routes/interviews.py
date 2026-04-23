@@ -33,6 +33,18 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Interviews"])
 
+PRE_INTERVIEW_FORM_FILTER = {
+    "$or": [
+        {"form_type": "pre_interview_questionnaire"},
+        {"requirement_id": "pre_interview_questionnaire"},
+        {"requirement_id": "interview"},
+    ]
+}
+
+
+def _pre_interview_sort():
+    return [("is_active_attempt", -1), ("updated_at", -1), ("submitted_at", -1), ("created_at", -1)]
+
 
 # ==================== MODELS ====================
 
@@ -196,14 +208,15 @@ async def create_interview_record(
         role = employee.get("job_title") or employee.get("role") or "support_worker"
         interview_config = get_role_interview_config(role)
         interview_questions = interview_config.get("questions", [])
-        questionnaire = await db.form_submissions.find_one({
-            "employee_id": employee_id,
-            "$or": [
-                {"form_type": "pre_interview_questionnaire"},
-                {"requirement_id": "pre_interview_questionnaire"},
-                {"requirement_id": "interview"}
-            ]
-        }, {"_id": 0})
+        questionnaire = await db.form_submissions.find_one(
+            {
+                "employee_id": employee_id,
+                **PRE_INTERVIEW_FORM_FILTER,
+                "is_active_attempt": {"$ne": False},
+            },
+            {"_id": 0},
+            sort=_pre_interview_sort(),
+        )
         worker_answers = (questionnaire or {}).get("form_data") or (questionnaire or {}).get("data") or {}
         assessment_items = []
         for question in interview_questions:
@@ -325,24 +338,32 @@ async def create_interview_record(
             new_form_status = None
 
         if new_form_status:
-            questionnaire_doc = await db.form_submissions.find_one({
-                "employee_id": employee_id,
-                "$or": [
-                    {"form_type": "pre_interview_questionnaire"},
-                    {"requirement_id": "pre_interview_questionnaire"},
-                    {"requirement_id": "interview"}
-                ]
-            })
+            questionnaire_doc = await db.form_submissions.find_one(
+                {
+                    "employee_id": employee_id,
+                    **PRE_INTERVIEW_FORM_FILTER,
+                    "is_active_attempt": {"$ne": False},
+                },
+                sort=_pre_interview_sort(),
+            )
             if questionnaire_doc:
+                update_payload = {
+                    "status": new_form_status,
+                    "reviewed_at": now,
+                    "reviewed_by": user.get("user_id"),
+                    "interview_record_id": record_id,
+                    "updated_at": now,
+                }
+                if new_form_status == "rejected":
+                    update_payload.update({
+                        "is_active_attempt": False,
+                        "failed_at": now,
+                        "failed_by": user.get("user_id"),
+                        "interview_outcome": "failed",
+                    })
                 await db.form_submissions.update_one(
                     {"_id": questionnaire_doc["_id"]},
-                    {"$set": {
-                        "status": new_form_status,
-                        "reviewed_at": now,
-                        "reviewed_by": user.get("user_id"),
-                        "interview_record_id": record_id,
-                        "updated_at": now,
-                    }}
+                    {"$set": update_payload}
                 )
     
     await log_audit_action(
@@ -376,14 +397,15 @@ async def get_pre_interview_questionnaire(
         raise HTTPException(status_code=404, detail="Employee not found")
     
     # Check for form submission — match on form_type (canonical) or requirement_id
-    questionnaire = await db.form_submissions.find_one({
-        "employee_id": employee_id,
-        "$or": [
-            {"form_type": "pre_interview_questionnaire"},
-            {"requirement_id": "pre_interview_questionnaire"},
-            {"requirement_id": "interview"}
-        ]
-    }, {"_id": 0})
+    questionnaire = await db.form_submissions.find_one(
+        {
+            "employee_id": employee_id,
+            **PRE_INTERVIEW_FORM_FILTER,
+            "is_active_attempt": {"$ne": False},
+        },
+        {"_id": 0},
+        sort=_pre_interview_sort(),
+    )
     
     if not questionnaire:
         # Return empty questionnaire structure
@@ -395,6 +417,14 @@ async def get_pre_interview_questionnaire(
             "form_data": None
         }
     
+    attempts = await db.form_submissions.find(
+        {
+            "employee_id": employee_id,
+            **PRE_INTERVIEW_FORM_FILTER,
+        },
+        {"_id": 0},
+    ).sort([("attempt_number", -1), ("submitted_at", -1), ("created_at", -1)]).to_list(20)
+
     return {
         "employee_id": employee_id,
         "stage": "worker_pre_screen",
@@ -406,7 +436,8 @@ async def get_pre_interview_questionnaire(
         "review_status": questionnaire.get("review_status"),
         "reviewed_at": questionnaire.get("reviewed_at"),
         "reviewed_by": questionnaire.get("reviewed_by"),
-        "reviewer_notes": questionnaire.get("reviewer_notes")
+        "reviewer_notes": questionnaire.get("reviewer_notes"),
+        "attempts": attempts,
     }
 
 
@@ -422,14 +453,14 @@ async def review_pre_interview_questionnaire(
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
     
-    questionnaire = await db.form_submissions.find_one({
-        "employee_id": employee_id,
-        "$or": [
-            {"form_type": "pre_interview_questionnaire"},
-            {"requirement_id": "pre_interview_questionnaire"},
-            {"requirement_id": "interview"}
-        ]
-    })
+    questionnaire = await db.form_submissions.find_one(
+        {
+            "employee_id": employee_id,
+            **PRE_INTERVIEW_FORM_FILTER,
+            "is_active_attempt": {"$ne": False},
+        },
+        sort=_pre_interview_sort(),
+    )
     
     if not questionnaire:
         raise HTTPException(status_code=404, detail="Pre-interview questionnaire not found")
@@ -522,14 +553,15 @@ async def download_pre_interview_pdf(
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
     
-    questionnaire = await db.form_submissions.find_one({
-        "employee_id": employee_id,
-        "$or": [
-            {"form_type": "pre_interview_questionnaire"},
-            {"requirement_id": "pre_interview_questionnaire"},
-            {"requirement_id": "interview"}
-        ]
-    }, {"_id": 0})
+    questionnaire = await db.form_submissions.find_one(
+        {
+            "employee_id": employee_id,
+            **PRE_INTERVIEW_FORM_FILTER,
+            "is_active_attempt": {"$ne": False},
+        },
+        {"_id": 0},
+        sort=_pre_interview_sort(),
+    )
     
     if not questionnaire:
         raise HTTPException(status_code=404, detail="Pre-interview questionnaire not found")

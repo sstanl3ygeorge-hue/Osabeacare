@@ -50,6 +50,7 @@ import CQCInspectionDashboard from "./pages/portal/CQCInspectionDashboard";
 import ServiceUserFeedbackPage from "./pages/portal/ServiceUserFeedbackPage";
 import ComplaintsHandlingPage from "./pages/portal/ComplaintsHandlingPage";
 import ShiftsPage from "./pages/portal/ShiftsPage";
+import IncidentsPage from "./pages/portal/IncidentsPage";
 
 // Auth Context
 import { AuthProvider } from "./context/AuthContext";
@@ -126,6 +127,7 @@ function AppRouter() {
         <Route path="cqc-dashboard" element={<CQCInspectionDashboard />} />
         <Route path="feedback" element={<ServiceUserFeedbackPage />} />
         <Route path="complaints" element={<ComplaintsHandlingPage />} />
+        <Route path="incidents" element={<IncidentsPage />} />
         <Route path="forms/:formId" element={<FormEditorPage />} />
         <Route path="audit" element={<AuditViewPage />} />
         <Route path="service-users" element={<ServiceUsersPage />} />

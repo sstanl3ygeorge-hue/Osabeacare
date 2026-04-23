@@ -239,6 +239,19 @@ export default function DashboardPage() {
   const staffNotReady = employeesNotReady;
   
   const needsAttentionTotal = expiredDocs + expiringSoon + policiesNotAcknowledged + staffNotReady + pendingVerifications;
+  const recurringOverdue = recurringCompliance?.summary?.overdue || 0;
+  const recurringDue = recurringCompliance?.summary?.due || 0;
+  const recurringUpcoming = recurringCompliance?.summary?.upcoming || 0;
+  const trainingBlocked = trainingSummary?.employees_blocked_by_training || 0;
+  const trainingOverdue = trainingSummary?.training_overdue_count || 0;
+  const trainingDueSoon = trainingSummary?.training_due_soon_count || 0;
+  const showActiveObligationsSnapshot =
+    recurringOverdue > 0 ||
+    recurringDue > 0 ||
+    recurringUpcoming > 0 ||
+    trainingBlocked > 0 ||
+    trainingOverdue > 0 ||
+    trainingDueSoon > 0;
 
   return (
     <div className="space-y-8" data-testid="dashboard-page">
@@ -251,6 +264,89 @@ export default function DashboardPage() {
           This dashboard highlights what needs attention today. Start with expired items and required checks.
         </p>
       </div>
+
+      {showActiveObligationsSnapshot && (
+        <Card className="border-[#E4E8EB] shadow-sm" data-testid="active-obligations-snapshot-strip">
+          <CardHeader className="pb-3">
+            <CardTitle className="font-heading text-lg flex items-center gap-2">
+              <ClipboardList className="h-5 w-5 text-primary" />
+              Active Obligations Snapshot
+            </CardTitle>
+            <p className="text-sm text-text-muted">
+              Fast triage for active-workforce obligations using current recurring and training summary truth.
+            </p>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
+              <button
+                type="button"
+                onClick={() => navigate('/portal/compliance-centre')}
+                className={`rounded-xl border p-3 text-left transition-colors ${
+                  recurringOverdue > 0 ? 'bg-red-50 border-red-200 hover:bg-red-100' : 'bg-white border-[#E4E8EB] hover:bg-[#F8FAFA]'
+                }`}
+              >
+                <p className={`text-xs ${recurringOverdue > 0 ? 'text-red-700' : 'text-text-muted'}`}>Recurring overdue</p>
+                <p className={`mt-1 text-2xl font-heading font-bold ${recurringOverdue > 0 ? 'text-red-700' : 'text-text-primary'}`}>{recurringOverdue}</p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => navigate('/portal/compliance-centre')}
+                className={`rounded-xl border p-3 text-left transition-colors ${
+                  recurringDue > 0 ? 'bg-amber-50 border-amber-200 hover:bg-amber-100' : 'bg-white border-[#E4E8EB] hover:bg-[#F8FAFA]'
+                }`}
+              >
+                <p className={`text-xs ${recurringDue > 0 ? 'text-amber-700' : 'text-text-muted'}`}>Recurring due now</p>
+                <p className={`mt-1 text-2xl font-heading font-bold ${recurringDue > 0 ? 'text-amber-700' : 'text-text-primary'}`}>{recurringDue}</p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => navigate('/portal/compliance-centre')}
+                className={`rounded-xl border p-3 text-left transition-colors ${
+                  recurringUpcoming > 0 ? 'bg-blue-50 border-blue-200 hover:bg-blue-100' : 'bg-white border-[#E4E8EB] hover:bg-[#F8FAFA]'
+                }`}
+              >
+                <p className={`text-xs ${recurringUpcoming > 0 ? 'text-blue-700' : 'text-text-muted'}`}>Recurring upcoming</p>
+                <p className={`mt-1 text-2xl font-heading font-bold ${recurringUpcoming > 0 ? 'text-blue-700' : 'text-text-primary'}`}>{recurringUpcoming}</p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => navigate('/portal/training?filter=all')}
+                className={`rounded-xl border p-3 text-left transition-colors ${
+                  trainingBlocked > 0 ? 'bg-red-50 border-red-200 hover:bg-red-100' : 'bg-white border-[#E4E8EB] hover:bg-[#F8FAFA]'
+                }`}
+              >
+                <p className={`text-xs ${trainingBlocked > 0 ? 'text-red-700' : 'text-text-muted'}`}>Training blocked staff</p>
+                <p className={`mt-1 text-2xl font-heading font-bold ${trainingBlocked > 0 ? 'text-red-700' : 'text-text-primary'}`}>{trainingBlocked}</p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => navigate('/portal/training?filter=expired')}
+                className={`rounded-xl border p-3 text-left transition-colors ${
+                  trainingOverdue > 0 ? 'bg-amber-50 border-amber-200 hover:bg-amber-100' : 'bg-white border-[#E4E8EB] hover:bg-[#F8FAFA]'
+                }`}
+              >
+                <p className={`text-xs ${trainingOverdue > 0 ? 'text-amber-700' : 'text-text-muted'}`}>Training overdue</p>
+                <p className={`mt-1 text-2xl font-heading font-bold ${trainingOverdue > 0 ? 'text-amber-700' : 'text-text-primary'}`}>{trainingOverdue}</p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => navigate('/portal/training?filter=expiring_soon')}
+                className={`rounded-xl border p-3 text-left transition-colors ${
+                  trainingDueSoon > 0 ? 'bg-blue-50 border-blue-200 hover:bg-blue-100' : 'bg-white border-[#E4E8EB] hover:bg-[#F8FAFA]'
+                }`}
+              >
+                <p className={`text-xs ${trainingDueSoon > 0 ? 'text-blue-700' : 'text-text-muted'}`}>Training due soon</p>
+                <p className={`mt-1 text-2xl font-heading font-bold ${trainingDueSoon > 0 ? 'text-blue-700' : 'text-text-primary'}`}>{trainingDueSoon}</p>
+              </button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* ACTIONABLE TASK QUEUE - New CQC-compliant task list */}
       <ActionableTaskQueue />

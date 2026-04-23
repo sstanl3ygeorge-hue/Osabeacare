@@ -5,7 +5,7 @@ import { Button } from '../../ui/button';
 import { toast } from 'sonner';
 import { 
   CheckCircle, Clock, Eye, Shield, XCircle, 
-  RotateCcw, FileCheck 
+  RotateCcw, FileCheck, Download 
 } from 'lucide-react';
 import { formatBackendDate, formatBackendDateTime } from '../../../lib/dateUtils';
 
@@ -55,9 +55,18 @@ export default function PoliciesTabContent({
 
   // Handle policy acknowledgement
   const handleAcknowledge = async (policy) => {
+    const signerName = window.prompt('Type your full name to acknowledge this policy:');
+    if (signerName === null) return;
+    if (!signerName.trim()) {
+      toast.error('Full name is required to acknowledge policy');
+      return;
+    }
+
     setLoading(prev => ({ ...prev, [`ack-${policy.id}`]: true }));
     try {
-      await axios.put(`${API}/policy-assignments/${policy.id}/acknowledge`, {}, {
+      await axios.put(`${API}/policy-assignments/${policy.id}/acknowledge`, {
+        signer_name: signerName.trim()
+      }, {
         headers: { Authorization: `Bearer ${token}` }
       });
       toast.success('Policy acknowledged successfully');
@@ -118,6 +127,32 @@ export default function PoliciesTabContent({
       toast.error(error.response?.data?.detail || 'Failed to withdraw policy');
     } finally {
       setLoading(prev => ({ ...prev, [`withdraw-${policy.id}`]: false }));
+    }
+  };
+
+  const handleDownloadAcknowledgement = async (policy) => {
+    setLoading(prev => ({ ...prev, [`pdf-${policy.id}`]: true }));
+    try {
+      const response = await axios.get(
+        `${API}/policy-assignments/${policy.id}/acknowledgement-pdf`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          responseType: 'blob'
+        }
+      );
+
+      const url = window.URL.createObjectURL(response.data);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${(policy.policy_title || 'policy').replace(/\s+/g, '_')}_acknowledgement.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to export acknowledgement PDF');
+    } finally {
+      setLoading(prev => ({ ...prev, [`pdf-${policy.id}`]: false }));
     }
   };
 
@@ -270,6 +305,20 @@ export default function PoliciesTabContent({
                         >
                           <Shield className="w-3 h-3 mr-1" />
                           Reviewed and Approved
+                        </Button>
+                      )}
+
+                      {(policy.status === 'acknowledged' || policy.status === 'signed' || policy.status === 'withdrawn') && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="rounded-lg text-xs"
+                          onClick={() => handleDownloadAcknowledgement(policy)}
+                          disabled={loading[`pdf-${policy.id}`]}
+                          data-testid={`download-policy-ack-${policy.id}`}
+                        >
+                          <Download className="w-3 h-3 mr-1" />
+                          Download Acknowledgement
                         </Button>
                       )}
                       

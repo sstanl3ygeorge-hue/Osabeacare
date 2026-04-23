@@ -63,6 +63,33 @@ const formatDateTime = (dateStr) => {
   });
 };
 
+const getWorkerIncidentStatusMeta = (status) => {
+  switch ((status || 'open').toLowerCase()) {
+    case 'closed':
+      return { className: 'bg-green-100 text-green-700', label: 'Closed' };
+    case 'resolved':
+      return { className: 'bg-emerald-100 text-emerald-700', label: 'Resolved' };
+    case 'under_review':
+    case 'investigating':
+      return { className: 'bg-amber-100 text-amber-700', label: 'Under review' };
+    default:
+      return { className: 'bg-blue-100 text-blue-700', label: 'Submitted' };
+  }
+};
+
+const getDueState = (dateStr, soonWindowDays = 7) => {
+  if (!dateStr) return null;
+  const target = new Date(dateStr);
+  if (isNaN(target.getTime())) return null;
+  const now = new Date();
+  const targetStart = new Date(target.getFullYear(), target.getMonth(), target.getDate());
+  const nowStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const deltaDays = Math.ceil((targetStart - nowStart) / (1000 * 60 * 60 * 24));
+  if (deltaDays < 0) return 'overdue';
+  if (deltaDays <= soonWindowDays) return 'due_soon';
+  return 'upcoming';
+};
+
 // Operational document guidance text
 const getDocumentGuidance = (docType) => {
   const guidance = {
@@ -705,6 +732,20 @@ export default function WorkerDashboard() {
   const [workerShiftResponseItem, setWorkerShiftResponseItem] = useState(null);
   const [workerShiftResponseNote, setWorkerShiftResponseNote] = useState('');
   const [workerShiftResponding, setWorkerShiftResponding] = useState(false);
+  const [workerIncidents, setWorkerIncidents] = useState([]);
+  const [workerIncidentsLoading, setWorkerIncidentsLoading] = useState(false);
+  const [incidentDetailOpen, setIncidentDetailOpen] = useState(false);
+  const [selectedIncident, setSelectedIncident] = useState(null);
+  const [incidentModalOpen, setIncidentModalOpen] = useState(false);
+  const [incidentSubmitting, setIncidentSubmitting] = useState(false);
+  const [incidentForm, setIncidentForm] = useState({
+    incident_type: 'incident',
+    occurred_at: '',
+    location_text: '',
+    description: '',
+    related_shift_id: '',
+    note: '',
+  });
   const navigate = useNavigate();
 
   const fetchDashboard = useCallback(async () => {
@@ -826,6 +867,7 @@ export default function WorkerDashboard() {
       fetchCvStatus();
       fetchReferenceMismatches();
       fetchWorkerShifts();
+      fetchWorkerIncidents();
     }
   }, [dashboard, fetchCvStatus]);
 
@@ -900,6 +942,67 @@ export default function WorkerDashboard() {
     } finally {
       setWorkerShiftResponding(false);
     }
+  };
+
+  const fetchWorkerIncidents = async () => {
+    setWorkerIncidentsLoading(true);
+    try {
+      const token = localStorage.getItem('workerToken');
+      const response = await axios.get(`${API}/worker/incidents`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setWorkerIncidents(response.data?.incidents || []);
+    } catch (error) {
+      console.error('Failed to fetch worker incidents:', error);
+    } finally {
+      setWorkerIncidentsLoading(false);
+    }
+  };
+
+  const handleSubmitIncident = async () => {
+    if (!incidentForm.occurred_at || !incidentForm.location_text || !incidentForm.description) {
+      toast.error('Date/time, location, and description are required');
+      return;
+    }
+    setIncidentSubmitting(true);
+    try {
+      const token = localStorage.getItem('workerToken');
+      await axios.post(
+        `${API}/worker/incidents`,
+        {
+          incident_type: incidentForm.incident_type,
+          occurred_at: new Date(incidentForm.occurred_at).toISOString(),
+          location_text: incidentForm.location_text,
+          description: incidentForm.description,
+          related_shift_id: incidentForm.related_shift_id || null,
+          note: incidentForm.note || null,
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success('Incident submitted');
+      setIncidentModalOpen(false);
+      setIncidentForm({
+        incident_type: 'incident',
+        occurred_at: '',
+        location_text: '',
+        description: '',
+        related_shift_id: '',
+        note: '',
+      });
+      fetchWorkerIncidents();
+    } catch (error) {
+      const message = typeof error.response?.data?.detail === 'string'
+        ? error.response.data.detail
+        : 'Failed to submit incident';
+      toast.error(message);
+    } finally {
+      setIncidentSubmitting(false);
+    }
+  };
+
+  const openIncidentDetail = (incident) => {
+    setSelectedIncident(incident);
+    setIncidentDetailOpen(true);
   };
 
   // Fetch reference-employment mismatches
@@ -1414,6 +1517,12 @@ export default function WorkerDashboard() {
     due: recurringItems.filter((item) => item?.computed_status === 'due'),
     upcoming: recurringItems.filter((item) => item?.computed_status === 'upcoming'),
     scheduled: recurringItems.filter((item) => item?.computed_status === 'scheduled'),
+  };
+  const competencyRecurringItems = recurringItems.filter((item) => item?.item_type === 'competency_assessment');
+  const competencyRecurringCounts = {
+    overdue: competencyRecurringItems.filter((item) => item?.computed_status === 'overdue').length,
+    due: competencyRecurringItems.filter((item) => item?.computed_status === 'due').length,
+    upcoming: competencyRecurringItems.filter((item) => item?.computed_status === 'upcoming').length,
   };
   const employment_readiness_blockers = _employment_readiness_blockers || [];
   const contractAgreement = agreements.find((agreement) => agreement.id === 'contract_acceptance');
@@ -1945,6 +2054,73 @@ export default function WorkerDashboard() {
             </CardContent>
           </Card>
         )}
+
+        <Card className="border border-slate-200 shadow-sm" data-testid="worker-incidents-card">
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <CardTitle className="text-lg text-slate-900">Incidents & Concerns</CardTitle>
+                <p className="mt-1 text-sm text-slate-600">Report an incident and track review status.</p>
+              </div>
+              <Button size="sm" onClick={() => setIncidentModalOpen(true)}>
+                <Plus className="mr-1 h-4 w-4" />
+                Report
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="pt-0">
+            {workerIncidentsLoading ? (
+              <div className="flex items-center justify-center py-6">
+                <Loader2 className="h-5 w-5 animate-spin text-slate-500" />
+              </div>
+            ) : workerIncidents.length === 0 ? (
+              <p className="text-sm text-slate-600">No incidents submitted yet.</p>
+            ) : (
+              <div className="space-y-2">
+                {workerIncidents.slice(0, 5).map((incident) => (
+                  <div key={incident.id} className="rounded-lg border border-slate-200 bg-white p-3">
+                    {(() => {
+                      const statusMeta = getWorkerIncidentStatusMeta(incident.status);
+                      return (
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="font-medium text-slate-900">{incident.reference_number || incident.title}</p>
+                        <p className="mt-1 text-xs text-slate-600">{formatDateTime(incident.date_occurred)} • {incident.location || 'Location not set'}</p>
+                        <p className="mt-1 text-xs text-slate-600 line-clamp-2">{incident.description}</p>
+                        <p className="mt-2 text-xs text-slate-700">{incident.progress_summary || 'Your report has been submitted and is awaiting review.'}</p>
+                        {incident.outcome_summary ? (
+                          <div className="mt-2 rounded-md border border-slate-200 bg-slate-50 p-2">
+                            <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Follow-up summary</p>
+                            <p className="mt-1 text-xs text-slate-700">{incident.outcome_summary}</p>
+                          </div>
+                        ) : null}
+                        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-500">
+                          {incident.reported_at ? <span>Submitted {formatDateTime(incident.reported_at)}</span> : null}
+                          {incident.reviewed_at ? <span>Reviewed {formatDateTime(incident.reviewed_at)}</span> : null}
+                          {incident.closed_at ? <span>Closed {formatDateTime(incident.closed_at)}</span> : null}
+                        </div>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <Badge className={statusMeta.className}>
+                          {incident.status_label || statusMeta.label}
+                        </Badge>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => openIncidentDetail(incident)}
+                        >
+                          View
+                        </Button>
+                      </div>
+                    </div>
+                      );
+                    })()}
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
         {/* Forms Section - Only for onboarding */}
         {!isActiveEmployee && <FormsSection />}
@@ -2926,7 +3102,7 @@ export default function WorkerDashboard() {
         )}
 
         {/* ========== COMPETENCY ASSESSMENTS (P1: Worker Dashboard) ========== */}
-        {!isActiveEmployee && competency_assessments && competency_assessments.length > 0 && (
+        {competency_assessments && competency_assessments.length > 0 && (
           <Card className="shadow-md border-0" data-testid="competency-section">
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between">
@@ -2949,59 +3125,99 @@ export default function WorkerDashboard() {
               </div>
             </CardHeader>
             <CardContent>
+              {isActiveEmployee && competencyRecurringItems.length > 0 && (
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
+                  <div className="rounded-lg border border-red-100 bg-red-50 px-3 py-2">
+                    <p className="text-xs text-red-700">Overdue reviews</p>
+                    <p className="text-sm font-semibold text-red-800">{competencyRecurringCounts.overdue}</p>
+                  </div>
+                  <div className="rounded-lg border border-amber-100 bg-amber-50 px-3 py-2">
+                    <p className="text-xs text-amber-700">Due now</p>
+                    <p className="text-sm font-semibold text-amber-800">{competencyRecurringCounts.due}</p>
+                  </div>
+                  <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2">
+                    <p className="text-xs text-blue-700">Upcoming</p>
+                    <p className="text-sm font-semibold text-blue-800">{competencyRecurringCounts.upcoming}</p>
+                  </div>
+                </div>
+              )}
+
               <div className="space-y-2">
                 {competency_assessments.map((comp, idx) => (
-                  <div
-                    key={idx}
-                    className={`p-3 rounded-xl border ${
-                      comp.outcome === 'pass' ? 'bg-green-50 border-green-200' :
-                      comp.outcome === 'fail' ? 'bg-red-50 border-red-200' :
-                      comp.status === 'scheduled' ? 'bg-blue-50 border-blue-200' :
-                      'bg-slate-50 border-slate-200'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
-                          comp.outcome === 'pass' ? 'bg-green-100' :
-                          comp.outcome === 'fail' ? 'bg-red-100' :
-                          'bg-slate-100'
-                        }`}>
-                          {comp.outcome === 'pass' ? (
-                            <CheckCircle className="h-5 w-5 text-green-600" />
-                          ) : comp.outcome === 'fail' ? (
-                            <X className="h-5 w-5 text-red-600" />
-                          ) : (
-                            <Clock className="h-5 w-5 text-slate-400" />
-                          )}
+                  (() => {
+                    const reviewState = comp.review_due_date ? getDueState(comp.review_due_date, 30) : null;
+                    const isCompleted = comp.outcome === 'pass' || comp.status === 'completed' || comp.status === 'competent';
+                    return (
+                      <div
+                        key={idx}
+                        className={`p-3 rounded-xl border ${
+                          reviewState === 'overdue' ? 'bg-red-50 border-red-200' :
+                          reviewState === 'due_soon' ? 'bg-amber-50 border-amber-200' :
+                          comp.outcome === 'pass' ? 'bg-green-50 border-green-200' :
+                          comp.outcome === 'fail' ? 'bg-red-50 border-red-200' :
+                          comp.status === 'scheduled' ? 'bg-blue-50 border-blue-200' :
+                          'bg-slate-50 border-slate-200'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
+                              comp.outcome === 'pass' ? 'bg-green-100' :
+                              comp.outcome === 'fail' ? 'bg-red-100' :
+                              'bg-slate-100'
+                            }`}>
+                              {comp.outcome === 'pass' ? (
+                                <CheckCircle className="h-5 w-5 text-green-600" />
+                              ) : comp.outcome === 'fail' ? (
+                                <X className="h-5 w-5 text-red-600" />
+                              ) : (
+                                <Clock className="h-5 w-5 text-slate-400" />
+                              )}
+                            </div>
+                            <div>
+                              <span className="font-medium text-slate-800">{comp.competency_name}</span>
+                              {comp.area && <p className="text-xs text-slate-500">{comp.area}</p>}
+                              {(comp.completed_date || comp.scheduled_date) && (
+                                <p className="text-xs text-slate-500">
+                                  {isCompleted ? 'Completed' : 'Scheduled'}: {formatDate(comp.completed_date || comp.scheduled_date)}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                          <Badge className={`text-xs ${
+                            comp.outcome === 'pass' ? 'bg-green-100 text-green-700' :
+                            comp.outcome === 'fail' ? 'bg-red-100 text-red-700' :
+                            reviewState === 'overdue' ? 'bg-red-100 text-red-700' :
+                            reviewState === 'due_soon' ? 'bg-amber-100 text-amber-700' :
+                            comp.status === 'scheduled' ? 'bg-blue-100 text-blue-700' :
+                            'bg-slate-100 text-slate-600'
+                          }`}>
+                            {comp.outcome === 'pass' ? 'Current' :
+                             comp.outcome === 'fail' ? 'Needs Improvement' :
+                             reviewState === 'overdue' ? 'Overdue' :
+                             reviewState === 'due_soon' ? 'Due soon' :
+                             comp.status === 'scheduled' ? 'Scheduled' : 'Pending'}
+                          </Badge>
                         </div>
-                        <div>
-                          <span className="font-medium text-slate-800">{comp.competency_name}</span>
-                          {comp.area && <p className="text-xs text-slate-500">{comp.area}</p>}
-                          {comp.scheduled_date && (
-                            <p className="text-xs text-slate-500">
-                              {comp.status === 'completed' ? 'Completed' : 'Scheduled'}: {formatDate(comp.completed_date || comp.scheduled_date)}
-                            </p>
-                          )}
-                        </div>
+
+                        {comp.review_due_date && (
+                          <p className={`text-xs mt-2 ${
+                            reviewState === 'overdue' ? 'text-red-600' :
+                            reviewState === 'due_soon' ? 'text-amber-600' :
+                            'text-slate-500'
+                          }`}>
+                            Review due: {formatDate(comp.review_due_date)}
+                          </p>
+                        )}
+
+                        {comp.follow_up_required && comp.follow_up_date && (
+                          <p className="text-xs text-amber-600 mt-1">
+                            Follow-up scheduled: {formatDate(comp.follow_up_date)}
+                          </p>
+                        )}
                       </div>
-                      <Badge className={`text-xs ${
-                        comp.outcome === 'pass' ? 'bg-green-100 text-green-700' :
-                        comp.outcome === 'fail' ? 'bg-red-100 text-red-700' :
-                        comp.status === 'scheduled' ? 'bg-blue-100 text-blue-700' :
-                        'bg-slate-100 text-slate-600'
-                      }`}>
-                        {comp.outcome === 'pass' ? 'Passed' :
-                         comp.outcome === 'fail' ? 'Needs Improvement' :
-                         comp.status === 'scheduled' ? 'Scheduled' : 'Pending'}
-                      </Badge>
-                    </div>
-                    {comp.follow_up_required && comp.follow_up_date && (
-                      <p className="text-xs text-amber-600 mt-2">
-                        Follow-up scheduled: {formatDate(comp.follow_up_date)}
-                      </p>
-                    )}
-                  </div>
+                    );
+                  })()
                 ))}
               </div>
             </CardContent>
@@ -3283,58 +3499,182 @@ export default function WorkerDashboard() {
             <CardContent>
               <div className="space-y-2 max-h-64 overflow-y-auto">
                 {spot_checks.slice(0, 10).map((spot, idx) => (
-                  <div
-                    key={idx}
-                    className={`p-3 rounded-xl border ${
-                      spot.outcome === 'pass' ? 'bg-green-50 border-green-200' :
-                      spot.outcome === 'needs_improvement' ? 'bg-amber-50 border-amber-200' :
-                      spot.outcome === 'fail' ? 'bg-red-50 border-red-200' :
-                      'bg-slate-50 border-slate-200'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
-                          spot.outcome === 'pass' ? 'bg-green-100' :
-                          spot.outcome === 'needs_improvement' ? 'bg-amber-100' :
-                          spot.outcome === 'fail' ? 'bg-red-100' :
-                          'bg-slate-100'
-                        }`}>
-                          {spot.outcome === 'pass' ? (
-                            <CheckCircle className="h-4 w-4 text-green-600" />
-                          ) : spot.outcome === 'needs_improvement' ? (
-                            <AlertCircle className="h-4 w-4 text-amber-600" />
-                          ) : spot.outcome === 'fail' ? (
-                            <X className="h-4 w-4 text-red-600" />
-                          ) : (
-                            <Clock className="h-4 w-4 text-slate-400" />
-                          )}
+                  (() => {
+                    const followUpState = spot.follow_up_required
+                      ? getDueState(spot.follow_up_date, 7)
+                      : null;
+                    return (
+                      <div
+                        key={idx}
+                        className={`p-3 rounded-xl border ${
+                          followUpState === 'overdue' ? 'bg-red-50 border-red-200' :
+                          followUpState === 'due_soon' ? 'bg-amber-50 border-amber-200' :
+                          spot.outcome === 'pass' ? 'bg-green-50 border-green-200' :
+                          spot.outcome === 'needs_improvement' ? 'bg-amber-50 border-amber-200' :
+                          spot.outcome === 'fail' ? 'bg-red-50 border-red-200' :
+                          'bg-slate-50 border-slate-200'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                              spot.outcome === 'pass' ? 'bg-green-100' :
+                              spot.outcome === 'needs_improvement' ? 'bg-amber-100' :
+                              spot.outcome === 'fail' ? 'bg-red-100' :
+                              'bg-slate-100'
+                            }`}>
+                              {spot.outcome === 'pass' ? (
+                                <CheckCircle className="h-4 w-4 text-green-600" />
+                              ) : spot.outcome === 'needs_improvement' ? (
+                                <AlertCircle className="h-4 w-4 text-amber-600" />
+                              ) : spot.outcome === 'fail' ? (
+                                <X className="h-4 w-4 text-red-600" />
+                              ) : (
+                                <Clock className="h-4 w-4 text-slate-400" />
+                              )}
+                            </div>
+                            <div>
+                              <span className="font-medium text-slate-700 text-sm">{spot.area || spot.type || 'Observation'}</span>
+                              {spot.date && <p className="text-xs text-slate-500">{formatDate(spot.date)}</p>}
+                              {spot.assessed_by_name && (
+                                <p className="text-xs text-slate-500">By {spot.assessed_by_name}</p>
+                              )}
+                            </div>
+                          </div>
+                          <Badge className={`text-xs ${
+                            spot.outcome === 'pass' ? 'bg-green-100 text-green-700' :
+                            spot.outcome === 'needs_improvement' ? 'bg-amber-100 text-amber-700' :
+                            spot.outcome === 'fail' ? 'bg-red-100 text-red-700' :
+                            'bg-slate-100 text-slate-600'
+                          }`}>
+                            {spot.outcome === 'pass' ? 'Pass' :
+                             spot.outcome === 'needs_improvement' ? 'Needs Work' :
+                             spot.outcome === 'fail' ? 'Fail' : 'Pending'}
+                          </Badge>
                         </div>
-                        <div>
-                          <span className="font-medium text-slate-700 text-sm">{spot.area || spot.type || 'Observation'}</span>
-                          {spot.date && <p className="text-xs text-slate-500">{formatDate(spot.date)}</p>}
-                        </div>
+
+                        {spot.follow_up_required && spot.follow_up_date && (
+                          <div className="mt-2">
+                            <Badge className={
+                              followUpState === 'overdue'
+                                ? 'bg-red-100 text-red-700'
+                                : followUpState === 'due_soon'
+                                  ? 'bg-amber-100 text-amber-700'
+                                  : 'bg-blue-100 text-blue-700'
+                            }>
+                              {followUpState === 'overdue'
+                                ? `Follow-up overdue (${formatDate(spot.follow_up_date)})`
+                                : followUpState === 'due_soon'
+                                  ? `Follow-up due soon (${formatDate(spot.follow_up_date)})`
+                                  : `Follow-up scheduled (${formatDate(spot.follow_up_date)})`}
+                            </Badge>
+                          </div>
+                        )}
+
+                        {spot.notes && (
+                          <p className="text-xs text-slate-600 mt-2 bg-white/50 p-2 rounded">{spot.notes}</p>
+                        )}
                       </div>
-                      <Badge className={`text-xs ${
-                        spot.outcome === 'pass' ? 'bg-green-100 text-green-700' :
-                        spot.outcome === 'needs_improvement' ? 'bg-amber-100 text-amber-700' :
-                        spot.outcome === 'fail' ? 'bg-red-100 text-red-700' :
-                        'bg-slate-100 text-slate-600'
-                      }`}>
-                        {spot.outcome === 'pass' ? 'Pass' :
-                         spot.outcome === 'needs_improvement' ? 'Needs Work' :
-                         spot.outcome === 'fail' ? 'Fail' : 'Pending'}
-                      </Badge>
-                    </div>
-                    {spot.notes && (
-                      <p className="text-xs text-slate-600 mt-2 bg-white/50 p-2 rounded">{spot.notes}</p>
-                    )}
-                  </div>
+                    );
+                  })()
                 ))}
               </div>
               {spot_checks.length > 10 && (
                 <p className="text-xs text-slate-400 mt-2 text-center">
                   Showing 10 of {spot_checks.length} spot checks
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {isActiveEmployee && supervisions && supervisions.length > 0 && (
+          <Card className="shadow-md border-0" data-testid="supervisions-section">
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2 text-lg">
+                    <Calendar className="h-5 w-5 text-teal-600" />
+                    Supervisions
+                  </CardTitle>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Your supervision schedule and completion history
+                  </p>
+                </div>
+                <Badge className="bg-teal-100 text-teal-700">
+                  {supervisions.length} Recorded
+                </Badge>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2 max-h-64 overflow-y-auto">
+                {supervisions.slice(0, 10).map((sv, idx) => {
+                  const status = (sv.status || '').toLowerCase();
+                  const dueTarget = sv.next_due_at || sv.scheduled_at;
+                  const dueState = getDueState(dueTarget, 14);
+                  return (
+                    <div
+                      key={idx}
+                      className={`p-3 rounded-xl border ${
+                        dueState === 'overdue' ? 'bg-red-50 border-red-200' :
+                        dueState === 'due_soon' ? 'bg-amber-50 border-amber-200' :
+                        status === 'completed' ? 'bg-green-50 border-green-200' :
+                        status === 'cancelled' ? 'bg-slate-50 border-slate-200' :
+                        'bg-blue-50 border-blue-200'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="font-medium text-slate-800 text-sm">
+                            {(sv.supervision_type || 'supervision').replace(/_/g, ' ')}
+                          </p>
+                          <p className="text-xs text-slate-500">
+                            {sv.completed_at
+                              ? `Completed ${formatDate(sv.completed_at)}`
+                              : sv.scheduled_at
+                                ? `Scheduled ${formatDate(sv.scheduled_at)}`
+                                : 'No scheduled date'}
+                          </p>
+                        </div>
+                        <Badge className={
+                          status === 'completed'
+                            ? 'bg-green-100 text-green-700'
+                            : status === 'cancelled'
+                              ? 'bg-slate-100 text-slate-600'
+                              : status === 'overdue' || dueState === 'overdue'
+                                ? 'bg-red-100 text-red-700'
+                                : dueState === 'due_soon'
+                                  ? 'bg-amber-100 text-amber-700'
+                                  : 'bg-blue-100 text-blue-700'
+                        }>
+                          {status === 'completed'
+                            ? 'Completed'
+                            : status === 'cancelled'
+                              ? 'Cancelled'
+                              : status === 'overdue' || dueState === 'overdue'
+                                ? 'Overdue'
+                                : dueState === 'due_soon'
+                                  ? 'Due soon'
+                                  : 'Scheduled'}
+                        </Badge>
+                      </div>
+
+                      {dueTarget && status !== 'completed' && (
+                        <p className="text-xs text-slate-600 mt-2">
+                          Next due: {formatDate(dueTarget)}
+                        </p>
+                      )}
+
+                      {sv.notes && (
+                        <p className="text-xs text-slate-600 mt-2 bg-white/50 p-2 rounded">{sv.notes}</p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              {supervisions.length > 10 && (
+                <p className="text-xs text-slate-400 mt-2 text-center">
+                  Showing 10 of {supervisions.length} supervisions
                 </p>
               )}
             </CardContent>
@@ -4135,6 +4475,163 @@ export default function WorkerDashboard() {
             >
               {workerShiftResponding ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
               {workerShiftResponseMode === 'reject' ? 'Reject shift' : 'Accept shift'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={incidentModalOpen} onOpenChange={setIncidentModalOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Report incident</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <Label>Type</Label>
+              <Select
+                value={incidentForm.incident_type}
+                onValueChange={(v) => setIncidentForm((prev) => ({ ...prev, incident_type: v }))}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="incident">Incident</SelectItem>
+                  <SelectItem value="near_miss">Near miss</SelectItem>
+                  <SelectItem value="concern">Concern</SelectItem>
+                  <SelectItem value="safeguarding">Safeguarding concern</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Occurred at</Label>
+              <Input
+                type="datetime-local"
+                value={incidentForm.occurred_at}
+                onChange={(e) => setIncidentForm((prev) => ({ ...prev, occurred_at: e.target.value }))}
+              />
+            </div>
+            <div>
+              <Label>Location</Label>
+              <Input
+                value={incidentForm.location_text}
+                onChange={(e) => setIncidentForm((prev) => ({ ...prev, location_text: e.target.value }))}
+              />
+            </div>
+            <div>
+              <Label>Related shift (optional)</Label>
+              <Select
+                value={incidentForm.related_shift_id || 'none'}
+                onValueChange={(v) => setIncidentForm((prev) => ({ ...prev, related_shift_id: v === 'none' ? '' : v }))}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a shift" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">None</SelectItem>
+                  {workerShifts.map((item) => (
+                    <SelectItem key={item.shift?.id} value={item.shift?.id}>
+                      {formatDate(item.shift?.start_at)} - {item.shift?.location_text || item.shift?.id}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Description</Label>
+              <Textarea
+                rows={4}
+                value={incidentForm.description}
+                onChange={(e) => setIncidentForm((prev) => ({ ...prev, description: e.target.value }))}
+              />
+            </div>
+            <div>
+              <Label>Note (optional)</Label>
+              <Textarea
+                rows={2}
+                value={incidentForm.note}
+                onChange={(e) => setIncidentForm((prev) => ({ ...prev, note: e.target.value }))}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIncidentModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleSubmitIncident} disabled={incidentSubmitting}>
+              {incidentSubmitting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+              Submit report
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={incidentDetailOpen}
+        onOpenChange={(open) => {
+          setIncidentDetailOpen(open);
+          if (!open) setSelectedIncident(null);
+        }}
+      >
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Incident details</DialogTitle>
+          </DialogHeader>
+          {selectedIncident ? (
+            <div className="space-y-3 text-sm text-slate-700">
+              <div className="flex items-center justify-between gap-2">
+                <p className="font-medium text-slate-900">{selectedIncident.reference_number || selectedIncident.title || 'Incident'}</p>
+                <Badge className={getWorkerIncidentStatusMeta(selectedIncident.status).className}>
+                  {selectedIncident.status_label || getWorkerIncidentStatusMeta(selectedIncident.status).label}
+                </Badge>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500">Incident type</p>
+                <p className="font-medium">{(selectedIncident.incident_type || 'incident').replace(/_/g, ' ')}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500">Occurred</p>
+                <p className="font-medium">{formatDateTime(selectedIncident.date_occurred)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500">Location</p>
+                <p className="font-medium">{selectedIncident.location || 'Location not set'}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500">Description</p>
+                <p className="font-medium whitespace-pre-wrap">{selectedIncident.description || '-'}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500">Progress</p>
+                <p className="font-medium">{selectedIncident.progress_summary || 'Your report has been submitted and is awaiting review.'}</p>
+              </div>
+              {selectedIncident.outcome_summary ? (
+                <div>
+                  <p className="text-xs text-slate-500">Outcome / follow-up summary</p>
+                  <p className="font-medium whitespace-pre-wrap">{selectedIncident.outcome_summary}</p>
+                </div>
+              ) : null}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <p className="text-xs text-slate-500">Submitted</p>
+                  <p className="font-medium">{formatDateTime(selectedIncident.reported_at)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500">Reviewed</p>
+                  <p className="font-medium">{formatDateTime(selectedIncident.reviewed_at)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500">Closed</p>
+                  <p className="font-medium">{formatDateTime(selectedIncident.closed_at)}</p>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-slate-600">Incident detail unavailable.</p>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIncidentDetailOpen(false)}>
+              Close
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -1618,21 +1618,35 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
         "overall_status": induction_canonical["overall_status"],
     }
     
-    # Competency assessments
-    competency_records = await db.competency_assessments.find({
+    # Competency assessments (canonical source: competency_records)
+    competency_records = await db.competency_records.find({
         "employee_id": employee_id
-    }, {"_id": 0}).sort("scheduled_date", -1).to_list(20)
+    }, {"_id": 0}).sort("updated_at", -1).to_list(50)
     
     competency_status = []
     for comp in competency_records:
+        raw_status = (comp.get("status") or "").strip().lower()
+        derived_outcome = comp.get("outcome")
+        if not derived_outcome:
+            if raw_status == "competent":
+                derived_outcome = "pass"
+            elif raw_status == "not_competent":
+                derived_outcome = "fail"
+            elif raw_status == "training_required":
+                derived_outcome = "needs_improvement"
+            elif raw_status == "scheduled":
+                derived_outcome = "scheduled"
+
         competency_status.append({
             "id": comp.get("id"),
+            "competency_type": comp.get("competency_type"),
             "competency_name": comp.get("competency_name") or comp.get("assessment_type", "Assessment"),
             "area": comp.get("area") or comp.get("competency_area"),
             "status": comp.get("status", "pending"),
             "scheduled_date": comp.get("scheduled_date") or comp.get("due_date"),
-            "completed_date": comp.get("completed_date") or comp.get("assessment_date"),
-            "outcome": comp.get("outcome"),
+            "completed_date": comp.get("completed_date") or comp.get("assessment_date") or comp.get("assessed_at"),
+            "review_due_date": comp.get("review_due_date"),
+            "outcome": derived_outcome,
             "assessed_by_name": comp.get("assessed_by_name") or comp.get("assessor_name"),
             "notes": comp.get("notes"),
             "follow_up_required": comp.get("follow_up_required", False),
@@ -1650,10 +1664,11 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             "id": spot.get("id"),
             "type": spot.get("type", "observation"),
             "area": spot.get("area"),
-            "date": spot.get("date") or spot.get("scheduled_date"),
+            "date": spot.get("date") or spot.get("check_date") or spot.get("scheduled_date"),
             "outcome": spot.get("outcome"),
             "notes": spot.get("notes"),
-            "assessed_by_name": spot.get("assessed_by_name"),
+            "assessed_by_name": spot.get("assessed_by_name") or spot.get("checked_by_name") or spot.get("scheduled_by_name"),
+            "status": spot.get("status"),
             "follow_up_required": spot.get("follow_up_required", False),
             "follow_up_date": spot.get("follow_up_date")
         })
@@ -1666,11 +1681,12 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
     for sv in supervision_records:
         supervisions_status.append({
             "id": sv.get("id"),
+            "supervision_type": sv.get("supervision_type"),
             "status": sv.get("status"),
             "scheduled_at": sv.get("scheduled_at"),
             "completed_at": sv.get("completed_at"),
             "next_due_at": sv.get("next_due_at"),
-            "supervisor_name": sv.get("supervisor_name"),
+            "supervisor_name": sv.get("supervisor_name") or sv.get("supervisor_id"),
             "notes": sv.get("notes"),
         })
 

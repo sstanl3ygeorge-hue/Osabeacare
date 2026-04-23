@@ -21,6 +21,7 @@ from pydantic import BaseModel, ConfigDict
 from .dependencies import (
     get_db,
     get_current_user,
+    get_current_worker,
     require_admin,
     log_audit_action,
 )
@@ -97,6 +98,8 @@ class IncidentLogCreate(BaseModel):
     root_cause: Optional[str] = None
     corrective_actions: Optional[str] = None
     lessons_learned: Optional[str] = None
+    related_shift_id: Optional[str] = None
+    service_user_id: Optional[str] = None
 
 
 class IncidentLogUpdate(BaseModel):
@@ -108,6 +111,7 @@ class IncidentLogUpdate(BaseModel):
     lessons_learned: Optional[str] = None
     closed_at: Optional[str] = None
     closed_by: Optional[str] = None
+    action_taken: Optional[str] = None
 
 
 class InsuranceDocUpdate(BaseModel):
@@ -165,8 +169,70 @@ class IncidentLogResponse(BaseModel):
     reported_at: str
     closed_at: Optional[str] = None
     closed_by: Optional[str] = None
+    related_shift_id: Optional[str] = None
+    service_user_id: Optional[str] = None
+    reporter_type: Optional[str] = None
+    submitted_by_employee_id: Optional[str] = None
+    action_taken: Optional[str] = None
+    notes: Optional[List[Dict[str, Any]]] = None
     created_at: str
     updated_at: str
+
+
+class WorkerIncidentCreate(BaseModel):
+    incident_type: str = "incident"
+    occurred_at: str
+    description: str
+    location_text: str
+    title: Optional[str] = None
+    related_shift_id: Optional[str] = None
+    note: Optional[str] = None
+    service_user_id: Optional[str] = None
+
+
+class IncidentNoteCreate(BaseModel):
+    note: str
+
+
+def _build_worker_incident_view(incident: Dict[str, Any]) -> Dict[str, Any]:
+    status = (incident.get("status") or "open").lower()
+    status_label = {
+        "open": "Submitted",
+        "under_review": "Under review",
+        "investigating": "Under review",
+        "resolved": "Resolved",
+        "closed": "Closed",
+    }.get(status, status.replace("_", " ").title())
+
+    progress_summary = {
+        "open": "Your report has been submitted and is awaiting review.",
+        "under_review": "Your report is being reviewed.",
+        "investigating": "Your report is being reviewed.",
+        "resolved": "Review is complete and the case outcome has been recorded.",
+        "closed": "Review is complete and the incident has been closed.",
+    }.get(status, "Your report is being processed.")
+
+    action_taken = incident.get("action_taken")
+    outcome_summary = action_taken.strip() if isinstance(action_taken, str) and action_taken.strip() else None
+
+    return {
+        "id": incident.get("id"),
+        "reference_number": incident.get("reference_number"),
+        "incident_type": incident.get("incident_type"),
+        "title": incident.get("title"),
+        "description": incident.get("description"),
+        "date_occurred": incident.get("date_occurred"),
+        "location": incident.get("location"),
+        "status": status,
+        "status_label": status_label,
+        "progress_summary": progress_summary,
+        "outcome_summary": outcome_summary,
+        "reported_at": incident.get("reported_at"),
+        "reviewed_at": incident.get("reviewed_at"),
+        "closed_at": incident.get("closed_at"),
+        "updated_at": incident.get("updated_at"),
+        "related_shift_id": incident.get("related_shift_id"),
+    }
 
 
 # ==================== CONSTANTS ====================
@@ -950,11 +1016,20 @@ async def create_incident(incident: IncidentLogCreate, user: dict = Depends(requ
     count = await db.incident_logs.count_documents({})
     ref_number = f"INC-{datetime.now().year}-{str(count + 1).zfill(4)}"
     
+    if incident.related_shift_id:
+        shift_exists = await db.shifts.find_one({"id": incident.related_shift_id}, {"_id": 0, "id": 1})
+        if not shift_exists:
+            raise HTTPException(status_code=400, detail="Related shift not found")
+
     doc = {
         "id": str(uuid.uuid4()),
         "reference_number": ref_number,
         **incident.model_dump(),
         "status": "open",
+        "notes": [],
+        "action_taken": None,
+        "reporter_type": "admin",
+        "submitted_by_employee_id": None,
         "reported_by": user['user_id'],
         "reported_at": now,
         "closed_at": None,
@@ -994,12 +1069,23 @@ async def update_incident(
     
     for field, value in updates.model_dump(exclude_none=True).items():
         update_dict[field] = value
-    
+
+    if updates.status in {"under_review", "investigating", "resolved", "closed"}:
+        update_dict["reviewed_by"] = user.get("user_id")
+        update_dict["reviewed_at"] = now
+
     if updates.status == "closed":
         update_dict["closed_at"] = now
         update_dict["closed_by"] = user['user_id']
-    
+
     await db.incident_logs.update_one({"id": incident_id}, {"$set": update_dict})
+    await log_audit_action(
+        user['user_id'],
+        "update_incident",
+        "incident_log",
+        incident_id,
+        {"changes": {k: v for k, v in update_dict.items() if k != "updated_at"}},
+    )
     
     updated = await db.incident_logs.find_one({"id": incident_id}, {"_id": 0})
     return updated
@@ -1055,6 +1141,137 @@ async def get_incident_history(incident_id: str, user: dict = Depends(require_ad
         {"_id": 0}
     ).sort("amended_at", -1).to_list(100)
     return {"history": history}
+
+
+@router.post("/compliance/incidents/{incident_id}/notes")
+async def add_incident_note(
+    incident_id: str,
+    payload: IncidentNoteCreate,
+    user: dict = Depends(require_admin),
+):
+    db = get_db()
+    incident = await db.incident_logs.find_one({"id": incident_id}, {"_id": 0})
+    if not incident:
+        raise HTTPException(status_code=404, detail="Incident not found")
+    if not payload.note or not payload.note.strip():
+        raise HTTPException(status_code=400, detail="Note is required")
+
+    now = datetime.now(timezone.utc).isoformat()
+    note_entry = {
+        "id": str(uuid.uuid4()),
+        "text": payload.note.strip(),
+        "author_id": user.get("user_id"),
+        "author_email": user.get("email"),
+        "author_type": "admin",
+        "created_at": now,
+    }
+    await db.incident_logs.update_one(
+        {"id": incident_id},
+        {
+            "$push": {"notes": note_entry},
+            "$set": {"updated_at": now}
+        },
+    )
+    await log_audit_action(
+        user['user_id'],
+        "incident_note_added",
+        "incident_log",
+        incident_id,
+        {"note_id": note_entry["id"]},
+    )
+    return {"success": True, "note": note_entry}
+
+
+@router.post("/worker/incidents")
+async def create_worker_incident(
+    payload: WorkerIncidentCreate,
+    worker: dict = Depends(get_current_worker),
+):
+    db = get_db()
+    employee_id = worker.get("employee_id")
+    if not employee_id:
+        raise HTTPException(status_code=400, detail="No employee linked to worker account")
+
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "first_name": 1, "last_name": 1})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    if payload.related_shift_id:
+        assignment = await db.shift_assignments.find_one(
+            {"shift_id": payload.related_shift_id, "employee_id": employee_id},
+            {"_id": 0, "id": 1}
+        )
+        if not assignment:
+            raise HTTPException(status_code=400, detail="Related shift is not assigned to this worker")
+
+    now = datetime.now(timezone.utc).isoformat()
+    count = await db.incident_logs.count_documents({})
+    ref_number = f"INC-{datetime.now().year}-{str(count + 1).zfill(4)}"
+
+    note_items = []
+    if payload.note and payload.note.strip():
+        note_items.append({
+            "id": str(uuid.uuid4()),
+            "text": payload.note.strip(),
+            "author_type": "worker",
+            "author_id": employee_id,
+            "created_at": now,
+        })
+
+    doc = {
+        "id": str(uuid.uuid4()),
+        "reference_number": ref_number,
+        "incident_type": payload.incident_type,
+        "title": payload.title or f"Worker incident report ({payload.incident_type})",
+        "description": payload.description,
+        "date_occurred": payload.occurred_at,
+        "location": payload.location_text,
+        "persons_involved": None,
+        "immediate_actions": None,
+        "root_cause": None,
+        "corrective_actions": None,
+        "lessons_learned": None,
+        "status": "open",
+        "action_taken": None,
+        "related_shift_id": payload.related_shift_id,
+        "service_user_id": payload.service_user_id,
+        "notes": note_items,
+        "reporter_type": "worker",
+        "submitted_by_employee_id": employee_id,
+        "reported_by": employee_id,
+        "reported_by_name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
+        "reported_at": now,
+        "closed_at": None,
+        "closed_by": None,
+        "reviewed_by": None,
+        "reviewed_at": None,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+    await db.incident_logs.insert_one(doc)
+    await log_audit_action(
+        employee_id,
+        "worker_create_incident",
+        "incident_log",
+        doc["id"],
+        {"reference": ref_number, "incident_type": payload.incident_type, "related_shift_id": payload.related_shift_id},
+    )
+    return {"success": True, "incident": _build_worker_incident_view(doc)}
+
+
+@router.get("/worker/incidents")
+async def list_worker_incidents(worker: dict = Depends(get_current_worker)):
+    db = get_db()
+    employee_id = worker.get("employee_id")
+    if not employee_id:
+        raise HTTPException(status_code=400, detail="No employee linked to worker account")
+
+    incidents = await db.incident_logs.find(
+        {"submitted_by_employee_id": employee_id},
+        {"_id": 0}
+    ).sort("created_at", -1).to_list(500)
+    return {"incidents": [_build_worker_incident_view(incident) for incident in incidents], "total": len(incidents)}
 
 
 # ==================== COMPLIANCE REPORTS ====================

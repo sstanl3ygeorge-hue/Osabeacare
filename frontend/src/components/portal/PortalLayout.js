@@ -32,6 +32,7 @@ const navigation = [
   { name: 'CQC Dashboard', href: '/portal/cqc-dashboard', icon: Shield },
   { name: 'Feedback', href: '/portal/feedback', icon: MessageSquare },
   { name: 'Complaints', href: '/portal/complaints', icon: AlertTriangle },
+  { name: 'Incidents', href: '/portal/incidents', icon: AlertTriangle },
   // Policy Assignments removed - consolidated into Compliance Centre
   { name: 'Training', href: '/portal/training', icon: GraduationCap },
   { name: 'DBS Register', href: '/portal/dbs-register', icon: Shield },

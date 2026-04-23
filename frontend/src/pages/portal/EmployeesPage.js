@@ -44,7 +44,7 @@ const STAGE_PRESETS = [
   { key: 'ALL', label: 'All' },
   { key: 'ONBOARDING', label: 'Onboarding' },
   { key: 'READY_TO_WORK', label: 'Ready for Work' },
-  { key: 'CAN_PROMOTE', label: 'Can Promote' },
+  { key: 'CAN_PROMOTE', label: 'Eligible to Move to Active' },
   { key: 'ACTIVE', label: 'Active' },
   { key: 'INACTIVE', label: 'Inactive' },
 ];
@@ -253,7 +253,7 @@ export default function EmployeesPage() {
     if (emp?.status === 'active' || emp?.status === 'active_employee') return 'Active Workforce';
     if (emp?.status === 'inactive') return 'Inactive';
     if (emp?.status === 'onboarding') {
-      return canPromoteEmployee(emp) ? 'Ready to activate' : 'Onboarding';
+      return canPromoteEmployee(emp) ? 'Eligible to move to Active' : 'Onboarding';
     }
     return (emp?.status || 'Unknown').replace(/_/g, ' ');
   };
@@ -699,7 +699,7 @@ export default function EmployeesPage() {
                 <SelectItem value="CAN_PROMOTE">
                   <span className="flex items-center gap-2">
                     <span className="w-2 h-2 rounded-full bg-warning"></span>
-                    Promotion Eligible
+                    Eligible to Move to Active
                   </span>
                 </SelectItem>
                 <SelectItem value="NOT_READY">
@@ -852,7 +852,7 @@ export default function EmployeesPage() {
                     const statusLabel = readiness.is_work_ready === true
                       ? 'Ready for Work'
                       : readiness.can_promote === true
-                        ? 'Promotion Eligible'
+                        ? 'Eligible to Move to Active'
                         : 'Not ready for work';
                     const statusColor = readiness.is_work_ready === true ? 'bg-success/10 text-success' :
                                       readiness.can_promote === true ? 'bg-warning/10 text-warning' :

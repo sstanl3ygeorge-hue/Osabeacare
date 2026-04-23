@@ -3861,7 +3861,7 @@ export default function EmployeeProfilePage() {
   const canonicalReadinessLabel = canonicalIsWorkReady
     ? 'Ready for Work'
     : canonicalCanPromote
-      ? 'Ready for Promotion'
+      ? 'Eligible to Move to Active'
       : 'Not ready for work';
   const canonicalReadinessClass = canonicalIsWorkReady || canonicalCanPromote
     ? 'bg-green-100 text-green-800'
@@ -3988,7 +3988,7 @@ export default function EmployeeProfilePage() {
                     if (canonicalCanPromote) {
                       return (
                         <span className="px-2 py-1 rounded-lg text-xs font-medium bg-green-100 text-green-800" data-testid="ready-badge">
-                          Ready for Promotion
+                          Eligible to Move to Active
                         </span>
                       );
                     }
@@ -4019,7 +4019,7 @@ export default function EmployeeProfilePage() {
                       {employee.status === 'active' || employee.status === 'active_employee'
                         ? 'Lifecycle: Active Workforce'
                         : canPromoteToActiveNow
-                          ? 'Lifecycle: Ready to activate'
+                          ? 'Lifecycle: Eligible to move to Active'
                           : employee.status === 'onboarding'
                             ? 'Lifecycle: Onboarding'
                             : `Lifecycle: ${(employee.status || 'unknown').replace(/_/g, ' ')}`}

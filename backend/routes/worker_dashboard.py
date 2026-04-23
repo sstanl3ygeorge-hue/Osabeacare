@@ -36,6 +36,7 @@ from agreement_document_service import (
     _employee_name,
     resolve_employee_agreement_state,
 )
+from .recurring_compliance import compute_recurring_status
 
 # Reference status enum (shared with stageGates)
 import sys
@@ -1656,6 +1657,65 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             "follow_up_required": spot.get("follow_up_required", False),
             "follow_up_date": spot.get("follow_up_date")
         })
+
+    # Supervisions (ongoing workforce obligations)
+    supervision_records = await db.supervisions.find({
+        "employee_id": employee_id
+    }, {"_id": 0}).sort("scheduled_at", -1).to_list(20)
+    supervisions_status = []
+    for sv in supervision_records:
+        supervisions_status.append({
+            "id": sv.get("id"),
+            "status": sv.get("status"),
+            "scheduled_at": sv.get("scheduled_at"),
+            "completed_at": sv.get("completed_at"),
+            "next_due_at": sv.get("next_due_at"),
+            "supervisor_name": sv.get("supervisor_name"),
+            "notes": sv.get("notes"),
+        })
+
+    # Recurring compliance snapshot (active workforce surfacing only, no new truth path)
+    recurring_summary = {
+        "total": 0,
+        "overdue": 0,
+        "due": 0,
+        "upcoming": 0,
+        "scheduled": 0,
+        "preview": [],
+    }
+    recurring_items = await db.recurring_compliance.find(
+        {"employee_id": employee_id, "$or": [{"is_active": True}, {"is_active": {"$exists": False}}]},
+        {"_id": 0, "id": 1, "item_type": 1, "item_name": 1, "next_due_date": 1, "computed_status": 1, "days_until_due": 1}
+    ).to_list(100)
+    if recurring_items:
+        status_priority = {"overdue": 0, "due": 1, "upcoming": 2, "scheduled": 3}
+        normalized = []
+        for item in recurring_items:
+            computed_status = item.get("computed_status")
+            days_until_due = item.get("days_until_due")
+            if not computed_status:
+                computed_status, days = compute_recurring_status(item.get("next_due_date"))
+                days_until_due = days if days >= 0 else 0
+            normalized_item = {
+                "id": item.get("id"),
+                "item_type": item.get("item_type"),
+                "item_name": item.get("item_name"),
+                "next_due_date": item.get("next_due_date"),
+                "computed_status": computed_status,
+                "days_until_due": days_until_due,
+            }
+            normalized.append(normalized_item)
+            recurring_summary["total"] += 1
+            if computed_status in recurring_summary:
+                recurring_summary[computed_status] += 1
+
+        normalized.sort(
+            key=lambda x: (
+                status_priority.get(x.get("computed_status"), 4),
+                x.get("days_until_due", 9999)
+            )
+        )
+        recurring_summary["preview"] = normalized[:5]
     
     return {
         "employee": {
@@ -1696,6 +1756,8 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
         "induction": induction_status,
         "competency_assessments": competency_status,
         "spot_checks": spot_check_status,
+        "supervisions": supervisions_status,
+        "recurring_compliance_summary": recurring_summary,
         "agreements": agreements_status
     }
 

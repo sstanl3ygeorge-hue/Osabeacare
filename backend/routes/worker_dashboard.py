@@ -80,6 +80,33 @@ FORM_LOCKED_STATUSES = ["submitted", "verified", "signed_off", "reviewed", "appr
 FORM_CORRECTION_STATUSES = ["rejected", "amendment_requested", "returned_for_correction", "reopened_for_worker_correction"]
 
 
+async def _canonicalize_health_form_worker_status(db, employee_id: str, form_id: str, status: str) -> str:
+    """
+    Ensure worker-facing health form status aligns with canonical readiness truth.
+
+    Staff Health Questionnaire must not appear effectively complete from generic
+    form sign-off/review flags unless a canonical health declaration outcome
+    exists in db.health_declarations.status ∈ {"fit", "conditional"}.
+    """
+    if form_id != "staff_health_questionnaire":
+        return status
+    if status not in ["verified", "signed_off", "reviewed", "approved"]:
+        return status
+
+    health_decl = await db.health_declarations.find_one(
+        {"employee_id": employee_id},
+        {"_id": 0, "status": 1, "reviewed_at": 1, "submitted_at": 1, "declaration_date": 1},
+        sort=[("reviewed_at", -1), ("submitted_at", -1), ("declaration_date", -1)],
+    )
+    canonical_status = (health_decl or {}).get("status")
+    if canonical_status in ("fit", "conditional"):
+        return status
+
+    # Keep worker-facing copy explicit: questionnaire submitted, health outcome
+    # still pending/requires further clinical review.
+    return "submitted"
+
+
 # ── Employment-readiness canonical state model ───────────────────────────────
 # Pure, testable helper kept at module scope so tests can exercise every branch
 # without spinning up the DB.  The worker_dashboard endpoint delegates to this.
@@ -2348,6 +2375,7 @@ async def get_worker_forms(worker: dict = Depends(get_current_worker)):
         
         if submission:
             status = submission.get("status", "submitted")
+            status = await _canonicalize_health_form_worker_status(db, employee_id, form_id, status)
             submitted_at = submission.get("submitted_at")
         elif progress:
             status = "in_progress"
@@ -2410,10 +2438,16 @@ async def get_worker_form_data(form_id: str, worker: dict = Depends(get_current_
     }, {"_id": 0}, sort=[("updated_at", -1), ("submitted_at", -1), ("created_at", -1)])
     
     if submission and submission.get("status") in FORM_LOCKED_STATUSES:
+        worker_status = await _canonicalize_health_form_worker_status(
+            db,
+            employee_id,
+            form_id,
+            submission.get("status"),
+        )
         return {
             "form_id": form_id,
             "form_definition": form_definition,
-            "status": submission.get("status"),
+            "status": worker_status,
             "data": submission.get("form_data", {}),
             "submitted_at": submission.get("submitted_at"),
             "can_edit": False

@@ -271,9 +271,14 @@ _HANDBOOK_ARTIFACT_PHRASES = [
 def _resolve_handbook_fields(org_settings: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """Map org_settings → canonical handbook field dict."""
     s = org_settings or {}
-    org_name = s.get("organisation_name") or None
+    org_name = (
+        s.get("organisation_name")
+        or s.get("company_name")
+        or None
+    )
     org_address = (
-        s.get("organisation_address")
+        s.get("company_address")
+        or s.get("organisation_address")
         or s.get("business_address")
         or s.get("registered_address")
         or s.get("address")

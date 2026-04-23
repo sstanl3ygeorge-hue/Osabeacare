@@ -34,6 +34,7 @@ router = APIRouter(tags=["Admin Operations"])
 
 class OrgSettingsUpdate(BaseModel):
     company_name: Optional[str] = None
+    company_address: Optional[str] = None
     tagline: Optional[str] = None
     primary_color: Optional[str] = None
     logo_url: Optional[str] = None
@@ -56,6 +57,7 @@ async def get_org_settings():
         return {
             "id": "default",
             "company_name": "Osabea Healthcare",
+            "company_address": None,
             "tagline": "Care Recruitment Excellence",
             "primary_color": "#2563EB",
             "logo_url": None,

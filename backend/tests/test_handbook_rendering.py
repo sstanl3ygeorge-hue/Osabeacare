@@ -79,6 +79,12 @@ _ORG_SETTINGS_NO_ADDRESS = {
     # deliberately omitting organisation_address
 }
 
+_ORG_SETTINGS_COMPANY_KEYS = {
+    "company_name": "Osabea Healthcare Solutions Ltd",
+    "company_address": "19 Station Road, Harlow, CM20 2BB",
+    "mileage_rate": "0.45",
+}
+
 _EMPLOYEE = {
     "id": "emp_handbook_test_001",
     "name": "Jane Smith",
@@ -281,6 +287,13 @@ class TestHandbookFieldValidation:
     def test_complete_org_settings_no_error(self):
         """Complete org settings must not raise."""
         fields = _resolve_handbook_fields(_ORG_SETTINGS)
+        _validate_handbook_fields(fields)  # must not raise
+
+    def test_company_key_org_settings_no_error(self):
+        """Live org settings using company_* keys must also resolve cleanly."""
+        fields = _resolve_handbook_fields(_ORG_SETTINGS_COMPANY_KEYS)
+        assert fields["company_name"] == "Osabea Healthcare Solutions Ltd"
+        assert fields["company_address"] == "19 Station Road, Harlow, CM20 2BB"
         _validate_handbook_fields(fields)  # must not raise
 
     def test_missing_company_address_raises(self):

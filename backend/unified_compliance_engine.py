@@ -42,8 +42,7 @@ from induction_definitions import (
 )
 from agreement_document_service import (
     HANDBOOK_AGREEMENT_TYPE,
-    HandbookRenderError,
-    build_agreement_rendering,
+    resolve_employee_agreement_state,
 )
 
 logger = logging.getLogger(__name__)
@@ -1313,43 +1312,13 @@ async def get_unified_employee_status(
     checks["contract"] = contract_fully_executed
     
     # Handbook
-    # Check legacy acknowledgements first, then template-based submissions.
-    handbook_ack = None
-    for ack in agreements:
-        ack_type = (ack.get("agreement_type") or "").lower()
-        if "handbook" in ack_type:
-            if ack.get("status") in ["acknowledged", "signed", "submitted", "verified", "rejected"]:
-                handbook_ack = ack
-                break
-
-    # Fallback: EMPLOYEE_HANDBOOK_ACKNOWLEDGEMENT_V1 template submission
-    if not handbook_ack:
-        _handbook_sub = await db.agreement_submissions.find_one(
-            {
-                "employee_id": emp_id,
-                "template_id": "EMPLOYEE_HANDBOOK_ACKNOWLEDGEMENT_V1",
-            },
-            {"_id": 0},
-        )
-        if _handbook_sub:
-            handbook_ack = _handbook_sub
-
-    handbook_render_issue = None
-    try:
-        await build_agreement_rendering(db, employee, HANDBOOK_AGREEMENT_TYPE)
-    except HandbookRenderError as exc:
-        handbook_render_issue = str(exc)
-    except Exception:
-        # Keep UCE resilient; an unexpected render exception should not break readiness computation.
-        handbook_render_issue = None
-
-    handbook_acknowledged = bool(
-        handbook_ack
-        and handbook_ack.get("acknowledged")
-        and handbook_ack.get("verification_status") != "rejected"
-    )
-    handbook_rejected = bool(handbook_ack and handbook_ack.get("verification_status") == "rejected")
-    checks["handbook"] = handbook_acknowledged
+    handbook_state = await resolve_employee_agreement_state(db, employee, HANDBOOK_AGREEMENT_TYPE)
+    handbook_ack = handbook_state.get("acknowledgement") or {}
+    handbook_render_issue = handbook_state.get("render_issue")
+    handbook_acknowledged = bool(handbook_state.get("worker_acknowledged"))
+    handbook_verified = bool(handbook_state.get("verified"))
+    handbook_rejected = bool(handbook_state.get("rejected"))
+    checks["handbook"] = handbook_verified or handbook_acknowledged
 
     categories["agreements"]["items"] = [
         {
@@ -1363,12 +1332,12 @@ async def get_unified_employee_status(
         {
             "id": "handbook",
             "name": "Employee Handbook",
-            "completed": handbook_acknowledged,
-            "status": "rejected" if handbook_rejected else ("acknowledged" if handbook_acknowledged else "pending"),
+            "completed": checks["handbook"],
+            "status": handbook_state.get("status") or ("rejected" if handbook_rejected else ("acknowledged" if handbook_acknowledged else "pending")),
             "render_issue": handbook_render_issue,
         },
     ]
-    categories["agreements"]["completed"] = (1 if contract_fully_executed else 0) + (1 if handbook_acknowledged else 0)
+    categories["agreements"]["completed"] = (1 if contract_fully_executed else 0) + (1 if checks["handbook"] else 0)
 
     if contract_rejected:
         blockers.append(_build_blocker(
@@ -1410,7 +1379,7 @@ async def get_unified_employee_status(
             "agreements",
             "required",
         ))
-    elif handbook_render_issue:
+    elif handbook_render_issue and not checks["handbook"]:
         blockers.append(_build_blocker(
             "handbook",
             "handbook_render",
@@ -1428,7 +1397,7 @@ async def get_unified_employee_status(
             "agreements",
             "required",
         ))
-    elif not handbook_acknowledged:
+    elif not checks["handbook"]:
         blockers.append(_build_blocker(
             "handbook",
             "handbook_acknowledged",

@@ -1261,6 +1261,29 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
         employment_readiness = "ready_for_work"
         employment_readiness_label = _EMPLOYMENT_READINESS_LABELS["ready_for_work"]
         employment_readiness_blockers = []
+    elif 'unified_status' in locals() and isinstance(unified_status, dict):
+        if unified_blockers:
+            if any(blocker.get("blocker_class") == "internal" and blocker.get("gate") == "handbook_render" for blocker in unified_blockers):
+                employment_readiness = "system_issue_preventing_completion"
+            else:
+                employment_readiness = "admin_review_in_progress"
+        else:
+            employment_readiness = "ready_for_work"
+        employment_readiness_label = _EMPLOYMENT_READINESS_LABELS[employment_readiness]
+        employment_readiness_blockers = [
+            {
+                "type": blocker.get("id"),
+                "classification": blocker.get("blocker_class"),
+                "label": blocker.get("reason"),
+                "actor": (
+                    "worker" if blocker.get("blocker_class") == "worker_action"
+                    else "company" if blocker.get("blocker_class") == "company_action"
+                    else "system" if blocker.get("blocker_class") == "system_issue"
+                    else "admin"
+                ),
+            }
+            for blocker in unified_blockers
+        ]
     else:
         (
             employment_readiness,

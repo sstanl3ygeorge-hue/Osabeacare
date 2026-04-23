@@ -100,7 +100,9 @@ async def _canonicalize_health_form_worker_status(db, employee_id: str, form_id:
     )
     canonical_status = (health_decl or {}).get("status")
     if canonical_status in ("fit", "conditional"):
-        return status
+        # For worker UX consistency, collapse any admin terminal review flavor
+        # (signed_off/reviewed/approved/verified) into a single "verified" state.
+        return "verified"
 
     # Keep worker-facing copy explicit: questionnaire submitted, health outcome
     # still pending/requires further clinical review.
@@ -1367,7 +1369,11 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             form_progress_pct = 0
             
             if submission:
-                form_status = "submitted" if submission.get("status") == "submitted" else "verified"
+                raw_submission_status = submission.get("status", "submitted")
+                normalized_submission_status = await _canonicalize_health_form_worker_status(
+                    db, employee_id, form_id, raw_submission_status
+                )
+                form_status = "submitted" if normalized_submission_status == "submitted" else "verified"
                 submitted_at = submission.get("submitted_at")
             elif progress:
                 form_status = "in_progress"

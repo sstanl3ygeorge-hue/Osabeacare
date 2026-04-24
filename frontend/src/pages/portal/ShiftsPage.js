@@ -76,6 +76,7 @@ export default function ShiftsPage() {
   const [assigning, setAssigning] = useState(false);
   const [shifts, setShifts] = useState([]);
   const [employees, setEmployees] = useState([]);
+  const [careLocations, setCareLocations] = useState([]);
   const [statusFilter, setStatusFilter] = useState('all');
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [detailShift, setDetailShift] = useState(null);
@@ -93,6 +94,7 @@ export default function ShiftsPage() {
     location_text: '',
     role_required: '',
     service_user_id: '',
+    care_location_id: '',
     notes: '',
   });
 
@@ -126,10 +128,26 @@ export default function ShiftsPage() {
     }
   };
 
+  const fetchActiveCareLocations = async () => {
+    try {
+      const res = await axios.get(`${API}/care-locations`, {
+        headers,
+        params: { include_inactive: false },
+      });
+      const rows = Array.isArray(res.data)
+        ? res.data
+        : (res.data?.care_locations || []);
+      setCareLocations(rows.filter((loc) => loc?.is_active !== false));
+    } catch (error) {
+      toast.error('Failed to load care locations');
+    }
+  };
+
   useEffect(() => {
     if (!token) return;
     fetchShifts();
     fetchActiveEmployees();
+    fetchActiveCareLocations();
   }, [token, statusFilter, serviceUserIdFilter]);
 
   const handleCreateShift = async (e) => {
@@ -150,6 +168,7 @@ export default function ShiftsPage() {
           location_text: newShift.location_text,
           role_required: newShift.role_required,
           service_user_id: newShift.service_user_id || null,
+          care_location_id: newShift.care_location_id || null,
           notes: newShift.notes || null,
         },
         { headers }
@@ -162,6 +181,7 @@ export default function ShiftsPage() {
         location_text: '',
         role_required: '',
         service_user_id: '',
+        care_location_id: '',
         notes: '',
       });
       fetchShifts();
@@ -349,6 +369,25 @@ export default function ShiftsPage() {
                   />
                 </div>
                 <div className="space-y-2">
+                  <Label htmlFor="care_location_id">Care Location (optional)</Label>
+                  <Select
+                    value={newShift.care_location_id || 'none'}
+                    onValueChange={(value) => setNewShift((prev) => ({ ...prev, care_location_id: value === 'none' ? '' : value }))}
+                  >
+                    <SelectTrigger id="care_location_id">
+                      <SelectValue placeholder="Select care location" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None</SelectItem>
+                      {careLocations.map((loc) => (
+                        <SelectItem key={loc.id} value={loc.id}>
+                          {loc.name} {loc.city ? `(${loc.city})` : ''}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
                   <Label htmlFor="shift_notes">Notes (optional)</Label>
                   <Textarea
                     id="shift_notes"
@@ -408,6 +447,13 @@ export default function ShiftsPage() {
                   <div className="flex items-start justify-between gap-3">
                     <div className="space-y-1">
                       <p className="font-medium text-text-primary">{shift.location_text}</p>
+                      {shift.care_location ? (
+                        <p className="text-xs text-text-muted">
+                          Care location: {shift.care_location.name}
+                          {shift.care_location.address_line_1 ? `, ${shift.care_location.address_line_1}` : ''}
+                          {shift.care_location.city ? `, ${shift.care_location.city}` : ''}
+                        </p>
+                      ) : null}
                       <p className="text-sm text-text-muted">{shift.role_required}</p>
                       <p className="text-xs text-text-muted">
                         {formatDateTime(shift.start_at)} → {formatDateTime(shift.end_at)}
@@ -542,6 +588,17 @@ export default function ShiftsPage() {
                 <p className="font-medium">Location</p>
                 <p className="text-text-muted">{detailShift.shift.location_text}</p>
               </div>
+              {detailShift.shift.care_location ? (
+                <div>
+                  <p className="font-medium">Linked Care Location</p>
+                  <p className="text-text-muted">
+                    {detailShift.shift.care_location.name}
+                    {detailShift.shift.care_location.address_line_1 ? `, ${detailShift.shift.care_location.address_line_1}` : ''}
+                    {detailShift.shift.care_location.city ? `, ${detailShift.shift.care_location.city}` : ''}
+                    {detailShift.shift.care_location.postcode ? `, ${detailShift.shift.care_location.postcode}` : ''}
+                  </p>
+                </div>
+              ) : null}
               <div>
                 <p className="font-medium">Role Required</p>
                 <p className="text-text-muted">{detailShift.shift.role_required}</p>

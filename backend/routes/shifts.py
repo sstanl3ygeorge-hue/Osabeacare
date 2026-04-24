@@ -44,6 +44,7 @@ class ShiftCreateRequest(BaseModel):
     location_text: str = Field(..., min_length=2)
     role_required: str = Field(..., min_length=2)
     service_user_id: Optional[str] = None
+    care_location_id: Optional[str] = None
     notes: Optional[str] = None
 
 
@@ -53,6 +54,7 @@ class ShiftUpdateRequest(BaseModel):
     location_text: Optional[str] = Field(default=None, min_length=2)
     role_required: Optional[str] = Field(default=None, min_length=2)
     service_user_id: Optional[str] = None
+    care_location_id: Optional[str] = None
     notes: Optional[str] = None
     status: Optional[str] = None
     cancel_reason: Optional[str] = None
@@ -110,6 +112,32 @@ async def _get_shift_or_404(shift_id: str) -> Dict[str, Any]:
     if not shift:
         raise HTTPException(status_code=404, detail="Shift not found")
     return shift
+
+
+async def _get_active_care_location_or_404(care_location_id: str) -> Dict[str, Any]:
+    db = get_db()
+    location = await db.care_locations.find_one({"id": care_location_id}, {"_id": 0})
+    if not location:
+        raise HTTPException(status_code=404, detail="Care location not found")
+    if not location.get("is_active", True):
+        raise HTTPException(status_code=409, detail="Care location is inactive")
+    return location
+
+
+async def _attach_care_location_metadata(shifts: List[Dict[str, Any]]):
+    if not shifts:
+        return
+    db = get_db()
+    location_ids = sorted({s.get("care_location_id") for s in shifts if s.get("care_location_id")})
+    if not location_ids:
+        return
+    rows = await db.care_locations.find(
+        {"id": {"$in": location_ids}},
+        {"_id": 0, "id": 1, "name": 1, "address_line_1": 1, "city": 1, "postcode": 1, "is_active": 1},
+    ).to_list(500)
+    by_id = {row.get("id"): row for row in rows}
+    for shift in shifts:
+        shift["care_location"] = by_id.get(shift.get("care_location_id"))
 
 
 def _assert_transition(current_status: str, next_status: str):
@@ -205,6 +233,8 @@ async def create_shift(
 ):
     db = get_db()
     start_dt, end_dt = _ensure_valid_window(payload.start_at, payload.end_at)
+    if payload.care_location_id:
+        await _get_active_care_location_or_404(payload.care_location_id)
     now = _now_iso()
     shift_id = str(uuid.uuid4())
 
@@ -215,6 +245,7 @@ async def create_shift(
         "location_text": _normalize_required_text(payload.location_text, "location_text"),
         "role_required": _normalize_required_text(payload.role_required, "role_required"),
         "service_user_id": payload.service_user_id,
+        "care_location_id": payload.care_location_id,
         "notes": payload.notes,
         "status": "open",
         "assigned_employee_id": None,
@@ -265,6 +296,7 @@ async def list_shifts(
         query["service_user_id"] = service_user_id
 
     shifts = await db.shifts.find(query, {"_id": 0}).sort("start_at", 1).to_list(500)
+    await _attach_care_location_metadata(shifts)
     shift_ids = [shift.get("id") for shift in shifts if shift.get("id")]
     latest_by_shift_id: Dict[str, Dict[str, Any]] = {}
     if shift_ids:
@@ -287,6 +319,7 @@ async def get_shift(
     user: dict = Depends(require_manager_or_admin),
 ):
     shift = await _get_shift_or_404(shift_id)
+    await _attach_care_location_metadata([shift])
     assignment = await _get_active_assignment_for_shift(shift_id)
     latest_assignment = await _get_latest_assignment_for_shift(shift_id)
     return {"shift": shift, "active_assignment": assignment, "latest_assignment": latest_assignment}
@@ -332,6 +365,12 @@ async def update_shift(
         update["role_required"] = _normalize_required_text(payload.role_required, "role_required")
     if payload.service_user_id is not None:
         update["service_user_id"] = payload.service_user_id
+    if payload.care_location_id is not None:
+        if payload.care_location_id:
+            await _get_active_care_location_or_404(payload.care_location_id)
+            update["care_location_id"] = payload.care_location_id
+        else:
+            update["care_location_id"] = None
     if payload.notes is not None:
         update["notes"] = payload.notes
 
@@ -368,6 +407,7 @@ async def update_shift(
     update["updated_by"] = user.get("user_id")
     await db.shifts.update_one({"id": shift_id}, {"$set": update})
     updated = await _get_shift_or_404(shift_id)
+    await _attach_care_location_metadata([updated])
 
     audit_action = "shift_updated"
     if update.get("status") == "cancelled":
@@ -403,6 +443,8 @@ async def assign_worker_to_shift(
     shift = await _get_shift_or_404(shift_id)
     if shift.get("status") in {"completed", "cancelled"}:
         raise HTTPException(status_code=409, detail="Cannot assign worker to completed/cancelled shift")
+    if shift.get("care_location_id"):
+        await _get_active_care_location_or_404(shift.get("care_location_id"))
 
     existing_assignment = await _get_active_assignment_for_shift(shift_id)
     if existing_assignment:
@@ -429,6 +471,7 @@ async def assign_worker_to_shift(
         "location_text": shift.get("location_text"),
         "role_required": shift.get("role_required"),
         "service_user_id": shift.get("service_user_id"),
+        "care_location_id": shift.get("care_location_id"),
         "created_at": now,
         "updated_at": now,
         "worker_response_status": "pending",
@@ -441,6 +484,7 @@ async def assign_worker_to_shift(
         {"$set": {"status": "assigned", "assigned_employee_id": payload.employee_id, "updated_at": now, "updated_by": user.get("user_id")}},
     )
     updated_shift = await _get_shift_or_404(shift_id)
+    await _attach_care_location_metadata([updated_shift])
     await log_audit_action(
         user.get("user_id"),
         "shift_assignment_created",
@@ -483,6 +527,7 @@ async def unassign_worker_from_shift(
         {"$set": {"status": "open", "assigned_employee_id": None, "updated_at": now, "updated_by": user.get("user_id")}},
     )
     updated_shift = await _get_shift_or_404(shift_id)
+    await _attach_care_location_metadata([updated_shift])
     await log_audit_action(
         user.get("user_id"),
         "shift_assignment_cancelled",
@@ -531,6 +576,7 @@ async def complete_shift(
         {"$set": {"status": "completed", "assigned_employee_id": None, "updated_at": now, "updated_by": user.get("user_id")}},
     )
     updated_shift = await _get_shift_or_404(shift_id)
+    await _attach_care_location_metadata([updated_shift])
     await log_audit_action(
         user.get("user_id"),
         "shift_completed",
@@ -565,6 +611,7 @@ async def list_worker_shifts(
     shifts = []
     if shift_ids:
         shifts = await db.shifts.find({"id": {"$in": shift_ids}}, {"_id": 0}).to_list(500)
+    await _attach_care_location_metadata(shifts)
     shifts_by_id = {s.get("id"): s for s in shifts}
 
     result = []
@@ -601,6 +648,7 @@ async def get_worker_shift(
     if not assignment:
         raise HTTPException(status_code=404, detail="Shift not found for this worker")
     shift = await _get_shift_or_404(shift_id)
+    await _attach_care_location_metadata([shift])
     return {"assignment": assignment, "shift": shift}
 
 
@@ -614,6 +662,7 @@ async def accept_worker_shift(
     employee_id = await _require_active_worker_employee(worker, db)
 
     shift = await _get_shift_or_404(shift_id)
+    await _attach_care_location_metadata([shift])
     if shift.get("status") in {"completed", "cancelled"}:
         raise HTTPException(status_code=409, detail="This shift is no longer active")
 
@@ -666,6 +715,7 @@ async def reject_worker_shift(
     employee_id = await _require_active_worker_employee(worker, db)
 
     shift = await _get_shift_or_404(shift_id)
+    await _attach_care_location_metadata([shift])
     if shift.get("status") in {"completed", "cancelled"}:
         raise HTTPException(status_code=409, detail="This shift is no longer active")
 
@@ -703,6 +753,7 @@ async def reject_worker_shift(
         }},
     )
     updated_shift = await _get_shift_or_404(shift_id)
+    await _attach_care_location_metadata([updated_shift])
     updated_assignment = await db.shift_assignments.find_one({"id": assignment["id"]}, {"_id": 0})
     await log_audit_action(
         f"worker:{employee_id}",

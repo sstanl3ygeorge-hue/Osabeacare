@@ -33,6 +33,7 @@ import {
 import { toast } from 'sonner';
 import FileUploader from '../../components/ui/file-uploader';
 import { formatBackendDate, parseBackendDate } from '../../lib/dateUtils';
+import { useAuth } from '../../context/AuthContext';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -54,6 +55,7 @@ const TABS = [
 export default function ServiceUserProfilePage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { isManagerOrAdmin } = useAuth();
   const [serviceUser, setServiceUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('overview');
@@ -72,11 +74,37 @@ export default function ServiceUserProfilePage() {
   });
   
   const [editForm, setEditForm] = useState({});
+  const [carePlans, setCarePlans] = useState([]);
+  const [carePlansLoading, setCarePlansLoading] = useState(false);
+  const [carePlansLoaded, setCarePlansLoaded] = useState(false);
+  const [createCarePlanForm, setCreateCarePlanForm] = useState({
+    care_plan_title: '',
+    goals: '',
+    needs_summary: '',
+    support_instructions: '',
+    effective_from: '',
+    review_due_at: '',
+  });
+  const [editingDraftId, setEditingDraftId] = useState(null);
+  const [editCarePlanForm, setEditCarePlanForm] = useState({
+    care_plan_title: '',
+    goals: '',
+    needs_summary: '',
+    support_instructions: '',
+    effective_from: '',
+    review_due_at: '',
+  });
 
   useEffect(() => {
     fetchServiceUser();
     fetchSections();
   }, [id]);
+
+  useEffect(() => {
+    if (activeTab === '4_care_plans' && isManagerOrAdmin() && !carePlansLoaded) {
+      fetchCarePlans();
+    }
+  }, [activeTab, id, carePlansLoaded, isManagerOrAdmin]);
 
   const fetchServiceUser = async () => {
     try {
@@ -229,6 +257,235 @@ export default function ServiceUserProfilePage() {
     setShowUploadDialog(true);
   };
 
+  const resetCreateCarePlanForm = () => {
+    setCreateCarePlanForm({
+      care_plan_title: '',
+      goals: '',
+      needs_summary: '',
+      support_instructions: '',
+      effective_from: '',
+      review_due_at: '',
+    });
+  };
+
+  const mapPlanToEditForm = (plan) => {
+    setEditCarePlanForm({
+      care_plan_title: plan?.care_plan_title || '',
+      goals: Array.isArray(plan?.goals) ? plan.goals.join('\n') : '',
+      needs_summary: plan?.needs_summary || '',
+      support_instructions: plan?.support_instructions || '',
+      effective_from: plan?.effective_from?.slice(0, 10) || '',
+      review_due_at: plan?.review_due_at?.slice(0, 10) || '',
+    });
+  };
+
+  const parseGoalsInput = (goalsInput) => {
+    return (goalsInput || '')
+      .split(/\n|,/)
+      .map((goal) => goal.trim())
+      .filter(Boolean);
+  };
+
+  const normalizeCarePlanPayload = (formState) => {
+    return {
+      care_plan_title: (formState.care_plan_title || '').trim(),
+      goals: parseGoalsInput(formState.goals),
+      needs_summary: (formState.needs_summary || '').trim(),
+      support_instructions: (formState.support_instructions || '').trim(),
+      effective_from: formState.effective_from || null,
+      review_due_at: formState.review_due_at || null,
+    };
+  };
+
+  const fetchCarePlans = async () => {
+    if (!isManagerOrAdmin()) {
+      return;
+    }
+    setCarePlansLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`${API_URL}/api/service-users/${id}/care-plans?include_archived=true`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setCarePlans(Array.isArray(data) ? data : []);
+        setCarePlansLoaded(true);
+      } else {
+        const error = await response.json().catch(() => ({}));
+        toast.error(error.detail || 'Failed to load care plans');
+      }
+    } catch (error) {
+      console.error('Error loading care plans:', error);
+      toast.error('Failed to load care plans');
+    } finally {
+      setCarePlansLoading(false);
+    }
+  };
+
+  const handleCreateCarePlanDraft = async (e) => {
+    e.preventDefault();
+    const payload = normalizeCarePlanPayload(createCarePlanForm);
+    if (!payload.care_plan_title) {
+      toast.error('Care plan title is required');
+      return;
+    }
+
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`${API_URL}/api/service-users/${id}/care-plans`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+      if (response.ok) {
+        toast.success('Draft care plan created');
+        resetCreateCarePlanForm();
+        await fetchCarePlans();
+      } else {
+        const error = await response.json().catch(() => ({}));
+        toast.error(error.detail || 'Failed to create draft care plan');
+      }
+    } catch (error) {
+      console.error('Error creating draft care plan:', error);
+      toast.error('Failed to create draft care plan');
+    }
+  };
+
+  const beginEditDraft = (plan) => {
+    setEditingDraftId(plan.id);
+    mapPlanToEditForm(plan);
+  };
+
+  const cancelEditDraft = () => {
+    setEditingDraftId(null);
+    setEditCarePlanForm({
+      care_plan_title: '',
+      goals: '',
+      needs_summary: '',
+      support_instructions: '',
+      effective_from: '',
+      review_due_at: '',
+    });
+  };
+
+  const handleSaveDraftEdit = async (carePlanId) => {
+    const payload = normalizeCarePlanPayload(editCarePlanForm);
+    if (!payload.care_plan_title) {
+      toast.error('Care plan title is required');
+      return;
+    }
+
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`${API_URL}/api/service-users/${id}/care-plans/${carePlanId}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+      if (response.ok) {
+        toast.success('Draft care plan updated');
+        cancelEditDraft();
+        await fetchCarePlans();
+      } else {
+        const error = await response.json().catch(() => ({}));
+        toast.error(error.detail || 'Failed to update draft care plan');
+      }
+    } catch (error) {
+      console.error('Error updating draft care plan:', error);
+      toast.error('Failed to update draft care plan');
+    }
+  };
+
+  const handleActivateDraft = async (carePlanId) => {
+    if (!window.confirm('Activate this draft care plan? This will supersede any currently active version.')) {
+      return;
+    }
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`${API_URL}/api/service-users/${id}/care-plans/${carePlanId}/activate`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (response.ok) {
+        toast.success('Care plan activated');
+        await fetchCarePlans();
+      } else {
+        const error = await response.json().catch(() => ({}));
+        toast.error(error.detail || 'Failed to activate care plan');
+      }
+    } catch (error) {
+      console.error('Error activating care plan:', error);
+      toast.error('Failed to activate care plan');
+    }
+  };
+
+  const handleArchivePlan = async (carePlanId) => {
+    if (!window.confirm('Archive this care plan version?')) {
+      return;
+    }
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`${API_URL}/api/service-users/${id}/care-plans/${carePlanId}/archive`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({}),
+      });
+      if (response.ok) {
+        toast.success('Care plan archived');
+        await fetchCarePlans();
+      } else {
+        const error = await response.json().catch(() => ({}));
+        toast.error(error.detail || 'Failed to archive care plan');
+      }
+    } catch (error) {
+      console.error('Error archiving care plan:', error);
+      toast.error('Failed to archive care plan');
+    }
+  };
+
+  const handleDownloadCarePlanPdf = async (plan) => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`${API_URL}/api/service-users/${id}/care-plans/${plan.id}/download-pdf`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        toast.error(error.detail || 'Failed to download care-plan PDF');
+        return;
+      }
+
+      const blob = await response.blob();
+      const disposition = response.headers.get('Content-Disposition') || '';
+      const filenameMatch = disposition.match(/filename="?([^\"]+)"?/i);
+      const fallbackName = `care_plan_v${plan.version_number || '0'}_${plan.id}.pdf`;
+      const filename = filenameMatch?.[1] || fallbackName;
+
+      const objectUrl = window.URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = objectUrl;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.URL.revokeObjectURL(objectUrl);
+      toast.success('Care-plan PDF downloaded');
+    } catch (error) {
+      console.error('Error downloading care-plan PDF:', error);
+      toast.error('Failed to download care-plan PDF');
+    }
+  };
+
   // HARDENING: Use parseBackendDate for safe age calculation
   const calculateAge = (dob) => {
     if (!dob) return null;
@@ -343,6 +600,25 @@ export default function ServiceUserProfilePage() {
       <div className="bg-white rounded-xl border border-gray-100 p-6">
         {activeTab === 'overview' ? (
           <OverviewTab serviceUser={serviceUser} onOpenSection={setActiveTab} serviceUserId={id} />
+        ) : activeTab === '4_care_plans' ? (
+          <CarePlansTab
+            carePlans={carePlans}
+            carePlansLoading={carePlansLoading}
+            canManageCarePlans={isManagerOrAdmin()}
+            createCarePlanForm={createCarePlanForm}
+            setCreateCarePlanForm={setCreateCarePlanForm}
+            onCreateDraft={handleCreateCarePlanDraft}
+            editingDraftId={editingDraftId}
+            editCarePlanForm={editCarePlanForm}
+            setEditCarePlanForm={setEditCarePlanForm}
+            onBeginEditDraft={beginEditDraft}
+            onCancelEditDraft={cancelEditDraft}
+            onSaveDraftEdit={handleSaveDraftEdit}
+            onActivateDraft={handleActivateDraft}
+            onArchivePlan={handleArchivePlan}
+            onDownloadPdf={handleDownloadCarePlanPdf}
+            onRefresh={fetchCarePlans}
+          />
         ) : (
           <SectionTab
             section={currentSection}
@@ -766,6 +1042,300 @@ function OverviewTab({ serviceUser, onOpenSection, serviceUserId }) {
           <p className="text-sm text-text-muted whitespace-pre-wrap">{serviceUser.notes}</p>
         </div>
       )}
+    </div>
+  );
+}
+
+function CarePlansTab({
+  carePlans,
+  carePlansLoading,
+  canManageCarePlans,
+  createCarePlanForm,
+  setCreateCarePlanForm,
+  onCreateDraft,
+  editingDraftId,
+  editCarePlanForm,
+  setEditCarePlanForm,
+  onBeginEditDraft,
+  onCancelEditDraft,
+  onSaveDraftEdit,
+  onActivateDraft,
+  onArchivePlan,
+  onDownloadPdf,
+  onRefresh,
+}) {
+  const activePlan = carePlans.find((plan) => plan.status === 'active');
+  const orderedPlans = [...carePlans].sort((a, b) => (b.version_number || 0) - (a.version_number || 0));
+
+  const statusStyles = {
+    active: 'bg-green-100 text-green-700',
+    draft: 'bg-blue-100 text-blue-700',
+    superseded: 'bg-amber-100 text-amber-700',
+    archived: 'bg-gray-100 text-gray-700',
+  };
+
+  const statusLabel = (status) => {
+    const normalized = (status || '').toLowerCase();
+    if (normalized === 'active') return 'Active';
+    if (normalized === 'draft') return 'Draft';
+    if (normalized === 'superseded') return 'Superseded';
+    if (normalized === 'archived') return 'Archived';
+    return status || 'Unknown';
+  };
+
+  if (!canManageCarePlans) {
+    return (
+      <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+        <p className="text-sm font-medium text-amber-800">Care plans are restricted to admin and manager roles.</p>
+        <p className="mt-1 text-xs text-amber-700">No worker-facing care-plan UI is enabled in this surface.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-semibold text-text-primary">Care Plan Versions</h2>
+          <p className="text-sm text-text-muted">Backend lifecycle status is authoritative. Active and superseded plans are read-only.</p>
+        </div>
+        <Button variant="outline" onClick={onRefresh} disabled={carePlansLoading}>
+          Refresh
+        </Button>
+      </div>
+
+      <div className="rounded-lg border border-green-100 bg-green-50 p-4">
+        <h3 className="text-sm font-semibold text-text-primary mb-2">Active Plan Details</h3>
+        {!activePlan ? (
+          <p className="text-sm text-text-muted">No active care plan yet.</p>
+        ) : (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <p className="font-medium text-text-primary">{activePlan.care_plan_title || 'Untitled care plan'}</p>
+              <span className={`px-2 py-0.5 rounded text-xs font-medium ${statusStyles.active}`}>Active</span>
+              <span className="text-xs text-text-muted">v{activePlan.version_number}</span>
+            </div>
+            {Array.isArray(activePlan.goals) && activePlan.goals.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-text-primary mb-1">Goals</p>
+                <ul className="list-disc list-inside text-sm text-text-muted space-y-1">
+                  {activePlan.goals.map((goal, index) => (
+                    <li key={`${activePlan.id}-goal-${index}`}>{goal}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {activePlan.needs_summary && (
+              <div>
+                <p className="text-xs font-medium text-text-primary mb-1">Needs Summary</p>
+                <p className="text-sm text-text-muted whitespace-pre-wrap">{activePlan.needs_summary}</p>
+              </div>
+            )}
+            {activePlan.support_instructions && (
+              <div>
+                <p className="text-xs font-medium text-text-primary mb-1">Support Instructions</p>
+                <p className="text-sm text-text-muted whitespace-pre-wrap">{activePlan.support_instructions}</p>
+              </div>
+            )}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs text-text-muted">
+              <p>Effective From: {formatBackendDate(activePlan.effective_from) || '-'}</p>
+              <p>Review Due: {formatBackendDate(activePlan.review_due_at) || '-'}</p>
+              <p>Approved At: {formatBackendDate(activePlan.approved_at) || '-'}</p>
+              <p>Updated At: {formatBackendDate(activePlan.updated_at) || '-'}</p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <form onSubmit={onCreateDraft} className="rounded-lg border border-gray-200 p-4 space-y-3">
+        <h3 className="text-sm font-semibold text-text-primary">Create Draft Care Plan</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="space-y-1">
+            <Label htmlFor="care_plan_title">Title *</Label>
+            <Input
+              id="care_plan_title"
+              value={createCarePlanForm.care_plan_title}
+              onChange={(e) => setCreateCarePlanForm((prev) => ({ ...prev, care_plan_title: e.target.value }))}
+              placeholder="e.g., Monthly care plan review"
+              required
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="care_plan_goals">Goals (comma or new line separated)</Label>
+            <Input
+              id="care_plan_goals"
+              value={createCarePlanForm.goals}
+              onChange={(e) => setCreateCarePlanForm((prev) => ({ ...prev, goals: e.target.value }))}
+              placeholder="Mobility, hydration, social engagement"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="care_plan_effective_from">Effective From</Label>
+            <Input
+              id="care_plan_effective_from"
+              type="date"
+              value={createCarePlanForm.effective_from}
+              onChange={(e) => setCreateCarePlanForm((prev) => ({ ...prev, effective_from: e.target.value }))}
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="care_plan_review_due_at">Review Due</Label>
+            <Input
+              id="care_plan_review_due_at"
+              type="date"
+              value={createCarePlanForm.review_due_at}
+              onChange={(e) => setCreateCarePlanForm((prev) => ({ ...prev, review_due_at: e.target.value }))}
+            />
+          </div>
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="care_plan_needs_summary">Needs Summary</Label>
+          <Textarea
+            id="care_plan_needs_summary"
+            value={createCarePlanForm.needs_summary}
+            onChange={(e) => setCreateCarePlanForm((prev) => ({ ...prev, needs_summary: e.target.value }))}
+            rows={3}
+          />
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="care_plan_support_instructions">Support Instructions</Label>
+          <Textarea
+            id="care_plan_support_instructions"
+            value={createCarePlanForm.support_instructions}
+            onChange={(e) => setCreateCarePlanForm((prev) => ({ ...prev, support_instructions: e.target.value }))}
+            rows={3}
+          />
+        </div>
+        <div className="flex justify-end">
+          <Button type="submit" disabled={carePlansLoading}>
+            Create Draft
+          </Button>
+        </div>
+      </form>
+
+      <div className="space-y-3">
+        {carePlansLoading ? (
+          <p className="text-sm text-text-muted">Loading care plans...</p>
+        ) : orderedPlans.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-gray-200 p-8 text-center">
+            <p className="text-sm text-text-muted">No care plans created yet.</p>
+          </div>
+        ) : (
+          orderedPlans.map((plan) => {
+            const normalizedStatus = (plan.status || '').toLowerCase();
+            const canEditDraft = normalizedStatus === 'draft';
+            const canActivateDraft = normalizedStatus === 'draft';
+            const canArchive = normalizedStatus === 'draft' || normalizedStatus === 'superseded';
+
+            return (
+              <div key={plan.id} className="rounded-lg border border-gray-200 p-4 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <p className="font-medium text-text-primary">{plan.care_plan_title || 'Untitled care plan'}</p>
+                      <span className={`px-2 py-0.5 rounded text-xs font-medium ${statusStyles[normalizedStatus] || 'bg-gray-100 text-gray-700'}`}>
+                        {statusLabel(plan.status)}
+                      </span>
+                      <span className="text-xs text-text-muted">v{plan.version_number}</span>
+                    </div>
+                    <p className="text-xs text-text-muted">Updated {formatBackendDate(plan.updated_at) || '-'}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button variant="outline" size="sm" onClick={() => onDownloadPdf(plan)}>
+                      Download PDF
+                    </Button>
+                    {canEditDraft && (
+                      <Button variant="outline" size="sm" onClick={() => onBeginEditDraft(plan)}>
+                        Edit Draft
+                      </Button>
+                    )}
+                    {canActivateDraft && (
+                      <Button size="sm" onClick={() => onActivateDraft(plan.id)}>
+                        Activate Draft
+                      </Button>
+                    )}
+                    {canArchive && (
+                      <Button variant="outline" size="sm" onClick={() => onArchivePlan(plan.id)}>
+                        Archive
+                      </Button>
+                    )}
+                  </div>
+                </div>
+
+                {editingDraftId === plan.id ? (
+                  <div className="rounded-md bg-gray-50 border border-gray-200 p-3 space-y-3">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <Label htmlFor={`edit-title-${plan.id}`}>Title *</Label>
+                        <Input
+                          id={`edit-title-${plan.id}`}
+                          value={editCarePlanForm.care_plan_title}
+                          onChange={(e) => setEditCarePlanForm((prev) => ({ ...prev, care_plan_title: e.target.value }))}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor={`edit-goals-${plan.id}`}>Goals</Label>
+                        <Input
+                          id={`edit-goals-${plan.id}`}
+                          value={editCarePlanForm.goals}
+                          onChange={(e) => setEditCarePlanForm((prev) => ({ ...prev, goals: e.target.value }))}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor={`edit-effective-${plan.id}`}>Effective From</Label>
+                        <Input
+                          id={`edit-effective-${plan.id}`}
+                          type="date"
+                          value={editCarePlanForm.effective_from}
+                          onChange={(e) => setEditCarePlanForm((prev) => ({ ...prev, effective_from: e.target.value }))}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor={`edit-review-${plan.id}`}>Review Due</Label>
+                        <Input
+                          id={`edit-review-${plan.id}`}
+                          type="date"
+                          value={editCarePlanForm.review_due_at}
+                          onChange={(e) => setEditCarePlanForm((prev) => ({ ...prev, review_due_at: e.target.value }))}
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor={`edit-needs-${plan.id}`}>Needs Summary</Label>
+                      <Textarea
+                        id={`edit-needs-${plan.id}`}
+                        value={editCarePlanForm.needs_summary}
+                        onChange={(e) => setEditCarePlanForm((prev) => ({ ...prev, needs_summary: e.target.value }))}
+                        rows={3}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor={`edit-support-${plan.id}`}>Support Instructions</Label>
+                      <Textarea
+                        id={`edit-support-${plan.id}`}
+                        value={editCarePlanForm.support_instructions}
+                        onChange={(e) => setEditCarePlanForm((prev) => ({ ...prev, support_instructions: e.target.value }))}
+                        rows={3}
+                      />
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <Button variant="outline" size="sm" onClick={onCancelEditDraft}>Cancel</Button>
+                      <Button size="sm" onClick={() => onSaveDraftEdit(plan.id)}>Save Draft</Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs text-text-muted">
+                    <p>Created: {formatBackendDate(plan.created_at) || '-'}</p>
+                    <p>Effective From: {formatBackendDate(plan.effective_from) || '-'}</p>
+                    <p>Review Due: {formatBackendDate(plan.review_due_at) || '-'}</p>
+                    <p>Approved At: {formatBackendDate(plan.approved_at) || '-'}</p>
+                  </div>
+                )}
+              </div>
+            );
+          })
+        )}
+      </div>
     </div>
   );
 }

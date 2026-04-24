@@ -15,7 +15,7 @@ import uuid
 import logging
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Dict, Any
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Query
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Query, Response
 from pydantic import BaseModel, ConfigDict
 
 from .dependencies import (
@@ -57,11 +57,18 @@ class OrgPolicyResponse(BaseModel):
 
 class InsuranceDocCreate(BaseModel):
     name: str
-    insurance_type: str  # public_liability, employers_liability
-    expiry_date: str
+    insurance_type: str  # public_liability, employers_liability, fire_safety_certificate, etc.
+    category: Optional[str] = "insurance"  # insurance, regulatory, safety
+    expiry_date: Optional[str] = None
+    issue_date: Optional[str] = None
     policy_number: Optional[str] = None
     provider: Optional[str] = None
     notes: Optional[str] = None
+    required: Optional[bool] = True
+    conditional: Optional[bool] = False
+    renewal_period_months: Optional[int] = 12
+    requires_expiry_date: Optional[bool] = True
+    valid_until_replaced: Optional[bool] = False
 
 
 class InsuranceDocResponse(BaseModel):
@@ -100,6 +107,12 @@ class IncidentLogCreate(BaseModel):
     lessons_learned: Optional[str] = None
     related_shift_id: Optional[str] = None
     service_user_id: Optional[str] = None
+    is_reportable: Optional[bool] = False
+    report_category: Optional[str] = None
+    reported_to_authority: Optional[bool] = False
+    reported_at: Optional[str] = None
+    report_reference: Optional[str] = None
+    report_notes: Optional[str] = None
 
 
 class IncidentLogUpdate(BaseModel):
@@ -112,6 +125,12 @@ class IncidentLogUpdate(BaseModel):
     closed_at: Optional[str] = None
     closed_by: Optional[str] = None
     action_taken: Optional[str] = None
+    is_reportable: Optional[bool] = None
+    report_category: Optional[str] = None
+    reported_to_authority: Optional[bool] = None
+    reported_at: Optional[str] = None
+    report_reference: Optional[str] = None
+    report_notes: Optional[str] = None
 
 
 class InsuranceDocUpdate(BaseModel):
@@ -147,6 +166,12 @@ class IncidentLogAmend(BaseModel):
     root_cause: Optional[str] = None
     corrective_actions: Optional[str] = None
     lessons_learned: Optional[str] = None
+    is_reportable: Optional[bool] = None
+    report_category: Optional[str] = None
+    reported_to_authority: Optional[bool] = None
+    reported_at: Optional[str] = None
+    report_reference: Optional[str] = None
+    report_notes: Optional[str] = None
     reason: str  # Required for audit trail
 
 
@@ -174,6 +199,12 @@ class IncidentLogResponse(BaseModel):
     reporter_type: Optional[str] = None
     submitted_by_employee_id: Optional[str] = None
     action_taken: Optional[str] = None
+    is_reportable: Optional[bool] = False
+    report_category: Optional[str] = None
+    reported_to_authority: Optional[bool] = False
+    reported_at: Optional[str] = None
+    report_reference: Optional[str] = None
+    report_notes: Optional[str] = None
     notes: Optional[List[Dict[str, Any]]] = None
     created_at: str
     updated_at: str
@@ -192,6 +223,46 @@ class WorkerIncidentCreate(BaseModel):
 
 class IncidentNoteCreate(BaseModel):
     note: str
+
+
+class StaffMeetingCreate(BaseModel):
+    meeting_date: str
+    meeting_type: str
+    employee_ids: List[str] = []
+    agenda: str
+    notes: str
+    actions_required: Optional[str] = None
+    next_meeting_date: Optional[str] = None
+
+
+class StaffMeetingAmend(BaseModel):
+    meeting_date: Optional[str] = None
+    meeting_type: Optional[str] = None
+    employee_ids: Optional[List[str]] = None
+    agenda: Optional[str] = None
+    notes: Optional[str] = None
+    actions_required: Optional[str] = None
+    next_meeting_date: Optional[str] = None
+    actions_status: Optional[str] = None
+    reason: str
+
+
+class StaffMeetingResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    meeting_date: str
+    meeting_type: str
+    employee_ids: List[str] = []
+    agenda: str
+    notes: str
+    actions_required: Optional[str] = None
+    next_meeting_date: Optional[str] = None
+    actions_status: str  # open, closed
+    actions_closed_at: Optional[str] = None
+    actions_closed_by: Optional[str] = None
+    created_by: str
+    created_at: str
+    updated_at: str
 
 
 def _build_worker_incident_view(incident: Dict[str, Any]) -> Dict[str, Any]:
@@ -660,10 +731,14 @@ async def seed_insurance_docs(user: dict = Depends(require_admin)):
         {"name": "Professional Indemnity Insurance", "insurance_type": "professional_indemnity", "category": "insurance", "required": False, "conditional": True, "renewal_period_months": 12},
         {"name": "CQC Registration Certificate", "insurance_type": "cqc_registration", "category": "regulatory", "required": True, "renewal_period_months": 0, "valid_until_replaced": True},
         {"name": "ICO Registration", "insurance_type": "ico_registration", "category": "regulatory", "required": True, "renewal_period_months": 12},
+        {"name": "HSE Law Poster Display Check", "insurance_type": "hse_poster", "category": "regulatory", "required": True, "renewal_period_months": 0, "valid_until_replaced": True},
         {"name": "PAT Testing Certificate", "insurance_type": "pat_testing", "category": "safety", "required": True, "renewal_period_months": 12},
         {"name": "Fire Risk Assessment", "insurance_type": "fire_risk", "category": "safety", "required": True, "renewal_period_months": 12},
+        {"name": "Fire Safety Certificate/Checks", "insurance_type": "fire_safety_certificate", "category": "safety", "required": True, "renewal_period_months": 12},
         {"name": "Gas Safety Certificate", "insurance_type": "gas_safety", "category": "safety", "required": False, "conditional": True, "renewal_period_months": 12},
         {"name": "Electrical Installation Certificate", "insurance_type": "electrical", "category": "safety", "required": False, "conditional": True, "renewal_period_months": 60},
+        {"name": "Legionella Risk Assessment", "insurance_type": "legionella", "category": "safety", "required": False, "conditional": True, "renewal_period_months": 24},
+        {"name": "Waste Contract", "insurance_type": "waste_contract", "category": "safety", "required": False, "conditional": True, "renewal_period_months": 12},
     ]
     
     created = 0
@@ -698,11 +773,76 @@ async def seed_insurance_docs(user: dict = Depends(require_admin)):
     return {"message": f"Created {created} certificate placeholders", "total": len(required_certs)}
 
 
+@router.post("/compliance/insurance", response_model=InsuranceDocResponse)
+async def create_insurance_doc(
+    payload: InsuranceDocCreate,
+    user: dict = Depends(require_admin)
+):
+    """Create a provider-level certificate/check register record."""
+    db = get_db()
+    now = datetime.now(timezone.utc).isoformat()
+
+    insurance_type = (payload.insurance_type or "").strip().lower().replace(" ", "_")
+    if not insurance_type:
+        raise HTTPException(status_code=400, detail="insurance_type is required")
+
+    existing = await db.insurance_docs.find_one({"insurance_type": insurance_type}, {"_id": 0, "id": 1})
+    if existing:
+        raise HTTPException(status_code=409, detail="Certificate/check type already exists. Amend the existing record instead.")
+
+    valid_until_replaced = bool(payload.valid_until_replaced)
+    requires_expiry_date = bool(payload.requires_expiry_date) if payload.requires_expiry_date is not None else (not valid_until_replaced)
+    if valid_until_replaced:
+        requires_expiry_date = False
+    if requires_expiry_date and not payload.expiry_date:
+        raise HTTPException(status_code=400, detail="expiry_date is required for this certificate/check type")
+
+    doc = {
+        "id": str(uuid.uuid4()),
+        "name": payload.name,
+        "insurance_type": insurance_type,
+        "category": payload.category or "insurance",
+        "required": payload.required if payload.required is not None else True,
+        "conditional": payload.conditional if payload.conditional is not None else False,
+        "renewal_period_months": payload.renewal_period_months if payload.renewal_period_months is not None else 12,
+        "requires_expiry_date": requires_expiry_date,
+        "valid_until_replaced": valid_until_replaced,
+        "status": "missing",
+        "file_url": None,
+        "original_filename": None,
+        "expiry_date": payload.expiry_date,
+        "issue_date": payload.issue_date,
+        "policy_number": payload.policy_number,
+        "provider": payload.provider,
+        "notes": payload.notes,
+        "created_at": now,
+        "updated_at": now,
+        "created_by": user['user_id']
+    }
+
+    await db.insurance_docs.insert_one(doc)
+    await log_audit_action(
+        user['user_id'],
+        "create_insurance_register_record",
+        "insurance_doc",
+        doc["id"],
+        {
+            "insurance_type": insurance_type,
+            "category": doc["category"],
+            "required": doc["required"],
+            "conditional": doc["conditional"],
+        }
+    )
+
+    doc.pop("_id", None)
+    return doc
+
+
 @router.get("/compliance/insurance", response_model=List[InsuranceDocResponse])
 async def get_insurance_docs(
     category: Optional[str] = None,
     status: Optional[str] = None,
-    user: dict = Depends(get_current_user)
+    user: dict = Depends(require_admin)
 ):
     """Get all insurance/certificate documents with expiry tracking"""
     db = get_db()
@@ -750,6 +890,7 @@ async def upload_insurance_doc(
     insurance_id: str,
     file: UploadFile = File(...),
     expiry_date: Optional[str] = None,
+    issue_date: Optional[str] = None,
     policy_number: Optional[str] = None,
     provider: Optional[str] = None,
     user: dict = Depends(require_admin)
@@ -775,7 +916,7 @@ async def upload_insurance_doc(
         "file_url": file_url,
         "original_filename": file.filename,
         "status": "valid",
-        "issue_date": now,
+        "issue_date": issue_date or now,
         "updated_at": now
     }
     
@@ -804,6 +945,9 @@ async def replace_insurance_doc(
     insurance_id: str,
     file: UploadFile = File(...),
     expiry_date: Optional[str] = None,
+    issue_date: Optional[str] = None,
+    policy_number: Optional[str] = None,
+    provider: Optional[str] = None,
     reason: str = Query(...),
     user: dict = Depends(require_admin)
 ):
@@ -842,7 +986,10 @@ async def replace_insurance_doc(
     amendment["new_values"] = {
         "file_url": file_url,
         "original_filename": file.filename,
-        "expiry_date": expiry_date
+        "expiry_date": expiry_date,
+        "issue_date": issue_date,
+        "policy_number": policy_number,
+        "provider": provider
     }
     
     await db.amendments.insert_one(amendment)
@@ -851,11 +998,15 @@ async def replace_insurance_doc(
         "file_url": file_url,
         "original_filename": file.filename,
         "status": "valid",
-        "issue_date": now,
+        "issue_date": issue_date or now,
         "updated_at": now
     }
     if expiry_date:
         update["expiry_date"] = expiry_date
+    if policy_number is not None:
+        update["policy_number"] = policy_number
+    if provider is not None:
+        update["provider"] = provider
     
     await db.insurance_docs.update_one({"id": insurance_id}, {"$set": update})
     
@@ -959,7 +1110,7 @@ async def get_insurance_history(insurance_id: str, user: dict = Depends(require_
 
 
 @router.get("/compliance/insurance/{insurance_id}/file")
-async def get_insurance_file_url(insurance_id: str, user: dict = Depends(get_current_user)):
+async def get_insurance_file_url(insurance_id: str, user: dict = Depends(require_admin)):
     """Get the file URL for an insurance document"""
     db = get_db()
     doc = await db.insurance_docs.find_one({"id": insurance_id}, {"_id": 0, "file_url": 1, "original_filename": 1})
@@ -972,7 +1123,7 @@ async def get_insurance_file_url(insurance_id: str, user: dict = Depends(get_cur
 
 
 @router.get("/compliance/insurance/{insurance_id}/download")
-async def download_insurance_file(insurance_id: str, user: dict = Depends(get_current_user)):
+async def download_insurance_file(insurance_id: str, user: dict = Depends(require_admin)):
     """Get download URL for an insurance file"""
     db = get_db()
     doc = await db.insurance_docs.find_one({"id": insurance_id}, {"_id": 0})
@@ -1245,6 +1396,12 @@ async def create_worker_incident(
         "closed_by": None,
         "reviewed_by": None,
         "reviewed_at": None,
+        "is_reportable": False,
+        "report_category": None,
+        "reported_to_authority": False,
+        "reported_at": None,
+        "report_reference": None,
+        "report_notes": None,
         "created_at": now,
         "updated_at": now,
     }
@@ -1272,6 +1429,200 @@ async def list_worker_incidents(worker: dict = Depends(get_current_worker)):
         {"_id": 0}
     ).sort("created_at", -1).to_list(500)
     return {"incidents": [_build_worker_incident_view(incident) for incident in incidents], "total": len(incidents)}
+
+
+# ==================== STAFF MEETING ROUTES ====================
+
+@router.get("/compliance/staff-meetings", response_model=List[StaffMeetingResponse])
+async def get_staff_meetings(user: dict = Depends(require_admin)):
+    """Get staff meeting records (admin-only)."""
+    db = get_db()
+    meetings = await db.staff_meeting_records.find({"_id": 0}).sort("meeting_date", -1).to_list(1000)
+    return meetings
+
+
+@router.get("/compliance/staff-meetings/{meeting_id}", response_model=StaffMeetingResponse)
+async def get_staff_meeting(meeting_id: str, user: dict = Depends(require_admin)):
+    """Get a single staff meeting record (admin-only)."""
+    db = get_db()
+    meeting = await db.staff_meeting_records.find_one({"id": meeting_id}, {"_id": 0})
+    if not meeting:
+        raise HTTPException(status_code=404, detail="Staff meeting record not found")
+    return meeting
+
+
+@router.post("/compliance/staff-meetings", response_model=StaffMeetingResponse)
+async def create_staff_meeting(payload: StaffMeetingCreate, user: dict = Depends(require_admin)):
+    """Create a staff meeting record (admin-only)."""
+    db = get_db()
+    now = datetime.now(timezone.utc).isoformat()
+
+    employee_ids = [emp_id for emp_id in (payload.employee_ids or []) if emp_id]
+    if employee_ids:
+        existing = await db.employees.find({"id": {"$in": employee_ids}}, {"_id": 0, "id": 1}).to_list(len(employee_ids))
+        existing_ids = {emp.get("id") for emp in existing}
+        missing_ids = [emp_id for emp_id in employee_ids if emp_id not in existing_ids]
+        if missing_ids:
+            raise HTTPException(status_code=400, detail=f"Unknown employee_ids: {', '.join(missing_ids)}")
+
+    doc = {
+        "id": str(uuid.uuid4()),
+        "meeting_date": payload.meeting_date,
+        "meeting_type": payload.meeting_type,
+        "employee_ids": employee_ids,
+        "agenda": payload.agenda,
+        "notes": payload.notes,
+        "actions_required": payload.actions_required,
+        "next_meeting_date": payload.next_meeting_date,
+        "actions_status": "open",
+        "actions_closed_at": None,
+        "actions_closed_by": None,
+        "created_by": user["user_id"],
+        "created_at": now,
+        "updated_at": now,
+    }
+
+    await db.staff_meeting_records.insert_one(doc)
+    await log_audit_action(
+        user["user_id"],
+        "create_staff_meeting_record",
+        "staff_meeting_record",
+        doc["id"],
+        {
+            "meeting_type": payload.meeting_type,
+            "meeting_date": payload.meeting_date,
+            "attendee_count": len(employee_ids),
+        },
+    )
+    return doc
+
+
+@router.put("/compliance/staff-meetings/{meeting_id}/amend", response_model=StaffMeetingResponse)
+async def amend_staff_meeting(
+    meeting_id: str,
+    amendment: StaffMeetingAmend,
+    user: dict = Depends(require_admin),
+):
+    """Amend staff meeting metadata with audit trail."""
+    db = get_db()
+
+    meeting = await db.staff_meeting_records.find_one({"id": meeting_id})
+    if not meeting:
+        raise HTTPException(status_code=404, detail="Staff meeting record not found")
+
+    now = datetime.now(timezone.utc).isoformat()
+    amend_record = {
+        "id": str(uuid.uuid4()),
+        "entity_type": "staff_meeting_record",
+        "entity_id": meeting_id,
+        "amended_by": user["user_id"],
+        "amended_at": now,
+        "reason": amendment.reason,
+        "changes": {},
+        "previous_values": {},
+    }
+
+    update_dict = {"updated_at": now}
+    payload = amendment.model_dump(exclude_none=True, exclude={"reason"})
+
+    if "employee_ids" in payload:
+        employee_ids = [emp_id for emp_id in (payload.get("employee_ids") or []) if emp_id]
+        if employee_ids:
+            existing = await db.employees.find({"id": {"$in": employee_ids}}, {"_id": 0, "id": 1}).to_list(len(employee_ids))
+            existing_ids = {emp.get("id") for emp in existing}
+            missing_ids = [emp_id for emp_id in employee_ids if emp_id not in existing_ids]
+            if missing_ids:
+                raise HTTPException(status_code=400, detail=f"Unknown employee_ids: {', '.join(missing_ids)}")
+        payload["employee_ids"] = employee_ids
+
+    for field, value in payload.items():
+        if field in meeting and meeting[field] != value:
+            amend_record["changes"][field] = value
+            amend_record["previous_values"][field] = meeting[field]
+            update_dict[field] = value
+
+    if payload.get("actions_status") == "closed" and meeting.get("actions_status") != "closed":
+        update_dict["actions_closed_at"] = now
+        update_dict["actions_closed_by"] = user["user_id"]
+    elif payload.get("actions_status") == "open" and meeting.get("actions_status") == "closed":
+        update_dict["actions_closed_at"] = None
+        update_dict["actions_closed_by"] = None
+
+    if amend_record["changes"]:
+        await db.amendments.insert_one(amend_record)
+        await db.staff_meeting_records.update_one({"id": meeting_id}, {"$set": update_dict})
+
+    updated = await db.staff_meeting_records.find_one({"id": meeting_id}, {"_id": 0})
+    return updated
+
+
+@router.get("/compliance/staff-meetings/{meeting_id}/history")
+async def get_staff_meeting_history(meeting_id: str, user: dict = Depends(require_admin)):
+    """Get amendment history for a staff meeting record."""
+    db = get_db()
+    history = await db.amendments.find(
+        {"entity_type": "staff_meeting_record", "entity_id": meeting_id},
+        {"_id": 0}
+    ).sort("amended_at", -1).to_list(100)
+    return {"history": history}
+
+
+@router.get("/compliance/staff-meetings/{meeting_id}/download-pdf")
+async def download_staff_meeting_pdf(meeting_id: str, user: dict = Depends(require_admin)):
+    """Download a staff meeting record as inspection-ready PDF evidence (admin-only)."""
+    db = get_db()
+
+    meeting = await db.staff_meeting_records.find_one({"id": meeting_id}, {"_id": 0})
+    if not meeting:
+        raise HTTPException(status_code=404, detail="Staff meeting record not found")
+
+    attendee_ids = [emp_id for emp_id in (meeting.get("employee_ids") or []) if emp_id]
+    attendees = []
+    if attendee_ids:
+        attendee_docs = await db.employees.find(
+            {"id": {"$in": attendee_ids}},
+            {"_id": 0, "id": 1, "first_name": 1, "last_name": 1, "employee_code": 1}
+        ).to_list(len(attendee_ids))
+        by_id = {doc.get("id"): doc for doc in attendee_docs}
+        for emp_id in attendee_ids:
+            emp = by_id.get(emp_id)
+            if not emp:
+                attendees.append(f"{emp_id} (not found)")
+                continue
+            full_name = f"{emp.get('first_name', '')} {emp.get('last_name', '')}".strip()
+            code = emp.get("employee_code")
+            attendees.append(f"{full_name} ({code})" if code else full_name)
+
+    from services.pdf_service import generate_staff_meeting_record_pdf
+
+    pdf_bytes = generate_staff_meeting_record_pdf(
+        meeting_data=meeting,
+        attendee_names=attendees,
+        admin_data={
+            "downloaded_by": user.get("name") or user.get("email") or user.get("user_id"),
+            "downloaded_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+
+    await log_audit_action(
+        user["user_id"],
+        "download_staff_meeting_pdf",
+        "staff_meeting_record",
+        meeting_id,
+        {
+            "meeting_type": meeting.get("meeting_type"),
+            "meeting_date": meeting.get("meeting_date"),
+            "attendee_count": len(attendee_ids),
+        },
+    )
+
+    meeting_date = str(meeting.get("meeting_date") or "record").replace(":", "-").replace("/", "-")
+    filename = f"staff_meeting_{meeting_date}_{meeting_id[:8]}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 # ==================== COMPLIANCE REPORTS ====================

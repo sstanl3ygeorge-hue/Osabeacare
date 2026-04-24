@@ -1278,7 +1278,7 @@ export default function EmployeeProfilePage() {
       axios.get(`${API}/employees/${employeeId}`, { headers: { Authorization: `Bearer ${token}` } }),
       axios.get(`${API}/employee-documents?employee_id=${employeeId}`, { headers: { Authorization: `Bearer ${token}` } }),
       axios.get(`${API}/document-types`, { headers: { Authorization: `Bearer ${token}` } }),
-      axios.get(`${API}/policy-assignments?employee_id=${employeeId}`, { headers: { Authorization: `Bearer ${token}` } }),
+      axios.get(`${API}/policy-assignments?employee_id=${employeeId}&include_inactive=true`, { headers: { Authorization: `Bearer ${token}` } }),
       axios.get(`${API}/training-records?employee_id=${employeeId}`, { headers: { Authorization: `Bearer ${token}` } }),
       axios.get(`${API}/audit-logs?entity_id=${employeeId}&compliance_only=true`, { headers: { Authorization: `Bearer ${token}` } }),
       axios.get(`${API}/generated-forms?employee_id=${employeeId}`, { headers: { Authorization: `Bearer ${token}` } }),

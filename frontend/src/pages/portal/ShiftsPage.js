@@ -79,8 +79,10 @@ export default function ShiftsPage() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [selectedShift, setSelectedShift] = useState(null);
   const [isAssignOpen, setIsAssignOpen] = useState(false);
+  const [isCancelOpen, setIsCancelOpen] = useState(false);
   const [assignEmployeeId, setAssignEmployeeId] = useState('');
   const [assignNotes, setAssignNotes] = useState('');
+  const [cancelReason, setCancelReason] = useState('');
 
   const [newShift, setNewShift] = useState({
     start_at: '',
@@ -222,6 +224,35 @@ export default function ShiftsPage() {
       fetchShifts();
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to complete shift');
+    }
+  };
+
+  const handleCancelShift = async () => {
+    if (!selectedShift?.id) {
+      toast.error('Shift not found');
+      return;
+    }
+    const reason = (cancelReason || '').trim();
+    if (reason.length < 3) {
+      toast.error('Cancellation reason must be at least 3 characters');
+      return;
+    }
+    setSaving(true);
+    try {
+      await axios.patch(
+        `${API}/shifts/${selectedShift.id}`,
+        { status: 'cancelled', cancel_reason: reason },
+        { headers }
+      );
+      toast.success('Shift cancelled');
+      setIsCancelOpen(false);
+      setSelectedShift(null);
+      setCancelReason('');
+      fetchShifts();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to cancel shift');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -407,6 +438,18 @@ export default function ShiftsPage() {
                                 Complete Shift
                               </DropdownMenuItem>
                             )}
+                            {shift.status !== 'completed' && shift.status !== 'cancelled' && (
+                              <DropdownMenuItem
+                                onClick={() => {
+                                  setSelectedShift(shift);
+                                  setCancelReason('');
+                                  setIsCancelOpen(true);
+                                }}
+                              >
+                                <UserX className="h-4 w-4 mr-2" />
+                                Cancel Shift
+                              </DropdownMenuItem>
+                            )}
                           </DropdownMenuContent>
                         </DropdownMenu>
                       )}
@@ -492,6 +535,12 @@ export default function ShiftsPage() {
                   {detailShift.shift.status}
                 </Badge>
               </div>
+              {detailShift.shift.cancelled_reason ? (
+                <div>
+                  <p className="font-medium">Cancellation Reason</p>
+                  <p className="text-text-muted">{detailShift.shift.cancelled_reason}</p>
+                </div>
+              ) : null}
               <div>
                 <p className="font-medium">Active Assignment</p>
                 <p className="text-text-muted">
@@ -511,6 +560,44 @@ export default function ShiftsPage() {
           ) : (
             <p className="text-text-muted">No detail loaded.</p>
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={isCancelOpen}
+        onOpenChange={(open) => {
+          setIsCancelOpen(open);
+          if (!open) {
+            setCancelReason('');
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Cancel Shift</DialogTitle>
+            <DialogDescription>
+              A cancellation reason is required and will be visible in worker-safe shift history.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="cancel_reason">Cancellation reason</Label>
+            <Textarea
+              id="cancel_reason"
+              value={cancelReason}
+              onChange={(e) => setCancelReason(e.target.value)}
+              rows={3}
+              placeholder="Explain why this shift was cancelled"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsCancelOpen(false)}>
+              Back
+            </Button>
+            <Button variant="destructive" onClick={handleCancelShift} disabled={saving || cancelReason.trim().length < 3}>
+              {saving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+              Cancel shift
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

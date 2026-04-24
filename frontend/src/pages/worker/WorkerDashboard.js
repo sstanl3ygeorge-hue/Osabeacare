@@ -1992,7 +1992,7 @@ export default function WorkerDashboard() {
           <Card className="border border-slate-200 shadow-sm" data-testid="worker-my-shifts-card">
             <CardHeader className="pb-3">
               <CardTitle className="text-lg text-slate-900">My Shifts</CardTitle>
-              <p className="mt-1 text-sm text-slate-600">Your upcoming assigned shifts.</p>
+              <p className="mt-1 text-sm text-slate-600">Your assigned shifts and recent shift updates.</p>
             </CardHeader>
             <CardContent className="pt-0">
               {workerShiftsLoading ? (
@@ -2006,6 +2006,7 @@ export default function WorkerDashboard() {
                   {workerShifts.map((item) => {
                     const shift = item.shift || {};
                     const responseStatus = item.worker_response_status || item.assignment?.worker_response_status || 'pending';
+                    const assignmentStatus = item.assignment_status || item.assignment?.status || 'active';
                     const canRespond = (item.assignment_status === 'active') && (responseStatus === 'pending' || !responseStatus);
                     return (
                       <div key={item.assignment_id || shift.id} className="rounded-lg border border-slate-200 bg-white p-3">
@@ -2016,10 +2017,17 @@ export default function WorkerDashboard() {
                             <p className="mt-1 text-xs text-slate-600">Role: {shift.role_required || '—'}</p>
                             {shift.notes ? <p className="mt-1 text-xs text-slate-500 line-clamp-2">Notes: {shift.notes}</p> : null}
                             {item.worker_response_note ? <p className="mt-1 text-xs text-slate-500 line-clamp-2">Your note: {item.worker_response_note}</p> : null}
+                            {item.cancellation_reason ? <p className="mt-1 text-xs text-red-700 line-clamp-2">Cancellation reason: {item.cancellation_reason}</p> : null}
                           </div>
                           <div className="flex shrink-0 flex-col items-end gap-2">
-                            <Badge className={(shift.status === 'assigned' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-700')}>
-                              {shift.status || item.assignment_status || 'assigned'}
+                            <Badge className={
+                              assignmentStatus === 'cancelled'
+                                ? 'bg-slate-100 text-slate-700'
+                                : assignmentStatus === 'completed'
+                                  ? 'bg-green-100 text-green-700'
+                                  : 'bg-amber-100 text-amber-700'
+                            }>
+                              {assignmentStatus}
                             </Badge>
                             <Badge className={
                               responseStatus === 'accepted'
@@ -4434,6 +4442,18 @@ export default function WorkerDashboard() {
                   {selectedWorkerShift.shift.status || selectedWorkerShift.assignment?.status || 'assigned'}
                 </Badge>
               </div>
+              <div>
+                <p className="text-xs text-slate-500">Assignment status</p>
+                <p className="font-medium">{selectedWorkerShift.assignment?.status || '—'}</p>
+              </div>
+              {(selectedWorkerShift.assignment?.unassign_reason || selectedWorkerShift.shift.cancelled_reason) ? (
+                <div>
+                  <p className="text-xs text-slate-500">Cancellation reason</p>
+                  <p className="font-medium text-red-700">
+                    {selectedWorkerShift.assignment?.unassign_reason || selectedWorkerShift.shift.cancelled_reason}
+                  </p>
+                </div>
+              ) : null}
             </div>
           ) : (
             <p className="text-sm text-slate-600">Shift detail unavailable.</p>

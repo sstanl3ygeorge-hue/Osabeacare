@@ -55,6 +55,7 @@ class ShiftUpdateRequest(BaseModel):
     service_user_id: Optional[str] = None
     notes: Optional[str] = None
     status: Optional[str] = None
+    cancel_reason: Optional[str] = None
 
 
 class AssignWorkerRequest(BaseModel):
@@ -322,11 +323,22 @@ async def update_shift(
         if active_assignment:
             raise HTTPException(status_code=409, detail="Cannot set shift to open while assignment is active")
         update["assigned_employee_id"] = None
+    if update.get("status") == "cancelled":
+        cancel_reason = (payload.cancel_reason or "").strip()
+        if len(cancel_reason) < 3:
+            raise HTTPException(status_code=400, detail="cancel_reason must be at least 3 characters")
+        update["cancelled_reason"] = cancel_reason
+        update["cancelled_at"] = _now_iso()
+        update["cancelled_by"] = user.get("user_id")
+
     if update.get("status") in {"completed", "cancelled"} and active_assignment:
         assignment_status = "completed" if update["status"] == "completed" else "cancelled"
+        assignment_update = {"status": assignment_status, "updated_at": _now_iso(), "ended_at": _now_iso(), "ended_by": user.get("user_id")}
+        if assignment_status == "cancelled" and update.get("cancelled_reason"):
+            assignment_update["unassign_reason"] = update.get("cancelled_reason")
         await db.shift_assignments.update_one(
             {"id": active_assignment["id"]},
-            {"$set": {"status": assignment_status, "updated_at": _now_iso(), "ended_at": _now_iso(), "ended_by": user.get("user_id")}},
+            {"$set": assignment_update},
         )
         update["assigned_employee_id"] = None
 
@@ -507,6 +519,7 @@ async def list_worker_shifts(
         shift = shifts_by_id.get(assignment.get("shift_id"))
         if not shift:
             continue
+        cancellation_reason = assignment.get("unassign_reason") or shift.get("cancelled_reason")
         result.append({
             "assignment_id": assignment.get("id"),
             "assignment_status": assignment.get("status"),
@@ -514,6 +527,7 @@ async def list_worker_shifts(
             "worker_response_status": assignment.get("worker_response_status"),
             "worker_response_note": assignment.get("worker_response_note"),
             "worker_responded_at": assignment.get("worker_responded_at"),
+            "cancellation_reason": cancellation_reason,
             "shift": shift,
         })
     return {"shifts": result, "total": len(result)}

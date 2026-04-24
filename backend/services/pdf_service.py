@@ -1164,6 +1164,100 @@ def generate_structured_form_pdf(
     return buffer.getvalue()
 
 
+def generate_staff_meeting_record_pdf(
+    meeting_data: Dict[str, Any],
+    attendee_names: Optional[List[str]] = None,
+    admin_data: Optional[Dict[str, Any]] = None,
+) -> bytes:
+    """Generate branded PDF evidence for an admin staff meeting record."""
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=20 * mm,
+        leftMargin=20 * mm,
+        topMargin=20 * mm,
+        bottomMargin=20 * mm,
+    )
+
+    styles = create_pdf_styles()
+    elements = []
+
+    logo = get_logo_image()
+    if logo:
+        elements.append(logo)
+        elements.append(Spacer(1, 3 * mm))
+
+    elements.append(Paragraph("Osabea Healthcare Solutions", styles["CompanyName"]))
+    elements.append(HRFlowable(width="100%", thickness=1, color=BORDER_COLOR, spaceAfter=5 * mm))
+    elements.append(Paragraph("Staff Meeting Record", styles["FormTitle"]))
+
+    meeting_date = _pdf_value(meeting_data.get("meeting_date"))
+    meeting_type = _pdf_value(meeting_data.get("meeting_type")).replace("_", " ")
+    next_meeting_date = _pdf_value(meeting_data.get("next_meeting_date"))
+    actions_status = _pdf_value(meeting_data.get("actions_status") or "open")
+
+    info_rows = [
+        ["Meeting Date", meeting_date],
+        ["Meeting Type", meeting_type],
+        ["Next Meeting Date", next_meeting_date],
+        ["Actions Status", actions_status],
+    ]
+    info_table = Table(info_rows, colWidths=[45 * mm, 125 * mm])
+    info_table.setStyle(TableStyle([
+        ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 10),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2 * mm),
+        ("LINEBELOW", (0, 0), (-1, -2), 0.25, BORDER_COLOR),
+    ]))
+    elements.append(info_table)
+    elements.append(Spacer(1, 4 * mm))
+
+    attendees = attendee_names or []
+    attendee_value = "<br/>".join([escape(name) for name in attendees]) if attendees else "No attendees recorded"
+    elements.append(Paragraph("Attendees", styles["SectionHeader"]))
+    elements.append(Paragraph(attendee_value, styles["Notes"]))
+
+    elements.append(Paragraph("Agenda", styles["SectionHeader"]))
+    elements.append(Paragraph(_pdf_value(meeting_data.get("agenda")), styles["Notes"]))
+
+    elements.append(Paragraph("Minutes / Notes", styles["SectionHeader"]))
+    elements.append(Paragraph(_pdf_value(meeting_data.get("notes")), styles["Notes"]))
+
+    elements.append(Paragraph("Actions Required", styles["SectionHeader"]))
+    elements.append(Paragraph(_pdf_value(meeting_data.get("actions_required")), styles["Notes"]))
+
+    elements.append(Paragraph("Record Timestamps", styles["SectionHeader"]))
+    timestamp_rows = [
+        ["Created At", _pdf_value(meeting_data.get("created_at"))],
+        ["Updated At", _pdf_value(meeting_data.get("updated_at"))],
+        ["Actions Closed At", _pdf_value(meeting_data.get("actions_closed_at"))],
+        ["Actions Closed By", _pdf_value(meeting_data.get("actions_closed_by"))],
+    ]
+    timestamp_table = Table(timestamp_rows, colWidths=[45 * mm, 125 * mm])
+    timestamp_table.setStyle(TableStyle([
+        ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2 * mm),
+        ("LINEBELOW", (0, 0), (-1, -2), 0.25, BORDER_COLOR),
+    ]))
+    elements.append(timestamp_table)
+
+    downloaded_by = _pdf_value((admin_data or {}).get("downloaded_by"))
+    downloaded_at = _pdf_value((admin_data or {}).get("downloaded_at"))
+    elements.append(Spacer(1, 8 * mm))
+    elements.append(HRFlowable(width="100%", thickness=0.5, color=BORDER_COLOR, spaceBefore=5 * mm))
+    elements.append(Paragraph(f"Downloaded by: {downloaded_by}", styles["Footer"]))
+    elements.append(Paragraph(f"Downloaded at: {downloaded_at}", styles["Footer"]))
+    elements.append(Paragraph("This is an official compliance document. Store securely.", styles["Footer"]))
+
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
 # =============================================================================
 # SMART VERIFICATION SYSTEM - PDF Generation & Stamping
 # =============================================================================

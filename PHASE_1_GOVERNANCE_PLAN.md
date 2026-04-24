@@ -576,3 +576,69 @@ For each domain:
 - verified-only rule honoured end-to-end
 - applicant surface visually unchanged (manual verification + one test per domain asserting 403 for applicant routes)
 - backend import check green; frontend `get_errors` clean; new tests all pass; `unified_compliance_engine` untouched (onboarding truth preserved)
+
+---
+
+## 7. Care Employer Legal and Operational Obligations Addendum (audit and plan only)
+
+This addendum is planning-only and does not authorize implementation in this pass.
+
+### 7.1 Updated backlog table (current truth audit)
+
+| Obligation area | Current status | Current truth path | Visibility now | Minimal next ticket (no new parallel truth) | Delivery phase |
+| --- | --- | --- | --- | --- | --- |
+| Supervision cadence and records | Partially exists | backend/routes/supervisions.py + backend/routes/recurring_compliance.py + frontend/src/components/compliance/SupervisionsPanel.js | Admin and manager primary, worker summary visible | Add explicit appraisal subtype guidance and completion SLAs to supervision policy and UI labels | Workforce now |
+| Formal appraisal cycle | Missing | No dedicated appraisal domain beyond supervision types | Admin-only by workaround | Add appraisal profile on existing supervisions truth (type, annual due window, outcome template) | Workforce now |
+| Spot checks and follow-up actions | Exists | backend/routes/spot_checks.py + frontend/src/components/compliance/SpotChecksPanel.js + worker dashboard summary | Admin and manager primary, worker summary visible | Add stricter closure rule for critical follow-up actions and recurring escalation copy | Workforce now |
+| Competency assessment and reassessment | Exists | backend/routes/competency.py + frontend/src/components/compliance/CompetencyAssessmentsPanel.js + worker dashboard summary | Admin and manager primary, worker summary visible | Add required-by-role matrix endpoint consumption in existing UI and explicit overdue chip | Workforce now |
+| Training refresh cadence | Partially exists | backend/routes/recurring_compliance.py supports training_refresh item_type | Mostly admin; worker visibility not explicit per item type | Add worker-safe training refresh card sourced from recurring_compliance without new collection | Workforce now |
+| Incidents and concern follow-up | Exists | backend/routes/compliance.py incident_logs + recurring report_followup support + Compliance Centre incidents tab | Admin full, worker incident views exist with scoping | Add mandatory follow-up due date workflow for unresolved high severity incidents | Workforce now |
+| RIDDOR and reportable external flags | Partially exists | Incident model has type and status; no explicit RIDDOR capture standard in current admin flow | Admin-only | Add explicit reportable flags and external reference fields on existing incident records | Workforce now |
+| Employer insurance and H and S certificate register | Exists | backend/routes/compliance.py insurance endpoints + seed types + Compliance Centre certificates tab | Admin-only | Add alert tiers by certificate category and renewal window to existing certificate truth | Workforce now |
+| Employer internal audit tracker | Partially exists | Audit artifacts exist in markdown and generic audit logs; no dedicated structured tracker route | Admin-only | Add lightweight internal-audit schedule and outcomes using recurring_compliance report_followup and evidence links | Workforce now |
+| Staff meetings and minutes | Missing | No staff meeting domain routes or UI | None | Add staff_meetings domain with minutes, actions, attendance, and follow-up via recurring_compliance | Workforce now |
+| Policy acknowledgements evidence | Exists | backend/routes/policy_assignments.py + employee policy tab + Compliance Centre assignment modal | Worker and admin visible | Add policy review cycle reminder on existing assignment truth, not a new policy system | Workforce now |
+| Shift change and cancellation audit trail | Exists | backend/routes/shifts.py + portal Shifts page + worker dashboard shift visibility | Worker and admin visible | Add immutable timeline panel in existing shift detail modal (created, edited, cancelled, reason) | Workforce now |
+
+### 7.2 Already covered (use as-is)
+
+- Spot checks with outcomes and follow-up fields.
+- Competency records, scheduling, reassessment result capture.
+- Incident logging and admin incident operations.
+- Employer certificate register with upload, replace, history, expiry status.
+- Policy acknowledgement lifecycle with signer capture and PDF evidence export.
+- Shift cancellation reason capture and worker-safe cancellation visibility.
+
+### 7.3 Partially covered (extend existing truth only)
+
+- Supervision exists but appraisal semantics are not yet explicit as a managed cycle.
+- Training refresh exists in recurring cadence but worker-facing clarity is limited.
+- RIDDOR and external-reporting flags are not explicit and standardized in incident workflows.
+- Internal audit tracking is present as artifacts/audits but not as a single structured operational tracker.
+
+### 7.4 Missing (new capabilities, but still on existing architecture patterns)
+
+- Dedicated formal appraisal profile using current supervision truth.
+- Staff meetings and minutes tracking with action follow-up.
+- Structured employer internal-audit schedule/outcomes register.
+
+### 7.5 Next 5 safest tickets (ordered)
+
+1. Incident reportable flags hardening on existing incident_logs (RIDDOR and external refs, no new collection).
+2. Training refresh worker visibility card from recurring_compliance training_refresh items.
+3. Supervision to appraisal profile extension (new supervision_type conventions, annual appraisal status chips).
+4. Internal audit tracker minimal slice using recurring_compliance report_followup + linked evidence.
+5. Shift timeline panel on existing shift truth and audit metadata (read-only timeline).
+
+### 7.6 Later or out of scope now (care-delivery phase or lower safety return)
+
+- Care-plan review orchestration tied to service-user clinical pathways (later care-delivery phase).
+- Multi-agency safeguarding workflow automation beyond incident flagging (later care-delivery phase).
+- Deep service-user outcome analytics in governance dashboard (later care-delivery phase).
+
+### 7.7 Guardrails for future tickets
+
+- No new parallel cadence engine; all due dates remain in recurring_compliance.
+- No duplicate incident system; extend compliance incident_logs only.
+- No duplicate policy store; continue policy_assignments lifecycle.
+- Keep worker visibility worker-safe; sensitive investigation details stay admin/manager only.

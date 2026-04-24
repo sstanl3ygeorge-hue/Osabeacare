@@ -36,6 +36,7 @@ export default function ComplianceCentrePage() {
   const [policies, setPolicies] = useState([]);
   const [insurance, setInsurance] = useState([]);
   const [incidents, setIncidents] = useState([]);
+  const [staffMeetings, setStaffMeetings] = useState([]);
   const [incidentFilter, setIncidentFilter] = useState({ status: 'all', severity: 'all' }); // Incident filters
   const [dbsReport, setDbsReport] = useState(null);
   const [trainingReport, setTrainingReport] = useState(null);
@@ -97,6 +98,67 @@ export default function ComplianceCentrePage() {
       toast.error('Failed to download document');
     }
   };
+
+  const handleDownloadPolicyAcknowledgement = async (assignment) => {
+    if (!assignment?.id) return;
+    try {
+      toast.loading('Preparing acknowledgement PDF...');
+      const response = await axios.get(
+        `${API}/policy-assignments/${assignment.id}/acknowledgement-pdf`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          responseType: 'blob'
+        }
+      );
+
+      const blob = new Blob([response.data], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      const safeTitle = (assignment.policy_title || policyToAssign?.name || 'policy').replace(/\s+/g, '_');
+      const safeEmployee = (assignment.employee_name || 'employee').replace(/\s+/g, '_');
+      link.href = url;
+      link.download = `${safeTitle}_${safeEmployee}_acknowledgement.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      toast.dismiss();
+      toast.success('Acknowledgement downloaded');
+    } catch (error) {
+      toast.dismiss();
+      toast.error(error.response?.data?.detail || 'Failed to download acknowledgement');
+    }
+  };
+
+  const handleDownloadStaffMeetingPdf = async (meeting) => {
+    if (!meeting?.id) return;
+    try {
+      toast.loading('Preparing staff meeting PDF...');
+      const response = await axios.get(
+        `${API}/compliance/staff-meetings/${meeting.id}/download-pdf`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          responseType: 'blob'
+        }
+      );
+
+      const blob = new Blob([response.data], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      const meetingDate = (meeting.meeting_date || 'meeting').toString().split('T')[0];
+      link.href = url;
+      link.download = `staff_meeting_${meetingDate}_${meeting.id.slice(0, 8)}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      toast.dismiss();
+      toast.success('Staff meeting PDF downloaded');
+    } catch (error) {
+      toast.dismiss();
+      toast.error(error.response?.data?.detail || 'Failed to download staff meeting PDF');
+    }
+  };
   
   // Upload states
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
@@ -109,6 +171,21 @@ export default function ComplianceCentrePage() {
   const [uploadPolicyNumber, setUploadPolicyNumber] = useState('');
   const [uploadProvider, setUploadProvider] = useState('');
   const [isUploading, setIsUploading] = useState(false);
+  const [createCertDialogOpen, setCreateCertDialogOpen] = useState(false);
+  const [isCreatingCert, setIsCreatingCert] = useState(false);
+  const [newCert, setNewCert] = useState({
+    name: '',
+    insurance_type: '',
+    category: 'safety',
+    issue_date: '',
+    expiry_date: '',
+    provider: '',
+    policy_number: '',
+    notes: '',
+    required: false,
+    conditional: true,
+    valid_until_replaced: false
+  });
   const [isReplaceMode, setIsReplaceMode] = useState(false);
   const [replaceReason, setReplaceReason] = useState('');
   const [removeDialogOpen, setRemoveDialogOpen] = useState(false);
@@ -126,9 +203,28 @@ export default function ComplianceCentrePage() {
     persons_involved: '',
     immediate_actions: '',
     root_cause: '',
-    corrective_actions: ''
+    corrective_actions: '',
+    is_reportable: false,
+    report_category: '',
+    reported_to_authority: false,
+    reported_at: '',
+    report_reference: '',
+    report_notes: ''
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Staff meeting form
+  const [staffMeetingDialogOpen, setStaffMeetingDialogOpen] = useState(false);
+  const [newStaffMeeting, setNewStaffMeeting] = useState({
+    meeting_date: new Date().toISOString().split('T')[0],
+    meeting_type: 'monthly_staff_meeting',
+    employee_ids: [],
+    agenda: '',
+    notes: '',
+    actions_required: '',
+    next_meeting_date: ''
+  });
+  const [isSubmittingMeeting, setIsSubmittingMeeting] = useState(false);
 
   // Employee Assignment state
   const [assignDialogOpen, setAssignDialogOpen] = useState(false);
@@ -138,9 +234,9 @@ export default function ComplianceCentrePage() {
   const [selectedEmployees, setSelectedEmployees] = useState([]);
   const [isAssigning, setIsAssigning] = useState(false);
 
-  // Amendment states - for editing policies, insurance, incidents with audit trail
+  // Amendment states - for editing policies, insurance, incidents, meetings with audit trail
   const [amendDialogOpen, setAmendDialogOpen] = useState(false);
-  const [amendType, setAmendType] = useState(null); // 'policy', 'insurance', 'incident'
+  const [amendType, setAmendType] = useState(null); // 'policy', 'insurance', 'incident', 'meeting'
   const [amendRecord, setAmendRecord] = useState(null);
   const [amendForm, setAmendForm] = useState({});
   const [isAmending, setIsAmending] = useState(false);
@@ -167,12 +263,17 @@ export default function ComplianceCentrePage() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [dashRes, summaryRes, policiesRes, insuranceRes, incidentsRes, employeesRes, assignmentsRes] = await Promise.all([
+      const insurancePromise = isAdmin()
+        ? axios.get(`${API}/compliance/insurance`, { headers: { Authorization: `Bearer ${token}` } })
+        : Promise.resolve({ data: [] });
+
+      const [dashRes, summaryRes, policiesRes, insuranceRes, incidentsRes, meetingsRes, employeesRes, assignmentsRes] = await Promise.all([
         axios.get(`${API}/compliance/dashboard`, { headers: { Authorization: `Bearer ${token}` } }),
         axios.get(`${API}/compliance/centre-summary`, { headers: { Authorization: `Bearer ${token}` } }),
         axios.get(`${API}/compliance/policies`, { headers: { Authorization: `Bearer ${token}` } }),
-        axios.get(`${API}/compliance/insurance`, { headers: { Authorization: `Bearer ${token}` } }),
+        insurancePromise,
         axios.get(`${API}/compliance/incidents`, { headers: { Authorization: `Bearer ${token}` } }),
+        axios.get(`${API}/compliance/staff-meetings`, { headers: { Authorization: `Bearer ${token}` } }),
         axios.get(`${API}/employees`, { headers: { Authorization: `Bearer ${token}` } }),
         axios.get(`${API}/policy-assignments?include_inactive=true`, { headers: { Authorization: `Bearer ${token}` } })
       ]);
@@ -182,6 +283,7 @@ export default function ComplianceCentrePage() {
       setPolicies(policiesRes.data);
       setInsurance(insuranceRes.data);
       setIncidents(incidentsRes.data);
+      setStaffMeetings(meetingsRes.data);
       const activeEmployees = employeesRes.data.filter(e => !['archived', 'withdrawn', 'superseded'].includes(e.status));
       setEmployees(activeEmployees);
       const staffForReadiness = activeEmployees.filter(e =>
@@ -238,6 +340,65 @@ export default function ComplianceCentrePage() {
       fetchData();
     } catch (error) {
       toast.error('Failed to seed compliance items');
+    }
+  };
+
+  const handleCreateCertificateRecord = async (e) => {
+    e.preventDefault();
+
+    const normalizedType = (newCert.insurance_type || '').trim().toLowerCase().replace(/\s+/g, '_');
+    if (!newCert.name.trim() || !normalizedType) {
+      toast.error('Name and type are required');
+      return;
+    }
+
+    if (!newCert.valid_until_replaced && !newCert.expiry_date) {
+      toast.error('Expiry or due date is required unless set to valid until replaced');
+      return;
+    }
+
+    setIsCreatingCert(true);
+    try {
+      await axios.post(
+        `${API}/compliance/insurance`,
+        {
+          name: newCert.name.trim(),
+          insurance_type: normalizedType,
+          category: newCert.category,
+          issue_date: newCert.issue_date || null,
+          expiry_date: newCert.valid_until_replaced ? null : (newCert.expiry_date || null),
+          provider: newCert.provider || null,
+          policy_number: newCert.policy_number || null,
+          notes: newCert.notes || null,
+          required: !!newCert.required,
+          conditional: !!newCert.conditional,
+          valid_until_replaced: !!newCert.valid_until_replaced,
+          requires_expiry_date: !newCert.valid_until_replaced,
+          renewal_period_months: 12,
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      toast.success('Certificate/check record created');
+      setCreateCertDialogOpen(false);
+      setNewCert({
+        name: '',
+        insurance_type: '',
+        category: 'safety',
+        issue_date: '',
+        expiry_date: '',
+        provider: '',
+        policy_number: '',
+        notes: '',
+        required: false,
+        conditional: true,
+        valid_until_replaced: false
+      });
+      fetchData();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to create certificate/check record');
+    } finally {
+      setIsCreatingCert(false);
     }
   };
 
@@ -322,6 +483,15 @@ export default function ComplianceCentrePage() {
         ? prev.filter(id => id !== empId)
         : [...prev, empId]
     );
+  };
+
+  const toggleMeetingAttendeeSelection = (employeeId) => {
+    setNewStaffMeeting(prev => ({
+      ...prev,
+      employee_ids: prev.employee_ids.includes(employeeId)
+        ? prev.employee_ids.filter(id => id !== employeeId)
+        : [...prev.employee_ids, employeeId]
+    }));
   };
 
   // Select all unassigned employees
@@ -437,13 +607,51 @@ export default function ComplianceCentrePage() {
         persons_involved: '',
         immediate_actions: '',
         root_cause: '',
-        corrective_actions: ''
+        corrective_actions: '',
+        is_reportable: false,
+        report_category: '',
+        reported_to_authority: false,
+        reported_at: '',
+        report_reference: '',
+        report_notes: ''
       });
       fetchData();
     } catch (error) {
       toast.error('Failed to create incident report');
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleCreateStaffMeeting = async (e) => {
+    e.preventDefault();
+    if (!newStaffMeeting.meeting_date || !newStaffMeeting.meeting_type || !newStaffMeeting.agenda || !newStaffMeeting.notes) {
+      toast.error('Meeting date, type, agenda and notes are required');
+      return;
+    }
+
+    setIsSubmittingMeeting(true);
+    try {
+      await axios.post(`${API}/compliance/staff-meetings`, newStaffMeeting, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      toast.success('Staff meeting record created');
+      setStaffMeetingDialogOpen(false);
+      setNewStaffMeeting({
+        meeting_date: new Date().toISOString().split('T')[0],
+        meeting_type: 'monthly_staff_meeting',
+        employee_ids: [],
+        agenda: '',
+        notes: '',
+        actions_required: '',
+        next_meeting_date: ''
+      });
+      fetchData();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to create staff meeting record');
+    } finally {
+      setIsSubmittingMeeting(false);
     }
   };
 
@@ -607,6 +815,24 @@ export default function ComplianceCentrePage() {
         root_cause: record.root_cause || '',
         corrective_actions: record.corrective_actions || '',
         lessons_learned: record.lessons_learned || '',
+        is_reportable: !!record.is_reportable,
+        report_category: record.report_category || '',
+        reported_to_authority: !!record.reported_to_authority,
+        reported_at: record.reported_at ? record.reported_at.split('T')[0] : '',
+        report_reference: record.report_reference || '',
+        report_notes: record.report_notes || '',
+        reason: ''
+      });
+    } else if (type === 'meeting') {
+      setAmendForm({
+        meeting_date: record.meeting_date ? record.meeting_date.split('T')[0] : '',
+        meeting_type: record.meeting_type || 'monthly_staff_meeting',
+        employee_ids: Array.isArray(record.employee_ids) ? record.employee_ids : [],
+        agenda: record.agenda || '',
+        notes: record.notes || '',
+        actions_required: record.actions_required || '',
+        next_meeting_date: record.next_meeting_date ? record.next_meeting_date.split('T')[0] : '',
+        actions_status: record.actions_status || 'open',
         reason: ''
       });
     }
@@ -627,7 +853,9 @@ export default function ComplianceCentrePage() {
         ? `${API}/compliance/policies/${amendRecord.id}/amend`
         : amendType === 'insurance'
         ? `${API}/compliance/insurance/${amendRecord.id}/amend`
-        : `${API}/compliance/incidents/${amendRecord.id}/amend`;
+        : amendType === 'incident'
+        ? `${API}/compliance/incidents/${amendRecord.id}/amend`
+        : `${API}/compliance/staff-meetings/${amendRecord.id}/amend`;
       
       await axios.put(endpoint, amendForm, {
         headers: { Authorization: `Bearer ${token}` }
@@ -657,7 +885,9 @@ export default function ComplianceCentrePage() {
         ? `${API}/compliance/policies/${recordId}/history`
         : type === 'insurance'
         ? `${API}/compliance/insurance/${recordId}/history`
-        : `${API}/compliance/incidents/${recordId}/history`;
+        : type === 'incident'
+        ? `${API}/compliance/incidents/${recordId}/history`
+        : `${API}/compliance/staff-meetings/${recordId}/history`;
       
       const response = await axios.get(endpoint, {
         headers: { Authorization: `Bearer ${token}` }
@@ -934,10 +1164,12 @@ export default function ComplianceCentrePage() {
             <FileText className="h-4 w-4 mr-2" />
             Policies
           </TabsTrigger>
-          <TabsTrigger value="certificates" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white" data-testid="tab-certificates">
-            <Shield className="h-4 w-4 mr-2" />
-            Certificates
-          </TabsTrigger>
+          {isAdmin() && (
+            <TabsTrigger value="certificates" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white" data-testid="tab-certificates">
+              <Shield className="h-4 w-4 mr-2" />
+              Certificates
+            </TabsTrigger>
+          )}
           <TabsTrigger value="staff" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white" data-testid="tab-staff">
             <Users className="h-4 w-4 mr-2" />
             Staff Compliance
@@ -945,6 +1177,10 @@ export default function ComplianceCentrePage() {
           <TabsTrigger value="incidents" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white" data-testid="tab-incidents">
             <AlertCircle className="h-4 w-4 mr-2" />
             Incidents
+          </TabsTrigger>
+          <TabsTrigger value="staff-meetings" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white" data-testid="tab-staff-meetings">
+            <ClipboardList className="h-4 w-4 mr-2" />
+            Staff Meetings
           </TabsTrigger>
           <TabsTrigger 
             value="reports" 
@@ -1237,7 +1473,7 @@ export default function ComplianceCentrePage() {
         </TabsContent>
 
         {/* Certificates Tab (formerly Insurance) */}
-        <TabsContent value="certificates">
+        {isAdmin() && <TabsContent value="certificates">
           <Card className="border-[#E4E8EB] shadow-sm">
             <CardHeader className="flex flex-row items-center justify-between">
               <div>
@@ -1249,12 +1485,22 @@ export default function ComplianceCentrePage() {
                   {insurance.filter(i => i.status === 'valid').length} of {insurance.length} certificates valid
                 </p>
               </div>
-              {insurance.some(i => i.status === 'missing' || i.status === 'expired') && (
-                <div className="flex items-center gap-2 text-sm text-error bg-error/10 px-3 py-1.5 rounded-lg">
-                  <AlertTriangle className="h-4 w-4" />
-                  {insurance.filter(i => i.status === 'missing' || i.status === 'expired').length} require attention
+              <div className="flex items-center gap-2">
+                {insurance.some(i => i.status === 'missing' || i.status === 'expired') && (
+                  <div className="flex items-center gap-2 text-sm text-error bg-error/10 px-3 py-1.5 rounded-lg">
+                    <AlertTriangle className="h-4 w-4" />
+                    {insurance.filter(i => i.status === 'missing' || i.status === 'expired').length} require attention
+                  </div>
+                )}
+                <Button
+                  onClick={() => setCreateCertDialogOpen(true)}
+                  className="rounded-xl"
+                  data-testid="add-certificate-record"
+                >
+                  <Plus className="h-4 w-4 mr-2" />
+                  Add Certificate/Check
+                </Button>
                 </div>
-              )}
             </CardHeader>
             <CardContent>
               {insurance.length === 0 ? (
@@ -1463,7 +1709,7 @@ export default function ComplianceCentrePage() {
               )}
             </CardContent>
           </Card>
-        </TabsContent>
+        </TabsContent>}
         
         {/* Staff Compliance Tab */}
         <TabsContent value="staff">
@@ -1851,6 +2097,83 @@ export default function ComplianceCentrePage() {
                         rows={2}
                       />
                     </div>
+
+                    <div className="space-y-3 rounded-xl border border-[#E4E8EB] p-3">
+                      <label className="flex items-center gap-2 text-sm font-medium text-text-primary">
+                        <input
+                          type="checkbox"
+                          checked={!!newIncident.is_reportable}
+                          onChange={(e) => setNewIncident({
+                            ...newIncident,
+                            is_reportable: e.target.checked,
+                            report_category: e.target.checked ? newIncident.report_category : '',
+                            reported_to_authority: e.target.checked ? newIncident.reported_to_authority : false,
+                            reported_at: e.target.checked ? newIncident.reported_at : '',
+                            report_reference: e.target.checked ? newIncident.report_reference : '',
+                            report_notes: e.target.checked ? newIncident.report_notes : ''
+                          })}
+                        />
+                        Potentially reportable incident
+                      </label>
+                      {newIncident.is_reportable && (
+                        <>
+                          <div className="space-y-2">
+                            <Label>Report Category</Label>
+                            <Input
+                              value={newIncident.report_category}
+                              onChange={(e) => setNewIncident({...newIncident, report_category: e.target.value})}
+                              placeholder="e.g., injury, dangerous occurrence"
+                              className="rounded-xl"
+                            />
+                          </div>
+                          <label className="flex items-center gap-2 text-sm text-text-primary">
+                            <input
+                              type="checkbox"
+                              checked={!!newIncident.reported_to_authority}
+                              onChange={(e) => setNewIncident({
+                                ...newIncident,
+                                reported_to_authority: e.target.checked,
+                                reported_at: e.target.checked ? newIncident.reported_at : '',
+                                report_reference: e.target.checked ? newIncident.report_reference : ''
+                              })}
+                            />
+                            Reported to authority
+                          </label>
+                          {newIncident.reported_to_authority && (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              <div className="space-y-2">
+                                <Label>Reported At</Label>
+                                <Input
+                                  type="date"
+                                  value={newIncident.reported_at}
+                                  onChange={(e) => setNewIncident({...newIncident, reported_at: e.target.value})}
+                                  className="rounded-xl"
+                                />
+                              </div>
+                              <div className="space-y-2">
+                                <Label>Report Reference</Label>
+                                <Input
+                                  value={newIncident.report_reference}
+                                  onChange={(e) => setNewIncident({...newIncident, report_reference: e.target.value})}
+                                  placeholder="Authority reference"
+                                  className="rounded-xl"
+                                />
+                              </div>
+                            </div>
+                          )}
+                          <div className="space-y-2">
+                            <Label>Report Notes</Label>
+                            <Textarea
+                              value={newIncident.report_notes}
+                              onChange={(e) => setNewIncident({...newIncident, report_notes: e.target.value})}
+                              placeholder="Internal report handling notes"
+                              className="rounded-xl"
+                              rows={2}
+                            />
+                          </div>
+                        </>
+                      )}
+                    </div>
                     
                     <div className="flex flex-col-reverse sm:flex-row justify-end gap-3 pt-4 border-t border-[#E4E8EB]">
                       <Button type="button" variant="outline" onClick={() => setIncidentDialogOpen(false)} className="rounded-xl w-full sm:w-auto">
@@ -1912,6 +2235,16 @@ export default function ComplianceCentrePage() {
                                 }`}>
                                   {incident.incident_type?.replace('_', ' ')}
                                 </span>
+                                {incident.is_reportable && (
+                                  <span className="text-xs px-2 py-0.5 rounded bg-red-100 text-red-700 font-medium">
+                                    Potentially reportable
+                                  </span>
+                                )}
+                                {incident.reported_to_authority && (
+                                  <span className="text-xs px-2 py-0.5 rounded bg-green-100 text-green-700 font-medium">
+                                    Reported
+                                  </span>
+                                )}
                                 {isOverdue && (
                                   <span className="text-xs px-2 py-0.5 rounded bg-red-100 text-red-700 font-medium">
                                     Overdue ({daysOld}d)
@@ -1923,6 +2256,8 @@ export default function ComplianceCentrePage() {
                               <div className="flex items-center gap-3 text-xs text-text-muted mt-2">
                                 <span>Date: {formatBackendDate(incident.date_occurred)}</span>
                                 {incident.location && <span>Location: {incident.location}</span>}
+                                {incident.report_category && <span>Category: {incident.report_category}</span>}
+                                {incident.reported_at && <span>Reported: {formatBackendDate(incident.reported_at)}</span>}
                               </div>
                             </div>
                             {/* Action buttons for incidents */}
@@ -1993,6 +2328,213 @@ export default function ComplianceCentrePage() {
             </CardContent>
           </Card>
           </div>
+        </TabsContent>
+
+        {/* Staff Meetings Tab */}
+        <TabsContent value="staff-meetings">
+          <Card className="border-[#E4E8EB] shadow-sm">
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle className="font-heading text-lg">Monthly Staff Meeting Records</CardTitle>
+                <p className="text-sm text-text-muted mt-1">Admin-only meeting minutes register for employer compliance evidence.</p>
+              </div>
+              <Dialog open={staffMeetingDialogOpen} onOpenChange={setStaffMeetingDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button className="bg-primary hover:bg-primary-hover text-white rounded-xl">
+                    <Plus className="h-4 w-4 mr-2" />
+                    New Meeting Record
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="max-w-2xl w-[95vw] max-h-[90vh] overflow-y-auto">
+                  <DialogHeader>
+                    <DialogTitle className="font-heading text-lg pr-6">Create Staff Meeting Record</DialogTitle>
+                  </DialogHeader>
+                  <form onSubmit={handleCreateStaffMeeting} className="space-y-4 mt-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label>Meeting Date *</Label>
+                        <Input
+                          type="date"
+                          value={newStaffMeeting.meeting_date}
+                          onChange={(e) => setNewStaffMeeting({ ...newStaffMeeting, meeting_date: e.target.value })}
+                          required
+                          className="rounded-xl"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Meeting Type *</Label>
+                        <Select
+                          value={newStaffMeeting.meeting_type}
+                          onValueChange={(v) => setNewStaffMeeting({ ...newStaffMeeting, meeting_type: v })}
+                        >
+                          <SelectTrigger className="rounded-xl">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="monthly_staff_meeting">Monthly Staff Meeting</SelectItem>
+                            <SelectItem value="team_meeting">Team Meeting</SelectItem>
+                            <SelectItem value="compliance_meeting">Compliance Meeting</SelectItem>
+                            <SelectItem value="ad_hoc_meeting">Ad Hoc Meeting</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Attendees (employee_ids)</Label>
+                      <div className="max-h-40 overflow-y-auto space-y-2 border border-[#E4E8EB] rounded-xl p-3">
+                        {employees.length === 0 ? (
+                          <p className="text-sm text-text-muted">No employees found</p>
+                        ) : (
+                          employees.map((emp) => (
+                            <label key={emp.id} className="flex items-center gap-2 text-sm text-text-primary">
+                              <input
+                                type="checkbox"
+                                checked={newStaffMeeting.employee_ids.includes(emp.id)}
+                                onChange={() => toggleMeetingAttendeeSelection(emp.id)}
+                              />
+                              <span>{emp.first_name} {emp.last_name}</span>
+                            </label>
+                          ))
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Agenda *</Label>
+                      <Textarea
+                        value={newStaffMeeting.agenda}
+                        onChange={(e) => setNewStaffMeeting({ ...newStaffMeeting, agenda: e.target.value })}
+                        rows={3}
+                        required
+                        className="rounded-xl"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Notes / Minutes *</Label>
+                      <Textarea
+                        value={newStaffMeeting.notes}
+                        onChange={(e) => setNewStaffMeeting({ ...newStaffMeeting, notes: e.target.value })}
+                        rows={4}
+                        required
+                        className="rounded-xl"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Actions Required</Label>
+                      <Textarea
+                        value={newStaffMeeting.actions_required}
+                        onChange={(e) => setNewStaffMeeting({ ...newStaffMeeting, actions_required: e.target.value })}
+                        rows={2}
+                        className="rounded-xl"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Next Meeting Date</Label>
+                      <Input
+                        type="date"
+                        value={newStaffMeeting.next_meeting_date}
+                        onChange={(e) => setNewStaffMeeting({ ...newStaffMeeting, next_meeting_date: e.target.value })}
+                        className="rounded-xl"
+                      />
+                    </div>
+
+                    <div className="flex flex-col-reverse sm:flex-row justify-end gap-3 pt-4 border-t border-[#E4E8EB]">
+                      <Button type="button" variant="outline" onClick={() => setStaffMeetingDialogOpen(false)} className="rounded-xl w-full sm:w-auto">
+                        Cancel
+                      </Button>
+                      <Button type="submit" disabled={isSubmittingMeeting} className="bg-primary hover:bg-primary-hover text-white rounded-xl w-full sm:w-auto">
+                        {isSubmittingMeeting ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Create Record'}
+                      </Button>
+                    </div>
+                  </form>
+                </DialogContent>
+              </Dialog>
+            </CardHeader>
+            <CardContent>
+              {staffMeetings.length === 0 ? (
+                <div className="text-center py-10 text-text-muted">
+                  <ClipboardList className="h-10 w-10 mx-auto mb-2 opacity-50" />
+                  <p>No staff meeting records yet</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {staffMeetings.map((meeting) => {
+                    const attendeeNames = (meeting.employee_ids || [])
+                      .map((empId) => employees.find((e) => e.id === empId))
+                      .filter(Boolean)
+                      .map((emp) => `${emp.first_name} ${emp.last_name}`);
+                    return (
+                      <div key={meeting.id} className="p-4 rounded-xl border bg-[#F8FAFA] border-[#E4E8EB]">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 flex-wrap mb-1">
+                              <span className="text-xs px-2 py-0.5 rounded bg-blue-100 text-blue-700">
+                                {meeting.meeting_type?.replace(/_/g, ' ')}
+                              </span>
+                              <span className={`text-xs px-2 py-0.5 rounded ${meeting.actions_status === 'closed' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                                Actions {meeting.actions_status || 'open'}
+                              </span>
+                            </div>
+                            <p className="text-sm text-text-primary"><span className="font-medium">Meeting:</span> {formatBackendDate(meeting.meeting_date)}</p>
+                            {meeting.next_meeting_date && <p className="text-sm text-text-muted">Next: {formatBackendDate(meeting.next_meeting_date)}</p>}
+                            <p className="text-sm text-text-primary mt-2"><span className="font-medium">Agenda:</span> {meeting.agenda}</p>
+                            <p className="text-sm text-text-muted mt-1"><span className="font-medium text-text-primary">Minutes:</span> {meeting.notes}</p>
+                            {meeting.actions_required && <p className="text-sm text-text-muted mt-1"><span className="font-medium text-text-primary">Actions:</span> {meeting.actions_required}</p>}
+                            <p className="text-xs text-text-muted mt-2">
+                              Attendees ({(meeting.employee_ids || []).length}): {attendeeNames.length > 0 ? attendeeNames.join(', ') : 'No attendees selected'}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="rounded-lg"
+                              onClick={() => handleDownloadStaffMeetingPdf(meeting)}
+                            >
+                              <Download className="h-4 w-4 mr-1" />
+                              PDF
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="rounded-lg"
+                              onClick={() => openAmendDialog('meeting', meeting)}
+                            >
+                              <Edit className="h-4 w-4 mr-1" />
+                              Edit
+                            </Button>
+                            {meeting.actions_status !== 'closed' && (
+                              <Button
+                                size="sm"
+                                className="rounded-lg bg-green-600 hover:bg-green-700"
+                                onClick={() => openAmendDialog('meeting', { ...meeting, actions_status: 'closed' })}
+                              >
+                                <CheckCircle className="h-4 w-4 mr-1" />
+                                Close Actions
+                              </Button>
+                            )}
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="rounded-lg"
+                              onClick={() => loadHistory('meeting', meeting.id)}
+                              title="View amendment history"
+                            >
+                              <History className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
 
         {/* Compliance Insights Tab (formerly Reports) */}
@@ -2562,6 +3104,127 @@ export default function ComplianceCentrePage() {
         </TabsContent>
       </Tabs>
 
+      <Dialog open={createCertDialogOpen} onOpenChange={setCreateCertDialogOpen}>
+        <DialogContent className="max-w-lg w-[95vw] max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="font-heading text-lg pr-6">Add Provider Certificate or Check</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleCreateCertificateRecord} className="space-y-4 mt-3">
+            <div className="space-y-2">
+              <Label>Name *</Label>
+              <Input
+                value={newCert.name}
+                onChange={(e) => setNewCert(prev => ({ ...prev, name: e.target.value }))}
+                placeholder="e.g., Waste Contract"
+                className="rounded-xl"
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Type Key *</Label>
+              <Input
+                value={newCert.insurance_type}
+                onChange={(e) => setNewCert(prev => ({ ...prev, insurance_type: e.target.value }))}
+                placeholder="e.g., waste_contract"
+                className="rounded-xl"
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Category *</Label>
+              <Select value={newCert.category} onValueChange={(v) => setNewCert(prev => ({ ...prev, category: v }))}>
+                <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="insurance">Insurance</SelectItem>
+                  <SelectItem value="regulatory">Regulatory</SelectItem>
+                  <SelectItem value="safety">Safety</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label>Issue Date</Label>
+                <Input
+                  type="date"
+                  value={newCert.issue_date}
+                  onChange={(e) => setNewCert(prev => ({ ...prev, issue_date: e.target.value }))}
+                  className="rounded-xl"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Expiry/Due Date {newCert.valid_until_replaced ? '(optional)' : '*'}</Label>
+                <Input
+                  type="date"
+                  value={newCert.expiry_date}
+                  onChange={(e) => setNewCert(prev => ({ ...prev, expiry_date: e.target.value }))}
+                  className="rounded-xl"
+                  required={!newCert.valid_until_replaced}
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label>Provider/Vendor</Label>
+                <Input
+                  value={newCert.provider}
+                  onChange={(e) => setNewCert(prev => ({ ...prev, provider: e.target.value }))}
+                  placeholder="Issuer or contractor"
+                  className="rounded-xl"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Reference</Label>
+                <Input
+                  value={newCert.policy_number}
+                  onChange={(e) => setNewCert(prev => ({ ...prev, policy_number: e.target.value }))}
+                  placeholder="Certificate or contract ref"
+                  className="rounded-xl"
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Notes</Label>
+              <Textarea
+                value={newCert.notes}
+                onChange={(e) => setNewCert(prev => ({ ...prev, notes: e.target.value }))}
+                className="rounded-xl"
+                placeholder="Optional compliance notes"
+              />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <label className="flex items-center gap-2 text-sm text-text-primary">
+                <input
+                  type="checkbox"
+                  checked={newCert.required}
+                  onChange={(e) => setNewCert(prev => ({ ...prev, required: e.target.checked }))}
+                />
+                Required item
+              </label>
+              <label className="flex items-center gap-2 text-sm text-text-primary">
+                <input
+                  type="checkbox"
+                  checked={newCert.valid_until_replaced}
+                  onChange={(e) => setNewCert(prev => ({
+                    ...prev,
+                    valid_until_replaced: e.target.checked,
+                    expiry_date: e.target.checked ? '' : prev.expiry_date
+                  }))}
+                />
+                Valid until replaced
+              </label>
+            </div>
+            <div className="flex flex-col-reverse sm:flex-row justify-end gap-3 pt-2 border-t border-[#E4E8EB]">
+              <Button type="button" variant="outline" onClick={() => setCreateCertDialogOpen(false)} className="rounded-xl w-full sm:w-auto">
+                Cancel
+              </Button>
+              <Button type="submit" disabled={isCreatingCert} className="rounded-xl w-full sm:w-auto">
+                {isCreatingCert ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Create Record'}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
       {/* Upload Dialog */}
       <Dialog open={uploadDialogOpen} onOpenChange={(open) => { setUploadDialogOpen(open); if (!open) resetUploadForm(); }}>
         <DialogContent className="max-w-lg w-[95vw] max-h-[90vh] overflow-y-auto">
@@ -2829,6 +3492,19 @@ export default function ComplianceCentrePage() {
                          a.employee_id === emp.id && 
                          !['unassigned', 'withdrawn'].includes(a.status)
                   );
+                  const latestAssignment = policyAssignments
+                    .filter(a => a.policy_id === policyToAssign?.id && a.employee_id === emp.id)
+                    .sort((a, b) => {
+                      const aDate = new Date(a.updated_at || a.withdrawn_at || a.unassigned_at || a.acknowledged_at || a.assigned_at || 0).getTime();
+                      const bDate = new Date(b.updated_at || b.withdrawn_at || b.unassigned_at || b.acknowledged_at || b.assigned_at || 0).getTime();
+                      return bDate - aDate;
+                    })[0];
+                  const effectiveAssignment = assignment || latestAssignment;
+                  const effectiveStatus = effectiveAssignment?.status;
+                  const isAcked = effectiveStatus === 'acknowledged' || effectiveStatus === 'signed';
+                  const isWithdrawn = effectiveStatus === 'withdrawn';
+                  const isUnassigned = effectiveStatus === 'unassigned';
+                  const canDownloadAck = Boolean(effectiveAssignment?.acknowledged_at);
                   
                   return (
                     <label 
@@ -2847,15 +3523,50 @@ export default function ComplianceCentrePage() {
                       <span className="text-text-primary flex-1 truncate">
                         {emp.first_name} {emp.last_name}
                       </span>
-                      {isAlreadyAssigned && (
-                        <span className={`text-xs px-2 py-0.5 rounded whitespace-nowrap ${
-                          assignment?.status === 'acknowledged' || assignment?.status === 'signed' 
-                            ? 'bg-green-100 text-green-700' 
-                            : 'bg-blue-100 text-blue-700'
-                        }`}>
-                          {assignment?.status === 'acknowledged' || assignment?.status === 'signed' 
-                            ? 'Acknowledged' 
-                            : 'Assigned'}
+                      {effectiveAssignment && (
+                        <div className="flex items-center gap-2">
+                          <span className={`text-xs px-2 py-0.5 rounded whitespace-nowrap ${
+                            effectiveAssignment?.admin_reviewed
+                              ? 'bg-green-100 text-green-700'
+                              : isAcked
+                                ? 'bg-blue-100 text-blue-700'
+                                : isWithdrawn
+                                  ? 'bg-red-100 text-red-700'
+                                  : isUnassigned
+                                    ? 'bg-gray-100 text-gray-600'
+                                    : 'bg-amber-100 text-amber-700'
+                          }`}>
+                            {effectiveAssignment?.admin_reviewed
+                              ? 'Reviewed'
+                              : isAcked
+                                ? 'Acknowledged'
+                                : isWithdrawn
+                                  ? 'Withdrawn'
+                                  : isUnassigned
+                                    ? 'Unassigned'
+                                    : 'Assigned'}
+                          </span>
+                          {canDownloadAck && (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              className="h-7 px-2"
+                              onClick={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                handleDownloadPolicyAcknowledgement(effectiveAssignment);
+                              }}
+                              title="Download acknowledgement PDF"
+                            >
+                              <Download className="h-3.5 w-3.5" />
+                            </Button>
+                          )}
+                        </div>
+                      )}
+                      {effectiveAssignment?.acknowledged_at && (
+                        <span className="sr-only">
+                          {`Acknowledged ${formatBackendDateTime(effectiveAssignment.acknowledged_at)} by ${effectiveAssignment.acknowledged_by_employee_name || effectiveAssignment.employee_name || 'employee'}`}
                         </span>
                       )}
                     </label>
@@ -2863,6 +3574,12 @@ export default function ComplianceCentrePage() {
                 })
               )}
             </div>
+
+            {policyToAssign && (
+              <div className="text-xs text-text-muted bg-[#F8FAFA] border border-[#E4E8EB] rounded-lg p-2">
+                Tip: staff badges include reviewed, acknowledged, pending, withdrawn, and unassigned states. Use the download icon to open acknowledgement evidence.
+              </div>
+            )}
             
             <p className="text-sm text-text-muted">
               {selectedEmployees.length} employee(s) selected
@@ -2902,7 +3619,7 @@ export default function ComplianceCentrePage() {
         <DialogContent className="max-w-lg w-[95vw] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="font-heading text-lg pr-6">
-              Edit {amendType === 'policy' ? 'Policy' : amendType === 'insurance' ? 'Certificate' : 'Incident'} Details
+              Edit {amendType === 'policy' ? 'Policy' : amendType === 'insurance' ? 'Certificate' : amendType === 'incident' ? 'Incident' : 'Staff Meeting'} Details
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 mt-4">
@@ -3137,6 +3854,195 @@ export default function ComplianceCentrePage() {
                     rows={2}
                   />
                 </div>
+                <div className="space-y-3 rounded-xl border border-[#E4E8EB] p-3">
+                  <label className="flex items-center gap-2 text-sm font-medium text-text-primary">
+                    <input
+                      type="checkbox"
+                      checked={!!amendForm.is_reportable}
+                      onChange={(e) => setAmendForm({
+                        ...amendForm,
+                        is_reportable: e.target.checked,
+                        report_category: e.target.checked ? (amendForm.report_category || '') : '',
+                        reported_to_authority: e.target.checked ? !!amendForm.reported_to_authority : false,
+                        reported_at: e.target.checked ? (amendForm.reported_at || '') : '',
+                        report_reference: e.target.checked ? (amendForm.report_reference || '') : '',
+                        report_notes: e.target.checked ? (amendForm.report_notes || '') : ''
+                      })}
+                    />
+                    Potentially reportable incident
+                  </label>
+                  {amendForm.is_reportable && (
+                    <>
+                      <div className="space-y-2">
+                        <Label>Report Category</Label>
+                        <Input
+                          value={amendForm.report_category || ''}
+                          onChange={(e) => setAmendForm({...amendForm, report_category: e.target.value})}
+                          className="rounded-xl"
+                          placeholder="e.g., injury, dangerous occurrence"
+                        />
+                      </div>
+                      <label className="flex items-center gap-2 text-sm text-text-primary">
+                        <input
+                          type="checkbox"
+                          checked={!!amendForm.reported_to_authority}
+                          onChange={(e) => setAmendForm({
+                            ...amendForm,
+                            reported_to_authority: e.target.checked,
+                            reported_at: e.target.checked ? (amendForm.reported_at || '') : '',
+                            report_reference: e.target.checked ? (amendForm.report_reference || '') : ''
+                          })}
+                        />
+                        Reported to authority
+                      </label>
+                      {amendForm.reported_to_authority && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div className="space-y-2">
+                            <Label>Reported At</Label>
+                            <Input
+                              type="date"
+                              value={amendForm.reported_at || ''}
+                              onChange={(e) => setAmendForm({...amendForm, reported_at: e.target.value})}
+                              className="rounded-xl"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Report Reference</Label>
+                            <Input
+                              value={amendForm.report_reference || ''}
+                              onChange={(e) => setAmendForm({...amendForm, report_reference: e.target.value})}
+                              className="rounded-xl"
+                              placeholder="Authority reference"
+                            />
+                          </div>
+                        </div>
+                      )}
+                      <div className="space-y-2">
+                        <Label>Report Notes</Label>
+                        <Textarea
+                          value={amendForm.report_notes || ''}
+                          onChange={(e) => setAmendForm({...amendForm, report_notes: e.target.value})}
+                          className="rounded-xl"
+                          rows={2}
+                          placeholder="Internal report handling notes"
+                        />
+                      </div>
+                    </>
+                  )}
+                </div>
+              </>
+            )}
+
+            {/* Staff Meeting Amendment Fields */}
+            {amendType === 'meeting' && (
+              <>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label>Meeting Date</Label>
+                    <Input
+                      type="date"
+                      value={amendForm.meeting_date || ''}
+                      onChange={(e) => setAmendForm({ ...amendForm, meeting_date: e.target.value })}
+                      className="rounded-xl"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Meeting Type</Label>
+                    <Select
+                      value={amendForm.meeting_type || 'monthly_staff_meeting'}
+                      onValueChange={(v) => setAmendForm({ ...amendForm, meeting_type: v })}
+                    >
+                      <SelectTrigger className="rounded-xl">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="monthly_staff_meeting">Monthly Staff Meeting</SelectItem>
+                        <SelectItem value="team_meeting">Team Meeting</SelectItem>
+                        <SelectItem value="compliance_meeting">Compliance Meeting</SelectItem>
+                        <SelectItem value="ad_hoc_meeting">Ad Hoc Meeting</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Attendees (employee_ids)</Label>
+                  <div className="max-h-36 overflow-y-auto space-y-2 border border-[#E4E8EB] rounded-xl p-3">
+                    {employees.map((emp) => (
+                      <label key={emp.id} className="flex items-center gap-2 text-sm text-text-primary">
+                        <input
+                          type="checkbox"
+                          checked={(amendForm.employee_ids || []).includes(emp.id)}
+                          onChange={() => {
+                            const current = amendForm.employee_ids || [];
+                            const next = current.includes(emp.id)
+                              ? current.filter(id => id !== emp.id)
+                              : [...current, emp.id];
+                            setAmendForm({ ...amendForm, employee_ids: next });
+                          }}
+                        />
+                        <span>{emp.first_name} {emp.last_name}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Agenda</Label>
+                  <Textarea
+                    value={amendForm.agenda || ''}
+                    onChange={(e) => setAmendForm({ ...amendForm, agenda: e.target.value })}
+                    className="rounded-xl"
+                    rows={3}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Notes / Minutes</Label>
+                  <Textarea
+                    value={amendForm.notes || ''}
+                    onChange={(e) => setAmendForm({ ...amendForm, notes: e.target.value })}
+                    className="rounded-xl"
+                    rows={4}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Actions Required</Label>
+                  <Textarea
+                    value={amendForm.actions_required || ''}
+                    onChange={(e) => setAmendForm({ ...amendForm, actions_required: e.target.value })}
+                    className="rounded-xl"
+                    rows={2}
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label>Next Meeting Date</Label>
+                    <Input
+                      type="date"
+                      value={amendForm.next_meeting_date || ''}
+                      onChange={(e) => setAmendForm({ ...amendForm, next_meeting_date: e.target.value })}
+                      className="rounded-xl"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Actions Status</Label>
+                    <Select
+                      value={amendForm.actions_status || 'open'}
+                      onValueChange={(v) => setAmendForm({ ...amendForm, actions_status: v })}
+                    >
+                      <SelectTrigger className="rounded-xl">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="open">Open</SelectItem>
+                        <SelectItem value="closed">Closed</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
               </>
             )}
             
@@ -3250,6 +4156,13 @@ export default function ComplianceCentrePage() {
                           {entry.incident_type && <p><span className="font-medium">Type:</span> {entry.incident_type}</p>}
                           {entry.date_occurred && <p><span className="font-medium">Date:</span> {formatBackendDate(entry.date_occurred)}</p>}
                           {entry.status && <p><span className="font-medium">Status:</span> {entry.status}</p>}
+                        </div>
+                      )}
+                      {historyType === 'meeting' && (
+                        <div className="text-xs text-text-muted space-y-1 pt-2 border-t border-[#E4E8EB]">
+                          {(entry.meeting_type || entry.changes?.meeting_type) && <p><span className="font-medium">Type:</span> {entry.meeting_type || entry.changes?.meeting_type}</p>}
+                          {(entry.meeting_date || entry.changes?.meeting_date) && <p><span className="font-medium">Date:</span> {formatBackendDate(entry.meeting_date || entry.changes?.meeting_date)}</p>}
+                          {(entry.actions_status || entry.changes?.actions_status) && <p><span className="font-medium">Actions:</span> {entry.actions_status || entry.changes?.actions_status}</p>}
                         </div>
                       )}
                     </div>

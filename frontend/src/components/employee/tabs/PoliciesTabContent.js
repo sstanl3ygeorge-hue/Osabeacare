@@ -160,6 +160,8 @@ export default function PoliciesTabContent({
   const getPolicyCardClass = (policy) => {
     if (policy.admin_reviewed) return 'bg-green-50 border-green-200';
     if (policy.status === 'acknowledged' || policy.status === 'signed') return 'bg-blue-50 border-blue-200';
+    if (policy.status === 'withdrawn') return 'bg-red-50 border-red-200';
+    if (policy.status === 'unassigned') return 'bg-gray-50 border-gray-200';
     if (policy.status === 'viewed') return 'bg-amber-50 border-amber-200';
     return 'bg-[#F8FAFA] border-[#E4E8EB]';
   };
@@ -168,6 +170,9 @@ export default function PoliciesTabContent({
   const getStatusBadgeClass = (policy) => {
     if (policy.admin_reviewed) return 'status-success';
     if (policy.status === 'acknowledged' || policy.status === 'signed') return 'bg-green-100 text-green-700 border-green-200';
+    if (policy.status === 'withdrawn') return 'bg-red-100 text-red-700 border-red-200';
+    if (policy.status === 'unassigned') return 'bg-gray-100 text-gray-600 border-gray-200';
+    if (policy.status === 'viewed') return 'bg-amber-100 text-amber-700 border-amber-200';
     return 'bg-gray-100 text-gray-600 border-gray-200';
   };
 
@@ -175,7 +180,10 @@ export default function PoliciesTabContent({
   const getStatusLabel = (policy) => {
     if (policy.admin_reviewed) return 'Reviewed & Approved';
     if (policy.status === 'acknowledged' || policy.status === 'signed') return 'Acknowledged';
-    return 'Not Read';
+    if (policy.status === 'viewed') return 'Viewed';
+    if (policy.status === 'withdrawn') return 'Withdrawn';
+    if (policy.status === 'unassigned') return 'Unassigned';
+    return 'Assigned';
   };
 
   return (

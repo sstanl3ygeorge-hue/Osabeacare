@@ -92,6 +92,33 @@ export default function ActionableTaskQueue() {
     }
   };
 
+  const openTaskDetail = (task) => {
+    if (!task?.employee_id) {
+      navigate('/portal/employees');
+      return;
+    }
+    const employeeProfileBase = `/portal/employees/${task.employee_id}`;
+
+    switch (task.type) {
+      case 'verification':
+      case 'expiring':
+        navigate(`${employeeProfileBase}?tab=compliance`);
+        return;
+      case 'reference':
+        navigate(`${employeeProfileBase}?tab=references`);
+        return;
+      case 'spot_check':
+      case 'followup':
+        navigate(`${employeeProfileBase}?tab=spot_checks`);
+        return;
+      case 'competency_assessment':
+        navigate(`${employeeProfileBase}?tab=competencies`);
+        return;
+      default:
+        navigate(employeeProfileBase);
+    }
+  };
+
   if (loading) {
     return (
       <Card className="border border-gray-200 shadow-sm">
@@ -224,11 +251,11 @@ export default function ActionableTaskQueue() {
                   </div>
                   <Button 
                     size="sm" 
-                    onClick={() => navigate(`/portal/recruitment/${doc.employee_id}?tab=compliance`)}
+                    onClick={() => openTaskDetail(doc)}
                     className="bg-blue-600 hover:bg-blue-700 shrink-0 ml-2"
                   >
                     <Eye className="h-3.5 w-3.5 mr-1" />
-                    Verify
+                    Open Document
                   </Button>
                 </div>
               ))}
@@ -262,11 +289,11 @@ export default function ActionableTaskQueue() {
                   </div>
                   <Button
                     size="sm"
-                    onClick={() => navigate(`/portal/recruitment/${ref.employee_id}?tab=references`)}
+                    onClick={() => openTaskDetail(ref)}
                     className="bg-purple-600 hover:bg-purple-700 shrink-0 ml-2"
                   >
                     <Eye className="h-3.5 w-3.5 mr-1" />
-                    Review
+                    Open References
                   </Button>
                 </div>
               ))}
@@ -380,6 +407,15 @@ export default function ActionableTaskQueue() {
                       </>
                     )}
                   </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => openTaskDetail(item)}
+                    className="shrink-0 ml-2"
+                  >
+                    <Eye className="h-3.5 w-3.5 mr-1" />
+                    Open Document
+                  </Button>
                 </div>
               ))}
             </div>
@@ -407,19 +443,39 @@ export default function ActionableTaskQueue() {
             </div>
           </CardHeader>
           <CardContent className="p-3">
-            <div className="flex gap-4">
-              {scheduledTasks.length > 0 && (
-                <div className="flex items-center gap-2 px-3 py-2 bg-white rounded-lg border">
-                  <ClipboardList className="h-4 w-4 text-cyan-600" />
-                  <span className="text-sm"><strong>{scheduledTasks.length}</strong> Checks Due</span>
+            <div className="space-y-2">
+              {scheduledTasks.map((task, idx) => (
+                <div key={`${task.id || idx}-${task.type}`} className="flex items-center justify-between px-3 py-2 bg-white rounded-lg border">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-gray-800 truncate">
+                      {task.type === 'spot_check' ? 'Spot check due' : 'Competency assessment due'} • {task.employee_name || 'Employee'}
+                    </p>
+                    {task.scheduled_date && (
+                      <p className="text-xs text-gray-500">Due {task.scheduled_date}</p>
+                    )}
+                  </div>
+                  <Button size="sm" variant="outline" onClick={() => openTaskDetail(task)} className="ml-2 shrink-0">
+                    <Eye className="h-3.5 w-3.5 mr-1" />
+                    Open
+                  </Button>
                 </div>
-              )}
-              {overdueFollowups.length > 0 && (
-                <div className="flex items-center gap-2 px-3 py-2 bg-white rounded-lg border">
-                  <AlertTriangle className="h-4 w-4 text-cyan-600" />
-                  <span className="text-sm"><strong>{overdueFollowups.length}</strong> Overdue Follow-ups</span>
+              ))}
+              {overdueFollowups.map((task, idx) => (
+                <div key={`${task.id || idx}-${task.type}`} className="flex items-center justify-between px-3 py-2 bg-white rounded-lg border border-red-100 bg-red-50/30">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-gray-800 truncate">
+                      Overdue follow-up • {task.employee_name || 'Employee'}
+                    </p>
+                    {task.follow_up_date && (
+                      <p className="text-xs text-gray-500">Was due {task.follow_up_date}</p>
+                    )}
+                  </div>
+                  <Button size="sm" variant="outline" onClick={() => openTaskDetail(task)} className="ml-2 shrink-0">
+                    <Eye className="h-3.5 w-3.5 mr-1" />
+                    Open
+                  </Button>
                 </div>
-              )}
+              ))}
             </div>
           </CardContent>
         </Card>
@@ -456,7 +512,7 @@ export default function ActionableTaskQueue() {
                     <Button 
                       size="sm"
                       variant="outline"
-                      onClick={() => navigate(`/portal/recruitment/${worker.employee_id}`)}
+                      onClick={() => navigate(`/portal/employees/${worker.employee_id}`)}
                     >
                       <Eye className="h-3.5 w-3.5 mr-1" />
                       View

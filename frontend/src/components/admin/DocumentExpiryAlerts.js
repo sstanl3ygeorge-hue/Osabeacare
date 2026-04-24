@@ -80,7 +80,7 @@ export default function DocumentExpiryAlerts({ compact = false }) {
           </div>
           <div>
             <p className="font-medium text-green-800">All Documents Current</p>
-            <p className="text-sm text-green-600">No DBS, RTW, or professional registrations expiring in the next 30 days</p>
+            <p className="text-sm text-green-600">No document summary alerts in the next 30 days</p>
           </div>
         </CardContent>
       </Card>
@@ -184,7 +184,7 @@ export default function DocumentExpiryAlerts({ compact = false }) {
           )} />
         </div>
         {critical.length > 0 && (
-          <p className="text-xs text-red-500 mt-2">{critical.length} critical (under 7 days) - View now</p>
+          <p className="text-xs text-red-500 mt-2">{critical.length} critical (under 7 days) - Open details</p>
         )}
       </div>
     );
@@ -201,7 +201,7 @@ export default function DocumentExpiryAlerts({ compact = false }) {
             </div>
             <div>
               <CardTitle className="text-lg flex items-center gap-2">
-                Document Expiry Alerts
+                Document Summary Alerts
                 <Badge className={cn(
                   "text-xs",
                   critical.length > 0 ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700"
@@ -210,7 +210,7 @@ export default function DocumentExpiryAlerts({ compact = false }) {
                 </Badge>
               </CardTitle>
               <CardDescription>
-                DBS, Right to Work, and Professional Registrations expiring within 30 days
+                Summary view of DBS, Right to Work, and professional registrations expiring within 30 days
               </CardDescription>
             </div>
           </div>
@@ -233,7 +233,7 @@ export default function DocumentExpiryAlerts({ compact = false }) {
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>
-                  Send email reminders to all employees with expiring documents
+                  Send reminders from this summary view
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>

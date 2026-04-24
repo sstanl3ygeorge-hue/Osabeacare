@@ -15,6 +15,7 @@ import { Search, UserPlus, Filter, Loader2, MoreHorizontal, Edit, Archive, Trash
 import { Checkbox } from '../../components/ui/checkbox';
 import { Textarea } from '../../components/ui/textarea';
 import EmployeeAvatar from '../../components/portal/EmployeeAvatar';
+import LifecycleReasonDialog from '../../components/portal/LifecycleReasonDialog';
 import { StageIdentityBadge } from '../../components/compliance';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -94,6 +95,11 @@ export default function EmployeesPage() {
   const [bulkDueDays, setBulkDueDays] = useState(14);
   const [isBulkRequesting, setIsBulkRequesting] = useState(false);
   const [bulkResult, setBulkResult] = useState(null);
+  const [lifecycleReasonDialogOpen, setLifecycleReasonDialogOpen] = useState(false);
+  const [lifecycleTargetEmployee, setLifecycleTargetEmployee] = useState(null);
+  const [lifecycleNextStatus, setLifecycleNextStatus] = useState('');
+  const [lifecycleActionLabel, setLifecycleActionLabel] = useState('');
+  const [isLifecycleSaving, setIsLifecycleSaving] = useState(false);
   
   const { token, isAuditor, user } = useAuth();
 
@@ -313,24 +319,32 @@ export default function EmployeesPage() {
   };
 
   const handleLifecycleStatusChange = async (emp, nextStatus, actionLabel) => {
-    const reason = window.prompt(`${actionLabel} reason (minimum 5 characters):`);
-    if (reason === null) return;
-    const trimmed = reason.trim();
-    if (trimmed.length < 5) {
-      toast.error('Please provide a reason of at least 5 characters');
-      return;
-    }
+    setLifecycleTargetEmployee(emp);
+    setLifecycleNextStatus(nextStatus);
+    setLifecycleActionLabel(actionLabel);
+    setLifecycleReasonDialogOpen(true);
+  };
+
+  const submitLifecycleStatusChange = async (reason) => {
+    if (!lifecycleTargetEmployee || !lifecycleNextStatus) return;
+    setIsLifecycleSaving(true);
     try {
       await axios.put(
-        `${API}/employees/${emp.id}`,
-        { status: nextStatus, status_change_reason: trimmed },
+        `${API}/employees/${lifecycleTargetEmployee.id}`,
+        { status: lifecycleNextStatus, status_change_reason: reason },
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      toast.success(`${emp.first_name} ${emp.last_name} updated to ${nextStatus}`);
+      toast.success(`${lifecycleTargetEmployee.first_name} ${lifecycleTargetEmployee.last_name} updated to ${lifecycleNextStatus}`);
+      setLifecycleReasonDialogOpen(false);
+      setLifecycleTargetEmployee(null);
+      setLifecycleNextStatus('');
+      setLifecycleActionLabel('');
       fetchEmployees();
     } catch (error) {
       const detail = error.response?.data?.detail;
       toast.error(typeof detail === 'string' ? detail : 'Failed to update lifecycle status');
+    } finally {
+      setIsLifecycleSaving(false);
     }
   };
 
@@ -1302,6 +1316,23 @@ export default function EmployeesPage() {
           )}
         </DialogContent>
       </Dialog>
+
+      <LifecycleReasonDialog
+        open={lifecycleReasonDialogOpen}
+        onOpenChange={(open) => {
+          setLifecycleReasonDialogOpen(open);
+          if (!open && !isLifecycleSaving) {
+            setLifecycleTargetEmployee(null);
+            setLifecycleNextStatus('');
+            setLifecycleActionLabel('');
+          }
+        }}
+        actionLabel={lifecycleActionLabel || 'Update lifecycle status'}
+        subjectLabel={lifecycleTargetEmployee ? `${lifecycleTargetEmployee.first_name} ${lifecycleTargetEmployee.last_name}` : ''}
+        minLength={5}
+        isSubmitting={isLifecycleSaving}
+        onConfirm={submitLifecycleStatusChange}
+      />
     </div>
   );
 }

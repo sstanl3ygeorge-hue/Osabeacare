@@ -18,6 +18,7 @@ import { toast } from 'sonner';
 import ComplianceOverview from '../../components/portal/ComplianceOverview';
 import DocumentPreviewModal from '../../components/portal/DocumentPreviewModal';
 import RecurringComplianceSection from '../../components/portal/RecurringComplianceSection';
+import LifecycleReasonDialog from '../../components/portal/LifecycleReasonDialog';
 import DocumentExtractionReview from '../../components/documents/DocumentExtractionReview';
 import TrainingIntakeWizard from '../../components/training/TrainingIntakeWizard';
 import TrainingRequestDialog from '../../components/training/TrainingRequestDialog';
@@ -351,6 +352,10 @@ export default function EmployeeProfilePage() {
   // Acknowledgement states (for Contract/Handbook acknowledgement flow)
   const [acknowledgementDialogOpen, setAcknowledgementDialogOpen] = useState(false);
   const [workApprovalDialogOpen, setWorkApprovalDialogOpen] = useState(false);
+  const [lifecycleReasonDialogOpen, setLifecycleReasonDialogOpen] = useState(false);
+  const [lifecycleNextStatus, setLifecycleNextStatus] = useState('');
+  const [lifecycleActionLabel, setLifecycleActionLabel] = useState('');
+  const [isLifecycleSaving, setIsLifecycleSaving] = useState(false);
   const [workApprovalOutcome, setWorkApprovalOutcome] = useState('ready');
   const [workApprovalRationale, setWorkApprovalRationale] = useState('');
   const [workApprovalConditions, setWorkApprovalConditions] = useState('');
@@ -1273,25 +1278,31 @@ export default function EmployeeProfilePage() {
   };
 
   const handleLifecycleStatusChange = async (nextStatus, actionLabel) => {
-    const reason = window.prompt(`${actionLabel} reason (minimum 5 characters):`);
-    if (reason === null) return;
-    const trimmed = reason.trim();
-    if (trimmed.length < 5) {
-      toast.error('Please provide a reason of at least 5 characters');
-      return;
-    }
+    setLifecycleNextStatus(nextStatus);
+    setLifecycleActionLabel(actionLabel);
+    setLifecycleReasonDialogOpen(true);
+  };
+
+  const submitLifecycleStatusChange = async (reason) => {
+    if (!lifecycleNextStatus) return;
+    setIsLifecycleSaving(true);
     try {
       await axios.put(
         `${API}/employees/${employeeId}`,
-        { status: nextStatus, status_change_reason: trimmed },
+        { status: lifecycleNextStatus, status_change_reason: reason },
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      toast.success(`Employee updated to ${nextStatus}`);
+      toast.success(`Employee updated to ${lifecycleNextStatus}`);
+      setLifecycleReasonDialogOpen(false);
+      setLifecycleNextStatus('');
+      setLifecycleActionLabel('');
       await fetchData();
       await fetchComplianceFile();
     } catch (error) {
       const detail = error.response?.data?.detail;
       toast.error(typeof detail === 'string' ? detail : 'Failed to update lifecycle status');
+    } finally {
+      setIsLifecycleSaving(false);
     }
   };
 
@@ -10020,6 +10031,22 @@ export default function EmployeeProfilePage() {
           setViewFormSubmission(inlineViewerFallback);
           setInlineViewerFallback(null);
         } : undefined}
+      />
+
+      <LifecycleReasonDialog
+        open={lifecycleReasonDialogOpen}
+        onOpenChange={(open) => {
+          setLifecycleReasonDialogOpen(open);
+          if (!open && !isLifecycleSaving) {
+            setLifecycleNextStatus('');
+            setLifecycleActionLabel('');
+          }
+        }}
+        actionLabel={lifecycleActionLabel || 'Update lifecycle status'}
+        subjectLabel={employee ? `${employee.first_name} ${employee.last_name}` : ''}
+        minLength={5}
+        isSubmitting={isLifecycleSaving}
+        onConfirm={submitLifecycleStatusChange}
       />
     </div>
   );

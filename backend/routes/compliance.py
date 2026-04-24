@@ -237,6 +237,44 @@ class IncidentNoteCreate(BaseModel):
     note: str
 
 
+def _normalize_and_validate_reportable_fields(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize incident reportability fields and enforce minimal reportable completeness."""
+    is_reportable = bool(payload.get("is_reportable"))
+    reported_to_authority = bool(payload.get("reported_to_authority"))
+
+    report_category = (payload.get("report_category") or "").strip()
+    report_reference = (payload.get("report_reference") or "").strip()
+    report_notes = (payload.get("report_notes") or "").strip()
+    reported_at = payload.get("reported_at")
+
+    if not is_reportable:
+        payload["is_reportable"] = False
+        payload["report_category"] = None
+        payload["reported_to_authority"] = False
+        payload["reported_at"] = None
+        payload["report_reference"] = None
+        payload["report_notes"] = None
+        return payload
+
+    if not report_category:
+        raise HTTPException(status_code=400, detail="Report category is required when incident is reportable")
+    if not report_notes:
+        raise HTTPException(status_code=400, detail="Report notes are required when incident is reportable")
+    if reported_to_authority and (not reported_at or not report_reference):
+        raise HTTPException(
+            status_code=400,
+            detail="Reported date and reference are required when incident is marked reported to authority",
+        )
+
+    payload["is_reportable"] = True
+    payload["report_category"] = report_category
+    payload["reported_to_authority"] = reported_to_authority
+    payload["reported_at"] = reported_at if reported_to_authority else None
+    payload["report_reference"] = report_reference if reported_to_authority else None
+    payload["report_notes"] = report_notes
+    return payload
+
+
 class StaffMeetingCreate(BaseModel):
     meeting_date: str
     meeting_type: str
@@ -1225,10 +1263,12 @@ async def create_incident(incident: IncidentLogCreate, user: dict = Depends(requ
         if not shift_exists:
             raise HTTPException(status_code=400, detail="Related shift not found")
 
+    incident_payload = _normalize_and_validate_reportable_fields(incident.model_dump())
+
     doc = {
         "id": str(uuid.uuid4()),
         "reference_number": ref_number,
-        **incident.model_dump(),
+        **incident_payload,
         "status": "open",
         "notes": [],
         "action_taken": None,
@@ -1249,7 +1289,12 @@ async def create_incident(incident: IncidentLogCreate, user: dict = Depends(requ
         "create_incident",
         "incident_log",
         doc["id"],
-        {"reference": ref_number, "type": incident.incident_type}
+        {
+            "reference": ref_number,
+            "type": incident.incident_type,
+            "is_reportable": doc.get("is_reportable"),
+            "reported_to_authority": doc.get("reported_to_authority"),
+        },
     )
     
     return {k: v for k, v in doc.items() if k != "_id"}
@@ -1269,10 +1314,17 @@ async def update_incident(
         raise HTTPException(status_code=404, detail="Incident not found")
     
     now = datetime.now(timezone.utc).isoformat()
+    incoming_updates = updates.model_dump(exclude_none=True)
+    effective_payload = {**incident, **incoming_updates}
+    _normalize_and_validate_reportable_fields(effective_payload)
+
     update_dict = {"updated_at": now}
-    
-    for field, value in updates.model_dump(exclude_none=True).items():
+    for field, value in incoming_updates.items():
         update_dict[field] = value
+
+    for field in ("is_reportable", "report_category", "reported_to_authority", "reported_at", "report_reference", "report_notes"):
+        if field in effective_payload:
+            update_dict[field] = effective_payload[field]
 
     if updates.status in {"under_review", "investigating", "resolved", "closed"}:
         update_dict["reviewed_by"] = user.get("user_id")
@@ -1309,6 +1361,9 @@ async def amend_incident(
         raise HTTPException(status_code=404, detail="Incident not found")
     
     now = datetime.now(timezone.utc).isoformat()
+    amendment_fields = amendment.model_dump(exclude_none=True, exclude={'reason'})
+    effective_payload = {**incident, **amendment_fields}
+    _normalize_and_validate_reportable_fields(effective_payload)
     
     amend_record = {
         "id": str(uuid.uuid4()),
@@ -1322,11 +1377,22 @@ async def amend_incident(
     }
     
     update_dict = {"updated_at": now}
-    for field, value in amendment.model_dump(exclude_none=True, exclude={'reason'}).items():
+    reportability_fields = {"is_reportable", "report_category", "reported_to_authority", "reported_at", "report_reference", "report_notes"}
+    for field, value in amendment_fields.items():
+        if field in reportability_fields:
+            value = effective_payload.get(field)
         if field in incident and incident[field] != value:
             amend_record["changes"][field] = value
             amend_record["previous_values"][field] = incident[field]
             update_dict[field] = value
+
+    if any(field in amendment_fields for field in reportability_fields):
+        for field in reportability_fields:
+            next_value = effective_payload.get(field)
+            if incident.get(field) != next_value:
+                amend_record["changes"][field] = next_value
+                amend_record["previous_values"][field] = incident.get(field)
+                update_dict[field] = next_value
     
     if amend_record["changes"]:
         await db.amendments.insert_one(amend_record)

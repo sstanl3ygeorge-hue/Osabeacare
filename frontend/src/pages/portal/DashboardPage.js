@@ -7,7 +7,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/ca
 import { Button } from '../../components/ui/button';
 import { Progress } from '../../components/ui/progress';
 import EmployeeAvatar from '../../components/portal/EmployeeAvatar';
-import AdminTaskQueue from '../../components/admin/AdminTaskQueue';
 import ActionableTaskQueue from '../../components/admin/ActionableTaskQueue';
 import TrainingExpiryAlerts from '../../components/admin/TrainingExpiryAlerts';
 import DocumentExpiryAlerts from '../../components/admin/DocumentExpiryAlerts';
@@ -261,7 +260,7 @@ export default function DashboardPage() {
           Compliance Dashboard
         </h1>
         <p className="text-text-muted mt-1">
-          This dashboard highlights what needs attention today. Start with expired items and required checks.
+          Snapshot view for operations. Use the task queue below for primary actions and open details from each summary card.
         </p>
       </div>
 
@@ -273,7 +272,7 @@ export default function DashboardPage() {
               Active Obligations Snapshot
             </CardTitle>
             <p className="text-sm text-text-muted">
-              Fast triage for active-workforce obligations using current recurring and training summary truth.
+              Summary counts only. Select any card to open its detailed page.
             </p>
           </CardHeader>
           <CardContent>
@@ -351,11 +350,6 @@ export default function DashboardPage() {
       {/* ACTIONABLE TASK QUEUE - New CQC-compliant task list */}
       <ActionableTaskQueue />
 
-      {/* Admin Task Queue (Summary counts) */}
-      <div className="mt-4">
-        <AdminTaskQueue />
-      </div>
-
       {/* PRIMARY: Needs Attention */}
       <Card className={`border-2 ${needsAttentionTotal > 0 ? 'border-red-200 bg-red-50' : 'border-green-200 bg-green-50'} shadow-sm`}>
         <CardHeader className="pb-3">
@@ -363,7 +357,7 @@ export default function DashboardPage() {
             {needsAttentionTotal > 0 ? (
               <>
                 <AlertTriangle className="h-5 w-5 text-red-600" />
-                <span className="text-red-700">Needs Attention</span>
+                <span className="text-red-700">Needs Attention Summary</span>
               </>
             ) : (
               <>
@@ -393,7 +387,7 @@ export default function DashboardPage() {
                   </div>
                   {expiredDocs > 0 && <ArrowRight className="h-4 w-4 text-red-400" />}
                 </div>
-                {expiredDocs > 0 && <p className="text-xs text-red-500 mt-2">Review now →</p>}
+                {expiredDocs > 0 && <p className="text-xs text-red-500 mt-2">Open details →</p>}
               </div>
               
               {/* Expiring Soon → Training Matrix filtered to expiring_soon */}
@@ -413,7 +407,7 @@ export default function DashboardPage() {
                   </div>
                   {expiringSoon > 0 && <ArrowRight className="h-4 w-4 text-amber-400" />}
                 </div>
-                {expiringSoon > 0 && <p className="text-xs text-amber-600 mt-2">See items →</p>}
+                {expiringSoon > 0 && <p className="text-xs text-amber-600 mt-2">Open details →</p>}
               </div>
               
               {/* Staff Not Ready → Employees filtered to not_ready */}
@@ -433,7 +427,7 @@ export default function DashboardPage() {
                   </div>
                   {staffNotReady > 0 && <ArrowRight className="h-4 w-4 text-red-400" />}
                 </div>
-                {staffNotReady > 0 && <p className="text-xs text-red-500 mt-2">View staff →</p>}
+                {staffNotReady > 0 && <p className="text-xs text-red-500 mt-2">Open details →</p>}
               </div>
               
               {/* Pending Verifications → Recruitment page */}
@@ -453,7 +447,7 @@ export default function DashboardPage() {
                   </div>
                   {pendingVerifications > 0 && <ArrowRight className="h-4 w-4 text-purple-400" />}
                 </div>
-                {pendingVerifications > 0 && <p className="text-xs text-purple-500 mt-2">Review now →</p>}
+                {pendingVerifications > 0 && <p className="text-xs text-purple-500 mt-2">Open details →</p>}
               </div>
               
               {/* Policies Not Acknowledged → Compliance Centre policies tab */}
@@ -473,11 +467,11 @@ export default function DashboardPage() {
                   </div>
                   {policiesNotAcknowledged > 0 && <ArrowRight className="h-4 w-4 text-blue-400" />}
                 </div>
-                {policiesNotAcknowledged > 0 && <p className="text-xs text-blue-500 mt-2">Open list →</p>}
+                {policiesNotAcknowledged > 0 && <p className="text-xs text-blue-500 mt-2">Open details →</p>}
               </div>
             </div>
           ) : (
-            <p className="text-green-700">No expired documents, no items expiring soon, all staff ready, and all policies acknowledged.</p>
+            <p className="text-green-700">No summary alerts at the moment.</p>
           )}
         </CardContent>
       </Card>
@@ -635,7 +629,7 @@ export default function DashboardPage() {
             {/* Urgent Items List */}
             {(recurringCompliance.overdue_items?.length > 0 || recurringCompliance.due_items?.length > 0) && (
               <div className="space-y-2">
-                <p className="text-sm font-medium text-text-muted">Action Required:</p>
+                <p className="text-sm font-medium text-text-muted">Top due/overdue items (open employee detail):</p>
                 {recurringCompliance.overdue_items?.slice(0, 3).map((item, idx) => (
                   <Link 
                     key={`overdue-${idx}`}
@@ -720,7 +714,7 @@ export default function DashboardPage() {
             {/* Blocked Employees List */}
             {trainingSummary.blocked_employees?.length > 0 && (
               <div className="space-y-2">
-                <p className="text-sm font-medium text-text-muted">Staff Blocked by Training:</p>
+                <p className="text-sm font-medium text-text-muted">Top blocked staff (open training detail):</p>
                 {trainingSummary.blocked_employees.slice(0, 3).map((emp, idx) => (
                   <Link 
                     key={`blocked-${idx}`}

@@ -80,7 +80,7 @@ export default function TrainingExpiryAlerts({ compact = false }) {
           </div>
           <div>
             <p className="font-medium text-green-800">All Training Current</p>
-            <p className="text-sm text-green-600">No training certificates expiring in the next 60 days</p>
+            <p className="text-sm text-green-600">No training summary alerts in the next 60 days</p>
           </div>
         </CardContent>
       </Card>
@@ -195,7 +195,7 @@ export default function TrainingExpiryAlerts({ compact = false }) {
             </div>
             <div>
               <CardTitle className="text-lg flex items-center gap-2">
-                Training Expiry Alerts
+                Training Summary Alerts
                 <Badge className={cn(
                   "text-xs",
                   critical.length > 0 ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700"
@@ -204,7 +204,7 @@ export default function TrainingExpiryAlerts({ compact = false }) {
                 </Badge>
               </CardTitle>
               <CardDescription>
-                Training certificates expiring within 60 days
+                Summary view of training certificates expiring within 60 days
               </CardDescription>
             </div>
           </div>
@@ -229,7 +229,7 @@ export default function TrainingExpiryAlerts({ compact = false }) {
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>
-                  <p>Send email reminders to all affected workers</p>
+                      <p>Send reminders from this summary view</p>
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
@@ -334,7 +334,7 @@ export default function TrainingExpiryAlerts({ compact = false }) {
           className="w-full mt-2"
           onClick={() => navigate('/portal/training?filter=expiring')}
         >
-          View All Expiring Training
+          Open Training Details
           <ChevronRight className="h-4 w-4 ml-1" />
         </Button>
       </CardContent>

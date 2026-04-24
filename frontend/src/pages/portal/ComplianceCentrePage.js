@@ -636,6 +636,20 @@ export default function ComplianceCentrePage() {
 
   const handleCreateIncident = async (e) => {
     e.preventDefault();
+    if (newIncident.is_reportable) {
+      if (!newIncident.report_category?.trim()) {
+        toast.error('Report category is required when incident is marked reportable');
+        return;
+      }
+      if (!newIncident.report_notes?.trim()) {
+        toast.error('Report notes are required when incident is marked reportable');
+        return;
+      }
+      if (newIncident.reported_to_authority && (!newIncident.reported_at || !newIncident.report_reference?.trim())) {
+        toast.error('Reported date and reference are required when marked as reported to authority');
+        return;
+      }
+    }
     setIsSubmitting(true);
     
     try {
@@ -936,6 +950,20 @@ export default function ComplianceCentrePage() {
     if (!amendForm.reason || amendForm.reason.trim().length < 3) {
       toast.error('Please provide a reason for this change (min 3 characters)');
       return;
+    }
+    if (amendType === 'incident' && amendForm.is_reportable) {
+      if (!amendForm.report_category?.trim()) {
+        toast.error('Report category is required when incident is marked reportable');
+        return;
+      }
+      if (!amendForm.report_notes?.trim()) {
+        toast.error('Report notes are required when incident is marked reportable');
+        return;
+      }
+      if (amendForm.reported_to_authority && (!amendForm.reported_at || !amendForm.report_reference?.trim())) {
+        toast.error('Reported date and reference are required when marked as reported to authority');
+        return;
+      }
     }
     
     setIsAmending(true);
@@ -2214,6 +2242,9 @@ export default function ComplianceCentrePage() {
                         />
                         Potentially reportable incident
                       </label>
+                      <p className="text-xs text-text-muted">
+                        Flag incidents that may be reportable (for example, RIDDOR-related) so reporting evidence is captured consistently.
+                      </p>
                       {newIncident.is_reportable && (
                         <>
                           <div className="space-y-2">
@@ -2336,12 +2367,7 @@ export default function ComplianceCentrePage() {
                                 </span>
                                 {incident.is_reportable && (
                                   <span className="text-xs px-2 py-0.5 rounded bg-red-100 text-red-700 font-medium">
-                                    Potentially reportable
-                                  </span>
-                                )}
-                                {incident.reported_to_authority && (
-                                  <span className="text-xs px-2 py-0.5 rounded bg-green-100 text-green-700 font-medium">
-                                    Reported
+                                    {incident.reported_to_authority ? 'Reportable: reported' : 'Reportable: pending authority report'}
                                   </span>
                                 )}
                                 {isOverdue && (
@@ -4129,6 +4155,9 @@ export default function ComplianceCentrePage() {
                     />
                     Potentially reportable incident
                   </label>
+                  <p className="text-xs text-text-muted">
+                    Flag incidents that may be reportable (for example, RIDDOR-related) so reporting evidence is captured consistently.
+                  </p>
                   {amendForm.is_reportable && (
                     <>
                       <div className="space-y-2">

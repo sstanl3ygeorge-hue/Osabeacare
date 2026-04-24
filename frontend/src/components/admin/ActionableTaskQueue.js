@@ -102,7 +102,7 @@ export default function ActionableTaskQueue() {
     switch (task.type) {
       case 'verification':
       case 'expiring':
-        navigate(`${employeeProfileBase}?tab=compliance`);
+        navigate(`${employeeProfileBase}?tab=work_readiness`);
         return;
       case 'reference':
         navigate(`${employeeProfileBase}?tab=references`);

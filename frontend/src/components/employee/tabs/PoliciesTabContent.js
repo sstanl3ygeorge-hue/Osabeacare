@@ -24,6 +24,28 @@ export default function PoliciesTabContent({
 }) {
   const [loading, setLoading] = useState({});
 
+  const activePolicies = policies.filter(policy => !['withdrawn', 'unassigned'].includes(policy.status));
+  const pendingAcknowledgementCount = activePolicies.filter(policy => ['assigned', 'viewed'].includes(policy.status)).length;
+  const awaitingAdminReviewCount = activePolicies.filter(policy => ['acknowledged', 'signed'].includes(policy.status) && !policy.admin_reviewed).length;
+  const reviewedCount = activePolicies.filter(policy => policy.admin_reviewed).length;
+
+  const statusPriority = (policy) => {
+    if (['assigned', 'viewed'].includes(policy.status)) return 0;
+    if ((policy.status === 'acknowledged' || policy.status === 'signed') && !policy.admin_reviewed) return 1;
+    if (policy.admin_reviewed) return 2;
+    if (policy.status === 'withdrawn') return 3;
+    if (policy.status === 'unassigned') return 4;
+    return 5;
+  };
+
+  const orderedPolicies = [...policies].sort((first, second) => {
+    const byStatus = statusPriority(first) - statusPriority(second);
+    if (byStatus !== 0) return byStatus;
+    const firstDate = new Date(first.acknowledged_at || first.viewed_at || first.assigned_at || 0).getTime();
+    const secondDate = new Date(second.acknowledged_at || second.viewed_at || second.assigned_at || 0).getTime();
+    return secondDate - firstDate;
+  });
+
   // Handle policy view
   const handleViewPolicy = async (policy) => {
     setLoading(prev => ({ ...prev, [`view-${policy.id}`]: true }));
@@ -179,7 +201,7 @@ export default function PoliciesTabContent({
   // Get status label
   const getStatusLabel = (policy) => {
     if (policy.admin_reviewed) return 'Reviewed & Approved';
-    if (policy.status === 'acknowledged' || policy.status === 'signed') return 'Acknowledged';
+    if (policy.status === 'acknowledged' || policy.status === 'signed') return 'Awaiting Admin Review';
     if (policy.status === 'viewed') return 'Viewed';
     if (policy.status === 'withdrawn') return 'Withdrawn';
     if (policy.status === 'unassigned') return 'Unassigned';
@@ -194,19 +216,22 @@ export default function PoliciesTabContent({
           <div>
             <h3 className="font-heading text-lg font-semibold text-text-primary">Assigned Policies</h3>
             <p className="text-sm text-text-muted">
-              {policies.filter(p => p.status === 'acknowledged' || p.status === 'signed').length} of {policies.length} acknowledged
+              {reviewedCount} of {activePolicies.length || policies.length} fully reviewed
             </p>
             <p className="text-xs text-text-muted mt-1">
               Employees must read and acknowledge assigned policies.
             </p>
           </div>
           {policies.length > 0 && (
-            <div className="flex items-center gap-2 text-sm">
-              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-gray-100 text-gray-600">
-                <Clock className="w-3 h-3" /> {policies.filter(p => p.status === 'assigned' || p.status === 'viewed').length} Not Read
+            <div className="flex items-center gap-2 text-sm flex-wrap justify-end">
+              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-amber-100 text-amber-700">
+                <Clock className="w-3 h-3" /> {pendingAcknowledgementCount} Pending acknowledgement
+              </span>
+              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-blue-100 text-blue-700">
+                <Shield className="w-3 h-3" /> {awaitingAdminReviewCount} Awaiting admin review
               </span>
               <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-green-100 text-green-700">
-                <CheckCircle className="w-3 h-3" /> {policies.filter(p => p.status === 'acknowledged' || p.status === 'signed').length} Acknowledged
+                <CheckCircle className="w-3 h-3" /> {reviewedCount} Reviewed
               </span>
             </div>
           )}
@@ -220,7 +245,7 @@ export default function PoliciesTabContent({
           </div>
         ) : (
           <div className="space-y-4">
-            {policies.map((policy) => (
+            {orderedPolicies.map((policy) => (
               <div 
                 key={policy.id} 
                 className={`p-4 rounded-xl border ${getPolicyCardClass(policy)}`}
@@ -238,6 +263,11 @@ export default function PoliciesTabContent({
                       Assigned: {formatBackendDate(policy.assigned_at)} 
                       {policy.assigned_by_name && ` by ${policy.assigned_by_name}`}
                     </p>
+                    {policy.viewed_at && !policy.acknowledged_at && (
+                      <p className="text-xs text-amber-700 mt-1">
+                        Viewed {formatBackendDateTime(policy.viewed_at)}. Acknowledgement still required.
+                      </p>
+                    )}
                     
                     {/* Signature Information Display */}
                     {(policy.status === 'acknowledged' || policy.status === 'signed') && (
@@ -250,6 +280,11 @@ export default function PoliciesTabContent({
                           {policy.acknowledged_at ? formatBackendDateTime(policy.acknowledged_at) : 
                            policy.signed_at ? formatBackendDateTime(policy.signed_at) : ''}
                         </p>
+                        {!policy.admin_reviewed && (
+                          <p className="mt-2 text-xs text-blue-700">
+                            Awaiting admin review.
+                          </p>
+                        )}
                       </div>
                     )}
                     

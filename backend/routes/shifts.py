@@ -298,6 +298,8 @@ async def update_shift(
     db = get_db()
     shift = await _get_shift_or_404(shift_id)
     update: Dict[str, Any] = {}
+    assignment_old_status: Optional[str] = None
+    assignment_new_status: Optional[str] = None
 
     next_status = payload.status or shift.get("status")
     if payload.status:
@@ -345,6 +347,8 @@ async def update_shift(
 
     if update.get("status") in {"completed", "cancelled"} and active_assignment:
         assignment_status = "completed" if update["status"] == "completed" else "cancelled"
+        assignment_old_status = active_assignment.get("status")
+        assignment_new_status = assignment_status
         assignment_update = {"status": assignment_status, "updated_at": _now_iso(), "ended_at": _now_iso(), "ended_by": user.get("user_id")}
         if assignment_status == "cancelled" and update.get("cancelled_reason"):
             assignment_update["unassign_reason"] = update.get("cancelled_reason")
@@ -361,12 +365,27 @@ async def update_shift(
     update["updated_by"] = user.get("user_id")
     await db.shifts.update_one({"id": shift_id}, {"$set": update})
     updated = await _get_shift_or_404(shift_id)
+
+    audit_action = "shift_updated"
+    if update.get("status") == "cancelled":
+        audit_action = "shift_cancelled"
+    elif update.get("status") == "completed":
+        audit_action = "shift_completed"
+
     await log_audit_action(
         user.get("user_id"),
-        "shift_updated",
+        audit_action,
         "shift",
         shift_id,
-        {"changes": update},
+        {
+            "changes": update,
+            "old_status": shift.get("status"),
+            "new_status": updated.get("status"),
+            "old_assigned_employee_id": shift.get("assigned_employee_id"),
+            "new_assigned_employee_id": updated.get("assigned_employee_id"),
+            "old_assignment_status": assignment_old_status,
+            "new_assignment_status": assignment_new_status,
+        },
     )
     return {"success": True, "shift": updated}
 
@@ -428,6 +447,10 @@ async def assign_worker_to_shift(
             "shift_id": shift_id,
             "employee_id": payload.employee_id,
             "employee_name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
+            "old_shift_status": shift.get("status"),
+            "new_shift_status": "assigned",
+            "old_assignment_status": None,
+            "new_assignment_status": "active",
         },
     )
     return {"success": True, "shift": updated_shift, "assignment": assignment_doc}
@@ -462,7 +485,14 @@ async def unassign_worker_from_shift(
         "shift_assignment_cancelled",
         "shift_assignment",
         assignment["id"],
-        {"shift_id": shift_id, "reason": payload.reason},
+        {
+            "shift_id": shift_id,
+            "reason": payload.reason,
+            "old_shift_status": shift.get("status"),
+            "new_shift_status": "open",
+            "old_assignment_status": assignment.get("status"),
+            "new_assignment_status": "cancelled",
+        },
     )
     return {"success": True, "shift": updated_shift}
 
@@ -478,16 +508,20 @@ async def complete_shift(
         return {"success": True, "shift": shift, "message": "Shift already completed"}
     if shift.get("status") == "cancelled":
         raise HTTPException(status_code=409, detail="Cancelled shifts cannot be completed")
-    if shift.get("status") not in {"assigned", "open"}:
+    if shift.get("status") == "open":
+        raise HTTPException(status_code=409, detail="Cannot complete unassigned shift")
+    if shift.get("status") != "assigned":
         raise HTTPException(status_code=409, detail="Shift cannot be completed from its current status")
 
     assignment = await _get_active_assignment_for_shift(shift_id)
+    if not assignment:
+        raise HTTPException(status_code=409, detail="Cannot complete shift without an active assignment")
+
     now = _now_iso()
-    if assignment:
-        await db.shift_assignments.update_one(
-            {"id": assignment["id"]},
-            {"$set": {"status": "completed", "ended_at": now, "ended_by": user.get("user_id"), "updated_at": now}},
-        )
+    await db.shift_assignments.update_one(
+        {"id": assignment["id"]},
+        {"$set": {"status": "completed", "ended_at": now, "ended_by": user.get("user_id"), "updated_at": now}},
+    )
 
     await db.shifts.update_one(
         {"id": shift_id},
@@ -499,7 +533,13 @@ async def complete_shift(
         "shift_completed",
         "shift",
         shift_id,
-        {"had_active_assignment": bool(assignment)},
+        {
+            "had_active_assignment": True,
+            "old_shift_status": shift.get("status"),
+            "new_shift_status": "completed",
+            "old_assignment_status": assignment.get("status"),
+            "new_assignment_status": "completed",
+        },
     )
     return {"success": True, "shift": updated_shift}
 
@@ -581,6 +621,7 @@ async def accept_worker_shift(
     if not assignment:
         raise HTTPException(status_code=404, detail="Active assignment not found for this shift")
 
+    previous_response_status = assignment.get("worker_response_status") or "pending"
     now = _now_iso()
     await db.shift_assignments.update_one(
         {"id": assignment["id"]},
@@ -593,11 +634,21 @@ async def accept_worker_shift(
     )
     updated_assignment = await db.shift_assignments.find_one({"id": assignment["id"]}, {"_id": 0})
     await log_audit_action(
-        employee_id,
+        f"worker:{employee_id}",
         "worker_shift_accepted",
         "shift_assignment",
         assignment["id"],
-        {"shift_id": shift_id, "note": payload.note},
+        {
+            "shift_id": shift_id,
+            "note": payload.note,
+            "worker_employee_id": employee_id,
+            "old_shift_status": shift.get("status"),
+            "new_shift_status": shift.get("status"),
+            "old_assignment_status": assignment.get("status"),
+            "new_assignment_status": assignment.get("status"),
+            "old_worker_response_status": previous_response_status,
+            "new_worker_response_status": "accepted",
+        },
     )
     return {"success": True, "assignment": updated_assignment, "shift": shift}
 
@@ -621,7 +672,10 @@ async def reject_worker_shift(
     )
     if not assignment:
         raise HTTPException(status_code=404, detail="Active assignment not found for this shift")
+    if assignment.get("worker_response_status") == "accepted":
+        raise HTTPException(status_code=409, detail="Accepted shifts cannot be rejected. Ask admin to unassign.")
 
+    previous_response_status = assignment.get("worker_response_status") or "pending"
     now = _now_iso()
     await db.shift_assignments.update_one(
         {"id": assignment["id"]},
@@ -648,10 +702,20 @@ async def reject_worker_shift(
     updated_shift = await _get_shift_or_404(shift_id)
     updated_assignment = await db.shift_assignments.find_one({"id": assignment["id"]}, {"_id": 0})
     await log_audit_action(
-        employee_id,
+        f"worker:{employee_id}",
         "worker_shift_rejected",
         "shift_assignment",
         assignment["id"],
-        {"shift_id": shift_id, "note": payload.note},
+        {
+            "shift_id": shift_id,
+            "note": payload.note,
+            "worker_employee_id": employee_id,
+            "old_shift_status": shift.get("status"),
+            "new_shift_status": "open",
+            "old_assignment_status": assignment.get("status"),
+            "new_assignment_status": "cancelled",
+            "old_worker_response_status": previous_response_status,
+            "new_worker_response_status": "rejected",
+        },
     )
     return {"success": True, "assignment": updated_assignment, "shift": updated_shift}

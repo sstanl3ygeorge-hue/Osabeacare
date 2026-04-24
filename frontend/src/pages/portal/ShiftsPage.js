@@ -432,7 +432,7 @@ export default function ShiftsPage() {
                                 Unassign Worker
                               </DropdownMenuItem>
                             )}
-                            {shift.status !== 'completed' && shift.status !== 'cancelled' && (
+                            {shift.status === 'assigned' && (
                               <DropdownMenuItem onClick={() => handleComplete(shift.id)}>
                                 <CheckCircle2 className="h-4 w-4 mr-2" />
                                 Complete Shift

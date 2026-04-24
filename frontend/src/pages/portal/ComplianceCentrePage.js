@@ -559,6 +559,16 @@ export default function ComplianceCentrePage() {
     return { total, acknowledged };
   };
 
+  const getPolicyAssignmentTriage = (policyId) => {
+    const assignments = policyAssignments.filter(a => a.policy_id === policyId && !['unassigned', 'withdrawn'].includes(a.status));
+    return {
+      total: assignments.length,
+      pendingAcknowledgement: assignments.filter(a => ['assigned', 'viewed'].includes(a.status)).length,
+      awaitingAdminReview: assignments.filter(a => ['acknowledged', 'signed'].includes(a.status) && !a.admin_reviewed).length,
+      reviewed: assignments.filter(a => a.admin_reviewed).length,
+    };
+  };
+
   const handleUploadPolicy = async (e) => {
     e.preventDefault();
     if (!uploadFile || !selectedPolicy) return;
@@ -1054,6 +1064,21 @@ export default function ComplianceCentrePage() {
     acc[policy.category].push(policy);
     return acc;
   }, {});
+
+  const certificateBuckets = {
+    missing: insurance.filter((item) => item.status === 'missing'),
+    expired: insurance.filter((item) => item.status === 'expired'),
+    expiringSoon: insurance.filter((item) => item.status === 'expiring_soon'),
+    valid: insurance.filter((item) => item.status === 'valid')
+  };
+
+  const certificateStatusPriority = {
+    expired: 0,
+    missing: 1,
+    expiring_soon: 2,
+    under_review: 3,
+    valid: 4
+  };
 
   if (loading) {
     return (
@@ -1609,8 +1634,22 @@ export default function ComplianceCentrePage() {
                   Insurance, regulatory, and safety certificates required for CQC compliance
                 </p>
                 <p className="text-xs text-text-muted mt-1">
-                  {insurance.filter(i => i.status === 'valid').length} of {insurance.length} certificates valid
+                  {certificateBuckets.valid.length} of {insurance.length} certificates valid
                 </p>
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-success/10 px-2 py-0.5 text-success">
+                    Current: {certificateBuckets.valid.length}
+                  </span>
+                  <span className="inline-flex items-center gap-1 rounded-full bg-warning/10 px-2 py-0.5 text-warning">
+                    Expiring soon: {certificateBuckets.expiringSoon.length}
+                  </span>
+                  <span className="inline-flex items-center gap-1 rounded-full bg-error/10 px-2 py-0.5 text-error">
+                    Expired: {certificateBuckets.expired.length}
+                  </span>
+                  <span className="inline-flex items-center gap-1 rounded-full bg-error/10 px-2 py-0.5 text-error">
+                    Missing: {certificateBuckets.missing.length}
+                  </span>
+                </div>
               </div>
               <div className="flex items-center gap-2">
                 {insurance.some(i => i.status === 'missing' || i.status === 'expired') && (
@@ -1655,9 +1694,29 @@ export default function ComplianceCentrePage() {
                 </div>
               ) : (
                 <div className="space-y-6">
+                  {(certificateBuckets.expired.length > 0 || certificateBuckets.missing.length > 0 || certificateBuckets.expiringSoon.length > 0) && (
+                    <div className="rounded-xl border border-warning/30 bg-warning/5 p-4">
+                      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <p className="text-sm font-semibold text-text-primary">Operational attention buckets</p>
+                          <p className="text-xs text-text-muted">Use the row actions below to upload missing files or replace renewed certificates.</p>
+                        </div>
+                        <div className="text-xs text-text-muted">
+                          Priority order: expired, missing, expiring soon
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Group by category */}
                   {['insurance', 'regulatory', 'safety'].map((category) => {
-                    const categoryItems = insurance.filter(i => (i.category || 'insurance') === category);
+                    const categoryItems = insurance
+                      .filter(i => (i.category || 'insurance') === category)
+                      .sort((a, b) => {
+                        const byStatus = (certificateStatusPriority[a.status] ?? 99) - (certificateStatusPriority[b.status] ?? 99);
+                        if (byStatus !== 0) return byStatus;
+                        return Number(Boolean(b.required)) - Number(Boolean(a.required));
+                      });
                     if (categoryItems.length === 0) return null;
                     
                     const categoryNames = {
@@ -1777,7 +1836,7 @@ export default function ComplianceCentrePage() {
                                           data-testid={`replace-certificate-${cert.id}`}
                                         >
                                           <RefreshCw className="h-4 w-4 mr-1" />
-                                          Replace
+                                          Replace / Renew
                                         </Button>
                                         <Button 
                                           variant="outline" 
@@ -1822,7 +1881,7 @@ export default function ComplianceCentrePage() {
                                     data-testid={`upload-certificate-${cert.id}`}
                                   >
                                     <Upload className="h-4 w-4 mr-1" />
-                                    Upload
+                                    Upload Now
                                   </Button>
                                 )}
                               </div>
@@ -3741,6 +3800,23 @@ export default function ComplianceCentrePage() {
             <DialogTitle className="font-heading text-lg pr-6">Assign Policy to Employees</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 mt-4">
+            {policyToAssign && (() => {
+              const triage = getPolicyAssignmentTriage(policyToAssign.id);
+              return triage.total > 0 ? (
+                <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[#E4E8EB] bg-[#F8FAFA] p-3 text-xs">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-amber-700">
+                    Pending acknowledgement: {triage.pendingAcknowledgement}
+                  </span>
+                  <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-blue-700">
+                    Awaiting admin review: {triage.awaitingAdminReview}
+                  </span>
+                  <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-green-700">
+                    Reviewed: {triage.reviewed}
+                  </span>
+                </div>
+              ) : null;
+            })()}
+
             {policyToAssign && (
               <div className="p-3 bg-[#F8FAFA] rounded-xl border border-[#E4E8EB]">
                 <p className="font-medium text-text-primary truncate" title={policyToAssign.name}>{policyToAssign.name}</p>
@@ -3765,7 +3841,27 @@ export default function ComplianceCentrePage() {
               {employees.length === 0 ? (
                 <p className="text-sm text-text-muted text-center py-4">No employees found</p>
               ) : (
-                employees.map((emp) => {
+                [...employees].sort((a, b) => {
+                  const getPriority = (empId) => {
+                    const current = policyAssignments.find(
+                      item => item.policy_id === policyToAssign?.id && item.employee_id === empId && !['unassigned', 'withdrawn'].includes(item.status)
+                    );
+                    const latest = policyAssignments
+                      .filter(item => item.policy_id === policyToAssign?.id && item.employee_id === empId)
+                      .sort((first, second) => {
+                        const firstDate = new Date(first.updated_at || first.withdrawn_at || first.unassigned_at || first.acknowledged_at || first.assigned_at || 0).getTime();
+                        const secondDate = new Date(second.updated_at || second.withdrawn_at || second.unassigned_at || second.acknowledged_at || second.assigned_at || 0).getTime();
+                        return secondDate - firstDate;
+                      })[0];
+                    const effective = current || latest;
+                    if (!effective || ['unassigned', 'withdrawn'].includes(effective.status)) return 3;
+                    if (['assigned', 'viewed'].includes(effective.status)) return 0;
+                    if ((effective.status === 'acknowledged' || effective.status === 'signed') && !effective.admin_reviewed) return 1;
+                    if (effective.admin_reviewed) return 2;
+                    return 3;
+                  };
+                  return getPriority(a.id) - getPriority(b.id) || `${a.first_name} ${a.last_name}`.localeCompare(`${b.first_name} ${b.last_name}`);
+                }).map((emp) => {
                   const isAlreadyAssigned = policyAssignments.some(
                     a => a.policy_id === policyToAssign?.id && 
                          a.employee_id === emp.id && 
@@ -3789,6 +3885,19 @@ export default function ComplianceCentrePage() {
                   const isWithdrawn = effectiveStatus === 'withdrawn';
                   const isUnassigned = effectiveStatus === 'unassigned';
                   const canDownloadAck = Boolean(effectiveAssignment?.acknowledged_at);
+                  const statusLabel = effectiveAssignment?.admin_reviewed
+                    ? 'Reviewed'
+                    : isAcked
+                      ? 'Awaiting review'
+                      : effectiveStatus === 'viewed'
+                        ? 'Viewed'
+                        : isWithdrawn
+                          ? 'Withdrawn'
+                          : isUnassigned
+                            ? 'Unassigned'
+                            : effectiveAssignment
+                              ? 'Assigned'
+                              : null;
                   
                   return (
                     <label 
@@ -3814,21 +3923,15 @@ export default function ComplianceCentrePage() {
                               ? 'bg-green-100 text-green-700'
                               : isAcked
                                 ? 'bg-blue-100 text-blue-700'
+                              : effectiveStatus === 'viewed'
+                                  ? 'bg-amber-100 text-amber-700'
                                 : isWithdrawn
                                   ? 'bg-red-100 text-red-700'
                                   : isUnassigned
                                     ? 'bg-gray-100 text-gray-600'
                                     : 'bg-amber-100 text-amber-700'
                           }`}>
-                            {effectiveAssignment?.admin_reviewed
-                              ? 'Reviewed'
-                              : isAcked
-                                ? 'Acknowledged'
-                                : isWithdrawn
-                                  ? 'Withdrawn'
-                                  : isUnassigned
-                                    ? 'Unassigned'
-                                    : 'Assigned'}
+                            {statusLabel}
                           </span>
                           {canDownloadAck && (
                             <Button
@@ -3848,9 +3951,15 @@ export default function ComplianceCentrePage() {
                           )}
                         </div>
                       )}
-                      {effectiveAssignment?.acknowledged_at && (
+                      {effectiveAssignment && (
                         <span className="sr-only">
-                          {`Acknowledged ${formatBackendDateTime(effectiveAssignment.acknowledged_at)} by ${effectiveAssignment.acknowledged_by_employee_name || effectiveAssignment.employee_name || 'employee'}`}
+                          {effectiveAssignment.admin_reviewed
+                            ? `Reviewed ${formatBackendDateTime(effectiveAssignment.admin_reviewed_at)}`
+                            : effectiveAssignment.acknowledged_at
+                              ? `Acknowledged ${formatBackendDateTime(effectiveAssignment.acknowledged_at)} by ${effectiveAssignment.acknowledged_by_employee_name || effectiveAssignment.employee_name || 'employee'}`
+                              : effectiveAssignment.viewed_at
+                                ? `Viewed ${formatBackendDateTime(effectiveAssignment.viewed_at)}`
+                                : `Assigned ${formatBackendDateTime(effectiveAssignment.assigned_at)}`}
                         </span>
                       )}
                     </label>
@@ -3861,7 +3970,7 @@ export default function ComplianceCentrePage() {
 
             {policyToAssign && (
               <div className="text-xs text-text-muted bg-[#F8FAFA] border border-[#E4E8EB] rounded-lg p-2">
-                Tip: staff badges include reviewed, acknowledged, pending, withdrawn, and unassigned states. Use the download icon to open acknowledgement evidence.
+                Tip: pending acknowledgement rows are shown first, then acknowledgements awaiting admin review, then reviewed records. Use the download icon to open acknowledgement evidence.
               </div>
             )}
             

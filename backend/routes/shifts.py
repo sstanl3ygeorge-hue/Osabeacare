@@ -140,6 +140,18 @@ async def _get_latest_assignment_for_shift(shift_id: str) -> Optional[Dict[str, 
     return items[0] if items else None
 
 
+async def _require_active_worker_employee(worker: dict, db) -> str:
+    employee_id = worker.get("employee_id")
+    if not employee_id:
+        raise HTTPException(status_code=400, detail="No employee linked to worker account")
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "status": 1})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    if employee.get("status") != "active":
+        raise HTTPException(status_code=403, detail="Shift access is only available for active employees")
+    return employee_id
+
+
 async def _assert_employee_is_active(employee_id: str):
     db = get_db()
     employee = await db.employees.find_one(
@@ -498,9 +510,7 @@ async def list_worker_shifts(
     worker: dict = Depends(get_current_worker),
 ):
     db = get_db()
-    employee_id = worker.get("employee_id")
-    if not employee_id:
-        raise HTTPException(status_code=400, detail="No employee linked to worker account")
+    employee_id = await _require_active_worker_employee(worker, db)
 
     assignment_statuses = ["active"] if not include_completed else ["active", "completed", "cancelled"]
     assignments = await db.shift_assignments.find(
@@ -539,9 +549,7 @@ async def get_worker_shift(
     worker: dict = Depends(get_current_worker),
 ):
     db = get_db()
-    employee_id = worker.get("employee_id")
-    if not employee_id:
-        raise HTTPException(status_code=400, detail="No employee linked to worker account")
+    employee_id = await _require_active_worker_employee(worker, db)
 
     assignment = await db.shift_assignments.find_one(
         {"shift_id": shift_id, "employee_id": employee_id, "status": {"$in": ["active", "completed", "cancelled"]}},
@@ -560,9 +568,7 @@ async def accept_worker_shift(
     worker: dict = Depends(get_current_worker),
 ):
     db = get_db()
-    employee_id = worker.get("employee_id")
-    if not employee_id:
-        raise HTTPException(status_code=400, detail="No employee linked to worker account")
+    employee_id = await _require_active_worker_employee(worker, db)
 
     shift = await _get_shift_or_404(shift_id)
     if shift.get("status") in {"completed", "cancelled"}:
@@ -603,9 +609,7 @@ async def reject_worker_shift(
     worker: dict = Depends(get_current_worker),
 ):
     db = get_db()
-    employee_id = worker.get("employee_id")
-    if not employee_id:
-        raise HTTPException(status_code=400, detail="No employee linked to worker account")
+    employee_id = await _require_active_worker_employee(worker, db)
 
     shift = await _get_shift_or_404(shift_id)
     if shift.get("status") in {"completed", "cancelled"}:

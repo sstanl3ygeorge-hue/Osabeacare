@@ -31,6 +31,18 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Compliance Management"])
 
 
+async def _require_active_worker_employee(worker: dict, db) -> str:
+    employee_id = worker.get("employee_id")
+    if not employee_id:
+        raise HTTPException(status_code=400, detail="No employee linked to worker account")
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "status": 1})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    if employee.get("status") != "active":
+        raise HTTPException(status_code=403, detail="Incident reporting is only available for active employees")
+    return employee_id
+
+
 # ==================== MODELS ====================
 
 class OrgPolicyResponse(BaseModel):
@@ -260,6 +272,47 @@ class StaffMeetingResponse(BaseModel):
     actions_status: str  # open, closed
     actions_closed_at: Optional[str] = None
     actions_closed_by: Optional[str] = None
+    created_by: str
+    created_at: str
+    updated_at: str
+
+
+class EmployerAuditCreate(BaseModel):
+    audit_type: str
+    audit_date: str
+    completed_by: str
+    overall_outcome: str
+    findings: str
+    actions_required: Optional[str] = None
+    next_review_date: Optional[str] = None
+    status: Optional[str] = "open"
+
+
+class EmployerAuditAmend(BaseModel):
+    audit_type: Optional[str] = None
+    audit_date: Optional[str] = None
+    completed_by: Optional[str] = None
+    overall_outcome: Optional[str] = None
+    findings: Optional[str] = None
+    actions_required: Optional[str] = None
+    next_review_date: Optional[str] = None
+    status: Optional[str] = None
+    reason: str
+
+
+class EmployerAuditResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    audit_type: str
+    audit_date: str
+    completed_by: str
+    overall_outcome: str
+    findings: str
+    actions_required: Optional[str] = None
+    next_review_date: Optional[str] = None
+    status: str  # open, closed
+    closed_at: Optional[str] = None
+    closed_by: Optional[str] = None
     created_by: str
     created_at: str
     updated_at: str
@@ -1339,9 +1392,7 @@ async def create_worker_incident(
     worker: dict = Depends(get_current_worker),
 ):
     db = get_db()
-    employee_id = worker.get("employee_id")
-    if not employee_id:
-        raise HTTPException(status_code=400, detail="No employee linked to worker account")
+    employee_id = await _require_active_worker_employee(worker, db)
 
     employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "first_name": 1, "last_name": 1})
     if not employee:
@@ -1420,9 +1471,7 @@ async def create_worker_incident(
 @router.get("/worker/incidents")
 async def list_worker_incidents(worker: dict = Depends(get_current_worker)):
     db = get_db()
-    employee_id = worker.get("employee_id")
-    if not employee_id:
-        raise HTTPException(status_code=400, detail="No employee linked to worker account")
+    employee_id = await _require_active_worker_employee(worker, db)
 
     incidents = await db.incident_logs.find(
         {"submitted_by_employee_id": employee_id},
@@ -1623,6 +1672,132 @@ async def download_staff_meeting_pdf(meeting_id: str, user: dict = Depends(requi
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+# ==================== EMPLOYER AUDIT/CHECKLIST ROUTES ====================
+
+@router.get("/compliance/employer-audits", response_model=List[EmployerAuditResponse])
+async def get_employer_audits(user: dict = Depends(require_admin)):
+    """Get employer/provider audit checklist records (admin-only)."""
+    db = get_db()
+    audits = await db.employer_audit_register.find({"_id": 0}).sort("audit_date", -1).to_list(1000)
+    return audits
+
+
+@router.get("/compliance/employer-audits/{audit_id}", response_model=EmployerAuditResponse)
+async def get_employer_audit(audit_id: str, user: dict = Depends(require_admin)):
+    """Get a single employer/provider audit checklist record (admin-only)."""
+    db = get_db()
+    audit = await db.employer_audit_register.find_one({"id": audit_id}, {"_id": 0})
+    if not audit:
+        raise HTTPException(status_code=404, detail="Employer audit record not found")
+    return audit
+
+
+@router.post("/compliance/employer-audits", response_model=EmployerAuditResponse)
+async def create_employer_audit(payload: EmployerAuditCreate, user: dict = Depends(require_admin)):
+    """Create an employer/provider audit checklist register record (admin-only)."""
+    db = get_db()
+    now = datetime.now(timezone.utc).isoformat()
+
+    status = (payload.status or "open").strip().lower()
+    if status not in {"open", "closed"}:
+        raise HTTPException(status_code=400, detail="status must be 'open' or 'closed'")
+
+    doc = {
+        "id": str(uuid.uuid4()),
+        "audit_type": payload.audit_type,
+        "audit_date": payload.audit_date,
+        "completed_by": payload.completed_by,
+        "overall_outcome": payload.overall_outcome,
+        "findings": payload.findings,
+        "actions_required": payload.actions_required,
+        "next_review_date": payload.next_review_date,
+        "status": status,
+        "closed_at": now if status == "closed" else None,
+        "closed_by": user["user_id"] if status == "closed" else None,
+        "created_by": user["user_id"],
+        "created_at": now,
+        "updated_at": now,
+    }
+
+    await db.employer_audit_register.insert_one(doc)
+    await log_audit_action(
+        user["user_id"],
+        "create_employer_audit_record",
+        "employer_audit_record",
+        doc["id"],
+        {
+            "audit_type": payload.audit_type,
+            "audit_date": payload.audit_date,
+            "status": status,
+        },
+    )
+    return doc
+
+
+@router.put("/compliance/employer-audits/{audit_id}/amend", response_model=EmployerAuditResponse)
+async def amend_employer_audit(
+    audit_id: str,
+    amendment: EmployerAuditAmend,
+    user: dict = Depends(require_admin),
+):
+    """Amend employer/provider audit checklist metadata with audit trail."""
+    db = get_db()
+    audit = await db.employer_audit_register.find_one({"id": audit_id})
+    if not audit:
+        raise HTTPException(status_code=404, detail="Employer audit record not found")
+
+    now = datetime.now(timezone.utc).isoformat()
+    amend_record = {
+        "id": str(uuid.uuid4()),
+        "entity_type": "employer_audit_record",
+        "entity_id": audit_id,
+        "amended_by": user["user_id"],
+        "amended_at": now,
+        "reason": amendment.reason,
+        "changes": {},
+        "previous_values": {},
+    }
+
+    payload = amendment.model_dump(exclude_none=True, exclude={"reason"})
+    if "status" in payload:
+        status = str(payload.get("status") or "").strip().lower()
+        if status not in {"open", "closed"}:
+            raise HTTPException(status_code=400, detail="status must be 'open' or 'closed'")
+        payload["status"] = status
+
+    update_dict = {"updated_at": now}
+    for field, value in payload.items():
+        if field in audit and audit[field] != value:
+            amend_record["changes"][field] = value
+            amend_record["previous_values"][field] = audit[field]
+            update_dict[field] = value
+
+    if payload.get("status") == "closed" and audit.get("status") != "closed":
+        update_dict["closed_at"] = now
+        update_dict["closed_by"] = user["user_id"]
+    elif payload.get("status") == "open" and audit.get("status") == "closed":
+        update_dict["closed_at"] = None
+        update_dict["closed_by"] = None
+
+    if amend_record["changes"]:
+        await db.amendments.insert_one(amend_record)
+        await db.employer_audit_register.update_one({"id": audit_id}, {"$set": update_dict})
+
+    updated = await db.employer_audit_register.find_one({"id": audit_id}, {"_id": 0})
+    return updated
+
+
+@router.get("/compliance/employer-audits/{audit_id}/history")
+async def get_employer_audit_history(audit_id: str, user: dict = Depends(require_admin)):
+    """Get amendment history for an employer/provider audit checklist record."""
+    db = get_db()
+    history = await db.amendments.find(
+        {"entity_type": "employer_audit_record", "entity_id": audit_id},
+        {"_id": 0}
+    ).sort("amended_at", -1).to_list(100)
+    return {"history": history}
 
 
 # ==================== COMPLIANCE REPORTS ====================

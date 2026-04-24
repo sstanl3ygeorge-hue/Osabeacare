@@ -312,6 +312,28 @@ export default function EmployeesPage() {
     }
   };
 
+  const handleLifecycleStatusChange = async (emp, nextStatus, actionLabel) => {
+    const reason = window.prompt(`${actionLabel} reason (minimum 5 characters):`);
+    if (reason === null) return;
+    const trimmed = reason.trim();
+    if (trimmed.length < 5) {
+      toast.error('Please provide a reason of at least 5 characters');
+      return;
+    }
+    try {
+      await axios.put(
+        `${API}/employees/${emp.id}`,
+        { status: nextStatus, status_change_reason: trimmed },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success(`${emp.first_name} ${emp.last_name} updated to ${nextStatus}`);
+      fetchEmployees();
+    } catch (error) {
+      const detail = error.response?.data?.detail;
+      toast.error(typeof detail === 'string' ? detail : 'Failed to update lifecycle status');
+    }
+  };
+
   // Bulk request handlers
   const toggleEmployeeSelection = (empId) => {
     setSelectedEmployees(prev => 
@@ -987,6 +1009,24 @@ export default function EmployeesPage() {
                                     Promote to Active
                                   </DropdownMenuItem>
                                 </>
+                              )}
+                              {emp.status === 'active' && (
+                                <DropdownMenuItem
+                                  onClick={() => handleLifecycleStatusChange(emp, 'inactive', 'Deactivation')}
+                                  className="text-amber-700"
+                                >
+                                  <Clock className="h-4 w-4 mr-2" />
+                                  Set Inactive
+                                </DropdownMenuItem>
+                              )}
+                              {emp.status === 'inactive' && (
+                                <DropdownMenuItem
+                                  onClick={() => handleLifecycleStatusChange(emp, 'onboarding', 'Reactivation')}
+                                  className="text-blue-700"
+                                >
+                                  <RotateCcw className="h-4 w-4 mr-2" />
+                                  Reactivate to Onboarding
+                                </DropdownMenuItem>
                               )}
                               <DropdownMenuSeparator />
                               {emp.status === 'archived' ? (

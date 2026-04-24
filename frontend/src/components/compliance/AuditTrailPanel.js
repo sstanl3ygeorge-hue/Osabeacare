@@ -61,6 +61,10 @@ const ACTION_CONFIG = {
   policy_admin_reviewed:         { label: 'Policy reviewed by admin', color: 'bg-green-100 text-green-700', icon: CheckCircle },
   status_changed:                { label: 'Status changed', color: 'bg-amber-100 text-amber-700', icon: Edit },
   status_change:                 { label: 'Status changed', color: 'bg-amber-100 text-amber-700', icon: Edit },
+  deactivate_employee:           { label: 'Set inactive', color: 'bg-amber-100 text-amber-700', icon: Clock },
+  reactivate_employee:           { label: 'Reactivated to onboarding', color: 'bg-blue-100 text-blue-700', icon: RefreshCw },
+  archive_employee:              { label: 'Archived', color: 'bg-slate-100 text-slate-700', icon: AlertTriangle },
+  restore_employee:              { label: 'Restored', color: 'bg-blue-100 text-blue-700', icon: RefreshCw },
   refresh_status:                { label: 'Status recalculated', color: 'bg-gray-100 text-gray-600', icon: RefreshCw },
   profile_updated:               { label: 'Profile updated', color: 'bg-gray-100 text-gray-600', icon: Edit },
   update_employee:               { label: 'Employee record updated', color: 'bg-gray-100 text-gray-600', icon: Edit },
@@ -97,6 +101,8 @@ const CRITICAL_ACTIONS = new Set([
   'mark_uploaded_in_error',
   'delete_evidence', 'remove_evidence', 'document_removed',
   'status_changed', 'status_change',
+  'deactivate_employee', 'reactivate_employee',
+  'archive_employee', 'restore_employee',
   // Readiness-critical decisions (see ACTION_CONFIG above)
   'approve_for_work',
   'auto_promoted_to_active', 'manual_promotion_to_active',
@@ -126,6 +132,8 @@ const REASON_REQUIRED_ACTIONS = new Set([
   'cv_rejected', 'cv_replacement_requested',
   'reject_reference',
   'manual_promotion_to_active',
+  'deactivate_employee', 'reactivate_employee',
+  'archive_employee',
 ]);
 
 /* ─── Normalise a single audit log entry ─────────────────────── *
@@ -133,7 +141,7 @@ const REASON_REQUIRED_ACTIONS = new Set([
  * AuditTrailService.log) that each use slightly different field names.
  * This function normalises them into a consistent shape.            */
 function normaliseLog(log) {
-  const action = log.action || 'unknown';
+  let action = log.action || 'unknown';
   const meta = log.metadata || {};
   const details = log.details || {};
 
@@ -166,7 +174,30 @@ function normaliseLog(log) {
     newState = meta.new_values;
   }
 
-  const reason = log.notes || details.reason || meta.reason || null;
+  const lifecyclePrev = meta.previous_status || null;
+  const lifecycleNext = meta.status || meta.new_status || null;
+  if (action === 'update_employee' && lifecyclePrev && lifecycleNext && lifecyclePrev !== lifecycleNext) {
+    if (lifecyclePrev === 'active' && lifecycleNext === 'inactive') {
+      action = 'deactivate_employee';
+    } else if (lifecyclePrev === 'inactive' && lifecycleNext === 'onboarding') {
+      action = 'reactivate_employee';
+    } else if (lifecycleNext === 'active') {
+      action = 'auto_promoted_to_active';
+    }
+  }
+
+  if (!prevState && lifecyclePrev && lifecycleNext && lifecyclePrev !== lifecycleNext) {
+    prevState = { status: lifecyclePrev };
+    newState = { status: lifecycleNext };
+  }
+
+  const reason =
+    log.notes ||
+    details.reason ||
+    meta.reason ||
+    meta.status_change_reason ||
+    meta.lifecycle_last_transition_reason ||
+    null;
   const description = log.description || meta.description || null;
 
   const isCritical = CRITICAL_ACTIONS.has(action);

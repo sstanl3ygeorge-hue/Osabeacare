@@ -864,10 +864,21 @@ export default function WorkerDashboard() {
 
   useEffect(() => {
     if (dashboard) {
+      const dashboardEmployee = dashboard?.employee || {};
+      const workerIsActive =
+        dashboardEmployee?.is_active_employee ||
+        dashboardEmployee?.employee_status === 'active_employee' ||
+        dashboardEmployee?.status === 'active_employee' ||
+        dashboardEmployee?.status === 'active';
       fetchCvStatus();
       fetchReferenceMismatches();
-      fetchWorkerShifts();
-      fetchWorkerIncidents();
+      if (workerIsActive) {
+        fetchWorkerShifts();
+        fetchWorkerIncidents();
+      } else {
+        setWorkerShifts([]);
+        setWorkerIncidents([]);
+      }
     }
   }, [dashboard, fetchCvStatus]);
 
@@ -2063,6 +2074,7 @@ export default function WorkerDashboard() {
           </Card>
         )}
 
+        {isActiveEmployee && (
         <Card className="border border-slate-200 shadow-sm" data-testid="worker-incidents-card">
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between gap-2">
@@ -2129,6 +2141,7 @@ export default function WorkerDashboard() {
             )}
           </CardContent>
         </Card>
+        )}
 
         {/* Forms Section - Only for onboarding */}
         {!isActiveEmployee && <FormsSection />}
@@ -3110,7 +3123,7 @@ export default function WorkerDashboard() {
         )}
 
         {/* ========== COMPETENCY ASSESSMENTS (P1: Worker Dashboard) ========== */}
-        {competency_assessments && competency_assessments.length > 0 && (
+        {isActiveEmployee && competency_assessments && competency_assessments.length > 0 && (
           <Card className="shadow-md border-0" data-testid="competency-section">
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between">

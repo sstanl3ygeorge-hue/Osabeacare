@@ -1272,6 +1272,29 @@ export default function EmployeeProfilePage() {
     }
   };
 
+  const handleLifecycleStatusChange = async (nextStatus, actionLabel) => {
+    const reason = window.prompt(`${actionLabel} reason (minimum 5 characters):`);
+    if (reason === null) return;
+    const trimmed = reason.trim();
+    if (trimmed.length < 5) {
+      toast.error('Please provide a reason of at least 5 characters');
+      return;
+    }
+    try {
+      await axios.put(
+        `${API}/employees/${employeeId}`,
+        { status: nextStatus, status_change_reason: trimmed },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success(`Employee updated to ${nextStatus}`);
+      await fetchData();
+      await fetchComplianceFile();
+    } catch (error) {
+      const detail = error.response?.data?.detail;
+      toast.error(typeof detail === 'string' ? detail : 'Failed to update lifecycle status');
+    }
+  };
+
   const fetchData = async () => {
     // Use Promise.allSettled to allow partial success
     const results = await Promise.allSettled([
@@ -4083,6 +4106,27 @@ export default function EmployeeProfilePage() {
                         Print Compliance PDF
                       </DropdownMenuItem>
                       <DropdownMenuSeparator />
+                      {employee.status === 'active' && (
+                        <DropdownMenuItem
+                          onClick={() => handleLifecycleStatusChange('inactive', 'Deactivation')}
+                          className="text-amber-700"
+                        >
+                          <Clock className="h-4 w-4 mr-2" />
+                          Set Inactive
+                        </DropdownMenuItem>
+                      )}
+                      {employee.status === 'inactive' && (
+                        <DropdownMenuItem
+                          onClick={() => handleLifecycleStatusChange('onboarding', 'Reactivation')}
+                          className="text-blue-700"
+                        >
+                          <RotateCcw className="h-4 w-4 mr-2" />
+                          Reactivate to Onboarding
+                        </DropdownMenuItem>
+                      )}
+                      {(employee.status === 'active' || employee.status === 'inactive') && (
+                        <DropdownMenuSeparator />
+                      )}
                       {employee.status === 'archived' ? (
                         <DropdownMenuItem onClick={handleRestoreEmployee}>
                           <RotateCcw className="h-4 w-4 mr-2" />

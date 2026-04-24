@@ -37,6 +37,7 @@ export default function ComplianceCentrePage() {
   const [insurance, setInsurance] = useState([]);
   const [incidents, setIncidents] = useState([]);
   const [staffMeetings, setStaffMeetings] = useState([]);
+  const [employerAudits, setEmployerAudits] = useState([]);
   const [incidentFilter, setIncidentFilter] = useState({ status: 'all', severity: 'all' }); // Incident filters
   const [dbsReport, setDbsReport] = useState(null);
   const [trainingReport, setTrainingReport] = useState(null);
@@ -226,6 +227,20 @@ export default function ComplianceCentrePage() {
   });
   const [isSubmittingMeeting, setIsSubmittingMeeting] = useState(false);
 
+  // Employer audit/checklist form
+  const [employerAuditDialogOpen, setEmployerAuditDialogOpen] = useState(false);
+  const [newEmployerAudit, setNewEmployerAudit] = useState({
+    audit_type: 'infection_control_audit',
+    audit_date: new Date().toISOString().split('T')[0],
+    completed_by: '',
+    overall_outcome: 'compliant',
+    findings: '',
+    actions_required: '',
+    next_review_date: '',
+    status: 'open'
+  });
+  const [isSubmittingEmployerAudit, setIsSubmittingEmployerAudit] = useState(false);
+
   // Employee Assignment state
   const [assignDialogOpen, setAssignDialogOpen] = useState(false);
   const [policyToAssign, setPolicyToAssign] = useState(null);
@@ -234,9 +249,9 @@ export default function ComplianceCentrePage() {
   const [selectedEmployees, setSelectedEmployees] = useState([]);
   const [isAssigning, setIsAssigning] = useState(false);
 
-  // Amendment states - for editing policies, insurance, incidents, meetings with audit trail
+  // Amendment states - for editing policies, insurance, incidents, meetings, employer audits with audit trail
   const [amendDialogOpen, setAmendDialogOpen] = useState(false);
-  const [amendType, setAmendType] = useState(null); // 'policy', 'insurance', 'incident', 'meeting'
+  const [amendType, setAmendType] = useState(null); // 'policy', 'insurance', 'incident', 'meeting', 'audit'
   const [amendRecord, setAmendRecord] = useState(null);
   const [amendForm, setAmendForm] = useState({});
   const [isAmending, setIsAmending] = useState(false);
@@ -267,13 +282,14 @@ export default function ComplianceCentrePage() {
         ? axios.get(`${API}/compliance/insurance`, { headers: { Authorization: `Bearer ${token}` } })
         : Promise.resolve({ data: [] });
 
-      const [dashRes, summaryRes, policiesRes, insuranceRes, incidentsRes, meetingsRes, employeesRes, assignmentsRes] = await Promise.all([
+      const [dashRes, summaryRes, policiesRes, insuranceRes, incidentsRes, meetingsRes, auditsRes, employeesRes, assignmentsRes] = await Promise.all([
         axios.get(`${API}/compliance/dashboard`, { headers: { Authorization: `Bearer ${token}` } }),
         axios.get(`${API}/compliance/centre-summary`, { headers: { Authorization: `Bearer ${token}` } }),
         axios.get(`${API}/compliance/policies`, { headers: { Authorization: `Bearer ${token}` } }),
         insurancePromise,
         axios.get(`${API}/compliance/incidents`, { headers: { Authorization: `Bearer ${token}` } }),
         axios.get(`${API}/compliance/staff-meetings`, { headers: { Authorization: `Bearer ${token}` } }),
+        axios.get(`${API}/compliance/employer-audits`, { headers: { Authorization: `Bearer ${token}` } }),
         axios.get(`${API}/employees`, { headers: { Authorization: `Bearer ${token}` } }),
         axios.get(`${API}/policy-assignments?include_inactive=true`, { headers: { Authorization: `Bearer ${token}` } })
       ]);
@@ -284,6 +300,7 @@ export default function ComplianceCentrePage() {
       setInsurance(insuranceRes.data);
       setIncidents(incidentsRes.data);
       setStaffMeetings(meetingsRes.data);
+      setEmployerAudits(auditsRes.data);
       const activeEmployees = employeesRes.data.filter(e => !['archived', 'withdrawn', 'superseded'].includes(e.status));
       setEmployees(activeEmployees);
       const staffForReadiness = activeEmployees.filter(e =>
@@ -655,6 +672,38 @@ export default function ComplianceCentrePage() {
     }
   };
 
+  const handleCreateEmployerAudit = async (e) => {
+    e.preventDefault();
+    if (!newEmployerAudit.audit_type || !newEmployerAudit.audit_date || !newEmployerAudit.completed_by || !newEmployerAudit.overall_outcome || !newEmployerAudit.findings) {
+      toast.error('Audit type, date, completed by, outcome and findings are required');
+      return;
+    }
+
+    setIsSubmittingEmployerAudit(true);
+    try {
+      await axios.post(`${API}/compliance/employer-audits`, newEmployerAudit, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      toast.success('Employer audit record created');
+      setEmployerAuditDialogOpen(false);
+      setNewEmployerAudit({
+        audit_type: 'infection_control_audit',
+        audit_date: new Date().toISOString().split('T')[0],
+        completed_by: '',
+        overall_outcome: 'compliant',
+        findings: '',
+        actions_required: '',
+        next_review_date: '',
+        status: 'open'
+      });
+      fetchData();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to create employer audit record');
+    } finally {
+      setIsSubmittingEmployerAudit(false);
+    }
+  };
+
   const fetchReports = async (type) => {
     try {
       if (type === 'dbs' && !dbsReport) {
@@ -835,6 +884,18 @@ export default function ComplianceCentrePage() {
         actions_status: record.actions_status || 'open',
         reason: ''
       });
+    } else if (type === 'audit') {
+      setAmendForm({
+        audit_type: record.audit_type || 'infection_control_audit',
+        audit_date: record.audit_date ? record.audit_date.split('T')[0] : '',
+        completed_by: record.completed_by || '',
+        overall_outcome: record.overall_outcome || 'compliant',
+        findings: record.findings || '',
+        actions_required: record.actions_required || '',
+        next_review_date: record.next_review_date ? record.next_review_date.split('T')[0] : '',
+        status: record.status || 'open',
+        reason: ''
+      });
     }
     
     setAmendDialogOpen(true);
@@ -855,7 +916,9 @@ export default function ComplianceCentrePage() {
         ? `${API}/compliance/insurance/${amendRecord.id}/amend`
         : amendType === 'incident'
         ? `${API}/compliance/incidents/${amendRecord.id}/amend`
-        : `${API}/compliance/staff-meetings/${amendRecord.id}/amend`;
+        : amendType === 'meeting'
+        ? `${API}/compliance/staff-meetings/${amendRecord.id}/amend`
+        : `${API}/compliance/employer-audits/${amendRecord.id}/amend`;
       
       await axios.put(endpoint, amendForm, {
         headers: { Authorization: `Bearer ${token}` }
@@ -887,7 +950,9 @@ export default function ComplianceCentrePage() {
         ? `${API}/compliance/insurance/${recordId}/history`
         : type === 'incident'
         ? `${API}/compliance/incidents/${recordId}/history`
-        : `${API}/compliance/staff-meetings/${recordId}/history`;
+        : type === 'meeting'
+        ? `${API}/compliance/staff-meetings/${recordId}/history`
+        : `${API}/compliance/employer-audits/${recordId}/history`;
       
       const response = await axios.get(endpoint, {
         headers: { Authorization: `Bearer ${token}` }
@@ -1181,6 +1246,10 @@ export default function ComplianceCentrePage() {
           <TabsTrigger value="staff-meetings" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white" data-testid="tab-staff-meetings">
             <ClipboardList className="h-4 w-4 mr-2" />
             Staff Meetings
+          </TabsTrigger>
+          <TabsTrigger value="employer-audits" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white" data-testid="tab-employer-audits">
+            <CheckCircle className="h-4 w-4 mr-2" />
+            Employer Audits
           </TabsTrigger>
           <TabsTrigger 
             value="reports" 
@@ -2537,6 +2606,156 @@ export default function ComplianceCentrePage() {
           </Card>
         </TabsContent>
 
+        {/* Employer Audits Tab */}
+        <TabsContent value="employer-audits">
+          <Card className="border-[#E4E8EB] shadow-sm">
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle className="font-heading text-lg">Employer Audit / Checklist Register</CardTitle>
+                <p className="text-sm text-text-muted mt-1">Admin-only provider audit records for compliance evidence.</p>
+              </div>
+              <Dialog open={employerAuditDialogOpen} onOpenChange={setEmployerAuditDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button className="bg-primary hover:bg-primary-hover text-white rounded-xl">
+                    <Plus className="h-4 w-4 mr-2" />
+                    New Audit Record
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="max-w-2xl w-[95vw] max-h-[90vh] overflow-y-auto">
+                  <DialogHeader>
+                    <DialogTitle className="font-heading text-lg pr-6">Create Employer Audit Record</DialogTitle>
+                  </DialogHeader>
+                  <form onSubmit={handleCreateEmployerAudit} className="space-y-4 mt-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label>Audit Type *</Label>
+                        <Select value={newEmployerAudit.audit_type} onValueChange={(v) => setNewEmployerAudit({ ...newEmployerAudit, audit_type: v })}>
+                          <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="infection_control_audit">Infection Control Audit</SelectItem>
+                            <SelectItem value="medication_audit">Medication Audit</SelectItem>
+                            <SelectItem value="health_and_safety_audit">Health and Safety Audit</SelectItem>
+                            <SelectItem value="fire_safety_audit">Fire Safety Audit</SelectItem>
+                            <SelectItem value="cleaning_audit">Cleaning Audit</SelectItem>
+                            <SelectItem value="daily_records_audit">Daily Records Audit</SelectItem>
+                            <SelectItem value="general_quality_audit">General Quality Audit</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Audit Date *</Label>
+                        <Input type="date" value={newEmployerAudit.audit_date} onChange={(e) => setNewEmployerAudit({ ...newEmployerAudit, audit_date: e.target.value })} className="rounded-xl" required />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label>Completed By *</Label>
+                        <Input value={newEmployerAudit.completed_by} onChange={(e) => setNewEmployerAudit({ ...newEmployerAudit, completed_by: e.target.value })} className="rounded-xl" required />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Overall Outcome *</Label>
+                        <Select value={newEmployerAudit.overall_outcome} onValueChange={(v) => setNewEmployerAudit({ ...newEmployerAudit, overall_outcome: v })}>
+                          <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="compliant">Compliant</SelectItem>
+                            <SelectItem value="partially_compliant">Partially Compliant</SelectItem>
+                            <SelectItem value="non_compliant">Non-Compliant</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Findings *</Label>
+                      <Textarea value={newEmployerAudit.findings} onChange={(e) => setNewEmployerAudit({ ...newEmployerAudit, findings: e.target.value })} className="rounded-xl" rows={4} required />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Actions Required</Label>
+                      <Textarea value={newEmployerAudit.actions_required} onChange={(e) => setNewEmployerAudit({ ...newEmployerAudit, actions_required: e.target.value })} className="rounded-xl" rows={2} />
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label>Next Review Date</Label>
+                        <Input type="date" value={newEmployerAudit.next_review_date} onChange={(e) => setNewEmployerAudit({ ...newEmployerAudit, next_review_date: e.target.value })} className="rounded-xl" />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Status</Label>
+                        <Select value={newEmployerAudit.status} onValueChange={(v) => setNewEmployerAudit({ ...newEmployerAudit, status: v })}>
+                          <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="open">Open</SelectItem>
+                            <SelectItem value="closed">Closed</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col-reverse sm:flex-row justify-end gap-3 pt-4 border-t border-[#E4E8EB]">
+                      <Button type="button" variant="outline" onClick={() => setEmployerAuditDialogOpen(false)} className="rounded-xl w-full sm:w-auto">Cancel</Button>
+                      <Button type="submit" disabled={isSubmittingEmployerAudit} className="bg-primary hover:bg-primary-hover text-white rounded-xl w-full sm:w-auto">
+                        {isSubmittingEmployerAudit ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Create Record'}
+                      </Button>
+                    </div>
+                  </form>
+                </DialogContent>
+              </Dialog>
+            </CardHeader>
+            <CardContent>
+              {employerAudits.length === 0 ? (
+                <div className="text-center py-10 text-text-muted">
+                  <CheckCircle className="h-10 w-10 mx-auto mb-2 opacity-50" />
+                  <p>No employer audit records yet</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {employerAudits.map((audit) => (
+                    <div key={audit.id} className="p-4 rounded-xl border bg-[#F8FAFA] border-[#E4E8EB]">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 flex-wrap mb-1">
+                            <span className="text-xs px-2 py-0.5 rounded bg-blue-100 text-blue-700">{audit.audit_type?.replace(/_/g, ' ')}</span>
+                            {getStatusBadge(audit.status || 'open')}
+                            <span className={`text-xs px-2 py-0.5 rounded ${audit.overall_outcome === 'compliant' ? 'bg-green-100 text-green-700' : audit.overall_outcome === 'partially_compliant' ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'}`}>
+                              {(audit.overall_outcome || '').replace(/_/g, ' ')}
+                            </span>
+                          </div>
+                          <p className="text-sm text-text-primary"><span className="font-medium">Audit Date:</span> {formatBackendDate(audit.audit_date)}</p>
+                          <p className="text-sm text-text-primary"><span className="font-medium">Completed By:</span> {audit.completed_by}</p>
+                          <p className="text-sm text-text-muted mt-2"><span className="font-medium text-text-primary">Findings:</span> {audit.findings}</p>
+                          {audit.actions_required && <p className="text-sm text-text-muted mt-1"><span className="font-medium text-text-primary">Actions:</span> {audit.actions_required}</p>}
+                          {audit.next_review_date && <p className="text-xs text-text-muted mt-2">Next review: {formatBackendDate(audit.next_review_date)}</p>}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Button size="sm" variant="outline" className="rounded-lg" onClick={() => openAmendDialog('audit', audit)}>
+                            <Edit className="h-4 w-4 mr-1" />
+                            Edit
+                          </Button>
+                          {audit.status !== 'closed' && (
+                            <Button
+                              size="sm"
+                              className="rounded-lg bg-green-600 hover:bg-green-700"
+                              onClick={() => openAmendDialog('audit', { ...audit, status: 'closed' })}
+                            >
+                              <CheckCircle className="h-4 w-4 mr-1" />
+                              Close
+                            </Button>
+                          )}
+                          <Button size="sm" variant="ghost" className="rounded-lg" onClick={() => loadHistory('audit', audit.id)} title="View amendment history">
+                            <History className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
         {/* Compliance Insights Tab (formerly Reports) */}
         <TabsContent value="reports">
           <div className="space-y-6">
@@ -3619,7 +3838,7 @@ export default function ComplianceCentrePage() {
         <DialogContent className="max-w-lg w-[95vw] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="font-heading text-lg pr-6">
-              Edit {amendType === 'policy' ? 'Policy' : amendType === 'insurance' ? 'Certificate' : amendType === 'incident' ? 'Incident' : 'Staff Meeting'} Details
+              Edit {amendType === 'policy' ? 'Policy' : amendType === 'insurance' ? 'Certificate' : amendType === 'incident' ? 'Incident' : amendType === 'meeting' ? 'Staff Meeting' : 'Employer Audit'} Details
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 mt-4">
@@ -4045,6 +4264,111 @@ export default function ComplianceCentrePage() {
                 </div>
               </>
             )}
+
+            {/* Employer Audit Amendment Fields */}
+            {amendType === 'audit' && (
+              <>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label>Audit Type</Label>
+                    <Select
+                      value={amendForm.audit_type || 'infection_control_audit'}
+                      onValueChange={(v) => setAmendForm({ ...amendForm, audit_type: v })}
+                    >
+                      <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="infection_control_audit">Infection Control Audit</SelectItem>
+                        <SelectItem value="medication_audit">Medication Audit</SelectItem>
+                        <SelectItem value="health_and_safety_audit">Health and Safety Audit</SelectItem>
+                        <SelectItem value="fire_safety_audit">Fire Safety Audit</SelectItem>
+                        <SelectItem value="cleaning_audit">Cleaning Audit</SelectItem>
+                        <SelectItem value="daily_records_audit">Daily Records Audit</SelectItem>
+                        <SelectItem value="general_quality_audit">General Quality Audit</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Audit Date</Label>
+                    <Input
+                      type="date"
+                      value={amendForm.audit_date || ''}
+                      onChange={(e) => setAmendForm({ ...amendForm, audit_date: e.target.value })}
+                      className="rounded-xl"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label>Completed By</Label>
+                    <Input
+                      value={amendForm.completed_by || ''}
+                      onChange={(e) => setAmendForm({ ...amendForm, completed_by: e.target.value })}
+                      className="rounded-xl"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Overall Outcome</Label>
+                    <Select
+                      value={amendForm.overall_outcome || 'compliant'}
+                      onValueChange={(v) => setAmendForm({ ...amendForm, overall_outcome: v })}
+                    >
+                      <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="compliant">Compliant</SelectItem>
+                        <SelectItem value="partially_compliant">Partially Compliant</SelectItem>
+                        <SelectItem value="non_compliant">Non-Compliant</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Findings</Label>
+                  <Textarea
+                    value={amendForm.findings || ''}
+                    onChange={(e) => setAmendForm({ ...amendForm, findings: e.target.value })}
+                    className="rounded-xl"
+                    rows={3}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Actions Required</Label>
+                  <Textarea
+                    value={amendForm.actions_required || ''}
+                    onChange={(e) => setAmendForm({ ...amendForm, actions_required: e.target.value })}
+                    className="rounded-xl"
+                    rows={2}
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label>Next Review Date</Label>
+                    <Input
+                      type="date"
+                      value={amendForm.next_review_date || ''}
+                      onChange={(e) => setAmendForm({ ...amendForm, next_review_date: e.target.value })}
+                      className="rounded-xl"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Status</Label>
+                    <Select
+                      value={amendForm.status || 'open'}
+                      onValueChange={(v) => setAmendForm({ ...amendForm, status: v })}
+                    >
+                      <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="open">Open</SelectItem>
+                        <SelectItem value="closed">Closed</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </>
+            )}
             
             {/* Reason for Change - Required for all types */}
             <div className="space-y-2 pt-2 border-t border-[#E4E8EB]">
@@ -4163,6 +4487,14 @@ export default function ComplianceCentrePage() {
                           {(entry.meeting_type || entry.changes?.meeting_type) && <p><span className="font-medium">Type:</span> {entry.meeting_type || entry.changes?.meeting_type}</p>}
                           {(entry.meeting_date || entry.changes?.meeting_date) && <p><span className="font-medium">Date:</span> {formatBackendDate(entry.meeting_date || entry.changes?.meeting_date)}</p>}
                           {(entry.actions_status || entry.changes?.actions_status) && <p><span className="font-medium">Actions:</span> {entry.actions_status || entry.changes?.actions_status}</p>}
+                        </div>
+                      )}
+                      {historyType === 'audit' && (
+                        <div className="text-xs text-text-muted space-y-1 pt-2 border-t border-[#E4E8EB]">
+                          {(entry.audit_type || entry.changes?.audit_type) && <p><span className="font-medium">Type:</span> {entry.audit_type || entry.changes?.audit_type}</p>}
+                          {(entry.audit_date || entry.changes?.audit_date) && <p><span className="font-medium">Date:</span> {formatBackendDate(entry.audit_date || entry.changes?.audit_date)}</p>}
+                          {(entry.overall_outcome || entry.changes?.overall_outcome) && <p><span className="font-medium">Outcome:</span> {entry.overall_outcome || entry.changes?.overall_outcome}</p>}
+                          {(entry.status || entry.changes?.status) && <p><span className="font-medium">Status:</span> {entry.status || entry.changes?.status}</p>}
                         </div>
                       )}
                     </div>

@@ -5519,6 +5519,8 @@ class EmployeeUpdate(BaseModel):
     driver_status: Optional[bool] = None
     notes: Optional[str] = None
     profile_photo_url: Optional[str] = None
+    # Lifecycle audit note for explicit status transitions (e.g. deactivate/reactivate)
+    status_change_reason: Optional[str] = None
     # Extended profile fields - populated from application form extraction
     address_line_1: Optional[str] = None
     address_line_2: Optional[str] = None
@@ -9667,14 +9669,47 @@ async def get_staff_employee_by_id(employee_id: str, user: dict = Depends(get_cu
 # MOVED TO routes/recruitment.py: /recruitment/applicants/{applicant_id}
 @api_router.put("/employees/{employee_id}", response_model=EmployeeResponse)
 async def update_employee(employee_id: str, update: EmployeeUpdate, user: dict = Depends(require_manager_or_admin)):
-    update_data = {k: v for k, v in update.model_dump().items() if v is not None}
-    update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
-    
-    result = await db.employees.update_one({"id": employee_id}, {"$set": update_data})
-    if result.matched_count == 0:
+    existing = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not existing:
         raise HTTPException(status_code=404, detail="Employee not found")
-    
-    await log_audit_action(user['user_id'], "update_employee", "employee", employee_id, update_data)
+
+    payload = update.model_dump()
+    status_change_reason = payload.pop("status_change_reason", None)
+    update_data = {k: v for k, v in payload.items() if v is not None}
+    update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+    current_status = existing.get("status")
+    requested_status = update_data.get("status")
+    if requested_status and requested_status != current_status:
+        lifecycle_statuses = {"onboarding", "active", "inactive"}
+        if current_status in lifecycle_statuses and requested_status in lifecycle_statuses:
+            # Canonical promotion remains /auto-promote; block direct onboarding->active edits.
+            if requested_status == "active":
+                raise HTTPException(status_code=400, detail="Use Promote to Active for this transition")
+            # Deactivation must be explicit: active -> inactive with reason.
+            if requested_status == "inactive":
+                if current_status != "active":
+                    raise HTTPException(status_code=400, detail="Only active employees can be moved to inactive")
+                if not status_change_reason or len(status_change_reason.strip()) < 5:
+                    raise HTTPException(status_code=400, detail="A deactivation reason is required (min 5 characters)")
+            # Reactivation path: inactive -> onboarding with reason.
+            if requested_status == "onboarding":
+                if current_status != "inactive":
+                    raise HTTPException(status_code=400, detail="Only inactive employees can be reactivated to onboarding")
+                if not status_change_reason or len(status_change_reason.strip()) < 5:
+                    raise HTTPException(status_code=400, detail="A reactivation reason is required (min 5 characters)")
+
+            update_data["previous_status"] = current_status
+            update_data["lifecycle_last_transition_at"] = datetime.now(timezone.utc).isoformat()
+            update_data["lifecycle_last_transition_by"] = user.get("user_id")
+            update_data["lifecycle_last_transition_reason"] = status_change_reason.strip() if status_change_reason else None
+
+    await db.employees.update_one({"id": employee_id}, {"$set": update_data})
+
+    audit_payload = dict(update_data)
+    if requested_status and requested_status != current_status and status_change_reason:
+        audit_payload["status_change_reason"] = status_change_reason.strip()
+    await log_audit_action(user['user_id'], "update_employee", "employee", employee_id, audit_payload)
     
     employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
     employee['completion_percentage'] = await calculate_completion_percentage(employee_id)

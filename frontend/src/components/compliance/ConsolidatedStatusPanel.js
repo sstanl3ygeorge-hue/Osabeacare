@@ -25,7 +25,7 @@ import { Progress } from '../ui/progress';
 import {
   AlertTriangle,
   FileText, Users, GraduationCap, ClipboardCheck,
-  Send, Eye, Plus, RefreshCw, Loader2, Shield,
+  Send, Plus, RefreshCw, Loader2, Shield,
   FileCheck, UserCheck, Briefcase, Heart, Calendar
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -40,7 +40,6 @@ export default function ConsolidatedStatusPanel({
   role,
   personStage,
   recruitmentApproved,
-  onNavigateToTab,
   onRefresh
 }) {
   const { token } = useAuth();
@@ -141,23 +140,6 @@ export default function ConsolidatedStatusPanel({
     }
   };
 
-  const handlePromoteToActive = async () => {
-    setActionLoading('promote');
-    try {
-      await axios.post(
-        `${API}/api/employees/${employeeId}/promote-to-active`,
-        {},
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      toast.success(`${employeeName} promoted to Active Employee!`);
-      if (onRefresh) onRefresh();
-    } catch (err) {
-      toast.error(err.response?.data?.detail || 'Failed to promote');
-    } finally {
-      setActionLoading(null);
-    }
-  };
-
   if (loading) {
     return (
       <Card className="border-2 border-gray-200">
@@ -226,7 +208,6 @@ export default function ConsolidatedStatusPanel({
     : progressBlockerStrings.length > 0
       ? progressBlockerStrings
       : [];
-  const canPromote = progress.can_promote;
   const progressCompleted = progress.completed_requirements;
   const progressTotal = progress.total_requirements;
   const progressCountAvailable = Number.isFinite(progressTotal) && progressTotal > 0;
@@ -239,7 +220,6 @@ export default function ConsolidatedStatusPanel({
 
   // Determine overall status
   const isApplicant = personStage === 'applicant';
-  const isEmployee = personStage === 'employee' || recruitmentApproved;
 
   // Gate-derived approval readiness (canonical — overrides old isBlocked for the approve CTA)
   const gateAllowed = gateResult?.allowed === true;
@@ -328,30 +308,6 @@ export default function ConsolidatedStatusPanel({
               )}
               Send Reminder to Worker
             </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => onNavigateToTab?.('compliance')}
-            >
-              <Eye className="h-4 w-4 mr-1" />
-              View staff file
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => onNavigateToTab?.('training')}
-            >
-              <GraduationCap className="h-4 w-4 mr-1" />
-              View Training
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => onNavigateToTab?.('references')}
-            >
-              <Users className="h-4 w-4 mr-1" />
-              View References
-            </Button>
             {isApplicant && !recruitmentApproved && (
               <Button
                 variant="outline"
@@ -371,21 +327,6 @@ export default function ConsolidatedStatusPanel({
                   <UserCheck className="h-4 w-4 mr-1" />
                 )}
                 Approve for Recruitment
-              </Button>
-            )}
-            {isEmployee && canPromote && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handlePromoteToActive}
-                disabled={actionLoading === 'promote'}
-              >
-                {actionLoading === 'promote' ? (
-                  <Loader2 className="h-4 w-4 animate-spin mr-1" />
-                ) : (
-                  <UserCheck className="h-4 w-4 mr-1" />
-                )}
-                Promote to Active
               </Button>
             )}
           </div>

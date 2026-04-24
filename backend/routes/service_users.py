@@ -248,9 +248,7 @@ async def create_service_user(
     return {"id": su_id, "service_user_code": su_code, "message": "Service user created successfully"}
 
 
-@router.get("/service-users/sections")
-async def get_service_user_sections(user: dict = Depends(get_current_user)):
-    """Get all available service user file sections with their document types"""
+def _service_user_sections_payload() -> Dict[str, Any]:
     return {
         "sections": [
             {
@@ -259,6 +257,20 @@ async def get_service_user_sections(user: dict = Depends(get_current_user)):
             }
             for section_id, section_info in SERVICE_USER_SECTIONS.items()
         ]
+    }
+
+
+@router.get("/service-users/sections")
+async def get_service_user_sections(user: dict = Depends(require_manager_or_admin)):
+    """Get all available service user file sections with their document types."""
+    return _service_user_sections_payload()
+
+
+@router.get("/service-user-sections")
+async def get_service_user_sections_legacy_alias(user: dict = Depends(require_manager_or_admin)):
+    """Legacy alias for service-user sections. Keep for backward compatibility."""
+    return {
+        **_service_user_sections_payload()
     }
 
 
@@ -468,6 +480,19 @@ async def verify_service_user_document(
             "verified_at": now,
             "verified_by": user.get("user_id")
         }}
+    )
+
+    await log_audit_action(
+        user.get("user_id"),
+        "verify_service_user_document",
+        "service_user_document",
+        document_id,
+        {
+            "service_user_id": service_user_id,
+            "section_id": document.get("section_id"),
+            "title": document.get("title"),
+            "verified_at": now
+        }
     )
     
     return {"message": "Document verified successfully"}

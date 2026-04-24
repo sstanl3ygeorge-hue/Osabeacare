@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import { useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { Badge } from '../../components/ui/badge';
@@ -57,6 +58,8 @@ const RATING_LABELS = {
 };
 
 const ServiceUserFeedbackPage = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const serviceUserIdFilter = searchParams.get('service_user_id') || '';
   const [feedback, setFeedback] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showAddDialog, setShowAddDialog] = useState(false);
@@ -85,12 +88,13 @@ const ServiceUserFeedbackPage = () => {
     fetchStats();
     fetchEmployees();
     fetchServiceUsers();
-  }, []);
+  }, [serviceUserIdFilter]);
 
   const fetchFeedback = async () => {
     setLoading(true);
     try {
       const response = await axios.get(`${API}/service-user-feedback`, {
+        params: serviceUserIdFilter ? { service_user_id: serviceUserIdFilter } : undefined,
         headers: { Authorization: `Bearer ${token}` }
       });
       setFeedback(response.data.feedback || []);
@@ -189,6 +193,24 @@ const ServiceUserFeedbackPage = () => {
 
   return (
     <div className="p-6 space-y-6" data-testid="service-user-feedback-page">
+      {serviceUserIdFilter && (
+        <div className="flex items-center justify-between rounded-lg border border-blue-200 bg-blue-50 px-3 py-2">
+          <span className="text-sm text-blue-700 font-medium">Filtered by service user</span>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 border-blue-200 text-blue-700 hover:bg-blue-100"
+            onClick={() => {
+              const next = new URLSearchParams(searchParams);
+              next.delete('service_user_id');
+              setSearchParams(next, { replace: true });
+            }}
+          >
+            Clear filter
+          </Button>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex justify-between items-start">
         <div>

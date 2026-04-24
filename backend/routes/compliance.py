@@ -1234,6 +1234,7 @@ async def download_insurance_file(insurance_id: str, user: dict = Depends(requir
 async def get_incidents(
     incident_type: Optional[str] = None,
     status: Optional[str] = None,
+    service_user_id: Optional[str] = None,
     user: dict = Depends(get_current_user)
 ):
     """Get all incident logs"""
@@ -1243,6 +1244,8 @@ async def get_incidents(
         query["incident_type"] = incident_type
     if status:
         query["status"] = status
+    if service_user_id:
+        query["service_user_id"] = service_user_id
     
     incidents = await db.incident_logs.find(query, {"_id": 0}).sort("date_occurred", -1).to_list(1000)
     return incidents

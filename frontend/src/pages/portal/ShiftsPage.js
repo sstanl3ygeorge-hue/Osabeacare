@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import { useAuth } from '../../context/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
@@ -68,6 +69,8 @@ function toIso(value) {
 
 export default function ShiftsPage() {
   const { token, isAuditor } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const serviceUserIdFilter = searchParams.get('service_user_id') || '';
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [assigning, setAssigning] = useState(false);
@@ -98,7 +101,9 @@ export default function ShiftsPage() {
   const fetchShifts = async () => {
     try {
       setLoading(true);
-      const params = statusFilter !== 'all' ? { status: statusFilter } : {};
+      const params = {};
+      if (statusFilter !== 'all') params.status = statusFilter;
+      if (serviceUserIdFilter) params.service_user_id = serviceUserIdFilter;
       const res = await axios.get(`${API}/shifts`, { params, headers });
       setShifts(res.data?.shifts || []);
     } catch (error) {
@@ -125,7 +130,7 @@ export default function ShiftsPage() {
     if (!token) return;
     fetchShifts();
     fetchActiveEmployees();
-  }, [token, statusFilter]);
+  }, [token, statusFilter, serviceUserIdFilter]);
 
   const handleCreateShift = async (e) => {
     e.preventDefault();
@@ -258,6 +263,24 @@ export default function ShiftsPage() {
 
   return (
     <div className="space-y-6" data-testid="shifts-page">
+      {serviceUserIdFilter && (
+        <div className="flex items-center justify-between rounded-lg border border-blue-200 bg-blue-50 px-3 py-2">
+          <span className="text-sm text-blue-700 font-medium">Filtered by service user</span>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 border-blue-200 text-blue-700 hover:bg-blue-100"
+            onClick={() => {
+              const next = new URLSearchParams(searchParams);
+              next.delete('service_user_id');
+              setSearchParams(next, { replace: true });
+            }}
+          >
+            Clear filter
+          </Button>
+        </div>
+      )}
+
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="font-heading text-2xl sm:text-3xl font-bold text-text-primary">Shifts</h1>

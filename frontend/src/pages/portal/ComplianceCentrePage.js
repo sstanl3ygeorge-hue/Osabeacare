@@ -27,6 +27,7 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 export default function ComplianceCentrePage() {
   const { token, isAdmin } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
+  const serviceUserIdFilter = searchParams.get('service_user_id') || '';
   
   // Initialize tab from URL for navigation state persistence
   const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'policies');
@@ -50,7 +51,9 @@ export default function ComplianceCentrePage() {
   // Sync tab changes to URL
   const handleTabChange = (value) => {
     setActiveTab(value);
-    setSearchParams({ tab: value }, { replace: true });
+    const next = { tab: value };
+    if (serviceUserIdFilter) next.service_user_id = serviceUserIdFilter;
+    setSearchParams(next, { replace: true });
   };
   
   // Open document in preview modal
@@ -303,7 +306,7 @@ export default function ComplianceCentrePage() {
 
   useEffect(() => {
     fetchData();
-  }, [token]);
+  }, [token, serviceUserIdFilter]);
 
   const fetchData = async () => {
     setLoading(true);
@@ -317,7 +320,10 @@ export default function ComplianceCentrePage() {
         axios.get(`${API}/compliance/centre-summary`, { headers: { Authorization: `Bearer ${token}` } }),
         axios.get(`${API}/compliance/policies`, { headers: { Authorization: `Bearer ${token}` } }),
         insurancePromise,
-        axios.get(`${API}/compliance/incidents`, { headers: { Authorization: `Bearer ${token}` } }),
+        axios.get(`${API}/compliance/incidents`, {
+          headers: { Authorization: `Bearer ${token}` },
+          params: serviceUserIdFilter ? { service_user_id: serviceUserIdFilter } : undefined
+        }),
         axios.get(`${API}/compliance/staff-meetings`, { headers: { Authorization: `Bearer ${token}` } }),
         axios.get(`${API}/compliance/employer-audits`, { headers: { Authorization: `Bearer ${token}` } }),
         axios.get(`${API}/employees`, { headers: { Authorization: `Bearer ${token}` } }),
@@ -1090,6 +1096,23 @@ export default function ComplianceCentrePage() {
 
   return (
     <div className="space-y-6" data-testid="compliance-centre">
+      {serviceUserIdFilter && (
+        <div className="flex items-center justify-between rounded-lg border border-blue-200 bg-blue-50 px-3 py-2">
+          <span className="text-sm text-blue-700 font-medium">Filtered by service user</span>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 border-blue-200 text-blue-700 hover:bg-blue-100"
+            onClick={() => {
+              const next = { tab: activeTab };
+              setSearchParams(next, { replace: true });
+            }}
+          >
+            Clear filter
+          </Button>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>

@@ -104,7 +104,7 @@ export default function ServiceUserProfilePage() {
   const fetchSections = async () => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`${API_URL}/api/service-user-sections`, {
+      const response = await fetch(`${API_URL}/api/service-users/sections`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       
@@ -342,7 +342,7 @@ export default function ServiceUserProfilePage() {
       {/* Tab Content */}
       <div className="bg-white rounded-xl border border-gray-100 p-6">
         {activeTab === 'overview' ? (
-          <OverviewTab serviceUser={serviceUser} onOpenSection={setActiveTab} />
+          <OverviewTab serviceUser={serviceUser} onOpenSection={setActiveTab} serviceUserId={id} />
         ) : (
           <SectionTab
             section={currentSection}
@@ -616,7 +616,8 @@ export default function ServiceUserProfilePage() {
 }
 
 // Overview Tab Component
-function OverviewTab({ serviceUser, onOpenSection }) {
+function OverviewTab({ serviceUser, onOpenSection, serviceUserId }) {
+  const encodedServiceUserId = encodeURIComponent(serviceUserId || '');
   return (
     <div className="space-y-6">
       {/* Quick Info Cards */}
@@ -729,6 +730,32 @@ function OverviewTab({ serviceUser, onOpenSection }) {
               <p className="text-sm font-medium text-text-primary truncate">{section.name}</p>
             </button>
           ))}
+        </div>
+      </div>
+
+      {/* Related Operational Records (read-only links) */}
+      <div className="p-4 rounded-lg bg-blue-50 border border-blue-100">
+        <h3 className="text-sm font-semibold text-text-primary mb-1">Related Operational Records</h3>
+        <p className="text-xs text-text-muted mb-3">Opens filtered operational records for this service user.</p>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          <a
+            href={`/portal/compliance-centre?tab=incidents&service_user_id=${encodedServiceUserId}`}
+            className="inline-flex items-center justify-center rounded-md border border-blue-200 bg-white px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50"
+          >
+            Incidents
+          </a>
+          <a
+            href={`/portal/shifts?service_user_id=${encodedServiceUserId}`}
+            className="inline-flex items-center justify-center rounded-md border border-blue-200 bg-white px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50"
+          >
+            Shifts
+          </a>
+          <a
+            href={`/portal/feedback?service_user_id=${encodedServiceUserId}`}
+            className="inline-flex items-center justify-center rounded-md border border-blue-200 bg-white px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50"
+          >
+            Feedback
+          </a>
         </div>
       </div>
       

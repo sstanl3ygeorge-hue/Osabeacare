@@ -30,13 +30,17 @@ router = APIRouter(tags=["Feedback & Complaints"])
 async def get_service_user_feedback(
     skip: int = 0,
     limit: int = 50,
+    service_user_id: Optional[str] = None,
     user: dict = Depends(get_current_user)
 ):
     """Get all service user feedback records"""
     db = get_db()
+    query = {}
+    if service_user_id:
+        query["service_user_id"] = service_user_id
     
     feedback_records = await db.service_user_feedback.find(
-        {},
+        query,
         {"_id": 0}
     ).sort("date_received", -1).skip(skip).limit(limit).to_list(limit)
     
@@ -50,7 +54,7 @@ async def get_service_user_feedback(
             if emp:
                 record["employee_name"] = f"{emp.get('first_name', '')} {emp.get('last_name', '')}".strip()
     
-    total = await db.service_user_feedback.count_documents({})
+    total = await db.service_user_feedback.count_documents(query)
     
     return {
         "feedback": feedback_records,

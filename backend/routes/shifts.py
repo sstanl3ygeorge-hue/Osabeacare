@@ -244,6 +244,7 @@ async def list_shifts(
     status: Optional[str] = Query(default=None),
     from_at: Optional[str] = Query(default=None),
     to_at: Optional[str] = Query(default=None),
+    service_user_id: Optional[str] = Query(default=None),
     user: dict = Depends(require_manager_or_admin),
 ):
     db = get_db()
@@ -260,6 +261,8 @@ async def list_shifts(
         _parse_iso(to_at, "to_at")
         query.setdefault("start_at", {})
         query["start_at"]["$lte"] = to_at
+    if service_user_id:
+        query["service_user_id"] = service_user_id
 
     shifts = await db.shifts.find(query, {"_id": 0}).sort("start_at", 1).to_list(500)
     shift_ids = [shift.get("id") for shift in shifts if shift.get("id")]

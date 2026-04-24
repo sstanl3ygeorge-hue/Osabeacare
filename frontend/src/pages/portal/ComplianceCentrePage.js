@@ -160,6 +160,36 @@ export default function ComplianceCentrePage() {
       toast.error(error.response?.data?.detail || 'Failed to download staff meeting PDF');
     }
   };
+
+  const handleDownloadEmployerAuditPdf = async (audit) => {
+    if (!audit?.id) return;
+    try {
+      toast.loading('Preparing employer audit PDF...');
+      const response = await axios.get(
+        `${API}/compliance/employer-audits/${audit.id}/download-pdf`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          responseType: 'blob'
+        }
+      );
+
+      const blob = new Blob([response.data], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      const auditDate = (audit.audit_date || 'audit').toString().split('T')[0];
+      link.href = url;
+      link.download = `employer_audit_${auditDate}_${audit.id.slice(0, 8)}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      toast.dismiss();
+      toast.success('Employer audit PDF downloaded');
+    } catch (error) {
+      toast.dismiss();
+      toast.error(error.response?.data?.detail || 'Failed to download employer audit PDF');
+    }
+  };
   
   // Upload states
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
@@ -2729,6 +2759,15 @@ export default function ComplianceCentrePage() {
                           {audit.next_review_date && <p className="text-xs text-text-muted mt-2">Next review: {formatBackendDate(audit.next_review_date)}</p>}
                         </div>
                         <div className="flex items-center gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="rounded-lg"
+                            onClick={() => handleDownloadEmployerAuditPdf(audit)}
+                          >
+                            <Download className="h-4 w-4 mr-1" />
+                            PDF
+                          </Button>
                           <Button size="sm" variant="outline" className="rounded-lg" onClick={() => openAmendDialog('audit', audit)}>
                             <Edit className="h-4 w-4 mr-1" />
                             Edit

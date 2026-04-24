@@ -1800,6 +1800,45 @@ async def get_employer_audit_history(audit_id: str, user: dict = Depends(require
     return {"history": history}
 
 
+@router.get("/compliance/employer-audits/{audit_id}/download-pdf")
+async def download_employer_audit_pdf(audit_id: str, user: dict = Depends(require_admin)):
+    """Download an employer/provider audit checklist record as inspection-ready PDF evidence (admin-only)."""
+    db = get_db()
+    audit = await db.employer_audit_register.find_one({"id": audit_id}, {"_id": 0})
+    if not audit:
+        raise HTTPException(status_code=404, detail="Employer audit record not found")
+
+    from services.pdf_service import generate_employer_audit_record_pdf
+
+    pdf_bytes = generate_employer_audit_record_pdf(
+        audit_data=audit,
+        admin_data={
+            "downloaded_by": user.get("name") or user.get("email") or user.get("user_id"),
+            "downloaded_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+
+    await log_audit_action(
+        user["user_id"],
+        "download_employer_audit_pdf",
+        "employer_audit_record",
+        audit_id,
+        {
+            "audit_type": audit.get("audit_type"),
+            "audit_date": audit.get("audit_date"),
+            "status": audit.get("status"),
+        },
+    )
+
+    audit_date = str(audit.get("audit_date") or "record").replace(":", "-").replace("/", "-")
+    filename = f"employer_audit_{audit_date}_{audit_id[:8]}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 # ==================== COMPLIANCE REPORTS ====================
 
 @router.get("/compliance/reports/staff-dbs")

@@ -111,6 +111,43 @@ function getShiftLocationLabel(shift) {
   return shift?.location_text || shift?.care_location?.name || shift?.service_user_name || 'Location pending';
 }
 
+function normalizeRoleText(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9 ]+/g, ' ')
+    .trim();
+}
+
+function getRoleFamily(value) {
+  const text = normalizeRoleText(value);
+  if (!text) return 'unknown';
+
+  const nurseTokens = ['nurse', 'registered nurse', 'rn', 'rgn', 'rmn'];
+  const careTokens = [
+    'healthcare assistant',
+    'hca',
+    'support worker',
+    'care assistant',
+    'care worker',
+    'carer',
+    'senior care assistant',
+  ];
+
+  if (nurseTokens.some((token) => text.includes(token))) return 'nurse';
+  if (careTokens.some((token) => text.includes(token))) return 'care';
+  return 'unknown';
+}
+
+function isEmployeeEligibleForShift(shift, employee) {
+  const shiftFamily = getRoleFamily(shift?.role_required);
+  if (shiftFamily === 'unknown') return true;
+
+  const employeeRole = employee?.role || employee?.job_title || employee?.system_role;
+  const workerFamily = getRoleFamily(employeeRole);
+  if (workerFamily === 'unknown') return true;
+  return shiftFamily === workerFamily;
+}
+
 export default function ShiftsPage() {
   const { token, isAuditor } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -183,6 +220,43 @@ export default function ShiftsPage() {
     }
     return map;
   }, [shifts, attendanceShiftsById]);
+
+  const eligibleActiveEmployees = useMemo(() => {
+    if (!selectedShift) return activeEmployees;
+    return activeEmployees.filter((employee) => isEmployeeEligibleForShift(selectedShift, employee));
+  }, [activeEmployees, selectedShift]);
+
+  const getComplianceReason = (employee) => {
+    const blockers = employee?.canonical_readiness?.blockers;
+    if (!Array.isArray(blockers) || blockers.length === 0) return null;
+    return String(blockers[0] || '').trim() || null;
+  };
+
+  const isComplianceEligible = (employee) => {
+    const blockers = employee?.canonical_readiness?.blockers;
+    if (!Array.isArray(blockers)) return true;
+    return blockers.length === 0;
+  };
+
+  const assignableEligibleEmployees = useMemo(
+    () => eligibleActiveEmployees.filter((employee) => isComplianceEligible(employee)),
+    [eligibleActiveEmployees]
+  );
+
+  const blockedEligibleEmployees = useMemo(
+    () => eligibleActiveEmployees.filter((employee) => !isComplianceEligible(employee)),
+    [eligibleActiveEmployees]
+  );
+
+  const hasEligibleActiveEmployees = assignableEligibleEmployees.length > 0;
+
+  useEffect(() => {
+    if (!assignEmployeeId) return;
+    const stillEligible = assignableEligibleEmployees.some((employee) => employee.id === assignEmployeeId);
+    if (!stillEligible) {
+      setAssignEmployeeId('');
+    }
+  }, [assignableEligibleEmployees, assignEmployeeId]);
 
   const getEmployeeDisplay = (employeeId) => {
     if (!employeeId) return 'Unknown employee';
@@ -484,7 +558,20 @@ export default function ShiftsPage() {
         headers,
       });
       const rows = Array.isArray(res.data) ? res.data : (res.data?.employees || []);
-      setEmployees(rows);
+      const employeeIds = rows.map((employee) => employee.id).filter(Boolean);
+      const readinessRes = employeeIds.length > 0
+        ? await axios.get(`${API}/employees/unified-progress-summary`, {
+            params: { employee_ids: employeeIds.join(',') },
+            headers,
+          }).catch(() => ({ data: [] }))
+        : { data: [] };
+      const readinessByEmployeeId = new Map(
+        (readinessRes.data || []).map((summary) => [summary.employee_id, summary])
+      );
+      setEmployees(rows.map((employee) => ({
+        ...employee,
+        canonical_readiness: readinessByEmployeeId.get(employee.id) || null,
+      })));
     } catch (error) {
       toast.error('Failed to load active employees for assignment');
     }
@@ -704,11 +791,7 @@ export default function ShiftsPage() {
       setAssignNotes('');
       fetchShifts();
     } catch (error) {
-      if (error.response?.status === 409) {
-        toast.error('Shift already assigned — duplicate assignment blocked');
-      } else {
-        toast.error(error.response?.data?.detail || 'Failed to assign worker');
-      }
+      toast.error(error.response?.data?.detail || 'Failed to assign worker');
     } finally {
       setAssigning(false);
     }
@@ -1215,24 +1298,44 @@ export default function ShiftsPage() {
           <DialogHeader>
             <DialogTitle>Assign Worker</DialogTitle>
             <DialogDescription>
-              Select an active employee. Eligibility and overlap are enforced by backend.
+              Select an active employee. Worker list is filtered by role requirements and non-compliant staff are disabled.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
             <div className="space-y-2">
               <Label>Active employee</Label>
               <Select value={assignEmployeeId} onValueChange={setAssignEmployeeId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select employee" />
+                <SelectTrigger disabled={!hasEligibleActiveEmployees}>
+                  <SelectValue placeholder={hasEligibleActiveEmployees ? 'Select employee' : 'No compliant active workers match this shift role.'} />
                 </SelectTrigger>
                 <SelectContent>
-                  {activeEmployees.map((emp) => (
+                  {assignableEligibleEmployees.map((emp) => (
                     <SelectItem key={emp.id} value={emp.id}>
                       {emp.first_name} {emp.last_name} ({emp.employee_code || emp.id})
                     </SelectItem>
                   ))}
+                  {blockedEligibleEmployees.map((emp) => (
+                    <SelectItem key={emp.id} value={emp.id} disabled>
+                      {emp.first_name} {emp.last_name} ({emp.employee_code || emp.id}) - Not compliant
+                    </SelectItem>
+                  ))}
+                  {!hasEligibleActiveEmployees ? (
+                    <div className="px-2 py-2 text-sm text-text-muted">No compliant active workers match this shift role.</div>
+                  ) : null}
                 </SelectContent>
               </Select>
+              {blockedEligibleEmployees.length > 0 && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800 space-y-1">
+                  {blockedEligibleEmployees.slice(0, 3).map((emp) => (
+                    <p key={emp.id}>
+                      {emp.first_name} {emp.last_name}: {getComplianceReason(emp) || 'Non-compliant for assignment'}
+                    </p>
+                  ))}
+                  {blockedEligibleEmployees.length > 3 && (
+                    <p>+ {blockedEligibleEmployees.length - 3} more non-compliant worker(s)</p>
+                  )}
+                </div>
+              )}
             </div>
             <div className="space-y-2">
               <Label>Notes (optional)</Label>
@@ -1243,7 +1346,7 @@ export default function ShiftsPage() {
             <Button variant="outline" onClick={() => setIsAssignOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={handleAssign} disabled={assigning || !assignEmployeeId}>
+            <Button onClick={handleAssign} disabled={assigning || !assignEmployeeId || !hasEligibleActiveEmployees}>
               {assigning ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
               Assign
             </Button>

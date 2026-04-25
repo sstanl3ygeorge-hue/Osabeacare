@@ -249,6 +249,9 @@ class IncidentLogResponse(BaseModel):
     reporter_type: Optional[str] = None
     submitted_by_employee_id: Optional[str] = None
     action_taken: Optional[str] = None
+    follow_up_item_id: Optional[str] = None
+    follow_up_due_date: Optional[str] = None
+    follow_up_status: Optional[str] = None
     is_reportable: Optional[bool] = False
     report_category: Optional[str] = None
     reported_to_authority: Optional[bool] = False
@@ -347,6 +350,161 @@ def _normalize_incident_status(status: Optional[str]) -> Optional[str]:
     if normalized in {"under_review", "investigating"}:
         return "reviewing"
     return normalized
+
+
+def _incident_followup_due_date(base_iso: str) -> str:
+    """Return ad-hoc follow-up due date (base date + 7 days) as YYYY-MM-DD."""
+    try:
+        base_dt = datetime.fromisoformat(str(base_iso).replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        base_dt = datetime.now(timezone.utc)
+    return (base_dt + timedelta(days=7)).date().isoformat()
+
+
+async def _sync_incident_report_followup(
+    db,
+    incident_doc: Dict[str, Any],
+    acting_user_id: Optional[str],
+    now_iso: str,
+) -> Dict[str, Optional[str]]:
+    """
+    Keep one recurring_compliance report_followup row in sync with incident flags/status.
+    """
+    incident_id = str(incident_doc.get("id") or "").strip()
+    recurring_collection = getattr(db, "recurring_compliance", None)
+    if recurring_collection is None:
+        return {
+            "follow_up_item_id": None,
+            "follow_up_due_date": None,
+            "follow_up_status": None,
+        }
+    if not incident_id:
+        return {
+            "follow_up_item_id": None,
+            "follow_up_due_date": None,
+            "follow_up_status": None,
+        }
+
+    status_value = _normalize_incident_status(incident_doc.get("status")) or "open"
+    should_close = status_value == "closed"
+    requires_followup = bool(
+        incident_doc.get("safeguarding_concern") or incident_doc.get("escalation_required")
+    )
+
+    existing = await recurring_collection.find_one(
+        {"item_type": "report_followup", "linked_incident_id": incident_id},
+        {"_id": 0},
+    )
+
+    if should_close:
+        if existing:
+            await recurring_collection.update_one(
+                {"id": existing.get("id")},
+                {
+                    "$set": {
+                        "is_active": False,
+                        "status": "closed",
+                        "closed_at": now_iso,
+                        "closed_by": acting_user_id,
+                        "updated_at": now_iso,
+                    }
+                },
+            )
+            return {
+                "follow_up_item_id": existing.get("id"),
+                "follow_up_due_date": existing.get("next_due_date"),
+                "follow_up_status": "closed",
+            }
+        return {
+            "follow_up_item_id": None,
+            "follow_up_due_date": None,
+            "follow_up_status": None,
+        }
+
+    if requires_followup:
+        due_date = _incident_followup_due_date(now_iso)
+        assigned_to = acting_user_id or incident_doc.get("reported_by")
+        followup_name = f"Incident Follow-up: {incident_doc.get('reference_number') or incident_id}"
+        followup_description = (
+            "Follow-up required for safeguarding/escalation incident. "
+            "Track closure actions and evidence."
+        )
+
+        if existing:
+            await recurring_collection.update_one(
+                {"id": existing.get("id")},
+                {
+                    "$set": {
+                        "item_name": followup_name,
+                        "description": followup_description,
+                        "frequency": "ad_hoc",
+                        "frequency_days": None,
+                        "assigned_to": assigned_to,
+                        "next_due_date": due_date,
+                        "is_active": True,
+                        "status": "open",
+                        "updated_at": now_iso,
+                    }
+                },
+            )
+            return {
+                "follow_up_item_id": existing.get("id"),
+                "follow_up_due_date": due_date,
+                "follow_up_status": "open",
+            }
+
+        followup_id = str(uuid.uuid4())
+        employee_id = (
+            str(incident_doc.get("submitted_by_employee_id") or "").strip()
+            or str(incident_doc.get("reported_by") or "").strip()
+            or f"incident-{incident_id}"
+        )
+
+        await recurring_collection.insert_one(
+            {
+                "id": followup_id,
+                "employee_id": employee_id,
+                "item_type": "report_followup",
+                "item_name": followup_name,
+                "description": followup_description,
+                "frequency": "ad_hoc",
+                "frequency_days": None,
+                "next_due_date": due_date,
+                "last_completed_date": None,
+                "assigned_to": assigned_to,
+                "escalate_to": None,
+                "linked_report_id": None,
+                "linked_incident_id": incident_id,
+                "reminder_schedule": [14, 7, 0],
+                "reminders_sent": [],
+                "escalation_threshold_days": 7,
+                "escalation_sent": False,
+                "completion_history": [],
+                "is_active": True,
+                "status": "open",
+                "created_at": now_iso,
+                "created_by": acting_user_id,
+                "updated_at": now_iso,
+            }
+        )
+        return {
+            "follow_up_item_id": followup_id,
+            "follow_up_due_date": due_date,
+            "follow_up_status": "open",
+        }
+
+    if existing:
+        return {
+            "follow_up_item_id": existing.get("id"),
+            "follow_up_due_date": existing.get("next_due_date"),
+            "follow_up_status": "open" if existing.get("is_active", True) else "closed",
+        }
+
+    return {
+        "follow_up_item_id": None,
+        "follow_up_due_date": None,
+        "follow_up_status": None,
+    }
 
 
 class StaffMeetingCreate(BaseModel):
@@ -1374,6 +1532,16 @@ async def create_incident(incident: IncidentLogCreate, user: dict = Depends(requ
     }
     
     await db.incident_logs.insert_one(doc)
+
+    follow_up_fields = await _sync_incident_report_followup(
+        db=db,
+        incident_doc=doc,
+        acting_user_id=user.get("user_id"),
+        now_iso=now,
+    )
+    if follow_up_fields:
+        await db.incident_logs.update_one({"id": doc["id"]}, {"$set": follow_up_fields})
+        doc.update(follow_up_fields)
     
     await log_audit_action(
         user['user_id'],
@@ -1447,6 +1615,15 @@ async def update_incident(
     )
     
     updated = await db.incident_logs.find_one({"id": incident_id}, {"_id": 0})
+    follow_up_fields = await _sync_incident_report_followup(
+        db=db,
+        incident_doc=updated,
+        acting_user_id=user.get("user_id"),
+        now_iso=now,
+    )
+    if follow_up_fields:
+        await db.incident_logs.update_one({"id": incident_id}, {"$set": follow_up_fields})
+        updated.update(follow_up_fields)
     return updated
 
 
@@ -1540,6 +1717,15 @@ async def amend_incident(
         await db.incident_logs.update_one({"id": incident_id}, {"$set": update_dict})
     
     updated = await db.incident_logs.find_one({"id": incident_id}, {"_id": 0})
+    follow_up_fields = await _sync_incident_report_followup(
+        db=db,
+        incident_doc=updated,
+        acting_user_id=user.get("user_id"),
+        now_iso=now,
+    )
+    if follow_up_fields:
+        await db.incident_logs.update_one({"id": incident_id}, {"$set": follow_up_fields})
+        updated.update(follow_up_fields)
     return updated
 
 

@@ -1400,12 +1400,14 @@ async def get_compliance_alerts_summary(
         },
     ).to_list(1000)
 
+    safeguarding_incident_names: Dict[str, str] = {}
     for row in safeguarding_rows:
         incident_id = str(row.get("id") or "").strip()
         if not incident_id:
             continue
         service_user_id = str(row.get("service_user_id") or "").strip()
         entity_name = row.get("service_user_name") or service_user_name_lookup.get(service_user_id) or incident_id
+        safeguarding_incident_names[incident_id] = entity_name
         alerts.append(
             _make_alert_row(
                 title="Open safeguarding concern",
@@ -1421,7 +1423,53 @@ async def get_compliance_alerts_summary(
         )
 
     # ------------------------------------------------------------------
-    # 7) Overdue competency reviews (reuses competency_records)
+    # 7) Overdue safeguarding follow-up tasks (reuses recurring_compliance)
+    # ------------------------------------------------------------------
+    recurring_collection = getattr(db, "recurring_compliance", None)
+    followup_rows = []
+    if recurring_collection is not None:
+        followup_rows = await recurring_collection.find(
+            {
+                "item_type": "report_followup",
+                "is_active": True,
+                "linked_incident_id": {"$exists": True, "$ne": None},
+                "next_due_date": {"$exists": True, "$ne": None},
+            },
+            {
+                "_id": 0,
+                "id": 1,
+                "linked_incident_id": 1,
+                "next_due_date": 1,
+            },
+        ).to_list(3000)
+
+    for row in followup_rows:
+        incident_id = str(row.get("linked_incident_id") or "").strip()
+        if not incident_id:
+            continue
+        if incident_id not in safeguarding_incident_names:
+            continue
+        due_value = row.get("next_due_date")
+        due_dt = _parse_iso_datetime(due_value)
+        if not due_dt or due_dt > now:
+            continue
+
+        alerts.append(
+            _make_alert_row(
+                title="Overdue safeguarding follow-up",
+                category="incidents",
+                severity="safeguarding",
+                entity_type="incident",
+                entity_id=incident_id,
+                entity_name=safeguarding_incident_names.get(incident_id, incident_id),
+                due_date=due_value,
+                link_target="/portal/compliance-centre",
+                source="recurring_compliance",
+            )
+        )
+
+    # ------------------------------------------------------------------
+    # 8) Overdue competency reviews (reuses competency_records)
     # ------------------------------------------------------------------
     competency_collection = getattr(db, "competency_records", None)
     competency_rows = []
@@ -1467,7 +1515,7 @@ async def get_compliance_alerts_summary(
         )
 
     # ------------------------------------------------------------------
-    # 8) Overdue appraisals (minimal appraisal evidence rows)
+    # 9) Overdue appraisals (minimal appraisal evidence rows)
     # ------------------------------------------------------------------
     appraisal_collection = getattr(db, "appraisal_records", None)
     appraisal_rows = []

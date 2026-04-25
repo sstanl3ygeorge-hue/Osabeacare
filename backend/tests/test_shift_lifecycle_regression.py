@@ -297,6 +297,52 @@ def test_overlap_prevention_blocks_second_active_assignment(shift_client):
     assert "overlapping active shift assignment" in second_assign.json()["detail"].lower()
 
 
+def test_shift_assignment_blocks_worker_with_critical_compliance_issue(shift_client, monkeypatch):
+    client, db = shift_client
+    _seed_shift(db, shift_id="s-compliance", status="open", role_required="Healthcare Assistant")
+
+    async def _critical_blockers(*args, **kwargs):
+        return [{"id": "dbs", "label": "DBS Certificate", "reason": "DBS verification missing", "severity": "critical"}]
+
+    monkeypatch.setattr(shifts, "_get_employee_critical_compliance_blockers", _critical_blockers)
+
+    response = client.post("/api/shifts/s-compliance/assign", json={"employee_id": "emp-active"})
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Worker is not compliant for assignment: DBS verification missing"
+
+
+def test_shift_assignment_allows_worker_when_only_non_critical_issues_exist(shift_client, monkeypatch):
+    client, db = shift_client
+    _seed_shift(db, shift_id="s-compliance-ok", status="open", role_required="Healthcare Assistant")
+
+    async def _no_critical_blockers(*args, **kwargs):
+        return []
+
+    monkeypatch.setattr(shifts, "_get_employee_critical_compliance_blockers", _no_critical_blockers)
+
+    response = client.post("/api/shifts/s-compliance-ok/assign", json={"employee_id": "emp-active"})
+
+    assert response.status_code == 200
+    assert response.json()["assignment"]["employee_id"] == "emp-active"
+
+
+def test_duplicate_assignment_message_preserved_before_compliance_gate(shift_client, monkeypatch):
+    client, db = shift_client
+    _seed_shift(db, shift_id="s-duplicate", status="assigned", assigned_employee_id="emp-nurse", role_required="Care Worker")
+    _seed_assignment(db, assignment_id="a-duplicate", shift_id="s-duplicate", employee_id="emp-nurse", status="active")
+
+    async def _critical_blockers(*args, **kwargs):
+        return [{"id": "dbs", "reason": "DBS verification missing", "severity": "critical"}]
+
+    monkeypatch.setattr(shifts, "_get_employee_critical_compliance_blockers", _critical_blockers)
+
+    response = client.post("/api/shifts/s-duplicate/assign", json={"employee_id": "emp-active"})
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Shift already has an active worker assignment"
+
+
 def test_shift_assignment_blocks_obvious_nurse_hca_mismatch(shift_client):
     client, db = shift_client
     _seed_shift(db, shift_id="s-role-mismatch", status="open", role_required="Registered Nurse")
@@ -304,7 +350,18 @@ def test_shift_assignment_blocks_obvious_nurse_hca_mismatch(shift_client):
     response = client.post("/api/shifts/s-role-mismatch/assign", json={"employee_id": "emp-active"})
 
     assert response.status_code == 409
-    assert response.json()["detail"] == "Worker role does not match shift role requirement"
+    assert response.json()["detail"] == "Worker role does not match shift role requirement."
+
+
+def test_role_mismatch_message_precedes_duplicate_assignment_message(shift_client):
+    client, db = shift_client
+    _seed_shift(db, shift_id="s-role-priority", status="assigned", assigned_employee_id="emp-nurse", role_required="Nurse")
+    _seed_assignment(db, assignment_id="a-role-priority", shift_id="s-role-priority", employee_id="emp-nurse", status="active")
+
+    response = client.post("/api/shifts/s-role-priority/assign", json={"employee_id": "emp-active"})
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Worker role does not match shift role requirement."
 
 
 def test_shift_assignment_allows_tolerant_nurse_match_for_rn_label(shift_client):

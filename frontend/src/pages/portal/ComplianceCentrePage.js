@@ -1077,6 +1077,31 @@ export default function ComplianceCentrePage() {
     );
   };
 
+  const getFollowUpStatusBadge = (status, dueDate) => {
+    const normalized = String(status || '').trim().toLowerCase();
+    if (!normalized) return null;
+
+    const due = parseBackendDate(dueDate);
+    const isOverdue = normalized === 'open' && due instanceof Date && !Number.isNaN(due.getTime()) && due < new Date();
+    const effective = normalized === 'closed' ? 'closed' : (isOverdue ? 'overdue' : 'open');
+
+    const config = {
+      open: { bg: 'bg-amber-100', text: 'text-amber-700', icon: Clock, label: 'open' },
+      overdue: { bg: 'bg-red-100', text: 'text-red-700', icon: AlertTriangle, label: 'overdue' },
+      closed: { bg: 'bg-green-100', text: 'text-green-700', icon: CheckCircle, label: 'closed' }
+    };
+
+    const c = config[effective] || config.open;
+    const Icon = c.icon;
+
+    return (
+      <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${c.bg} ${c.text}`}>
+        <Icon className="h-3 w-3" />
+        Follow-up: {c.label}
+      </span>
+    );
+  };
+
   const groupedPolicies = policies.reduce((acc, policy) => {
     if (!acc[policy.category]) acc[policy.category] = [];
     acc[policy.category].push(policy);
@@ -2485,6 +2510,8 @@ export default function ComplianceCentrePage() {
                                 {incident.location && <span>Location: {incident.location}</span>}
                                 {incident.report_category && <span>Category: {incident.report_category}</span>}
                                 {incident.reported_at && <span>Reported: {formatBackendDate(incident.reported_at)}</span>}
+                                {incident.follow_up_due_date && <span>Follow-up due: {formatBackendDate(incident.follow_up_due_date)}</span>}
+                                {getFollowUpStatusBadge(incident.follow_up_status, incident.follow_up_due_date)}
                               </div>
                             </div>
                             {/* Action buttons for incidents */}
@@ -4191,6 +4218,15 @@ export default function ComplianceCentrePage() {
             {/* Incident Amendment Fields */}
             {amendType === 'incident' && (
               <>
+                {(amendRecord?.follow_up_due_date || amendRecord?.follow_up_status) && (
+                  <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900">
+                    <p className="font-medium">Linked Follow-up</p>
+                    <div className="mt-1 flex items-center gap-2 flex-wrap">
+                      {getFollowUpStatusBadge(amendRecord?.follow_up_status, amendRecord?.follow_up_due_date) || <span>Status: -</span>}
+                      {amendRecord?.follow_up_due_date && <span>Due: {formatBackendDate(amendRecord.follow_up_due_date)}</span>}
+                    </div>
+                  </div>
+                )}
                 <div className="space-y-2">
                   <Label>Title</Label>
                   <Input
@@ -4315,6 +4351,24 @@ export default function ComplianceCentrePage() {
                     className="rounded-xl"
                     rows={2}
                   />
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <label className="flex items-center gap-2 text-sm text-text-primary">
+                    <input
+                      type="checkbox"
+                      checked={!!amendForm.safeguarding_concern}
+                      onChange={(e) => setAmendForm({ ...amendForm, safeguarding_concern: e.target.checked })}
+                    />
+                    Safeguarding concern
+                  </label>
+                  <label className="flex items-center gap-2 text-sm text-text-primary">
+                    <input
+                      type="checkbox"
+                      checked={!!amendForm.escalation_required}
+                      onChange={(e) => setAmendForm({ ...amendForm, escalation_required: e.target.checked })}
+                    />
+                    Escalation required
+                  </label>
                 </div>
                 <div className="space-y-3 rounded-xl border border-[#E4E8EB] p-3">
                   <label className="flex items-center gap-2 text-sm font-medium text-text-primary">

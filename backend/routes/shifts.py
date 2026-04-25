@@ -190,7 +190,7 @@ def _assert_role_matches_shift_requirement(shift: Dict[str, Any], employee: Dict
 
     # Fail safe only for obvious mismatches. Unknown/free-text labels remain permissive.
     if required_family != "unknown" and worker_family != "unknown" and required_family != worker_family:
-        raise HTTPException(status_code=409, detail="Worker role does not match shift role requirement")
+        raise HTTPException(status_code=409, detail="Worker role does not match shift role requirement.")
 
 
 def _ensure_valid_window(start_at: str, end_at: str) -> tuple[datetime, datetime]:
@@ -348,6 +348,36 @@ async def _assert_no_overlap_for_employee(
                 status_code=409,
                 detail="Employee already has an overlapping active shift assignment",
             )
+
+
+async def _get_employee_critical_compliance_blockers(employee_id: str, db) -> List[Dict[str, Any]]:
+    """
+    Reuse canonical readiness output and return only critical blockers for assignment gating.
+    """
+    try:
+        from unified_compliance_engine import get_unified_employee_status
+    except Exception:
+        return []
+
+    try:
+        status = await get_unified_employee_status(
+            employee_id,
+            db,
+            user_role="admin",
+            include_details=False,
+        )
+    except Exception:
+        return []
+
+    if not isinstance(status, dict) or status.get("error"):
+        return []
+
+    blockers = status.get("blockers") or []
+    return [
+        blocker
+        for blocker in blockers
+        if str((blocker or {}).get("severity") or "").strip().lower() == "critical"
+    ]
 
 
 @router.post("/shifts")
@@ -601,15 +631,30 @@ async def assign_worker_to_shift(
     if shift.get("care_location_id"):
         await _get_active_care_location_or_404(shift.get("care_location_id"))
 
+    employee = await _assert_employee_is_active(payload.employee_id)
+    _assert_role_matches_shift_requirement(shift, employee)
+
     existing_assignment = await _get_active_assignment_for_shift(shift_id)
     if existing_assignment:
         raise HTTPException(status_code=409, detail="Shift already has an active worker assignment")
 
-    employee = await _assert_employee_is_active(payload.employee_id)
-    _assert_role_matches_shift_requirement(shift, employee)
     start_dt = _parse_iso(shift.get("start_at"), "shift.start_at")
     end_dt = _parse_iso(shift.get("end_at"), "shift.end_at")
     await _assert_no_overlap_for_employee(payload.employee_id, start_dt, end_dt, exclude_shift_id=shift_id)
+
+    critical_blockers = await _get_employee_critical_compliance_blockers(payload.employee_id, db)
+    if critical_blockers:
+        first = critical_blockers[0] or {}
+        reason = (
+            str(first.get("reason") or "").strip()
+            or str(first.get("label") or "").strip()
+            or str(first.get("id") or "").strip()
+            or "critical compliance requirement not met"
+        )
+        raise HTTPException(
+            status_code=409,
+            detail=f"Worker is not compliant for assignment: {reason}",
+        )
 
     now = _now_iso()
     assignment_id = str(uuid.uuid4())

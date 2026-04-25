@@ -107,6 +107,7 @@ const getDocumentGuidance = (docType) => {
 
 // Accepted file formats text
 const ACCEPTED_FORMATS = "Accepted formats: PDF, JPG, PNG (max 10MB per file)";
+const DAILY_NOTE_TAG_OPTIONS = ['nutrition', 'mood', 'incident', 'medication'];
 
 const DOCUMENT_WORKFLOW_UI = {
   missing: { label: 'Missing', className: 'bg-red-100 text-red-700' },
@@ -733,6 +734,9 @@ export default function WorkerDashboard() {
   const [workerShiftResponseNote, setWorkerShiftResponseNote] = useState('');
   const [workerShiftResponding, setWorkerShiftResponding] = useState(false);
   const [workerShiftClocking, setWorkerShiftClocking] = useState(false);
+  const [workerDailyNoteText, setWorkerDailyNoteText] = useState('');
+  const [workerDailyNoteTags, setWorkerDailyNoteTags] = useState([]);
+  const [workerDailyNoteSubmitting, setWorkerDailyNoteSubmitting] = useState(false);
   const [workerIncidents, setWorkerIncidents] = useState([]);
   const [workerIncidentsLoading, setWorkerIncidentsLoading] = useState(false);
   const [incidentDetailOpen, setIncidentDetailOpen] = useState(false);
@@ -744,7 +748,17 @@ export default function WorkerDashboard() {
     occurred_at: '',
     location_text: '',
     description: '',
+    people_involved: '',
+    witnesses: '',
+    immediate_actions_taken: '',
+    injury_or_harm: '',
+    safeguarding_concern: false,
+    escalation_required: false,
+    escalation_details: '',
+    learning_outcome: '',
+    prevention_actions: '',
     related_shift_id: '',
+    service_user_id: '',
     note: '',
   });
   const navigate = useNavigate();
@@ -907,6 +921,13 @@ export default function WorkerDashboard() {
         headers: { Authorization: `Bearer ${token}` }
       });
       setSelectedWorkerShift(response.data || null);
+      if (response.data?.current_daily_note) {
+        setWorkerDailyNoteText(response.data.current_daily_note.note_text || '');
+        setWorkerDailyNoteTags(Array.isArray(response.data.current_daily_note.tags) ? response.data.current_daily_note.tags : []);
+      } else {
+        setWorkerDailyNoteText('');
+        setWorkerDailyNoteTags([]);
+      }
       setWorkerShiftDetailOpen(true);
     } catch (error) {
       const message = typeof error.response?.data?.detail === 'string'
@@ -1007,6 +1028,44 @@ export default function WorkerDashboard() {
     }
   };
 
+  const toggleWorkerDailyNoteTag = (tag) => {
+    setWorkerDailyNoteTags((prev) => (
+      prev.includes(tag) ? prev.filter((item) => item !== tag) : [...prev, tag]
+    ));
+  };
+
+  const handleSubmitWorkerDailyNote = async () => {
+    const shiftId = selectedWorkerShift?.shift?.id;
+    if (!shiftId) {
+      toast.error('Shift not found');
+      return;
+    }
+    const text = (workerDailyNoteText || '').trim();
+    if (text.length < 2) {
+      toast.error('Daily note text is required');
+      return;
+    }
+    setWorkerDailyNoteSubmitting(true);
+    try {
+      const token = localStorage.getItem('workerToken');
+      await axios.post(
+        `${API}/worker/shifts/${shiftId}/daily-notes`,
+        { note_text: text, tags: workerDailyNoteTags },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success('Daily note saved');
+      await fetchWorkerShifts();
+      await handleOpenWorkerShift(shiftId);
+    } catch (error) {
+      const message = typeof error.response?.data?.detail === 'string'
+        ? error.response.data.detail
+        : 'Could not save daily note';
+      toast.error(message);
+    } finally {
+      setWorkerDailyNoteSubmitting(false);
+    }
+  };
+
   const fetchWorkerIncidents = async () => {
     setWorkerIncidentsLoading(true);
     try {
@@ -1020,6 +1079,24 @@ export default function WorkerDashboard() {
     } finally {
       setWorkerIncidentsLoading(false);
     }
+  };
+
+  const handleReportIncidentForShift = () => {
+    const shift = selectedWorkerShift?.shift;
+    if (!shift?.id) {
+      setIncidentModalOpen(true);
+      return;
+    }
+    const now = new Date();
+    const localIso = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+    setIncidentForm((prev) => ({
+      ...prev,
+      occurred_at: prev.occurred_at || localIso,
+      location_text: prev.location_text || shift.location_text || '',
+      related_shift_id: shift.id,
+      service_user_id: shift.service_user_id || '',
+    }));
+    setIncidentModalOpen(true);
   };
 
   const handleSubmitIncident = async () => {
@@ -1037,7 +1114,17 @@ export default function WorkerDashboard() {
           occurred_at: new Date(incidentForm.occurred_at).toISOString(),
           location_text: incidentForm.location_text,
           description: incidentForm.description,
+          people_involved: incidentForm.people_involved || null,
+          witnesses: incidentForm.witnesses || null,
+          immediate_actions_taken: incidentForm.immediate_actions_taken || null,
+          injury_or_harm: incidentForm.injury_or_harm || null,
+          safeguarding_concern: !!incidentForm.safeguarding_concern,
+          escalation_required: !!incidentForm.escalation_required,
+          escalation_details: incidentForm.escalation_required ? (incidentForm.escalation_details || null) : null,
+          learning_outcome: incidentForm.learning_outcome || null,
+          prevention_actions: incidentForm.prevention_actions || null,
           related_shift_id: incidentForm.related_shift_id || null,
+          service_user_id: incidentForm.service_user_id || null,
           note: incidentForm.note || null,
         },
         { headers: { Authorization: `Bearer ${token}` } }
@@ -1049,7 +1136,17 @@ export default function WorkerDashboard() {
         occurred_at: '',
         location_text: '',
         description: '',
+        people_involved: '',
+        witnesses: '',
+        immediate_actions_taken: '',
+        injury_or_harm: '',
+        safeguarding_concern: false,
+        escalation_required: false,
+        escalation_details: '',
+        learning_outcome: '',
+        prevention_actions: '',
         related_shift_id: '',
+        service_user_id: '',
         note: '',
       });
       fetchWorkerIncidents();
@@ -4556,6 +4653,56 @@ export default function WorkerDashboard() {
                   </p>
                 </div>
               ) : null}
+              <div className="border-t border-slate-200 pt-3">
+                <p className="text-xs text-slate-500 mb-2">Daily note</p>
+                {selectedWorkerShift.current_daily_note ? (
+                  <div className="rounded-md border border-slate-200 bg-slate-50 p-3 space-y-2">
+                    <p className="text-sm text-slate-700 whitespace-pre-wrap">{selectedWorkerShift.current_daily_note.note_text}</p>
+                    {Array.isArray(selectedWorkerShift.current_daily_note.tags) && selectedWorkerShift.current_daily_note.tags.length > 0 && (
+                      <div className="flex flex-wrap gap-1">
+                        {selectedWorkerShift.current_daily_note.tags.map((tag) => (
+                          <Badge key={`note-tag-${tag}`} className="bg-slate-200 text-slate-700 text-[11px]">
+                            {tag}
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
+                    <p className="text-xs text-slate-500">Saved at {formatDateTime(selectedWorkerShift.current_daily_note.timestamp)}</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <Textarea
+                      value={workerDailyNoteText}
+                      onChange={(e) => setWorkerDailyNoteText(e.target.value)}
+                      rows={3}
+                      placeholder="Write care delivery note for this shift"
+                    />
+                    <div className="flex flex-wrap gap-1">
+                      {DAILY_NOTE_TAG_OPTIONS.map((tag) => (
+                        <Button
+                          key={`daily-note-tag-${tag}`}
+                          type="button"
+                          size="sm"
+                          variant={workerDailyNoteTags.includes(tag) ? 'default' : 'outline'}
+                          onClick={() => toggleWorkerDailyNoteTag(tag)}
+                        >
+                          {tag}
+                        </Button>
+                      ))}
+                    </div>
+                    <div className="flex justify-end">
+                      <Button
+                        size="sm"
+                        onClick={handleSubmitWorkerDailyNote}
+                        disabled={workerDailyNoteSubmitting || (workerDailyNoteText || '').trim().length < 2}
+                      >
+                        {workerDailyNoteSubmitting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+                        Save Daily Note
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
               {(canWorkerClockIn(selectedWorkerShift) || canWorkerClockOut(selectedWorkerShift)) && (
                 <div className="flex items-center gap-2 pt-2">
                   {canWorkerClockIn(selectedWorkerShift) && (
@@ -4586,6 +4733,9 @@ export default function WorkerDashboard() {
             <p className="text-sm text-slate-600">Shift detail unavailable.</p>
           )}
           <DialogFooter>
+            <Button variant="outline" onClick={handleReportIncidentForShift}>
+              Report Incident For This Shift
+            </Button>
             <Button variant="outline" onClick={() => setWorkerShiftDetailOpen(false)}>
               Close
             </Button>
@@ -4637,7 +4787,11 @@ export default function WorkerDashboard() {
               <Label>Type</Label>
               <Select
                 value={incidentForm.incident_type}
-                onValueChange={(v) => setIncidentForm((prev) => ({ ...prev, incident_type: v }))}
+                onValueChange={(v) => setIncidentForm((prev) => ({
+                  ...prev,
+                  incident_type: v,
+                  safeguarding_concern: v === 'safeguarding' ? true : prev.safeguarding_concern,
+                }))}
               >
                 <SelectTrigger>
                   <SelectValue />
@@ -4669,7 +4823,19 @@ export default function WorkerDashboard() {
               <Label>Related shift (optional)</Label>
               <Select
                 value={incidentForm.related_shift_id || 'none'}
-                onValueChange={(v) => setIncidentForm((prev) => ({ ...prev, related_shift_id: v === 'none' ? '' : v }))}
+                onValueChange={(v) => {
+                  if (v === 'none') {
+                    setIncidentForm((prev) => ({ ...prev, related_shift_id: '', service_user_id: '' }));
+                    return;
+                  }
+                  const selected = workerShifts.find((item) => item.shift?.id === v);
+                  setIncidentForm((prev) => ({
+                    ...prev,
+                    related_shift_id: v,
+                    service_user_id: selected?.shift?.service_user_id || '',
+                    location_text: prev.location_text || selected?.shift?.location_text || '',
+                  }));
+                }}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Select a shift" />
@@ -4690,6 +4856,82 @@ export default function WorkerDashboard() {
                 rows={4}
                 value={incidentForm.description}
                 onChange={(e) => setIncidentForm((prev) => ({ ...prev, description: e.target.value }))}
+              />
+            </div>
+            <div>
+              <Label>People involved (optional)</Label>
+              <Input
+                value={incidentForm.people_involved}
+                onChange={(e) => setIncidentForm((prev) => ({ ...prev, people_involved: e.target.value }))}
+              />
+            </div>
+            <div>
+              <Label>Witnesses (optional)</Label>
+              <Input
+                value={incidentForm.witnesses}
+                onChange={(e) => setIncidentForm((prev) => ({ ...prev, witnesses: e.target.value }))}
+              />
+            </div>
+            <div>
+              <Label>Immediate actions taken (optional)</Label>
+              <Textarea
+                rows={2}
+                value={incidentForm.immediate_actions_taken}
+                onChange={(e) => setIncidentForm((prev) => ({ ...prev, immediate_actions_taken: e.target.value }))}
+              />
+            </div>
+            <div>
+              <Label>Injury or harm (optional)</Label>
+              <Textarea
+                rows={2}
+                value={incidentForm.injury_or_harm}
+                onChange={(e) => setIncidentForm((prev) => ({ ...prev, injury_or_harm: e.target.value }))}
+              />
+            </div>
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={!!incidentForm.safeguarding_concern}
+                onChange={(e) => setIncidentForm((prev) => ({ ...prev, safeguarding_concern: e.target.checked }))}
+              />
+              Safeguarding concern
+            </label>
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={!!incidentForm.escalation_required}
+                onChange={(e) => setIncidentForm((prev) => ({
+                  ...prev,
+                  escalation_required: e.target.checked,
+                  escalation_details: e.target.checked ? prev.escalation_details : '',
+                }))}
+              />
+              Escalation required
+            </label>
+            {incidentForm.escalation_required ? (
+              <div>
+                <Label>Escalation details</Label>
+                <Textarea
+                  rows={2}
+                  value={incidentForm.escalation_details}
+                  onChange={(e) => setIncidentForm((prev) => ({ ...prev, escalation_details: e.target.value }))}
+                />
+              </div>
+            ) : null}
+            <div>
+              <Label>Learning outcome (optional)</Label>
+              <Textarea
+                rows={2}
+                value={incidentForm.learning_outcome}
+                onChange={(e) => setIncidentForm((prev) => ({ ...prev, learning_outcome: e.target.value }))}
+              />
+            </div>
+            <div>
+              <Label>Prevention actions (optional)</Label>
+              <Textarea
+                rows={2}
+                value={incidentForm.prevention_actions}
+                onChange={(e) => setIncidentForm((prev) => ({ ...prev, prevention_actions: e.target.value }))}
               />
             </div>
             <div>

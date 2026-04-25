@@ -31,6 +31,7 @@ router = APIRouter(tags=["Shifts"])
 SHIFT_STATUSES = {"open", "assigned", "completed", "cancelled"}
 ASSIGNMENT_STATUSES = {"active", "completed", "cancelled"}
 ATTENDANCE_STATUSES = {"open", "submitted", "approved", "rejected"}
+DAILY_NOTE_TAGS = {"nutrition", "mood", "incident", "medication"}
 SHIFT_TRANSITIONS = {
     "open": {"assigned", "cancelled"},
     "assigned": {"open", "completed", "cancelled"},
@@ -86,6 +87,11 @@ class AdminAttendanceReviewRequest(BaseModel):
     reason: Optional[str] = None
 
 
+class WorkerDailyNoteCreateRequest(BaseModel):
+    note_text: str = Field(..., min_length=2)
+    tags: Optional[List[str]] = None
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -106,6 +112,25 @@ def _normalize_optional_id(value: Optional[str], field_name: str) -> Optional[st
     if not text or text.lower() in {"none", "null", "undefined"}:
         return None
     return text
+
+
+def _normalize_daily_note_tags(tags: Optional[List[str]]) -> List[str]:
+    if tags is None:
+        return []
+    if not isinstance(tags, list):
+        raise HTTPException(status_code=400, detail="tags must be a list")
+    normalized: List[str] = []
+    seen = set()
+    for raw in tags:
+        text = str(raw or "").strip().lower()
+        if not text:
+            continue
+        if text not in DAILY_NOTE_TAGS:
+            raise HTTPException(status_code=400, detail=f"Invalid tag: {text}")
+        if text not in seen:
+            normalized.append(text)
+            seen.add(text)
+    return normalized
 
 
 def _parse_iso(value: str, field_name: str) -> datetime:
@@ -162,6 +187,23 @@ async def _attach_care_location_metadata(shifts: List[Dict[str, Any]]):
     by_id = {row.get("id"): row for row in rows}
     for shift in shifts:
         shift["care_location"] = by_id.get(shift.get("care_location_id"))
+
+
+async def _attach_service_user_metadata(shifts: List[Dict[str, Any]]):
+    if not shifts:
+        return
+    db = get_db()
+    service_user_ids = sorted({s.get("service_user_id") for s in shifts if s.get("service_user_id")})
+    if not service_user_ids:
+        return
+    rows = await db.service_users.find(
+        {"id": {"$in": service_user_ids}},
+        {"_id": 0, "id": 1, "full_name": 1},
+    ).to_list(500)
+    by_id = {row.get("id"): row for row in rows}
+    for shift in shifts:
+        service_user = by_id.get(shift.get("service_user_id"))
+        shift["service_user_name"] = service_user.get("full_name") if service_user else None
 
 
 def _assert_transition(current_status: str, next_status: str):
@@ -343,6 +385,7 @@ async def list_shifts(
 
     shifts = await db.shifts.find(query, {"_id": 0}).sort("start_at", 1).to_list(500)
     await _attach_care_location_metadata(shifts)
+    await _attach_service_user_metadata(shifts)
     shift_ids = [shift.get("id") for shift in shifts if shift.get("id")]
     latest_by_shift_id: Dict[str, Dict[str, Any]] = {}
     if shift_ids:
@@ -366,6 +409,7 @@ async def get_shift(
 ):
     shift = await _get_shift_or_404(shift_id)
     await _attach_care_location_metadata([shift])
+    await _attach_service_user_metadata([shift])
     assignment = await _get_active_assignment_for_shift(shift_id)
     latest_assignment = await _get_latest_assignment_for_shift(shift_id)
     return {"shift": shift, "active_assignment": assignment, "latest_assignment": latest_assignment}
@@ -468,6 +512,7 @@ async def update_shift(
     await db.shifts.update_one({"id": shift_id}, {"$set": update})
     updated = await _get_shift_or_404(shift_id)
     await _attach_care_location_metadata([updated])
+    await _attach_service_user_metadata([updated])
 
     audit_action = "shift_updated"
     if update.get("status") == "cancelled":
@@ -546,6 +591,7 @@ async def assign_worker_to_shift(
     )
     updated_shift = await _get_shift_or_404(shift_id)
     await _attach_care_location_metadata([updated_shift])
+    await _attach_service_user_metadata([updated_shift])
     await log_audit_action(
         user.get("user_id"),
         "shift_assignment_created",
@@ -589,6 +635,7 @@ async def unassign_worker_from_shift(
     )
     updated_shift = await _get_shift_or_404(shift_id)
     await _attach_care_location_metadata([updated_shift])
+    await _attach_service_user_metadata([updated_shift])
     await log_audit_action(
         user.get("user_id"),
         "shift_assignment_cancelled",
@@ -638,6 +685,7 @@ async def complete_shift(
     )
     updated_shift = await _get_shift_or_404(shift_id)
     await _attach_care_location_metadata([updated_shift])
+    await _attach_service_user_metadata([updated_shift])
     await log_audit_action(
         user.get("user_id"),
         "shift_completed",
@@ -674,6 +722,7 @@ async def list_worker_shifts(
     if shift_ids:
         shifts = await db.shifts.find({"id": {"$in": shift_ids}}, {"_id": 0}).to_list(500)
     await _attach_care_location_metadata(shifts)
+    await _attach_service_user_metadata(shifts)
     shifts_by_id = {s.get("id"): s for s in shifts}
 
     latest_attendance_by_assignment: Dict[str, Dict[str, Any]] = {}
@@ -723,12 +772,151 @@ async def get_worker_shift(
         raise HTTPException(status_code=404, detail="Shift not found for this worker")
     shift = await _get_shift_or_404(shift_id)
     await _attach_care_location_metadata([shift])
+    await _attach_service_user_metadata([shift])
     current_attendance = await db.shift_attendance_records.find_one(
         {"assignment_id": assignment.get("id")},
         {"_id": 0},
         sort=[("created_at", -1)],
     )
-    return {"assignment": assignment, "shift": shift, "current_attendance": current_attendance}
+    current_daily_note = await db.shift_daily_notes.find_one(
+        {"shift_id": shift_id, "employee_id": employee_id},
+        {"_id": 0},
+    )
+    return {
+        "assignment": assignment,
+        "shift": shift,
+        "current_attendance": current_attendance,
+        "current_daily_note": current_daily_note,
+    }
+
+
+@router.post("/worker/shifts/{shift_id}/daily-notes")
+async def create_worker_shift_daily_note(
+    shift_id: str,
+    payload: WorkerDailyNoteCreateRequest,
+    worker: dict = Depends(get_current_worker),
+):
+    db = get_db()
+    employee_id = await _require_active_worker_employee(worker, db)
+    shift = await _get_shift_or_404(shift_id)
+    service_user_id = shift.get("service_user_id")
+    if not service_user_id:
+        raise HTTPException(status_code=409, detail="Daily notes require a service user linked to this shift")
+
+    assignment = await db.shift_assignments.find_one(
+        {
+            "shift_id": shift_id,
+            "employee_id": employee_id,
+            "status": {"$in": ["active", "completed"]},
+        },
+        {"_id": 0, "id": 1, "status": 1},
+    )
+    if not assignment:
+        raise HTTPException(status_code=404, detail="No worker assignment found for this shift")
+
+    existing = await db.shift_daily_notes.find_one(
+        {"shift_id": shift_id, "employee_id": employee_id},
+        {"_id": 0, "id": 1},
+    )
+    if existing:
+        raise HTTPException(status_code=409, detail="Daily note already exists for this shift")
+
+    note_text = (payload.note_text or "").strip()
+    if len(note_text) < 2:
+        raise HTTPException(status_code=400, detail="note_text is required")
+    tags = _normalize_daily_note_tags(payload.tags)
+
+    now = _now_iso()
+    note_id = str(uuid.uuid4())
+    note = {
+        "id": note_id,
+        "service_user_id": service_user_id,
+        "shift_id": shift_id,
+        "employee_id": employee_id,
+        "assignment_id": assignment.get("id"),
+        "note_text": note_text,
+        "tags": tags,
+        "timestamp": now,
+        "created_at": now,
+        "updated_at": now,
+        "created_by": f"worker:{employee_id}",
+        "updated_by": f"worker:{employee_id}",
+    }
+    await db.shift_daily_notes.insert_one(note)
+    note.pop("_id", None)
+
+    await log_audit_action(
+        f"worker:{employee_id}",
+        "daily_note_created",
+        "daily_note",
+        note_id,
+        {
+            "service_user_id": service_user_id,
+            "shift_id": shift_id,
+            "employee_id": employee_id,
+            "tags": tags,
+        },
+    )
+    return {"success": True, "daily_note": note}
+
+
+@router.get("/service-users/{service_user_id}/daily-notes")
+async def list_service_user_daily_notes(
+    service_user_id: str,
+    user: dict = Depends(require_manager_or_admin),
+):
+    db = get_db()
+    service_user = await db.service_users.find_one({"id": service_user_id}, {"_id": 0, "id": 1})
+    if not service_user:
+        raise HTTPException(status_code=404, detail="Service user not found")
+
+    rows = await db.shift_daily_notes.find(
+        {"service_user_id": service_user_id},
+        {"_id": 0},
+    ).sort("timestamp", -1).to_list(1000)
+
+    employee_ids = sorted({row.get("employee_id") for row in rows if row.get("employee_id")})
+    shift_ids = sorted({row.get("shift_id") for row in rows if row.get("shift_id")})
+
+    employees = []
+    if employee_ids:
+        employees = await db.employees.find(
+            {"id": {"$in": employee_ids}},
+            {"_id": 0, "id": 1, "first_name": 1, "last_name": 1, "employee_code": 1},
+        ).to_list(1000)
+    shifts = []
+    if shift_ids:
+        shifts = await db.shifts.find(
+            {"id": {"$in": shift_ids}},
+            {"_id": 0, "id": 1, "location_text": 1, "role_required": 1, "start_at": 1, "end_at": 1, "care_location_id": 1},
+        ).to_list(1000)
+
+    care_location_ids = sorted({row.get("care_location_id") for row in shifts if row.get("care_location_id")})
+    care_locations = []
+    if care_location_ids:
+        care_locations = await db.care_locations.find(
+            {"id": {"$in": care_location_ids}},
+            {"_id": 0, "id": 1, "name": 1},
+        ).to_list(1000)
+
+    employees_by_id = {emp.get("id"): emp for emp in employees}
+    shifts_by_id = {shift.get("id"): shift for shift in shifts}
+    care_locations_by_id = {loc.get("id"): loc for loc in care_locations}
+
+    for row in rows:
+        employee = employees_by_id.get(row.get("employee_id")) or {}
+        shift = shifts_by_id.get(row.get("shift_id")) or {}
+        care_location = care_locations_by_id.get(shift.get("care_location_id")) or {}
+
+        row["employee_name"] = f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip() or row.get("employee_id")
+        row["employee_code"] = employee.get("employee_code")
+        row["shift_location_text"] = shift.get("location_text")
+        row["shift_role_required"] = shift.get("role_required")
+        row["shift_start_at"] = shift.get("start_at")
+        row["shift_end_at"] = shift.get("end_at")
+        row["care_location_name"] = care_location.get("name")
+
+    return {"daily_notes": rows, "total": len(rows)}
 
 
 @router.post("/worker/shifts/{shift_id}/accept")

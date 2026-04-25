@@ -917,10 +917,21 @@ export default function ComplianceCentrePage() {
         title: record.title || '',
         description: record.description || '',
         incident_type: record.incident_type || 'incident',
+        status: record.status || 'open',
+        action_taken: record.action_taken || '',
         date_occurred: record.date_occurred ? record.date_occurred.split('T')[0] : '',
         location: record.location || '',
+        people_involved: record.people_involved || record.persons_involved || '',
         persons_involved: record.persons_involved || '',
+        witnesses: record.witnesses || '',
+        immediate_actions_taken: record.immediate_actions_taken || record.immediate_actions || '',
         immediate_actions: record.immediate_actions || '',
+        injury_or_harm: record.injury_or_harm || '',
+        safeguarding_concern: !!record.safeguarding_concern,
+        escalation_required: !!record.escalation_required,
+        escalation_details: record.escalation_details || '',
+        learning_outcome: record.learning_outcome || record.lessons_learned || '',
+        prevention_actions: record.prevention_actions || record.corrective_actions || '',
         root_cause: record.root_cause || '',
         corrective_actions: record.corrective_actions || '',
         lessons_learned: record.lessons_learned || '',
@@ -1049,6 +1060,7 @@ export default function ComplianceCentrePage() {
       expired: { bg: 'bg-error/10', text: 'text-error', icon: AlertTriangle },
       expiring_soon: { bg: 'bg-warning/10', text: 'text-warning', icon: Clock },
       under_review: { bg: 'bg-info/10', text: 'text-info', icon: Clock },
+      reviewing: { bg: 'bg-info/10', text: 'text-info', icon: Clock },
       open: { bg: 'bg-error/10', text: 'text-error', icon: AlertCircle },
       investigating: { bg: 'bg-warning/10', text: 'text-warning', icon: Search },
       resolved: { bg: 'bg-info/10', text: 'text-info', icon: CheckCircle },
@@ -2097,7 +2109,7 @@ export default function ComplianceCentrePage() {
           <div className="space-y-4">
             {/* Incidents KPI Summary Bar */}
             {(() => {
-              const openCount = incidents.filter(i => i.status === 'open' || i.status === 'investigating').length;
+              const openCount = incidents.filter(i => i.status === 'open' || i.status === 'reviewing' || i.status === 'under_review' || i.status === 'investigating').length;
               const closedCount = incidents.filter(i => i.status === 'closed' || i.status === 'resolved').length;
               const overdueCount = incidents.filter(i => {
                 if (i.status === 'closed' || i.status === 'resolved') return false;
@@ -2170,6 +2182,7 @@ export default function ComplianceCentrePage() {
                     <SelectContent>
                       <SelectItem value="all">All Status</SelectItem>
                       <SelectItem value="open">Open</SelectItem>
+                      <SelectItem value="reviewing">Reviewing</SelectItem>
                       <SelectItem value="investigating">Investigating</SelectItem>
                       <SelectItem value="resolved">Resolved</SelectItem>
                       <SelectItem value="closed">Closed</SelectItem>
@@ -2404,7 +2417,14 @@ export default function ComplianceCentrePage() {
               {(() => {
                 // Apply filters
                 const filteredIncidents = incidents.filter(incident => {
-                  if (incidentFilter.status !== 'all' && incident.status !== incidentFilter.status) return false;
+                  if (incidentFilter.status !== 'all') {
+                    const status = (incident.status || '').toLowerCase();
+                    if (incidentFilter.status === 'reviewing') {
+                      if (!['reviewing', 'under_review', 'investigating'].includes(status)) return false;
+                    } else if (status !== incidentFilter.status) {
+                      return false;
+                    }
+                  }
                   if (incidentFilter.severity !== 'all' && incident.incident_type !== incidentFilter.severity) return false;
                   return true;
                 });
@@ -2426,7 +2446,7 @@ export default function ComplianceCentrePage() {
                       // HARDENING: Use parseBackendDate for safe calculation
                       const dateOccurred = parseBackendDate(incident.date_occurred);
                       const daysOld = dateOccurred ? Math.ceil((new Date() - dateOccurred) / (1000 * 60 * 60 * 24)) : 0;
-                      const isOverdue = (incident.status === 'open' || incident.status === 'investigating') && daysOld > 7;
+                      const isOverdue = (incident.status === 'open' || incident.status === 'reviewing' || incident.status === 'under_review' || incident.status === 'investigating') && daysOld > 7;
                       
                       return (
                         <div 
@@ -2473,7 +2493,7 @@ export default function ComplianceCentrePage() {
                                 size="sm"
                                 variant="outline"
                                 className="rounded-lg"
-                                onClick={() => {/* View details */}}
+                                onClick={() => openAmendDialog('incident', incident)}
                                 data-testid={`view-incident-${incident.id}`}
                               >
                                 <Eye className="h-4 w-4 mr-1" />
@@ -2491,7 +2511,7 @@ export default function ComplianceCentrePage() {
                                     <Edit className="h-4 w-4 mr-1" />
                                     Edit
                                   </Button>
-                                  {(incident.status === 'open' || incident.status === 'investigating') && (
+                                  {(incident.status === 'open' || incident.status === 'reviewing' || incident.status === 'under_review' || incident.status === 'investigating') && (
                                     <Button 
                                       size="sm"
                                       variant="default"
@@ -4203,6 +4223,32 @@ export default function ComplianceCentrePage() {
                       type="date"
                       value={amendForm.date_occurred || ''}
                       onChange={(e) => setAmendForm({...amendForm, date_occurred: e.target.value})}
+                      className="rounded-xl"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label>Status</Label>
+                    <Select
+                      value={amendForm.status || 'open'}
+                      onValueChange={(v) => setAmendForm({ ...amendForm, status: v })}
+                    >
+                      <SelectTrigger className="rounded-xl">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="open">Open</SelectItem>
+                        <SelectItem value="reviewing">Reviewing</SelectItem>
+                        <SelectItem value="closed">Closed</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Action / Outcome Notes</Label>
+                    <Input
+                      value={amendForm.action_taken || ''}
+                      onChange={(e) => setAmendForm({ ...amendForm, action_taken: e.target.value })}
                       className="rounded-xl"
                     />
                   </div>

@@ -50,6 +50,7 @@ const TABS = [
   { id: '8_health_visits', label: '8. Health Visits', icon: Stethoscope },
   { id: '9_reviews', label: '9. Reviews', icon: CalendarCheck },
   { id: '10_correspondence', label: '10. Letters', icon: Mail },
+  { id: '11_daily_notes', label: '11. Daily Notes', icon: FileText },
 ];
 
 export default function ServiceUserProfilePage() {
@@ -94,6 +95,9 @@ export default function ServiceUserProfilePage() {
     effective_from: '',
     review_due_at: '',
   });
+  const [dailyNotes, setDailyNotes] = useState([]);
+  const [dailyNotesLoading, setDailyNotesLoading] = useState(false);
+  const [dailyNotesLoaded, setDailyNotesLoaded] = useState(false);
 
   useEffect(() => {
     fetchServiceUser();
@@ -105,6 +109,12 @@ export default function ServiceUserProfilePage() {
       fetchCarePlans();
     }
   }, [activeTab, id, carePlansLoaded, isManagerOrAdmin]);
+
+  useEffect(() => {
+    if (activeTab === '11_daily_notes' && isManagerOrAdmin() && !dailyNotesLoaded) {
+      fetchDailyNotes();
+    }
+  }, [activeTab, id, dailyNotesLoaded, isManagerOrAdmin]);
 
   const fetchServiceUser = async () => {
     try {
@@ -142,6 +152,29 @@ export default function ServiceUserProfilePage() {
       }
     } catch (error) {
       console.error('Error fetching sections:', error);
+    }
+  };
+
+  const fetchDailyNotes = async () => {
+    setDailyNotesLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`${API_URL}/api/service-users/${id}/daily-notes`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setDailyNotes(data.daily_notes || []);
+        setDailyNotesLoaded(true);
+      } else {
+        const error = await response.json();
+        toast.error(error.detail || 'Failed to load daily notes');
+      }
+    } catch (error) {
+      console.error('Error loading daily notes:', error);
+      toast.error('Failed to load daily notes');
+    } finally {
+      setDailyNotesLoading(false);
     }
   };
 
@@ -619,6 +652,13 @@ export default function ServiceUserProfilePage() {
             onDownloadPdf={handleDownloadCarePlanPdf}
             onRefresh={fetchCarePlans}
           />
+        ) : activeTab === '11_daily_notes' ? (
+          <DailyNotesTimelineTab
+            notes={dailyNotes}
+            loading={dailyNotesLoading}
+            canManage={isManagerOrAdmin()}
+            onRefresh={fetchDailyNotes}
+          />
         ) : (
           <SectionTab
             section={currentSection}
@@ -1040,6 +1080,65 @@ function OverviewTab({ serviceUser, onOpenSection, serviceUserId }) {
         <div className="p-4 rounded-lg bg-amber-50 border border-amber-100">
           <h3 className="text-sm font-semibold text-text-primary mb-2">Notes</h3>
           <p className="text-sm text-text-muted whitespace-pre-wrap">{serviceUser.notes}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DailyNotesTimelineTab({ notes, loading, canManage, onRefresh }) {
+  if (!canManage) {
+    return (
+      <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+        <p className="text-sm font-medium text-amber-800">Daily notes are restricted to admin and manager roles.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-semibold text-text-primary">Daily Notes Timeline</h2>
+          <p className="text-sm text-text-muted">Chronological notes linked to shifts and care delivery.</p>
+        </div>
+        <Button variant="outline" onClick={onRefresh} disabled={loading}>
+          Refresh
+        </Button>
+      </div>
+
+      {loading ? (
+        <p className="text-sm text-text-muted">Loading daily notes...</p>
+      ) : notes.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-gray-200 p-8 text-center">
+          <p className="text-sm text-text-muted">No daily notes recorded yet.</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {notes.map((note) => (
+            <div key={note.id} className="rounded-lg border border-gray-200 p-4 space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="font-medium text-text-primary">{note.employee_name || 'Unknown employee'}{note.employee_code ? ` (${note.employee_code})` : ''}</p>
+                <p className="text-xs text-text-muted">{formatBackendDate(note.timestamp) || '-'}</p>
+              </div>
+              <p className="text-sm text-text-muted">
+                {(note.care_location_name || note.shift_location_text || 'Location pending')} • {note.shift_role_required || 'Role pending'}
+              </p>
+              <p className="text-xs text-text-muted">
+                Shift window: {formatBackendDate(note.shift_start_at) || '-'} → {formatBackendDate(note.shift_end_at) || '-'}
+              </p>
+              <p className="text-sm text-text-primary whitespace-pre-wrap">{note.note_text}</p>
+              {Array.isArray(note.tags) && note.tags.length > 0 && (
+                <div className="flex flex-wrap gap-1">
+                  {note.tags.map((tag) => (
+                    <span key={`${note.id}-${tag}`} className="px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700">
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
         </div>
       )}
     </div>

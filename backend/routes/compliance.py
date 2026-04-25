@@ -112,8 +112,17 @@ class IncidentLogCreate(BaseModel):
     description: str
     date_occurred: str
     location: Optional[str] = None
+    people_involved: Optional[str] = None
     persons_involved: Optional[str] = None
+    witnesses: Optional[str] = None
+    immediate_actions_taken: Optional[str] = None
     immediate_actions: Optional[str] = None
+    injury_or_harm: Optional[str] = None
+    safeguarding_concern: Optional[bool] = False
+    escalation_required: Optional[bool] = False
+    escalation_details: Optional[str] = None
+    learning_outcome: Optional[str] = None
+    prevention_actions: Optional[str] = None
     root_cause: Optional[str] = None
     corrective_actions: Optional[str] = None
     lessons_learned: Optional[str] = None
@@ -131,6 +140,15 @@ class IncidentLogUpdate(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     status: Optional[str] = None
+    people_involved: Optional[str] = None
+    witnesses: Optional[str] = None
+    immediate_actions_taken: Optional[str] = None
+    injury_or_harm: Optional[str] = None
+    safeguarding_concern: Optional[bool] = None
+    escalation_required: Optional[bool] = None
+    escalation_details: Optional[str] = None
+    learning_outcome: Optional[str] = None
+    prevention_actions: Optional[str] = None
     root_cause: Optional[str] = None
     corrective_actions: Optional[str] = None
     lessons_learned: Optional[str] = None
@@ -171,10 +189,21 @@ class IncidentLogAmend(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     incident_type: Optional[str] = None
+    status: Optional[str] = None
+    action_taken: Optional[str] = None
     date_occurred: Optional[str] = None
     location: Optional[str] = None
+    people_involved: Optional[str] = None
     persons_involved: Optional[str] = None
+    witnesses: Optional[str] = None
+    immediate_actions_taken: Optional[str] = None
     immediate_actions: Optional[str] = None
+    injury_or_harm: Optional[str] = None
+    safeguarding_concern: Optional[bool] = None
+    escalation_required: Optional[bool] = None
+    escalation_details: Optional[str] = None
+    learning_outcome: Optional[str] = None
+    prevention_actions: Optional[str] = None
     root_cause: Optional[str] = None
     corrective_actions: Optional[str] = None
     lessons_learned: Optional[str] = None
@@ -196,8 +225,17 @@ class IncidentLogResponse(BaseModel):
     description: str
     date_occurred: str
     location: Optional[str] = None
+    people_involved: Optional[str] = None
     persons_involved: Optional[str] = None
+    witnesses: Optional[str] = None
+    immediate_actions_taken: Optional[str] = None
     immediate_actions: Optional[str] = None
+    injury_or_harm: Optional[str] = None
+    safeguarding_concern: Optional[bool] = False
+    escalation_required: Optional[bool] = False
+    escalation_details: Optional[str] = None
+    learning_outcome: Optional[str] = None
+    prevention_actions: Optional[str] = None
     root_cause: Optional[str] = None
     corrective_actions: Optional[str] = None
     lessons_learned: Optional[str] = None
@@ -228,6 +266,15 @@ class WorkerIncidentCreate(BaseModel):
     description: str
     location_text: str
     title: Optional[str] = None
+    people_involved: Optional[str] = None
+    witnesses: Optional[str] = None
+    immediate_actions_taken: Optional[str] = None
+    injury_or_harm: Optional[str] = None
+    safeguarding_concern: Optional[bool] = False
+    escalation_required: Optional[bool] = False
+    escalation_details: Optional[str] = None
+    learning_outcome: Optional[str] = None
+    prevention_actions: Optional[str] = None
     related_shift_id: Optional[str] = None
     note: Optional[str] = None
     service_user_id: Optional[str] = None
@@ -273,6 +320,33 @@ def _normalize_and_validate_reportable_fields(payload: Dict[str, Any]) -> Dict[s
     payload["report_reference"] = report_reference if reported_to_authority else None
     payload["report_notes"] = report_notes
     return payload
+
+
+def _normalize_incident_alias_fields(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Keep modern and legacy incident field names in sync."""
+    alias_pairs = [
+        ("people_involved", "persons_involved"),
+        ("immediate_actions_taken", "immediate_actions"),
+        ("learning_outcome", "lessons_learned"),
+        ("prevention_actions", "corrective_actions"),
+    ]
+    for modern_field, legacy_field in alias_pairs:
+        modern_value = payload.get(modern_field)
+        legacy_value = payload.get(legacy_field)
+        if modern_value in (None, "") and legacy_value not in (None, ""):
+            payload[modern_field] = legacy_value
+        elif legacy_value in (None, "") and modern_value not in (None, ""):
+            payload[legacy_field] = modern_value
+    return payload
+
+
+def _normalize_incident_status(status: Optional[str]) -> Optional[str]:
+    if not status:
+        return status
+    normalized = status.strip().lower()
+    if normalized in {"under_review", "investigating"}:
+        return "reviewing"
+    return normalized
 
 
 class StaffMeetingCreate(BaseModel):
@@ -357,9 +431,10 @@ class EmployerAuditResponse(BaseModel):
 
 
 def _build_worker_incident_view(incident: Dict[str, Any]) -> Dict[str, Any]:
-    status = (incident.get("status") or "open").lower()
+    status = _normalize_incident_status(incident.get("status")) or "open"
     status_label = {
         "open": "Submitted",
+        "reviewing": "Under review",
         "under_review": "Under review",
         "investigating": "Under review",
         "resolved": "Resolved",
@@ -368,6 +443,7 @@ def _build_worker_incident_view(incident: Dict[str, Any]) -> Dict[str, Any]:
 
     progress_summary = {
         "open": "Your report has been submitted and is awaiting review.",
+        "reviewing": "Your report is being reviewed.",
         "under_review": "Your report is being reviewed.",
         "investigating": "Your report is being reviewed.",
         "resolved": "Review is complete and the case outcome has been recorded.",
@@ -385,6 +461,15 @@ def _build_worker_incident_view(incident: Dict[str, Any]) -> Dict[str, Any]:
         "description": incident.get("description"),
         "date_occurred": incident.get("date_occurred"),
         "location": incident.get("location"),
+        "people_involved": incident.get("people_involved") or incident.get("persons_involved"),
+        "witnesses": incident.get("witnesses"),
+        "immediate_actions_taken": incident.get("immediate_actions_taken") or incident.get("immediate_actions"),
+        "injury_or_harm": incident.get("injury_or_harm"),
+        "safeguarding_concern": bool(incident.get("safeguarding_concern")),
+        "escalation_required": bool(incident.get("escalation_required")),
+        "escalation_details": incident.get("escalation_details"),
+        "learning_outcome": incident.get("learning_outcome") or incident.get("lessons_learned"),
+        "prevention_actions": incident.get("prevention_actions") or incident.get("corrective_actions"),
         "status": status,
         "status_label": status_label,
         "progress_summary": progress_summary,
@@ -394,6 +479,7 @@ def _build_worker_incident_view(incident: Dict[str, Any]) -> Dict[str, Any]:
         "closed_at": incident.get("closed_at"),
         "updated_at": incident.get("updated_at"),
         "related_shift_id": incident.get("related_shift_id"),
+        "service_user_id": incident.get("service_user_id"),
     }
 
 
@@ -1266,13 +1352,15 @@ async def create_incident(incident: IncidentLogCreate, user: dict = Depends(requ
         if not shift_exists:
             raise HTTPException(status_code=400, detail="Related shift not found")
 
-    incident_payload = _normalize_and_validate_reportable_fields(incident.model_dump())
+    incident_payload = _normalize_incident_alias_fields(incident.model_dump())
+    incident_payload = _normalize_and_validate_reportable_fields(incident_payload)
+    incident_payload["status"] = _normalize_incident_status(incident_payload.get("status")) or "open"
 
     doc = {
         "id": str(uuid.uuid4()),
         "reference_number": ref_number,
         **incident_payload,
-        "status": "open",
+        "status": incident_payload.get("status") or "open",
         "notes": [],
         "action_taken": None,
         "reporter_type": "admin",
@@ -1318,18 +1406,30 @@ async def update_incident(
     
     now = datetime.now(timezone.utc).isoformat()
     incoming_updates = updates.model_dump(exclude_none=True)
+    if "status" in incoming_updates:
+        incoming_updates["status"] = _normalize_incident_status(incoming_updates.get("status"))
     effective_payload = {**incident, **incoming_updates}
+    _normalize_incident_alias_fields(effective_payload)
     _normalize_and_validate_reportable_fields(effective_payload)
 
     update_dict = {"updated_at": now}
     for field, value in incoming_updates.items():
         update_dict[field] = value
 
+    alias_fields = {
+        "people_involved", "persons_involved", "immediate_actions_taken", "immediate_actions",
+        "learning_outcome", "lessons_learned", "prevention_actions", "corrective_actions",
+    }
+    if any(field in incoming_updates for field in alias_fields):
+        for field in alias_fields:
+            if field in effective_payload:
+                update_dict[field] = effective_payload[field]
+
     for field in ("is_reportable", "report_category", "reported_to_authority", "reported_at", "report_reference", "report_notes"):
         if field in effective_payload:
             update_dict[field] = effective_payload[field]
 
-    if updates.status in {"under_review", "investigating", "resolved", "closed"}:
+    if updates.status in {"reviewing", "under_review", "investigating", "resolved", "closed"}:
         update_dict["reviewed_by"] = user.get("user_id")
         update_dict["reviewed_at"] = now
 
@@ -1365,7 +1465,10 @@ async def amend_incident(
     
     now = datetime.now(timezone.utc).isoformat()
     amendment_fields = amendment.model_dump(exclude_none=True, exclude={'reason'})
+    if "status" in amendment_fields:
+        amendment_fields["status"] = _normalize_incident_status(amendment_fields.get("status"))
     effective_payload = {**incident, **amendment_fields}
+    _normalize_incident_alias_fields(effective_payload)
     _normalize_and_validate_reportable_fields(effective_payload)
     
     amend_record = {
@@ -1381,13 +1484,27 @@ async def amend_incident(
     
     update_dict = {"updated_at": now}
     reportability_fields = {"is_reportable", "report_category", "reported_to_authority", "reported_at", "report_reference", "report_notes"}
+    alias_fields = {
+        "people_involved", "persons_involved", "immediate_actions_taken", "immediate_actions",
+        "learning_outcome", "lessons_learned", "prevention_actions", "corrective_actions",
+    }
     for field, value in amendment_fields.items():
         if field in reportability_fields:
+            value = effective_payload.get(field)
+        if field in alias_fields:
             value = effective_payload.get(field)
         if field in incident and incident[field] != value:
             amend_record["changes"][field] = value
             amend_record["previous_values"][field] = incident[field]
             update_dict[field] = value
+
+    if any(field in amendment_fields for field in alias_fields):
+        for field in alias_fields:
+            next_value = effective_payload.get(field)
+            if incident.get(field) != next_value:
+                amend_record["changes"][field] = next_value
+                amend_record["previous_values"][field] = incident.get(field)
+                update_dict[field] = next_value
 
     if any(field in amendment_fields for field in reportability_fields):
         for field in reportability_fields:
@@ -1396,6 +1513,27 @@ async def amend_incident(
                 amend_record["changes"][field] = next_value
                 amend_record["previous_values"][field] = incident.get(field)
                 update_dict[field] = next_value
+
+    amended_status = update_dict.get("status")
+    if amended_status in {"reviewing", "under_review", "investigating", "resolved", "closed"}:
+        if incident.get("reviewed_by") != user.get("user_id"):
+            amend_record["changes"]["reviewed_by"] = user.get("user_id")
+            amend_record["previous_values"]["reviewed_by"] = incident.get("reviewed_by")
+        if incident.get("reviewed_at") != now:
+            amend_record["changes"]["reviewed_at"] = now
+            amend_record["previous_values"]["reviewed_at"] = incident.get("reviewed_at")
+        update_dict["reviewed_by"] = user.get("user_id")
+        update_dict["reviewed_at"] = now
+
+    if amended_status == "closed":
+        if incident.get("closed_at") != now:
+            amend_record["changes"]["closed_at"] = now
+            amend_record["previous_values"]["closed_at"] = incident.get("closed_at")
+        if incident.get("closed_by") != user.get("user_id"):
+            amend_record["changes"]["closed_by"] = user.get("user_id")
+            amend_record["previous_values"]["closed_by"] = incident.get("closed_by")
+        update_dict["closed_at"] = now
+        update_dict["closed_by"] = user.get("user_id")
     
     if amend_record["changes"]:
         await db.amendments.insert_one(amend_record)
@@ -1467,6 +1605,7 @@ async def create_worker_incident(
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
 
+    linked_service_user_id = payload.service_user_id
     if payload.related_shift_id:
         assignment = await db.shift_assignments.find_one(
             {"shift_id": payload.related_shift_id, "employee_id": employee_id},
@@ -1474,6 +1613,12 @@ async def create_worker_incident(
         )
         if not assignment:
             raise HTTPException(status_code=400, detail="Related shift is not assigned to this worker")
+        shift_doc = await db.shifts.find_one(
+            {"id": payload.related_shift_id},
+            {"_id": 0, "service_user_id": 1}
+        )
+        if shift_doc and shift_doc.get("service_user_id"):
+            linked_service_user_id = shift_doc.get("service_user_id")
 
     now = datetime.now(timezone.utc).isoformat()
     count = await db.incident_logs.count_documents({})
@@ -1497,15 +1642,24 @@ async def create_worker_incident(
         "description": payload.description,
         "date_occurred": payload.occurred_at,
         "location": payload.location_text,
-        "persons_involved": None,
-        "immediate_actions": None,
+        "people_involved": payload.people_involved,
+        "persons_involved": payload.people_involved,
+        "witnesses": payload.witnesses,
+        "immediate_actions_taken": payload.immediate_actions_taken,
+        "immediate_actions": payload.immediate_actions_taken,
+        "injury_or_harm": payload.injury_or_harm,
+        "safeguarding_concern": bool(payload.safeguarding_concern or payload.incident_type == "safeguarding"),
+        "escalation_required": bool(payload.escalation_required),
+        "escalation_details": payload.escalation_details,
+        "learning_outcome": payload.learning_outcome,
+        "prevention_actions": payload.prevention_actions,
         "root_cause": None,
-        "corrective_actions": None,
-        "lessons_learned": None,
+        "corrective_actions": payload.prevention_actions,
+        "lessons_learned": payload.learning_outcome,
         "status": "open",
         "action_taken": None,
         "related_shift_id": payload.related_shift_id,
-        "service_user_id": payload.service_user_id,
+        "service_user_id": linked_service_user_id,
         "notes": note_items,
         "reporter_type": "worker",
         "submitted_by_employee_id": employee_id,

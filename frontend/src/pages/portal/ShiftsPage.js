@@ -78,6 +78,39 @@ function normalizeOptionalId(value) {
   return text;
 }
 
+function getInitialNewShift(defaultServiceUserId = '') {
+  const normalizedServiceUserId = normalizeOptionalId(defaultServiceUserId) || '';
+  return {
+    shift_type: normalizedServiceUserId ? 'service_user_visit' : 'care_location',
+    start_at: '',
+    end_at: '',
+    location_text: '',
+    role_required: '',
+    service_user_id: normalizedServiceUserId,
+    care_location_id: '',
+    notes: '',
+  };
+}
+
+function getServiceUserDisplayName(serviceUser) {
+  if (!serviceUser) return '';
+  return serviceUser.full_name || serviceUser.service_user_code || serviceUser.id || '';
+}
+
+function getServiceUserLocationFallback(serviceUser) {
+  if (!serviceUser) return '';
+  const name = getServiceUserDisplayName(serviceUser);
+  const addressBits = [serviceUser.address_line_1, serviceUser.city, serviceUser.postcode].filter(Boolean);
+  if (!name) return addressBits.join(', ');
+  if (addressBits.length === 0) return name;
+  return `${name} - ${addressBits.join(', ')}`;
+}
+
+function getShiftLocationLabel(shift) {
+  if (!shift) return '';
+  return shift?.location_text || shift?.care_location?.name || shift?.service_user_name || 'Location pending';
+}
+
 export default function ShiftsPage() {
   const { token, isAuditor } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -88,6 +121,7 @@ export default function ShiftsPage() {
   const [shifts, setShifts] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [careLocations, setCareLocations] = useState([]);
+  const [serviceUsers, setServiceUsers] = useState([]);
   const [statusFilter, setStatusFilter] = useState('all');
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [detailShift, setDetailShift] = useState(null);
@@ -107,15 +141,7 @@ export default function ShiftsPage() {
   const [isRejectAttendanceOpen, setIsRejectAttendanceOpen] = useState(false);
   const [attendanceRejectReason, setAttendanceRejectReason] = useState('');
 
-  const [newShift, setNewShift] = useState({
-    start_at: '',
-    end_at: '',
-    location_text: '',
-    role_required: '',
-    service_user_id: '',
-    care_location_id: '',
-    notes: '',
-  });
+  const [newShift, setNewShift] = useState(() => getInitialNewShift(serviceUserIdFilter));
 
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
   const activeEmployees = useMemo(
@@ -131,10 +157,19 @@ export default function ShiftsPage() {
     }
     return map;
   }, [employees]);
+  const serviceUserById = useMemo(() => {
+    const map = {};
+    for (const serviceUser of serviceUsers || []) {
+      if (serviceUser?.id) {
+        map[serviceUser.id] = serviceUser;
+      }
+    }
+    return map;
+  }, [serviceUsers]);
   const shiftLocationById = useMemo(() => {
     const map = {};
     for (const shift of shifts || []) {
-      if (shift?.id) map[shift.id] = shift.location_text || shift.care_location?.name || null;
+      if (shift?.id) map[shift.id] = getShiftLocationLabel(shift);
     }
     return map;
   }, [shifts]);
@@ -161,14 +196,14 @@ export default function ShiftsPage() {
     if (!shiftId) return 'Unknown shift';
     const shift = shiftById[shiftId];
     if (!shift) return shiftId;
-    const location = shift.location_text || shift.care_location?.name || 'Location pending';
+    const location = getShiftLocationLabel(shift);
     const role = shift.role_required || 'Role pending';
     return `${location} — ${role} (${formatDateTime(shift.start_at)} → ${formatDateTime(shift.end_at)})`;
   };
 
   const getShiftLocationForAttendance = (shiftId) => {
     const shift = shiftById[shiftId];
-    return shift?.location_text || shift?.care_location?.name || shiftLocationById[shiftId] || '—';
+    return getShiftLocationLabel(shift) || shiftLocationById[shiftId] || '—';
   };
 
   const getShiftRoleForAttendance = (shiftId) => {
@@ -276,6 +311,8 @@ export default function ShiftsPage() {
       toast.error('Could not open print window');
       return;
     }
+    const generatedAt = formatDateTime(new Date().toISOString());
+    const logoSrc = `${window.location.origin}/osabea_logo.png`;
     const tableRows = rows.map((item) => `
       <tr>
         <td>${htmlEscape(item.employeeName)}</td>
@@ -297,34 +334,127 @@ export default function ShiftsPage() {
         <head>
           <title>Approved Attendance / Timesheet Ready</title>
           <style>
-            body { font-family: Arial, sans-serif; margin: 16px; color: #111827; }
-            h1 { font-size: 18px; margin: 0 0 6px; }
-            p { margin: 0 0 12px; color: #4b5563; font-size: 12px; }
-            table { width: 100%; border-collapse: collapse; font-size: 12px; }
-            th, td { border: 1px solid #d1d5db; padding: 6px; text-align: left; vertical-align: top; }
-            th { background: #f3f4f6; }
+            :root {
+              --brand-primary: #0D6E6E;
+              --brand-secondary: #1F2937;
+              --brand-muted: #6B7280;
+              --brand-border: #D1D5DB;
+              --surface: #F9FAFB;
+            }
+            * { box-sizing: border-box; }
+            body {
+              margin: 0;
+              padding: 18px;
+              font-family: "Segoe UI", Arial, sans-serif;
+              color: var(--brand-secondary);
+              background: #ffffff;
+            }
+            .document {
+              max-width: 1040px;
+              margin: 0 auto;
+            }
+            .header {
+              text-align: center;
+              margin-bottom: 12px;
+            }
+            .logo {
+              max-height: 56px;
+              width: auto;
+              display: block;
+              margin: 0 auto 8px;
+            }
+            .company {
+              margin: 0;
+              font-size: 14px;
+              font-weight: 600;
+              color: var(--brand-secondary);
+            }
+            .title {
+              margin: 4px 0 0;
+              font-size: 22px;
+              font-weight: 700;
+              color: var(--brand-primary);
+            }
+            .meta {
+              margin: 6px 0 0;
+              font-size: 12px;
+              color: var(--brand-muted);
+            }
+            .section-heading {
+              margin: 14px 0 8px;
+              font-size: 13px;
+              font-weight: 700;
+              color: var(--brand-primary);
+              text-transform: uppercase;
+              letter-spacing: 0.04em;
+            }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              font-size: 11px;
+              background: #fff;
+            }
+            th, td {
+              border: 1px solid var(--brand-border);
+              padding: 7px;
+              text-align: left;
+              vertical-align: top;
+            }
+            th {
+              background: var(--brand-primary);
+              color: #ffffff;
+              font-weight: 600;
+            }
+            tr:nth-child(even) td {
+              background: var(--surface);
+            }
+            .footer {
+              margin-top: 14px;
+              padding-top: 8px;
+              border-top: 1px solid #E5E7EB;
+              text-align: center;
+              color: var(--brand-muted);
+              font-size: 11px;
+            }
+            @media print {
+              body { padding: 0; }
+              .document { max-width: none; }
+            }
           </style>
         </head>
         <body>
-          <h1>Approved Attendance / Timesheet Ready</h1>
-          <p>Generated: ${htmlEscape(formatDateTime(new Date().toISOString()))}</p>
-          <table>
-            <thead>
-              <tr>
-                <th>Employee Name</th>
-                <th>Employee Code</th>
-                <th>Shift Location/Care Location</th>
-                <th>Role Required</th>
-                <th>Scheduled Start</th>
-                <th>Scheduled End</th>
-                <th>Clock In</th>
-                <th>Clock Out</th>
-                <th>Approved At</th>
-                <th>Approved For Timesheet</th>
-              </tr>
-            </thead>
-            <tbody>${tableRows}</tbody>
-          </table>
+          <main class="document">
+            <header class="header">
+              <img class="logo" src="${htmlEscape(logoSrc)}" alt="Osabea Healthcare Solutions logo" />
+              <p class="company">Osabea Healthcare Solutions</p>
+              <h1 class="title">Approved Attendance / Timesheet Ready</h1>
+              <p class="meta">Generated: ${htmlEscape(generatedAt)}</p>
+            </header>
+
+            <h2 class="section-heading">Approved Attendance Register</h2>
+            <table>
+              <thead>
+                <tr>
+                  <th>Employee Name</th>
+                  <th>Employee Code</th>
+                  <th>Shift Location / Care Location</th>
+                  <th>Role Required</th>
+                  <th>Scheduled Start</th>
+                  <th>Scheduled End</th>
+                  <th>Clock In</th>
+                  <th>Clock Out</th>
+                  <th>Approved At</th>
+                  <th>Approved For Timesheet</th>
+                </tr>
+              </thead>
+              <tbody>${tableRows}</tbody>
+            </table>
+
+            <footer class="footer">
+              <div>Osabea Healthcare Solutions</div>
+              <div>Page generated from Compliance Portal</div>
+            </footer>
+          </main>
         </body>
       </html>
     `);
@@ -375,6 +505,16 @@ export default function ShiftsPage() {
     }
   };
 
+  const fetchServiceUsers = async () => {
+    try {
+      const res = await axios.get(`${API}/service-users`, { headers });
+      const rows = Array.isArray(res.data) ? res.data : (res.data?.service_users || []);
+      setServiceUsers(rows);
+    } catch (error) {
+      toast.error('Failed to load service users');
+    }
+  };
+
   const fetchAttendanceQueue = async () => {
     try {
       setAttendanceLoading(true);
@@ -422,6 +562,7 @@ export default function ShiftsPage() {
     fetchShifts();
     fetchActiveEmployees();
     fetchActiveCareLocations();
+    fetchServiceUsers();
     if (!isAuditor()) {
       fetchAttendanceQueue();
     }
@@ -482,6 +623,31 @@ export default function ShiftsPage() {
       toast.error('Start and end date/time are required');
       return;
     }
+    const shiftType = newShift.shift_type || 'care_location';
+    const serviceUserId = normalizeOptionalId(newShift.service_user_id);
+    const careLocationId = normalizeOptionalId(newShift.care_location_id);
+    const selectedServiceUser = serviceUserId ? serviceUserById[serviceUserId] : null;
+    const selectedCareLocation = careLocationId
+      ? careLocations.find((location) => location.id === careLocationId)
+      : null;
+    if (shiftType === 'care_location' && !careLocationId) {
+      toast.error('Select a care location for this shift type');
+      return;
+    }
+    if (shiftType === 'service_user_visit' && !serviceUserId) {
+      toast.error('Select a service user for this shift type');
+      return;
+    }
+    const autoLocationText = shiftType === 'care_location'
+      ? (selectedCareLocation?.name || '')
+      : shiftType === 'service_user_visit'
+        ? getServiceUserLocationFallback(selectedServiceUser)
+        : '';
+    const locationText = (newShift.location_text || '').trim() || autoLocationText;
+    if (!locationText) {
+      toast.error('Location is required');
+      return;
+    }
     setSaving(true);
     try {
       await axios.post(
@@ -489,25 +655,17 @@ export default function ShiftsPage() {
         {
           start_at: startIso,
           end_at: endIso,
-          location_text: newShift.location_text,
+          location_text: locationText,
           role_required: newShift.role_required,
-          service_user_id: normalizeOptionalId(newShift.service_user_id),
-          care_location_id: normalizeOptionalId(newShift.care_location_id),
+          service_user_id: serviceUserId,
+          care_location_id: careLocationId,
           notes: newShift.notes || null,
         },
         { headers }
       );
       toast.success('Shift created');
       setIsCreateOpen(false);
-      setNewShift({
-        start_at: '',
-        end_at: '',
-        location_text: '',
-        role_required: '',
-        service_user_id: '',
-        care_location_id: '',
-        notes: '',
-      });
+      setNewShift(getInitialNewShift(serviceUserIdFilter));
       fetchShifts();
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to create shift');
@@ -645,7 +803,7 @@ export default function ShiftsPage() {
             <DialogContent className="sm:max-w-xl">
               <DialogHeader>
                 <DialogTitle>Create Shift</DialogTitle>
-                <DialogDescription>Required: start, end, location, and role required.</DialogDescription>
+                <DialogDescription>Select the shift type, then confirm the linked location or service user.</DialogDescription>
               </DialogHeader>
               <form onSubmit={handleCreateShift} className="space-y-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -671,13 +829,25 @@ export default function ShiftsPage() {
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="location_text">Location</Label>
-                  <Input
-                    id="location_text"
-                    value={newShift.location_text}
-                    onChange={(e) => setNewShift((prev) => ({ ...prev, location_text: e.target.value }))}
-                    required
-                  />
+                  <Label htmlFor="shift_type">Shift Type</Label>
+                  <Select
+                    value={newShift.shift_type}
+                    onValueChange={(value) => setNewShift((prev) => ({
+                      ...prev,
+                      shift_type: value,
+                      service_user_id: value === 'care_location' || value === 'external_location' ? '' : prev.service_user_id,
+                      care_location_id: value === 'service_user_visit' || value === 'external_location' ? '' : prev.care_location_id,
+                    }))}
+                  >
+                    <SelectTrigger id="shift_type">
+                      <SelectValue placeholder="Select shift type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="care_location">Care location shift</SelectItem>
+                      <SelectItem value="service_user_visit">Service user visit</SelectItem>
+                      <SelectItem value="external_location">External location</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="role_required">Role Required</Label>
@@ -688,32 +858,88 @@ export default function ShiftsPage() {
                     required
                   />
                 </div>
+                {newShift.shift_type === 'care_location' ? (
+                  <div className="space-y-2">
+                    <Label htmlFor="care_location_id">Care Location</Label>
+                    <Select
+                      value={newShift.care_location_id || 'none'}
+                      onValueChange={(value) => {
+                        const nextId = value === 'none' ? '' : value;
+                        const selectedLocation = careLocations.find((loc) => loc.id === nextId);
+                        setNewShift((prev) => ({
+                          ...prev,
+                          care_location_id: nextId,
+                          service_user_id: '',
+                          location_text: prev.location_text || selectedLocation?.name || '',
+                        }));
+                      }}
+                    >
+                      <SelectTrigger id="care_location_id">
+                        <SelectValue placeholder="Select care location" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Select care location</SelectItem>
+                        {careLocations.map((loc) => (
+                          <SelectItem key={loc.id} value={loc.id}>
+                            {loc.name} {loc.city ? `(${loc.city})` : ''}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                ) : null}
+                {newShift.shift_type === 'service_user_visit' ? (
+                  <div className="space-y-2">
+                    <Label htmlFor="service_user_id">Service User</Label>
+                    <Select
+                      value={newShift.service_user_id || 'none'}
+                      onValueChange={(value) => {
+                        const nextId = value === 'none' ? '' : value;
+                        const selectedServiceUser = serviceUserById[nextId];
+                        setNewShift((prev) => ({
+                          ...prev,
+                          service_user_id: nextId,
+                          care_location_id: '',
+                          location_text: prev.location_text || getServiceUserLocationFallback(selectedServiceUser),
+                        }));
+                      }}
+                    >
+                      <SelectTrigger id="service_user_id">
+                        <SelectValue placeholder="Select service user" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Select service user</SelectItem>
+                        {serviceUsers.map((serviceUser) => (
+                          <SelectItem key={serviceUser.id} value={serviceUser.id}>
+                            {getServiceUserDisplayName(serviceUser) || serviceUser.id}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {newShift.service_user_id && serviceUserById[newShift.service_user_id] ? (
+                      <p className="text-xs text-text-muted">
+                        {getServiceUserLocationFallback(serviceUserById[newShift.service_user_id])}
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
                 <div className="space-y-2">
-                  <Label htmlFor="service_user_id">Service User ID (optional)</Label>
+                  <Label htmlFor="location_text">
+                    {newShift.shift_type === 'external_location' ? 'Location' : 'Location Text Override / Fallback'}
+                  </Label>
                   <Input
-                    id="service_user_id"
-                    value={newShift.service_user_id}
-                    onChange={(e) => setNewShift((prev) => ({ ...prev, service_user_id: e.target.value }))}
+                    id="location_text"
+                    value={newShift.location_text}
+                    onChange={(e) => setNewShift((prev) => ({ ...prev, location_text: e.target.value }))}
+                    placeholder={
+                      newShift.shift_type === 'care_location'
+                        ? 'Defaults to selected care location name'
+                        : newShift.shift_type === 'service_user_visit'
+                          ? 'Defaults to selected service user name/address'
+                          : 'Enter external location'
+                    }
+                    required={newShift.shift_type === 'external_location'}
                   />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="care_location_id">Care Location (optional)</Label>
-                  <Select
-                    value={newShift.care_location_id || 'none'}
-                    onValueChange={(value) => setNewShift((prev) => ({ ...prev, care_location_id: value === 'none' ? '' : value }))}
-                  >
-                    <SelectTrigger id="care_location_id">
-                      <SelectValue placeholder="Select care location" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">None</SelectItem>
-                      {careLocations.map((loc) => (
-                        <SelectItem key={loc.id} value={loc.id}>
-                          {loc.name} {loc.city ? `(${loc.city})` : ''}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="shift_notes">Notes (optional)</Label>
@@ -774,13 +1000,16 @@ export default function ShiftsPage() {
                 <div key={shift.id} className="border rounded-lg p-3 sm:p-4">
                   <div className="flex items-start justify-between gap-3">
                     <div className="space-y-1">
-                      <p className="font-medium text-text-primary">{shift.location_text}</p>
+                      <p className="font-medium text-text-primary">{getShiftLocationLabel(shift)}</p>
                       {shift.care_location ? (
                         <p className="text-xs text-text-muted">
                           Care location: {shift.care_location.name}
                           {shift.care_location.address_line_1 ? `, ${shift.care_location.address_line_1}` : ''}
                           {shift.care_location.city ? `, ${shift.care_location.city}` : ''}
                         </p>
+                      ) : null}
+                      {shift.service_user_name ? (
+                        <p className="text-xs text-text-muted">Service user: {shift.service_user_name}</p>
                       ) : null}
                       <p className="text-sm text-text-muted">{shift.role_required}</p>
                       <p className="text-xs text-text-muted">
@@ -1036,7 +1265,7 @@ export default function ShiftsPage() {
             <div className="space-y-3 text-sm">
               <div>
                 <p className="font-medium">Location</p>
-                <p className="text-text-muted">{detailShift.shift.location_text}</p>
+                <p className="text-text-muted">{getShiftLocationLabel(detailShift.shift)}</p>
               </div>
               {detailShift.shift.care_location ? (
                 <div>
@@ -1047,6 +1276,12 @@ export default function ShiftsPage() {
                     {detailShift.shift.care_location.city ? `, ${detailShift.shift.care_location.city}` : ''}
                     {detailShift.shift.care_location.postcode ? `, ${detailShift.shift.care_location.postcode}` : ''}
                   </p>
+                </div>
+              ) : null}
+              {detailShift.shift.service_user_name ? (
+                <div>
+                  <p className="font-medium">Linked Service User</p>
+                  <p className="text-text-muted">{detailShift.shift.service_user_name}</p>
                 </div>
               ) : null}
               <div>

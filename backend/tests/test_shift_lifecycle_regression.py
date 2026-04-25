@@ -74,10 +74,12 @@ class _FakeDb:
     def __init__(self):
         self.shifts = _FakeCollection([])
         self.shift_assignments = _FakeCollection([])
+        self.shift_attendance_records = _FakeCollection([])
+        self.shift_daily_notes = _FakeCollection([])
         self.audit_logs = _FakeCollection([])
         self.care_locations = _FakeCollection([])
         self.service_users = _FakeCollection([
-            {"id": "su-1"},
+            {"id": "su-1", "full_name": "Alex Example"},
         ])
         self.employees = _FakeCollection(
             [
@@ -355,3 +357,48 @@ def test_create_shift_invalid_optional_ids_return_400(shift_client):
     )
     assert invalid_care_location.status_code == 400
     assert invalid_care_location.json()["detail"] == "Invalid care_location_id"
+
+
+def test_list_and_detail_hydrate_service_user_name(shift_client):
+    client, db = shift_client
+
+    db.shifts.docs.append(
+        {
+            "id": "s-service-user",
+            "start_at": "2026-05-01T09:00:00+00:00",
+            "end_at": "2026-05-01T11:00:00+00:00",
+            "location_text": "Alex Example visit",
+            "role_required": "Care Worker",
+            "service_user_id": "su-1",
+            "care_location_id": None,
+            "notes": None,
+            "status": "open",
+            "assigned_employee_id": None,
+            "created_at": "2026-04-24T10:00:00+00:00",
+            "updated_at": "2026-04-24T10:00:00+00:00",
+            "created_by": "mgr-1",
+            "updated_by": "mgr-1",
+        }
+    )
+
+    list_response = client.get("/api/shifts")
+    detail_response = client.get("/api/shifts/s-service-user")
+
+    assert list_response.status_code == 200
+    assert detail_response.status_code == 200
+    assert list_response.json()["shifts"][0]["service_user_name"] == "Alex Example"
+    assert detail_response.json()["shift"]["service_user_name"] == "Alex Example"
+
+
+def test_worker_shift_hydrates_service_user_name(shift_client):
+    client, db = shift_client
+
+    _seed_shift(db, shift_id="s-worker", status="assigned", assigned_employee_id="emp-active")
+    db.shifts.docs[-1]["service_user_id"] = "su-1"
+    db.shifts.docs[-1]["location_text"] = "Alex Example visit"
+    _seed_assignment(db, assignment_id="a-worker", shift_id="s-worker", employee_id="emp-active")
+
+    response = client.get("/api/worker/shifts")
+
+    assert response.status_code == 200
+    assert response.json()["shifts"][0]["shift"]["service_user_name"] == "Alex Example"

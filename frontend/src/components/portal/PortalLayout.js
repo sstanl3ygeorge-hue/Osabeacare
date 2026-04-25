@@ -29,6 +29,7 @@ const navigation = [
   // Templates hidden for Audit Mode - forms system hidden from UI
   // { name: 'Templates', href: '/portal/templates', icon: ClipboardList },
   { name: 'Compliance Centre', href: '/portal/compliance-centre', icon: Building2 },
+  { name: 'Compliance Alerts', href: '/portal/compliance-alerts', icon: Bell },
   { name: 'CQC Dashboard', href: '/portal/cqc-dashboard', icon: Shield },
   { name: 'Feedback', href: '/portal/feedback', icon: MessageSquare },
   { name: 'Complaints', href: '/portal/complaints', icon: AlertTriangle },

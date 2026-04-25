@@ -758,13 +758,23 @@ export default function ServiceUserProfilePage() {
         </div>
       </div>
 
-      {/* Tab Navigation */}
-      <OnboardingReadinessCard
-        readiness={onboardingReadiness}
-        loading={onboardingLoading}
-        onRefresh={fetchOnboardingReadiness}
-        onOpenTarget={(targetTab) => setActiveTab(targetTab || 'overview')}
-      />
+      {/* Readiness + Next Actions */}
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+        <div className="xl:col-span-2">
+          <OnboardingReadinessCard
+            readiness={onboardingReadiness}
+            loading={onboardingLoading}
+            onRefresh={fetchOnboardingReadiness}
+            onOpenTarget={(targetTab) => setActiveTab(targetTab || 'overview')}
+          />
+        </div>
+        <NextActionsCard
+          readiness={onboardingReadiness}
+          serviceUserId={id}
+          onOpenTab={setActiveTab}
+          onNavigate={navigate}
+        />
+      </div>
 
       {/* Tab Navigation */}
       <div className="flex gap-1 overflow-x-auto pb-2 border-b border-gray-200">
@@ -1164,6 +1174,74 @@ function OnboardingReadinessCard({ readiness, loading, onRefresh, onOpenTarget }
   );
 }
 
+function NextActionsCard({ readiness, serviceUserId, onOpenTab, onNavigate }) {
+  const encodedServiceUserId = encodeURIComponent(serviceUserId || '');
+  const actionableOnboardingRow = (readiness?.rows || []).find((row) => (
+    ['missing', 'review_due'].includes(row?.status) && !!row?.target_tab
+  ));
+
+  return (
+    <div className="p-4 rounded-lg bg-gray-50 border border-gray-100">
+      <div className="mb-3">
+        <h3 className="text-sm font-semibold text-text-primary">Next Actions</h3>
+        <p className="text-xs text-text-muted">Quick operational steps for first-client readiness.</p>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-1 gap-2">
+        <Button
+          size="sm"
+          variant="outline"
+          className="justify-start"
+          disabled={!actionableOnboardingRow}
+          onClick={() => onOpenTab(actionableOnboardingRow?.target_tab || 'overview')}
+        >
+          Complete missing onboarding item
+        </Button>
+
+        <Button
+          size="sm"
+          variant="outline"
+          className="justify-start"
+          onClick={() => onOpenTab('4_care_plans')}
+        >
+          Create/update care plan
+        </Button>
+
+        <Button
+          size="sm"
+          variant="outline"
+          className="justify-start"
+          onClick={() => onNavigate(`/portal/shifts?service_user_id=${encodedServiceUserId}`)}
+        >
+          Create service-user shift
+        </Button>
+
+        <Button
+          size="sm"
+          variant="outline"
+          className="justify-start"
+          onClick={() => onOpenTab('11_daily_notes')}
+        >
+          View daily notes
+        </Button>
+
+        <Button
+          size="sm"
+          variant="outline"
+          className="justify-start"
+          onClick={() => onNavigate(`/portal/compliance-centre?tab=incidents&service_user_id=${encodedServiceUserId}`)}
+        >
+          View incidents
+        </Button>
+      </div>
+
+      {!actionableOnboardingRow ? (
+        <p className="text-xs text-text-muted mt-2">No onboarding follow-up needed.</p>
+      ) : null}
+    </div>
+  );
+}
+
 // Overview Tab Component
 function OverviewTab({ serviceUser, onOpenSection, serviceUserId }) {
   const encodedServiceUserId = encodeURIComponent(serviceUserId || '');
@@ -1286,7 +1364,7 @@ function OverviewTab({ serviceUser, onOpenSection, serviceUserId }) {
       <div className="p-4 rounded-lg bg-blue-50 border border-blue-100">
         <h3 className="text-sm font-semibold text-text-primary mb-1">Related Operational Records</h3>
         <p className="text-xs text-text-muted mb-3">Opens filtered operational records for this service user.</p>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
           <a
             href={`/portal/compliance-centre?tab=incidents&service_user_id=${encodedServiceUserId}`}
             className="inline-flex items-center justify-center rounded-md border border-blue-200 bg-white px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50"
@@ -1305,6 +1383,13 @@ function OverviewTab({ serviceUser, onOpenSection, serviceUserId }) {
           >
             Feedback
           </a>
+          <button
+            type="button"
+            onClick={() => onOpenSection('11_daily_notes')}
+            className="inline-flex items-center justify-center rounded-md border border-blue-200 bg-white px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50"
+          >
+            Daily Notes
+          </button>
         </div>
       </div>
       

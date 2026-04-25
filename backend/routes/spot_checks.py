@@ -19,8 +19,9 @@ from pydantic import BaseModel
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-from reportlab.lib.units import inch
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
+from reportlab.lib.units import inch, mm
+from reportlab.lib.colors import HexColor
 
 from .dependencies import (
     get_db, get_current_user, require_manager_or_admin,
@@ -347,18 +348,61 @@ async def download_spot_check_pdf(
     employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "first_name": 1, "last_name": 1, "role": 1})
     employee_name = f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip() if employee else "Unknown"
     
-    # Generate PDF
-    buffer = BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=0.5*inch, bottomMargin=0.5*inch)
+    # Generate PDF with branded styling
+    from services.pdf_service import get_logo_image, PRIMARY_COLOR, BORDER_COLOR, TEXT_PRIMARY, TEXT_SECONDARY
     
-    styles = getSampleStyleSheet()
-    title_style = ParagraphStyle('Title', parent=styles['Heading1'], fontSize=16, spaceAfter=20, textColor=colors.HexColor('#0d6c6c'))
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=20*mm,
+        leftMargin=20*mm,
+        topMargin=20*mm,
+        bottomMargin=20*mm
+    )
+    
+    # Create branded styles
+    base_styles = getSampleStyleSheet()
+    
+    company_style = ParagraphStyle(
+        name='CompanyName',
+        parent=base_styles['Heading1'],
+        fontSize=16,
+        textColor=HexColor("#1A1A2E"),
+        spaceAfter=2*mm,
+        alignment=1  # TA_CENTER
+    )
+    
+    title_style = ParagraphStyle(
+        name='Title',
+        parent=base_styles['Heading1'],
+        fontSize=18,
+        textColor=PRIMARY_COLOR,
+        spaceAfter=6*mm,
+        alignment=1  # TA_CENTER
+    )
+    
+    footer_style = ParagraphStyle(
+        name='Footer',
+        parent=base_styles['Normal'],
+        fontSize=8,
+        textColor=TEXT_SECONDARY,
+        alignment=1  # TA_CENTER
+    )
     
     story = []
     
+    # Header with logo
+    logo = get_logo_image()
+    if logo:
+        story.append(logo)
+        story.append(Spacer(1, 3*mm))
+    
+    story.append(Paragraph("Osabea Healthcare Solutions", company_style))
+    story.append(HRFlowable(width="100%", thickness=1, color=BORDER_COLOR, spaceAfter=5*mm))
+    
     # Title
-    story.append(Paragraph("SPOT CHECK REPORT", title_style))
-    story.append(Spacer(1, 20))
+    story.append(Paragraph("Spot Check Record", title_style))
     
     # Build data table
     check_type_label = next((t['label'] for t in SPOT_CHECK_TYPES if t['value'] == check.get('type')), check.get('type', 'N/A'))
@@ -379,14 +423,17 @@ async def download_spot_check_pdf(
     if check.get('follow_up_date'):
         data.append(["Follow-up Date:", check['follow_up_date'][:10]])
     
-    table = Table(data, colWidths=[2*inch, 4.5*inch])
+    table = Table(data, colWidths=[50*mm, 120*mm])
     table.setStyle(TableStyle([
         ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
         ('FONTNAME', (1, 0), (1, -1), 'Helvetica'),
         ('FONTSIZE', (0, 0), (-1, -1), 10),
         ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-        ('TOPPADDING', (0, 0), (-1, -1), 6),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ('TEXTCOLOR', (0, 0), (0, -1), TEXT_SECONDARY),
+        ('TEXTCOLOR', (1, 0), (1, -1), TEXT_PRIMARY),
+        ('TOPPADDING', (0, 0), (-1, -1), 2*mm),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 2*mm),
+        ('LINEBELOW', (0, 0), (-1, -2), 0.25, BORDER_COLOR),
     ]))
     
     story.append(table)
@@ -396,14 +443,15 @@ async def download_spot_check_pdf(
     outcome = check.get('outcome', 'N/A')
     outcome_color = colors.green if outcome == 'pass' else colors.orange if outcome == 'needs_improvement' else colors.red
     
-    outcome_style = ParagraphStyle('Outcome', parent=styles['Normal'], fontSize=14, textColor=outcome_color, fontName='Helvetica-Bold')
+    outcome_style = ParagraphStyle('Outcome', parent=base_styles['Normal'], fontSize=14, textColor=outcome_color, fontName='Helvetica-Bold')
     story.append(Paragraph(f"OUTCOME: {outcome.upper()}", outcome_style))
     
-    # Footer
-    story.append(Spacer(1, 40))
-    footer_style = ParagraphStyle('Footer', parent=styles['Normal'], fontSize=8, textColor=colors.grey)
-    story.append(Paragraph(f"Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}", footer_style))
-    story.append(Paragraph("Osabea Healthcare Solutions - CQC Compliant Supervision Records", footer_style))
+    # Footer with timestamp
+    story.append(Spacer(1, 8*mm))
+    story.append(HRFlowable(width="100%", thickness=0.5, color=BORDER_COLOR, spaceBefore=5*mm))
+    footer_text = f"Generated by Osabea Healthcare Solutions Compliance System on {datetime.now(timezone.utc).strftime('%d %B %Y %H:%M UTC')}"
+    story.append(Paragraph(footer_text, footer_style))
+    story.append(Paragraph("This is an official supervision record. Store securely.", footer_style))
     
     doc.build(story)
     

@@ -52,6 +52,7 @@ import ServiceUserFeedbackPage from "./pages/portal/ServiceUserFeedbackPage";
 import ComplaintsHandlingPage from "./pages/portal/ComplaintsHandlingPage";
 import ShiftsPage from "./pages/portal/ShiftsPage";
 import IncidentsPage from "./pages/portal/IncidentsPage";
+import ComplianceAlertsPage from "./pages/portal/ComplianceAlertsPage";
 
 // Auth Context
 import { AuthProvider } from "./context/AuthContext";
@@ -129,6 +130,7 @@ function AppRouter() {
         <Route path="feedback" element={<ServiceUserFeedbackPage />} />
         <Route path="complaints" element={<ComplaintsHandlingPage />} />
         <Route path="incidents" element={<IncidentsPage />} />
+        <Route path="compliance-alerts" element={<ComplianceAlertsPage />} />
         <Route path="forms/:formId" element={<FormEditorPage />} />
         <Route path="audit" element={<AuditViewPage />} />
         <Route path="global-audit" element={<GlobalAuditLogPage />} />

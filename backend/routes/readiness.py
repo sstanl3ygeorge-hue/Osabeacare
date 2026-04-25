@@ -142,10 +142,22 @@ def get_calculate_employee_compliance():
     return calculate_employee_compliance
 
 
+def get_excluded_doc_statuses() -> set[str]:
+    """Lazy import of excluded document statuses."""
+    from server import EXCLUDED_DOC_STATUSES
+    return EXCLUDED_DOC_STATUSES
+
+
 def get_unified_employee_status_func():
     """Lazy import of canonical unified status calculator."""
     from unified_compliance_engine import get_unified_employee_status
     return get_unified_employee_status
+
+
+def get_service_user_onboarding_readiness_func():
+    """Lazy import of service-user onboarding readiness reader."""
+    from routes.service_users import get_service_user_onboarding_readiness
+    return get_service_user_onboarding_readiness
 
 
 async def adapt_unified_status_to_legacy_readiness(unified_status: dict, employee: dict) -> dict:
@@ -381,6 +393,43 @@ def _safe_lower(value: Any) -> str:
 def _append_unique(target: List[str], value: str):
     if value and value not in target:
         target.append(value)
+
+
+def _parse_iso_datetime(value: Any) -> Optional[datetime]:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _make_alert_row(
+    title: str,
+    category: str,
+    severity: str,
+    entity_type: str,
+    entity_id: str,
+    entity_name: str,
+    link_target: str,
+    source: str,
+    *,
+    due_date: Optional[str] = None,
+    expiry_date: Optional[str] = None,
+) -> Dict[str, Any]:
+    return {
+        "title": title,
+        "category": category,
+        "severity": severity,
+        "entity_type": entity_type,
+        "entity_id": entity_id,
+        "entity_name": entity_name,
+        "due_date": due_date,
+        "expiry_date": expiry_date,
+        "link_target": link_target,
+        "source": source,
+    }
 
 
 # ==================== READINESS ENDPOINTS ====================
@@ -743,7 +792,7 @@ async def get_poa_freshness(
         raise HTTPException(status_code=404, detail="Employee not found")
     
     # Get PoA documents - use global constant for sync
-    from server import EXCLUDED_DOC_STATUSES
+    excluded_doc_statuses = get_excluded_doc_statuses()
     poa_docs = await db.employee_documents.find({
         "employee_id": employee_id,
         "requirement_id": {"$in": ["proof_of_address", "proof_of_address_evidence", "address_proof", "proof_of_address_2", "proof_of_address_3", "proof_of_address_4", "proof_of_address_5"]},
@@ -1089,6 +1138,313 @@ async def get_staff_compliance_dashboard(
         "filter": normalized_filter,
         "total": len(items),
         "items": items,
+    }
+
+
+@router.get("/compliance/alerts-summary")
+async def get_compliance_alerts_summary(
+    limit: int = Query(default=500, ge=1, le=1000),
+    user: dict = Depends(require_manager_or_admin),
+):
+    """
+    Read-only cross-system compliance alerts summary.
+
+    Reuses existing collections and existing readiness/onboarding summaries.
+    Does not create new workflows or engines.
+    """
+    db = get_db()
+    now = datetime.now(timezone.utc)
+    expiring_cutoff = now + timedelta(days=30)
+
+    alerts: List[Dict[str, Any]] = []
+    excluded_doc_statuses = get_excluded_doc_statuses()
+
+    # ------------------------------------------------------------------
+    # 1) Expired / expiring staff documents
+    # ------------------------------------------------------------------
+    employee_ids_for_docs = set()
+    doc_rows = await db.employee_documents.find(
+        {
+            "expiry_date": {"$exists": True, "$ne": None},
+            "status": {"$nin": list(excluded_doc_statuses)},
+        },
+        {"_id": 0, "employee_id": 1, "document_type": 1, "expiry_date": 1},
+    ).to_list(5000)
+
+    for row in doc_rows:
+        employee_id = str(row.get("employee_id") or "").strip()
+        if employee_id:
+            employee_ids_for_docs.add(employee_id)
+
+    employee_lookup: Dict[str, str] = {}
+    if employee_ids_for_docs:
+        employee_rows = await db.employees.find(
+            {"id": {"$in": list(employee_ids_for_docs)}},
+            {"_id": 0, "id": 1, "first_name": 1, "last_name": 1},
+        ).to_list(2000)
+        for emp in employee_rows:
+            emp_id = str(emp.get("id") or "").strip()
+            if not emp_id:
+                continue
+            employee_lookup[emp_id] = (
+                f"{emp.get('first_name', '')} {emp.get('last_name', '')}".strip() or emp_id
+            )
+
+    for row in doc_rows:
+        employee_id = str(row.get("employee_id") or "").strip()
+        if not employee_id:
+            continue
+        expiry_date = row.get("expiry_date")
+        expiry_dt = _parse_iso_datetime(expiry_date)
+        if not expiry_dt:
+            continue
+        if expiry_dt <= now:
+            severity = "urgent"
+            title = f"Expired {row.get('document_type') or 'document'}"
+        elif expiry_dt <= expiring_cutoff:
+            severity = "warning"
+            title = f"Expiring soon {row.get('document_type') or 'document'}"
+        else:
+            continue
+        alerts.append(
+            _make_alert_row(
+                title=title,
+                category="staff_documents",
+                severity=severity,
+                entity_type="employee",
+                entity_id=employee_id,
+                entity_name=employee_lookup.get(employee_id, employee_id),
+                expiry_date=expiry_date,
+                link_target=f"/portal/employees/{employee_id}",
+                source="employee_documents",
+            )
+        )
+
+    # ------------------------------------------------------------------
+    # 2) Expired / expiring training
+    # ------------------------------------------------------------------
+    training_rows = await db.training_records.find(
+        {
+            "expiry_date": {"$exists": True, "$ne": None},
+            "record_status": {"$ne": "superseded"},
+        },
+        {"_id": 0, "employee_id": 1, "training_name": 1, "expiry_date": 1},
+    ).to_list(5000)
+
+    for row in training_rows:
+        employee_id = str(row.get("employee_id") or "").strip()
+        if not employee_id:
+            continue
+        expiry_date = row.get("expiry_date")
+        expiry_dt = _parse_iso_datetime(expiry_date)
+        if not expiry_dt:
+            continue
+        if expiry_dt <= now:
+            severity = "urgent"
+            title = f"Expired training: {row.get('training_name') or 'Training'}"
+        elif expiry_dt <= expiring_cutoff:
+            severity = "warning"
+            title = f"Expiring soon training: {row.get('training_name') or 'Training'}"
+        else:
+            continue
+        alerts.append(
+            _make_alert_row(
+                title=title,
+                category="staff_training",
+                severity=severity,
+                entity_type="employee",
+                entity_id=employee_id,
+                entity_name=employee_lookup.get(employee_id, employee_id),
+                expiry_date=expiry_date,
+                link_target=f"/portal/employees/{employee_id}",
+                source="training_records",
+            )
+        )
+
+    # ------------------------------------------------------------------
+    # 3) Missing staff compliance items (reuses existing dashboard logic)
+    # ------------------------------------------------------------------
+    missing_dashboard = await get_staff_compliance_dashboard(status="missing", user=user)
+    for item in missing_dashboard.get("items", []):
+        employee_id = str(item.get("employee_id") or "").strip()
+        missing_items = [str(v).strip() for v in item.get("missing_items", []) if str(v).strip()]
+        if not employee_id or not missing_items:
+            continue
+        alerts.append(
+            _make_alert_row(
+                title=f"Missing compliance items ({len(missing_items)})",
+                category="staff_compliance",
+                severity="missing",
+                entity_type="employee",
+                entity_id=employee_id,
+                entity_name=item.get("employee_name") or employee_lookup.get(employee_id, employee_id),
+                link_target=f"/portal/employees/{employee_id}",
+                source="staff_compliance_dashboard",
+            )
+        )
+
+    # ------------------------------------------------------------------
+    # 4) Overdue active care plan reviews
+    # ------------------------------------------------------------------
+    care_plan_rows = await db.service_user_care_plans.find(
+        {
+            "status": "active",
+            "next_review_due_at": {"$exists": True, "$ne": None},
+        },
+        {
+            "_id": 0,
+            "id": 1,
+            "service_user_id": 1,
+            "care_plan_title": 1,
+            "next_review_due_at": 1,
+        },
+    ).to_list(2000)
+
+    service_user_ids = {
+        str(row.get("service_user_id") or "").strip()
+        for row in care_plan_rows
+        if str(row.get("service_user_id") or "").strip()
+    }
+    service_user_name_lookup: Dict[str, str] = {}
+    if service_user_ids:
+        service_user_rows = await db.service_users.find(
+            {"id": {"$in": list(service_user_ids)}},
+            {"_id": 0, "id": 1, "full_name": 1, "service_user_code": 1},
+        ).to_list(2000)
+        for su in service_user_rows:
+            sid = str(su.get("id") or "").strip()
+            if not sid:
+                continue
+            service_user_name_lookup[sid] = su.get("full_name") or su.get("service_user_code") or sid
+
+    for row in care_plan_rows:
+        due_date = row.get("next_review_due_at")
+        due_dt = _parse_iso_datetime(due_date)
+        if not due_dt or due_dt > now:
+            continue
+        service_user_id = str(row.get("service_user_id") or "").strip()
+        if not service_user_id:
+            continue
+        plan_title = row.get("care_plan_title") or "Care plan"
+        alerts.append(
+            _make_alert_row(
+                title=f"Overdue care plan review: {plan_title}",
+                category="care_plan_review",
+                severity="urgent",
+                entity_type="service_user",
+                entity_id=service_user_id,
+                entity_name=service_user_name_lookup.get(service_user_id, service_user_id),
+                due_date=due_date,
+                link_target=f"/portal/service-users/{service_user_id}",
+                source="service_user_care_plans",
+            )
+        )
+
+    # ------------------------------------------------------------------
+    # 5) Incomplete service-user onboarding (reuse existing onboarding endpoint)
+    # ------------------------------------------------------------------
+    onboarding_reader = get_service_user_onboarding_readiness_func()
+    service_users = await db.service_users.find(
+        {},
+        {"_id": 0, "id": 1, "full_name": 1, "service_user_code": 1},
+    ).to_list(500)
+
+    for su in service_users:
+        service_user_id = str(su.get("id") or "").strip()
+        if not service_user_id:
+            continue
+        onboarding = await onboarding_reader(service_user_id=service_user_id, user=user)
+        overall_status = _safe_lower(onboarding.get("overall_status"))
+        if overall_status == "ready":
+            continue
+        missing_count = int(onboarding.get("missing_count") or 0)
+        review_due_count = int(onboarding.get("review_due_count") or 0)
+        if missing_count > 0:
+            severity = "missing"
+            title = f"Onboarding incomplete ({missing_count} missing)"
+        else:
+            severity = "warning"
+            title = f"Onboarding review due ({review_due_count})"
+        alerts.append(
+            _make_alert_row(
+                title=title,
+                category="service_user_onboarding",
+                severity=severity,
+                entity_type="service_user",
+                entity_id=service_user_id,
+                entity_name=su.get("full_name") or su.get("service_user_code") or service_user_id,
+                link_target=f"/portal/service-users/{service_user_id}",
+                source="service_user_onboarding_readiness",
+            )
+        )
+
+    # ------------------------------------------------------------------
+    # 6) Open safeguarding incidents
+    # ------------------------------------------------------------------
+    safeguarding_rows = await db.incident_logs.find(
+        {
+            "status": {"$in": ["open", "reviewing", "under_review", "investigating"]},
+            "$or": [
+                {"safeguarding_concern": True},
+                {"incident_type": "safeguarding"},
+            ],
+        },
+        {
+            "_id": 0,
+            "id": 1,
+            "incident_type": 1,
+            "service_user_id": 1,
+            "status": 1,
+            "date_occurred": 1,
+            "service_user_name": 1,
+        },
+    ).to_list(1000)
+
+    for row in safeguarding_rows:
+        incident_id = str(row.get("id") or "").strip()
+        if not incident_id:
+            continue
+        service_user_id = str(row.get("service_user_id") or "").strip()
+        entity_name = row.get("service_user_name") or service_user_name_lookup.get(service_user_id) or incident_id
+        alerts.append(
+            _make_alert_row(
+                title="Open safeguarding concern",
+                category="incidents",
+                severity="safeguarding",
+                entity_type="incident",
+                entity_id=incident_id,
+                entity_name=entity_name,
+                due_date=row.get("date_occurred"),
+                link_target="/portal/compliance-centre",
+                source="incident_logs",
+            )
+        )
+
+    severity_rank = {"urgent": 0, "safeguarding": 1, "missing": 2, "warning": 3}
+    alerts.sort(
+        key=lambda row: (
+            severity_rank.get(_safe_lower(row.get("severity")), 9),
+            row.get("due_date") or row.get("expiry_date") or "",
+        )
+    )
+
+    limited = alerts[:limit]
+    by_severity = {
+        "urgent": 0,
+        "warning": 0,
+        "missing": 0,
+        "safeguarding": 0,
+    }
+    for row in limited:
+        sev = _safe_lower(row.get("severity"))
+        if sev in by_severity:
+            by_severity[sev] += 1
+
+    return {
+        "total": len(limited),
+        "counts": by_severity,
+        "alerts": limited,
+        "as_of": now.isoformat(),
     }
 
 

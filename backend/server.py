@@ -7021,9 +7021,46 @@ from services.training_evaluator import (
     normalize_training_key,
     resolve_mandatory_training_code,
     get_nurse_effective_required_training_items,
+    derive_training_evidence_metadata,
 )
 # Keep module-level EXPIRY_WARNING_DAYS aligned (used in a few other places)
 EXPIRY_WARNING_DAYS = _TE_EXPIRY_WARNING_DAYS
+
+
+def _build_training_evidence_metadata(
+    existing_record: Optional[dict] = None,
+    *,
+    completion_method: Optional[str] = None,
+    certificate_url: Optional[str] = None,
+    source_document_id: Optional[str] = None,
+    internal_source_type: str = "internal_course",
+) -> dict:
+    """Normalize evidence metadata for a single training-record write."""
+    base = dict(existing_record or {})
+    resolved_source_document_id = (
+        source_document_id
+        or base.get("source_document_id")
+        or base.get("certificate_document_id")
+        or base.get("document_id")
+        or base.get("evidence_document_id")
+    )
+
+    if completion_method is not None:
+        base["completion_method"] = completion_method
+    if certificate_url is not None:
+        base["certificate_url"] = certificate_url
+    if resolved_source_document_id:
+        base["source_document_id"] = resolved_source_document_id
+
+    metadata = derive_training_evidence_metadata(
+        base,
+        internal_source_type=internal_source_type,
+    )
+    if completion_method is not None:
+        metadata["completion_method"] = completion_method
+    if resolved_source_document_id:
+        metadata["source_document_id"] = resolved_source_document_id
+    return metadata
 
 
 async def get_training_audit_export(employee_id: str, role: str = '') -> dict:
@@ -11545,6 +11582,14 @@ async def record_training_completion(
         "requirement_id": training_code,
         "record_status": {"$ne": "deleted"}
     })
+    completion_method = "certificate" if certificate_document_id else "manual"
+    metadata_fields = _build_training_evidence_metadata(
+        existing,
+        completion_method=completion_method,
+        certificate_url=(existing or {}).get("certificate_url"),
+        source_document_id=certificate_document_id,
+        internal_source_type="internal_course",
+    )
     
     if existing:
         # Update existing record
@@ -11558,7 +11603,9 @@ async def record_training_completion(
                 "verified": False,  # Reset verification on update
                 "verification_status": "awaiting_review",
                 "updated_at": now,
-                "notes": notes
+                "notes": notes,
+                **metadata_fields,
+                **({"certificate_document_id": certificate_document_id} if certificate_document_id else {})
             }}
         )
         record_id = existing['id']
@@ -11579,7 +11626,8 @@ async def record_training_completion(
             "record_status": "active",
             "created_at": now,
             "updated_at": now,
-            "notes": notes
+            "notes": notes,
+            **metadata_fields,
         }
         
         if certificate_document_id:
@@ -11723,9 +11771,7 @@ async def verify_training(
                     "certificate_url": file_url,
                     "verified": False,
                     "verification_status": "pending",
-                    "source_type": "certificate_extraction",
                     "source_proposed_item_id": proposed_item.get("id"),
-                    "source_document_id": proposed_item.get("source_document_id"),
                     "evidence_files": (
                         [{
                             "document_id": proposed_item.get("source_document_id"),
@@ -11737,6 +11783,12 @@ async def verify_training(
                     ),
                     "created_at": now_iso,
                     "updated_at": now_iso,
+                    **_build_training_evidence_metadata(
+                        None,
+                        completion_method="certificate",
+                        certificate_url=file_url,
+                        source_document_id=proposed_item.get("source_document_id"),
+                    ),
                 }
                 await db.training_records.insert_one(new_record)
 
@@ -16045,10 +16097,14 @@ async def upload_requirement_evidence(
                     # REMOVED: "status": "completed" - derived at runtime from completion_date/expiry_date
                     "record_status": "active",  # Ensure active
                     "completion_date": now,
-                    "completion_method": "certificate",
                     "requirement_id": requirement_id,
                     "updated_at": now,
-                    "expiry_date": calculated_expiry
+                    "expiry_date": calculated_expiry,
+                    **_build_training_evidence_metadata(
+                        existing,
+                        completion_method="certificate",
+                        certificate_url=result["path"],
+                    ),
                 }}
             )
             record_id = existing['id']
@@ -16079,10 +16135,14 @@ async def upload_requirement_evidence(
                 "uploaded_at": now,
                 "evidence_files": [evidence_file],
                 "verified": False,
-                "completion_method": "certificate",
                 "requirement_id": requirement_id,
                 "created_at": now,
-                "updated_at": now
+                "updated_at": now,
+                **_build_training_evidence_metadata(
+                    None,
+                    completion_method="certificate",
+                    certificate_url=result["path"],
+                ),
             }
             await db.training_records.insert_one(new_record)
             
@@ -23098,6 +23158,23 @@ async def update_employee_training_record(
         else:
             update_data["verified_at"] = None
             update_data["verified_by"] = None
+
+    if update.completion_date is not None or update.status is not None:
+        existing_completion_method = record.get("completion_method")
+        if not existing_completion_method:
+            existing_completion_method = "certificate" if (
+                record.get("certificate_url")
+                or record.get("source_document_id")
+                or record.get("certificate_document_id")
+            ) else "manual"
+        update_data.update(
+            _build_training_evidence_metadata(
+                record,
+                completion_method=existing_completion_method,
+                certificate_url=record.get("certificate_url"),
+                internal_source_type="internal_course",
+            )
+        )
     
     # Apply update
     await db.training_records.update_one(
@@ -23310,8 +23387,12 @@ async def upload_training_certificate(
         "uploaded_at": now,
         # REMOVED: "status": "completed" - derived from completion_date/expiry_date
         "completion_date": now,
-        "completion_method": "certificate",
-        "updated_at": now
+        "updated_at": now,
+        **_build_training_evidence_metadata(
+            record,
+            completion_method="certificate",
+            certificate_url=result["path"],
+        ),
     }
     
     if expiry_date:
@@ -23527,10 +23608,14 @@ async def upload_training_certificate_for_requirement(
             "uploaded_at": now,
             # REMOVED: "status": "completed" - derived at runtime
             "completion_date": now,
-            "completion_method": "certificate",
             "requirement_id": requirement_id,
             "updated_at": now,
-            "record_status": "active"  # BUGFIX: Ensure record remains active
+            "record_status": "active",  # BUGFIX: Ensure record remains active
+            **_build_training_evidence_metadata(
+                existing_record,
+                completion_method="certificate",
+                certificate_url=result["path"],
+            ),
         }
         if expiry_date:
             update_data["expiry_date"] = expiry_date
@@ -23569,9 +23654,13 @@ async def upload_training_certificate_for_requirement(
             "verified": False,
             "verified_by": None,
             "verified_at": None,
-            "completion_method": "certificate",
             "requirement_id": requirement_id,
-            "created_at": now
+            "created_at": now,
+            **_build_training_evidence_metadata(
+                None,
+                completion_method="certificate",
+                certificate_url=result["path"],
+            ),
         }
         
         await db.training_records.insert_one(new_record)
@@ -23687,7 +23776,17 @@ async def complete_training_requirement(
                 "completion_date": completion_date,
                 "expiry_date": request.expiry_date,
                 "requirement_id": request.requirement_id,
-                "updated_at": now
+                "updated_at": now,
+                **_build_training_evidence_metadata(
+                    existing_record,
+                    completion_method=(existing_record.get("completion_method") or ("certificate" if (
+                        existing_record.get("certificate_url")
+                        or existing_record.get("source_document_id")
+                        or existing_record.get("certificate_document_id")
+                    ) else "manual")),
+                    certificate_url=existing_record.get("certificate_url"),
+                    internal_source_type="internal_course",
+                ),
             }}
         )
         
@@ -23731,7 +23830,17 @@ async def complete_training_requirement(
                 "completion_date": completion_date,
                 "expiry_date": request.expiry_date,
                 "requirement_id": request.requirement_id,
-                "updated_at": now
+                "updated_at": now,
+                **_build_training_evidence_metadata(
+                    existing_incomplete,
+                    completion_method=(existing_incomplete.get("completion_method") or ("certificate" if (
+                        existing_incomplete.get("certificate_url")
+                        or existing_incomplete.get("source_document_id")
+                        or existing_incomplete.get("certificate_document_id")
+                    ) else "manual")),
+                    certificate_url=existing_incomplete.get("certificate_url"),
+                    internal_source_type="internal_course",
+                ),
             }}
         )
         
@@ -23768,7 +23877,12 @@ async def complete_training_requirement(
         "expiry_date": request.expiry_date,
         "certificate_url": None,
         "requirement_id": request.requirement_id,
-        "created_at": now
+        "created_at": now,
+        **_build_training_evidence_metadata(
+            None,
+            completion_method="manual",
+            internal_source_type="internal_course",
+        ),
     }
     
     await db.training_records.insert_one(new_record)
@@ -41786,6 +41900,12 @@ Important:
                         "mapped_training_code": training_code,
                         "mapped_training_title": training_title,
                         "is_unmapped": False,
+                        **_build_training_evidence_metadata(
+                            existing_record,
+                            completion_method="certificate",
+                            certificate_url=file_url,
+                            source_document_id=proposed.get("source_document_id"),
+                        ),
                     }
                     
                     # Add evidence file link
@@ -41832,7 +41952,6 @@ Important:
                         "mapped_training_code": training_code,
                         "mapped_training_title": training_title,
                         "is_unmapped": False,
-                        "source_type": "certificate_extraction",
                         "evidence_files": [{
                             "file_id": str(uuid.uuid4()),
                             "document_id": proposed.get("source_document_id"),
@@ -41842,7 +41961,13 @@ Important:
                             "page_range": proposed.get("page_range")
                         }],
                         "created_at": now,
-                        "updated_at": now
+                        "updated_at": now,
+                        **_build_training_evidence_metadata(
+                            None,
+                            completion_method="certificate",
+                            certificate_url=file_url,
+                            source_document_id=proposed.get("source_document_id"),
+                        ),
                     }
                     
                     await db.training_records.insert_one(new_record)
@@ -42483,6 +42608,12 @@ async def approve_and_verify_proposed_training_items(
                         "mapped_training_code": training_code,
                         "mapped_training_title": training_title,
                         "is_unmapped": False,
+                        **_build_training_evidence_metadata(
+                            {"source_document_id": proposed.get("source_document_id")},
+                            completion_method="certificate",
+                            certificate_url=file_url,
+                            source_document_id=proposed.get("source_document_id"),
+                        ),
                         **verify_fields,
                     },
                     "$push": {"evidence_files": evidence_entry},
@@ -42514,10 +42645,15 @@ async def approve_and_verify_proposed_training_items(
                 "mapped_training_code": training_code,
                 "mapped_training_title": training_title,
                 "is_unmapped": False,
-                "source_type": "certificate_extraction",
                 "evidence_files": [evidence_entry],
                 "created_at": now,
                 "updated_at": now,
+                **_build_training_evidence_metadata(
+                    None,
+                    completion_method="certificate",
+                    certificate_url=file_url,
+                    source_document_id=proposed.get("source_document_id"),
+                ),
                 **verify_fields,
             }
             await db_handle.training_records.insert_one(new_record)
@@ -42625,10 +42761,15 @@ async def add_manual_training_record(
                     "completion_date": completion_date,
                     "expiry_date": expiry_date,
                     "status": "completed",
-                    "completion_method": "manual",
                     "updated_at": now,
                     "updated_by": user.get("user_id"),
-                    "manual_entry_notes": notes
+                    "manual_entry_notes": notes,
+                    **_build_training_evidence_metadata(
+                        existing,
+                        completion_method=(existing.get("completion_method") or "manual"),
+                        certificate_url=existing.get("certificate_url"),
+                        internal_source_type="internal_course",
+                    ),
                 }
             }
         )
@@ -42644,12 +42785,16 @@ async def add_manual_training_record(
             "expiry_date": expiry_date,
             "status": "completed",
             "verified": False,
-            "completion_method": "manual",
             "record_status": "active",
             "created_at": now,
             "updated_at": now,
             "created_by": user.get("user_id"),
-            "manual_entry_notes": notes
+            "manual_entry_notes": notes,
+            **_build_training_evidence_metadata(
+                None,
+                completion_method="manual",
+                internal_source_type="internal_course",
+            ),
         }
         
         await db.training_records.insert_one(new_record)

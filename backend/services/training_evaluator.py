@@ -10,7 +10,7 @@ import them lazily from ``server`` to avoid circular imports.
 """
 
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional
+from typing import Dict, List, Optional
 import logging
 import re
 import os
@@ -261,10 +261,46 @@ def _format_date_only(dt: datetime) -> str:
     return dt.strftime("%Y-%m-%d")
 
 
+def derive_training_evidence_metadata(
+    record: dict,
+    *,
+    internal_source_type: str = "internal_course",
+) -> Dict[str, str]:
+    """Return canonical evidence metadata for new or updated training records."""
+    safe_internal_source = "questionnaire" if internal_source_type == "questionnaire" else "internal_course"
+    source_document_id = (
+        record.get("source_document_id")
+        or record.get("certificate_document_id")
+        or record.get("document_id")
+        or record.get("evidence_document_id")
+    )
+
+    if _is_external_certificate_evidence(record):
+        metadata = {
+            "source_type": "certificate",
+            "evidence_type": "external_certificate",
+        }
+        if source_document_id:
+            metadata["source_document_id"] = source_document_id
+        return metadata
+
+    metadata = {
+        "source_type": safe_internal_source,
+        "evidence_type": "temporary_internal",
+    }
+    if source_document_id:
+        metadata["source_document_id"] = source_document_id
+    return metadata
+
+
 def _is_external_certificate_evidence(record: dict) -> bool:
     """Return True when the training evidence is from an external certificate path."""
     source_type = (record.get("source_type") or "").strip().lower()
     completion_method = (record.get("completion_method") or "").strip().lower()
+    evidence_type = (record.get("evidence_type") or "").strip().lower()
+
+    if evidence_type == "external_certificate":
+        return True
 
     if completion_method == "certificate":
         return True
@@ -279,8 +315,12 @@ def _is_internal_temporary_evidence(record: dict) -> bool:
     """Return True when evidence is internal/questionnaire/manual and should be temporary."""
     source_type = (record.get("source_type") or "").strip().lower()
     completion_method = (record.get("completion_method") or "").strip().lower()
+    evidence_type = (record.get("evidence_type") or "").strip().lower()
 
-    if source_type in {"form_submission", "structured_form"}:
+    if evidence_type == "temporary_internal":
+        return True
+
+    if source_type in {"form_submission", "structured_form", "internal_course", "questionnaire"}:
         return True
     if completion_method == "manual":
         return True

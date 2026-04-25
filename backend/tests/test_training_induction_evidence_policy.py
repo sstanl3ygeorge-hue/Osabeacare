@@ -6,6 +6,7 @@ from services.training_evaluator import (
     _resolve_effective_expiry_date,
     compute_training_record_status,
     calculate_training_expiry,
+    derive_training_evidence_metadata,
 )
 from induction_definitions import (
     CARE_CERTIFICATE_STANDARDS,
@@ -63,6 +64,44 @@ def test_internal_temporary_evidence_becomes_expired_after_90_days():
         "completion_date": completion_dt.strftime("%Y-%m-%d"),
         "expiry_date": None,
         "source_type": "form_submission",
+        "completion_method": "manual",
+        "requirement_id": "health_safety",
+        "verified": True,
+    }
+    computed = compute_training_record_status(record)
+    assert computed["computed_status"] == "expired"
+
+
+def test_derive_external_certificate_metadata_is_explicit_and_preserves_source_document():
+    metadata = derive_training_evidence_metadata({
+        "completion_method": "certificate",
+        "certificate_url": "https://example.com/cert.pdf",
+        "source_document_id": "doc-123",
+    })
+    assert metadata == {
+        "source_type": "certificate",
+        "evidence_type": "external_certificate",
+        "source_document_id": "doc-123",
+    }
+
+
+def test_derive_internal_manual_metadata_defaults_to_internal_course():
+    metadata = derive_training_evidence_metadata({
+        "completion_method": "manual",
+    })
+    assert metadata == {
+        "source_type": "internal_course",
+        "evidence_type": "temporary_internal",
+    }
+
+
+def test_questionnaire_source_type_is_treated_as_temporary_internal():
+    completion = datetime.now(timezone.utc) - timedelta(days=120)
+    record = {
+        "completion_date": completion.strftime("%Y-%m-%d"),
+        "expiry_date": None,
+        "source_type": "questionnaire",
+        "evidence_type": "temporary_internal",
         "completion_method": "manual",
         "requirement_id": "health_safety",
         "verified": True,

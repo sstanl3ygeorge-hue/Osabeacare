@@ -88,25 +88,41 @@ class _FakeDb:
                     "first_name": "Active",
                     "last_name": "Worker",
                     "status": "active",
+                    "role": "Healthcare Assistant",
                 },
                 {
                     "id": "emp-onboarding",
                     "first_name": "Onboard",
                     "last_name": "Worker",
                     "status": "onboarding",
+                    "role": "Healthcare Assistant",
+                },
+                {
+                    "id": "emp-nurse",
+                    "first_name": "Nina",
+                    "last_name": "Nurse",
+                    "status": "active",
+                    "role": "Nurse",
+                },
+                {
+                    "id": "emp-rn",
+                    "first_name": "Rory",
+                    "last_name": "Registered",
+                    "status": "active",
+                    "role": "RN",
                 },
             ]
         )
 
 
-def _seed_shift(db, *, shift_id, status="open", assigned_employee_id=None, start_at=None, end_at=None):
+def _seed_shift(db, *, shift_id, status="open", assigned_employee_id=None, start_at=None, end_at=None, role_required="Care Worker"):
     db.shifts.docs.append(
         {
             "id": shift_id,
             "start_at": start_at or "2026-05-01T09:00:00+00:00",
             "end_at": end_at or "2026-05-01T17:00:00+00:00",
             "location_text": "Main Branch",
-            "role_required": "Care Worker",
+            "role_required": role_required,
             "service_user_id": None,
             "notes": None,
             "status": status,
@@ -279,6 +295,36 @@ def test_overlap_prevention_blocks_second_active_assignment(shift_client):
     assert first_assign.status_code == 200
     assert second_assign.status_code == 409
     assert "overlapping active shift assignment" in second_assign.json()["detail"].lower()
+
+
+def test_shift_assignment_blocks_obvious_nurse_hca_mismatch(shift_client):
+    client, db = shift_client
+    _seed_shift(db, shift_id="s-role-mismatch", status="open", role_required="Registered Nurse")
+
+    response = client.post("/api/shifts/s-role-mismatch/assign", json={"employee_id": "emp-active"})
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Worker role does not match shift role requirement"
+
+
+def test_shift_assignment_allows_tolerant_nurse_match_for_rn_label(shift_client):
+    client, db = shift_client
+    _seed_shift(db, shift_id="s-role-rn", status="open", role_required="Nurse")
+
+    response = client.post("/api/shifts/s-role-rn/assign", json={"employee_id": "emp-rn"})
+
+    assert response.status_code == 200
+    assert response.json()["assignment"]["employee_id"] == "emp-rn"
+
+
+def test_shift_assignment_keeps_legacy_unknown_role_labels_permissive(shift_client):
+    client, db = shift_client
+    _seed_shift(db, shift_id="s-role-legacy", status="open", role_required="Complex Package Team A")
+
+    response = client.post("/api/shifts/s-role-legacy/assign", json={"employee_id": "emp-active"})
+
+    assert response.status_code == 200
+    assert response.json()["assignment"]["employee_id"] == "emp-active"
 
 
 def test_cancel_assigned_shift_records_reason_and_closes_assignment(shift_client):

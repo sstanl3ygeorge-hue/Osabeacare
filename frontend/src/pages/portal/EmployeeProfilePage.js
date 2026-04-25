@@ -360,6 +360,8 @@ export default function EmployeeProfilePage() {
   const [workApprovalRationale, setWorkApprovalRationale] = useState('');
   const [workApprovalConditions, setWorkApprovalConditions] = useState('');
   const [isSavingWorkApproval, setIsSavingWorkApproval] = useState(false);
+  const [scopeOfPracticeDraft, setScopeOfPracticeDraft] = useState('');
+  const [isSavingScopeOfPractice, setIsSavingScopeOfPractice] = useState(false);
   const [acknowledgingRequirement, setAcknowledgingRequirement] = useState(null);
   const [isAcknowledging, setIsAcknowledging] = useState(false);
   const [acknowledgementConfirmed, setAcknowledgementConfirmed] = useState(false);
@@ -1400,8 +1402,26 @@ export default function EmployeeProfilePage() {
         headers: { Authorization: `Bearer ${token}` }
       });
       setEmployee(response.data);
+      setScopeOfPracticeDraft(response.data?.scope_of_practice_notes || '');
     } catch (error) {
       console.error('Failed to fetch employee:', error);
+    }
+  };
+
+  const handleSaveScopeOfPractice = async () => {
+    setIsSavingScopeOfPractice(true);
+    try {
+      await axios.put(
+        `${API}/employees/${employeeId}`,
+        { scope_of_practice_notes: scopeOfPracticeDraft || '' },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success('Scope of practice notes updated');
+      await fetchEmployee();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to update scope of practice notes');
+    } finally {
+      setIsSavingScopeOfPractice(false);
     }
   };
 
@@ -5122,6 +5142,29 @@ export default function EmployeeProfilePage() {
                       </p>
                     </div>
                   )}
+
+                  <div className="rounded-lg bg-gray-50 p-3 space-y-2">
+                    <p className="text-xs uppercase tracking-wider text-text-muted">Scope of practice notes</p>
+                    <Textarea
+                      value={scopeOfPracticeDraft}
+                      onChange={(e) => setScopeOfPracticeDraft(e.target.value)}
+                      placeholder="Record clinical scope limits, delegated tasks, and escalation boundaries"
+                      rows={4}
+                      disabled={isAuditor() || isSavingScopeOfPractice}
+                    />
+                    {!isAuditor() && (
+                      <div className="flex justify-end">
+                        <Button
+                          size="sm"
+                          onClick={handleSaveScopeOfPractice}
+                          disabled={isSavingScopeOfPractice}
+                        >
+                          {isSavingScopeOfPractice ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
+                          Save Scope Notes
+                        </Button>
+                      </div>
+                    )}
+                  </div>
 
                   {!latestHealthDeclaration && (
                     <p className="text-sm text-text-muted">

@@ -107,6 +107,7 @@ class EmployeeCreate(BaseModel):
     emergency_contact_name: Optional[str] = None
     emergency_contact_phone: Optional[str] = None
     emergency_contact_relationship: Optional[str] = None
+    scope_of_practice_notes: Optional[str] = None
 
 
 class EmployeeResponse(BaseModel):
@@ -127,6 +128,7 @@ class EmployeeResponse(BaseModel):
     postcode: Optional[str] = None
     completion_percentage: Optional[int] = 0
     recruitment_approved: Optional[bool] = False
+    scope_of_practice_notes: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
     
@@ -147,6 +149,7 @@ class EmployeeUpdate(BaseModel):
     address_line_2: Optional[str] = None
     city: Optional[str] = None
     postcode: Optional[str] = None
+    scope_of_practice_notes: Optional[str] = None
 
 
 class PersonalDetailsUpdate(BaseModel):

@@ -12,6 +12,7 @@ MVP constraints:
 """
 
 import uuid
+import re
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 
@@ -143,6 +144,55 @@ def _parse_iso(value: str, field_name: str) -> datetime:
         raise HTTPException(status_code=400, detail=f"Invalid ISO datetime for {field_name}")
 
 
+def _normalize_role_text(value: Optional[str]) -> str:
+    return re.sub(r"[^a-z0-9 ]+", " ", str(value or "").lower()).strip()
+
+
+def _role_family(value: Optional[str]) -> str:
+    """
+    Classify free-text role labels into broad families for safe assignment checks.
+    Unknown labels deliberately return "unknown" to avoid breaking legacy shifts.
+    """
+    text = _normalize_role_text(value)
+    if not text:
+        return "unknown"
+
+    nurse_tokens = {
+        "nurse",
+        "registered nurse",
+        "rn",
+        "rgn",
+        "rmn",
+    }
+    care_tokens = {
+        "healthcare assistant",
+        "hca",
+        "support worker",
+        "care assistant",
+        "senior care assistant",
+        "carer",
+        "care worker",
+    }
+
+    if any(token in text for token in nurse_tokens):
+        return "nurse"
+    if any(token in text for token in care_tokens):
+        return "care"
+    return "unknown"
+
+
+def _assert_role_matches_shift_requirement(shift: Dict[str, Any], employee: Dict[str, Any]):
+    shift_role = shift.get("role_required")
+    employee_role = employee.get("role") or employee.get("job_title") or employee.get("system_role")
+
+    required_family = _role_family(shift_role)
+    worker_family = _role_family(employee_role)
+
+    # Fail safe only for obvious mismatches. Unknown/free-text labels remain permissive.
+    if required_family != "unknown" and worker_family != "unknown" and required_family != worker_family:
+        raise HTTPException(status_code=409, detail="Worker role does not match shift role requirement")
+
+
 def _ensure_valid_window(start_at: str, end_at: str) -> tuple[datetime, datetime]:
     start_dt = _parse_iso(start_at, "start_at")
     end_dt = _parse_iso(end_at, "end_at")
@@ -258,7 +308,7 @@ async def _assert_employee_is_active(employee_id: str):
     db = get_db()
     employee = await db.employees.find_one(
         {"id": employee_id},
-        {"_id": 0, "id": 1, "status": 1, "first_name": 1, "last_name": 1}
+        {"_id": 0, "id": 1, "status": 1, "first_name": 1, "last_name": 1, "role": 1, "job_title": 1, "system_role": 1}
     )
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
@@ -556,6 +606,7 @@ async def assign_worker_to_shift(
         raise HTTPException(status_code=409, detail="Shift already has an active worker assignment")
 
     employee = await _assert_employee_is_active(payload.employee_id)
+    _assert_role_matches_shift_requirement(shift, employee)
     start_dt = _parse_iso(shift.get("start_at"), "shift.start_at")
     end_dt = _parse_iso(shift.get("end_at"), "shift.end_at")
     await _assert_no_overlap_for_employee(payload.employee_id, start_dt, end_dt, exclude_shift_id=shift_id)

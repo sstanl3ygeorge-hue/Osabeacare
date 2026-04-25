@@ -5503,6 +5503,7 @@ class EmployeeCreate(BaseModel):
     manager_name: Optional[str] = None
     driver_status: bool = False
     notes: Optional[str] = None
+    scope_of_practice_notes: Optional[str] = None
     profile_photo_url: Optional[str] = None
 
 class EmployeeUpdate(BaseModel):
@@ -5520,6 +5521,7 @@ class EmployeeUpdate(BaseModel):
     manager_name: Optional[str] = None
     driver_status: Optional[bool] = None
     notes: Optional[str] = None
+    scope_of_practice_notes: Optional[str] = None
     profile_photo_url: Optional[str] = None
     # Lifecycle audit note for explicit status transitions (e.g. deactivate/reactivate)
     status_change_reason: Optional[str] = None
@@ -5633,6 +5635,7 @@ class EmployeeResponse(BaseModel):
     manager_name: Optional[str] = None
     driver_status: bool = False
     notes: Optional[str] = None
+    scope_of_practice_notes: Optional[str] = None
     completion_percentage: int = 0
     profile_photo_url: Optional[str] = None
     work_readiness: Optional[dict] = None  # Work readiness status for list view

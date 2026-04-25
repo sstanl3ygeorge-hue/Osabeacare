@@ -37,6 +37,12 @@ import {
 } from 'lucide-react';
 import { formatBackendDate } from '../../lib/dateUtils';
 import DocumentActionMenu from './DocumentActionMenu';
+import {
+  fetchProtectedFileBlob,
+  downloadBlobUrl,
+  openBlobUrlInNewTab,
+  revokeBlobUrlLater,
+} from '../../lib/protectedFiles';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -86,7 +92,7 @@ export default function RequirementFilesDrawer({
   ];
 
   // Handle file view - opens preview or falls back to download
-  const handleViewFile = (file) => {
+  const handleViewFile = async (file) => {
     if (!file) {
       toast.error('File data not available');
       return;
@@ -114,9 +120,10 @@ export default function RequirementFilesDrawer({
         file_id: file.file_id
       });
     } else {
-      // Fallback to download/open in new tab
       try {
-        window.open(fileUrl, '_blank');
+        const { blobUrl } = await fetchProtectedFileBlob(fileUrl, token);
+        openBlobUrlInNewTab(blobUrl, file.file_name || file.file_label || 'document');
+        revokeBlobUrlLater(blobUrl);
         if (!isPreviewable) {
           toast.info(`Opening ${file.file_name || 'file'} for download (preview not supported for this file type)`);
         }
@@ -128,24 +135,19 @@ export default function RequirementFilesDrawer({
   };
 
   // Handle file download
-  const handleDownloadFile = (file) => {
-    if (!file || !file.file_url) {
+  const handleDownloadFile = async (file) => {
+    const fileUrl = file?.stamped_file_url || file?.file_url;
+    if (!file || !fileUrl) {
       toast.error('File URL not available');
       return;
     }
     
     try {
-      // Create a temporary link to trigger download
-      const link = document.createElement('a');
-      link.href = file.file_url;
-      link.download = file.file_name || file.file_label || 'document';
-      link.target = '_blank';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+      const { blobUrl } = await fetchProtectedFileBlob(fileUrl, token);
+      downloadBlobUrl(blobUrl, file.file_name || file.file_label || 'document');
+      revokeBlobUrlLater(blobUrl);
     } catch (err) {
-      // Fallback to window.open
-      window.open(file.file_url, '_blank');
+      toast.error('Failed to download file');
     }
   };
 

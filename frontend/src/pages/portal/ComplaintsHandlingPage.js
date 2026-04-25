@@ -130,7 +130,7 @@ const ComplaintsHandlingPage = () => {
 
   const fetchEmployees = async () => {
     try {
-      const response = await axios.get(`${API}/employees`, {
+      const response = await axios.get(`${API}/staff/employees`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setEmployees(response.data || []);

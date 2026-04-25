@@ -8,5 +8,5 @@ export default function IncidentsPage() {
     notified = true;
     toast.info('Incidents are now managed in Compliance Centre for consistent reportable incident handling.');
   }
-  return <Navigate to="/portal/compliance-centre" replace />;
+  return <Navigate to="/portal/compliance-centre?tab=incidents" replace />;
 }

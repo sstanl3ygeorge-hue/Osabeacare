@@ -34,6 +34,11 @@ import { toast } from 'sonner';
 import FileUploader from '../../components/ui/file-uploader';
 import { formatBackendDate, parseBackendDate } from '../../lib/dateUtils';
 import { useAuth } from '../../context/AuthContext';
+import {
+  fetchProtectedFileBlob,
+  openBlobUrlInNewTab,
+  revokeBlobUrlLater,
+} from '../../lib/protectedFiles';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 const CARE_PLAN_REQUIRED_SECTIONS = [
@@ -132,6 +137,22 @@ export default function ServiceUserProfilePage() {
   const [serviceUser, setServiceUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('overview');
+
+  const handleViewUploadedDocument = async (doc) => {
+    if (!doc?.file_url) {
+      toast.error('Document URL not available');
+      return;
+    }
+
+    try {
+      const token = localStorage.getItem('token');
+      const { blobUrl } = await fetchProtectedFileBlob(doc.file_url, token);
+      openBlobUrlInNewTab(blobUrl, doc.file_name || doc.title || 'document');
+      revokeBlobUrlLater(blobUrl);
+    } catch (error) {
+      toast.error('Failed to open document');
+    }
+  };
   const [showUploadDialog, setShowUploadDialog] = useState(false);
   const [showEditDialog, setShowEditDialog] = useState(false);
   const [uploadSection, setUploadSection] = useState(null);
@@ -1950,7 +1971,7 @@ function SectionTab({ section, sectionId, onUpload, onVerify, onDelete }) {
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={() => window.open(doc.file_url, '_blank')}>
+                    <DropdownMenuItem onClick={() => handleViewUploadedDocument(doc)}>
                       <Eye className="h-4 w-4 mr-2" />
                       View Document
                     </DropdownMenuItem>

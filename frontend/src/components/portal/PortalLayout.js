@@ -33,7 +33,7 @@ const navigation = [
   { name: 'CQC Dashboard', href: '/portal/cqc-dashboard', icon: Shield },
   { name: 'Feedback', href: '/portal/feedback', icon: MessageSquare },
   { name: 'Complaints', href: '/portal/complaints', icon: AlertTriangle },
-  { name: 'Incidents', href: '/portal/incidents', icon: AlertTriangle },
+  { name: 'Incidents', href: '/portal/compliance-centre?tab=incidents', icon: AlertTriangle },
   // Policy Assignments removed - consolidated into Compliance Centre
   { name: 'Training', href: '/portal/training', icon: GraduationCap },
   { name: 'DBS Register', href: '/portal/dbs-register', icon: Shield },
@@ -62,7 +62,16 @@ export default function PortalLayout() {
   const NavLinks = ({ onClick }) => (
     <nav className="flex-1 px-4 py-6 space-y-1">
       {filteredNavigation.map((item) => {
-        const isActive = location.pathname === item.href || 
+        const activeTab = new URLSearchParams(location.search).get('tab');
+        const isIncidentsNav = item.name === 'Incidents';
+        const isComplianceNav = item.name === 'Compliance Centre';
+        const isActive =
+          (isIncidentsNav && (
+            location.pathname === '/portal/incidents' ||
+            (location.pathname === '/portal/compliance-centre' && activeTab === 'incidents')
+          )) ||
+          (isComplianceNav && location.pathname === '/portal/compliance-centre' && activeTab !== 'incidents') ||
+          location.pathname === item.href ||
           (item.href === '/portal/employees' && location.pathname.startsWith('/portal/employees/')) ||
           (item.href === '/portal/recruitment' && location.pathname.startsWith('/portal/recruitment/')) ||
           (item.href === '/portal/service-users' && location.pathname.startsWith('/portal/service-users/'));

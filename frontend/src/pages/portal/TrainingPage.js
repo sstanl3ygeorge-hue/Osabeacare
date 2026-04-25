@@ -155,7 +155,11 @@ export default function TrainingPage() {
       ]);
       
       setTraining(trainingRes.data || []);
-      setEmployees(employeesRes.data || []);
+      const activeWorkforceEmployees = (employeesRes.data || []).filter((employee) => {
+        const status = (employee?.status || '').toLowerCase();
+        return status === 'active' || status === 'active_employee';
+      });
+      setEmployees(activeWorkforceEmployees);
       
       // Set training definitions from canonical source
       if (defsRes?.data?.definitions) {

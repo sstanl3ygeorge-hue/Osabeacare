@@ -22,6 +22,12 @@ import {
 } from 'lucide-react';
 import { formatBackendDate } from '../../lib/dateUtils';
 import { cn } from '../../lib/utils';
+import {
+  fetchProtectedFileBlob,
+  downloadBlobUrl,
+  openBlobUrlInNewTab,
+  revokeBlobUrl,
+} from '../../lib/protectedFiles';
 
 const API = process.env.REACT_APP_BACKEND_URL;
 
@@ -41,7 +47,6 @@ export default function DocumentViewerModal({
 }) {
   const { token } = useAuth();
   const [loading, setLoading] = useState(false);
-  const [documentUrl, setDocumentUrl] = useState(null);
   const [blobUrl, setBlobUrl] = useState(null);
   const [detectedContentType, setDetectedContentType] = useState(null);
   const [error, setError] = useState(null);
@@ -51,7 +56,7 @@ export default function DocumentViewerModal({
       loadDocument();
     }
     return () => {
-      if (blobUrl) URL.revokeObjectURL(blobUrl);
+      revokeBlobUrl(blobUrl);
     };
   }, [open, document]);
 
@@ -63,22 +68,15 @@ export default function DocumentViewerModal({
 
     setLoading(true);
     setError(null);
+    revokeBlobUrl(blobUrl);
     setBlobUrl(null);
     setDetectedContentType(null);
 
     try {
       const url = document.file_url || document.url;
-      setDocumentUrl(url);
-
-      // Fetch to get the real content-type and create a blob URL for images
-      const headers = token ? { Authorization: `Bearer ${token}` } : {};
-      const response = await fetch(url, { headers });
-      if (response.ok) {
-        const ct = response.headers.get('content-type') || '';
-        setDetectedContentType(ct);
-        const blob = await response.blob();
-        setBlobUrl(URL.createObjectURL(blob));
-      }
+      const { blobUrl: nextBlobUrl, contentType } = await fetchProtectedFileBlob(url, token);
+      setDetectedContentType(contentType);
+      setBlobUrl(nextBlobUrl);
     } catch (err) {
       console.error('Failed to load document:', err);
       setError('Failed to load document');
@@ -88,14 +86,19 @@ export default function DocumentViewerModal({
   };
 
   const handleDownload = () => {
-    if (documentUrl) {
-      window.open(documentUrl, '_blank');
+    if (blobUrl) {
+      downloadBlobUrl(blobUrl, document?.original_filename || document?.document_type || 'document');
+    }
+  };
+
+  const handleOpenInNewTab = () => {
+    if (blobUrl) {
+      openBlobUrlInNewTab(blobUrl, document?.original_filename || document?.document_type || 'document');
     }
   };
 
   const handleClose = () => {
-    if (blobUrl) URL.revokeObjectURL(blobUrl);
-    setDocumentUrl(null);
+    revokeBlobUrl(blobUrl);
     setBlobUrl(null);
     setDetectedContentType(null);
     setError(null);
@@ -192,11 +195,11 @@ export default function DocumentViewerModal({
                 Retry
               </Button>
             </div>
-          ) : documentUrl ? (
+          ) : blobUrl ? (
             isImage ? (
               <div className="flex items-center justify-center p-4 h-full">
                 <img 
-                  src={blobUrl || documentUrl} 
+                  src={blobUrl} 
                   alt={document?.original_filename || 'Document'} 
                   className="max-w-full max-h-full object-contain rounded shadow-lg"
                   data-testid="document-image"
@@ -204,7 +207,7 @@ export default function DocumentViewerModal({
               </div>
             ) : isPdf ? (
               <iframe
-                src={`${documentUrl}#toolbar=1&navpanes=1&scrollbar=1`}
+                src={`${blobUrl}#toolbar=1&navpanes=1&scrollbar=1`}
                 className="w-full h-full rounded"
                 style={{ minHeight: '100%' }}
                 title={document?.original_filename || 'Document'}
@@ -243,7 +246,7 @@ export default function DocumentViewerModal({
             </Button>
           )}
           
-          {documentUrl && (
+          {blobUrl && (
             <Button 
               variant="outline" 
               onClick={handleDownload}
@@ -254,10 +257,10 @@ export default function DocumentViewerModal({
             </Button>
           )}
           
-          {documentUrl && (
+          {blobUrl && (
             <Button 
               variant="outline" 
-              onClick={() => window.open(documentUrl, '_blank')}
+              onClick={handleOpenInNewTab}
             >
               <ExternalLink className="h-4 w-4 mr-2" />
               Open in New Tab

@@ -326,7 +326,7 @@ export default function ComplianceCentrePage() {
         }),
         axios.get(`${API}/compliance/staff-meetings`, { headers: { Authorization: `Bearer ${token}` } }),
         axios.get(`${API}/compliance/employer-audits`, { headers: { Authorization: `Bearer ${token}` } }),
-        axios.get(`${API}/employees`, { headers: { Authorization: `Bearer ${token}` } }),
+        axios.get(`${API}/staff/employees`, { headers: { Authorization: `Bearer ${token}` } }),
         axios.get(`${API}/policy-assignments?include_inactive=true`, { headers: { Authorization: `Bearer ${token}` } })
       ]);
       

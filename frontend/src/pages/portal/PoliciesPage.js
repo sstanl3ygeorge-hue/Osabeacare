@@ -41,7 +41,7 @@ export default function PoliciesPage() {
     try {
       const [policiesRes, employeesRes, assignmentsRes] = await Promise.all([
         axios.get(`${API}/policies`, { headers: { Authorization: `Bearer ${token}` } }),
-        axios.get(`${API}/employees`, { headers: { Authorization: `Bearer ${token}` } }),
+        axios.get(`${API}/staff/employees`, { headers: { Authorization: `Bearer ${token}` } }),
         axios.get(`${API}/policy-assignments`, { headers: { Authorization: `Bearer ${token}` } })
       ]);
       setPolicies(policiesRes.data);

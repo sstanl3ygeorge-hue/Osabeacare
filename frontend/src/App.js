@@ -29,7 +29,6 @@ import PortalLayout from "./components/portal/PortalLayout";
 import DashboardPage from "./pages/portal/DashboardPage";
 import EmployeesPage from "./pages/portal/EmployeesPage";
 import EmployeeProfilePage from "./pages/portal/EmployeeProfilePage";
-import DocumentsPage from "./pages/portal/DocumentsPage";
 // PoliciesPage removed - policy management consolidated in Compliance Centre
 // import PoliciesPage from "./pages/portal/PoliciesPage";
 // DocumentsPage kept for backward compatibility but route disabled

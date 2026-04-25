@@ -14,8 +14,10 @@ from fastapi import APIRouter, Depends, Response
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-from reportlab.lib.units import inch
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
+from reportlab.lib.units import inch, mm
+
+from services.pdf_service import get_logo_image, create_pdf_styles, PRIMARY_COLOR, BORDER_COLOR
 
 from .dependencies import get_db, get_current_user, log_audit_action
 
@@ -95,37 +97,51 @@ async def generate_inspection_pack(
     with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
         # 1. Generate Cover Sheet PDF
         cover_buffer = BytesIO()
-        doc = SimpleDocTemplate(cover_buffer, pagesize=A4, topMargin=0.5*inch, bottomMargin=0.5*inch)
-        styles = getSampleStyleSheet()
+        doc = SimpleDocTemplate(
+            cover_buffer,
+            pagesize=A4,
+            rightMargin=20 * mm,
+            leftMargin=20 * mm,
+            topMargin=20 * mm,
+            bottomMargin=20 * mm,
+        )
+        styles = create_pdf_styles()
+        base_styles = getSampleStyleSheet()
         
         title_style = ParagraphStyle(
             'Title',
-            parent=styles['Heading1'],
+            parent=styles['FormTitle'],
             fontSize=20,
             spaceAfter=30,
-            textColor=colors.HexColor('#0d6c6c')
+            textColor=PRIMARY_COLOR
         )
         
         heading_style = ParagraphStyle(
             'Heading',
-            parent=styles['Heading2'],
+            parent=styles['SectionHeader'],
             fontSize=14,
             spaceAfter=12,
-            textColor=colors.HexColor('#333333')
+            textColor=PRIMARY_COLOR
         )
         
         story = []
         
         # Header
+        logo = get_logo_image()
+        if logo:
+            story.append(logo)
+            story.append(Spacer(1, 3 * mm))
+        story.append(Paragraph("Osabea Healthcare Solutions", styles['CompanyName']))
+        story.append(HRFlowable(width="100%", thickness=1, color=BORDER_COLOR, spaceAfter=5 * mm))
         story.append(Paragraph("CQC INSPECTION PACK", title_style))
-        story.append(Paragraph("Osabea Healthcare Solutions", styles['Heading2']))
-        story.append(Paragraph(f"Generated: {now.strftime('%d %B %Y at %H:%M')}", styles['Normal']))
+        story.append(Paragraph(f"Generated: {now.strftime('%d %B %Y at %H:%M UTC')}", base_styles['Normal']))
         story.append(Spacer(1, 30))
         
         # Organisation Summary
         story.append(Paragraph("Organisation Summary", heading_style))
         
         org_data = [
+            ["Field", "Value"],
             ["Organisation Name:", "Osabea Healthcare Solutions"],
             ["CQC Registration:", "Pending / Active"],
             ["Service Type:", "Domiciliary Care"],
@@ -134,9 +150,15 @@ async def generate_inspection_pack(
         
         org_table = Table(org_data, colWidths=[2.5*inch, 4*inch])
         org_table.setStyle(TableStyle([
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('BACKGROUND', (0, 0), (-1, 0), PRIMARY_COLOR),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
             ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
             ('FONTSIZE', (0, 0), (-1, -1), 10),
             ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOX', (0, 0), (-1, -1), 0.5, BORDER_COLOR),
+            ('INNERGRID', (0, 0), (-1, -1), 0.25, BORDER_COLOR),
         ]))
         story.append(org_table)
         story.append(Spacer(1, 20))
@@ -145,6 +167,7 @@ async def generate_inspection_pack(
         story.append(Paragraph("Staff Compliance Summary", heading_style))
         
         staff_data = [
+            ["Metric", "Value"],
             ["Total Staff:", str(employee_count)],
             ["Work Ready:", str(ready_count)],
             ["Supervised Start:", str(supervised_count)],
@@ -153,9 +176,15 @@ async def generate_inspection_pack(
         
         staff_table = Table(staff_data, colWidths=[2.5*inch, 4*inch])
         staff_table.setStyle(TableStyle([
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('BACKGROUND', (0, 0), (-1, 0), PRIMARY_COLOR),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
             ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
             ('FONTSIZE', (0, 0), (-1, -1), 10),
             ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOX', (0, 0), (-1, -1), 0.5, BORDER_COLOR),
+            ('INNERGRID', (0, 0), (-1, -1), 0.25, BORDER_COLOR),
         ]))
         story.append(staff_table)
         story.append(Spacer(1, 20))
@@ -202,13 +231,18 @@ async def generate_inspection_pack(
             story.append(Spacer(1, 20))
         
         # Footer
-        story.append(Spacer(1, 40))
-        footer_style = ParagraphStyle('Footer', parent=styles['Normal'], fontSize=8, textColor=colors.grey)
+        story.append(Spacer(1, 8 * mm))
+        story.append(HRFlowable(width="100%", thickness=0.5, color=BORDER_COLOR, spaceBefore=5 * mm))
+        story.append(Paragraph(
+            f"Generated by Osabea Healthcare Solutions Compliance System on {now.strftime('%d %B %Y %H:%M UTC')}",
+            styles['Footer']
+        ))
         story.append(Paragraph(
             "This pack was automatically generated by Osabea Compliance Portal. "
             "All documents are current as of the generation date.",
-            footer_style
+            styles['Footer']
         ))
+        story.append(Paragraph("This is an official compliance document. Store securely.", styles['Footer']))
         
         doc.build(story)
         cover_buffer.seek(0)

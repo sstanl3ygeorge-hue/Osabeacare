@@ -1371,6 +1371,7 @@ def generate_service_user_care_plan_pdf(
     service_user_name = _pdf_value((service_user_data or {}).get("full_name"))
     service_user_code = _pdf_value((service_user_data or {}).get("service_user_code"))
     info_rows = [
+        ["Field", "Details"],
         ["Service User", service_user_name],
         ["Service User Code", service_user_code],
         ["Care Plan Title", _pdf_value(care_plan_data.get("care_plan_title"))],
@@ -1379,11 +1380,17 @@ def generate_service_user_care_plan_pdf(
     ]
     info_table = Table(info_rows, colWidths=[50 * mm, 120 * mm])
     info_table.setStyle(TableStyle([
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("BACKGROUND", (0, 0), (-1, 0), PRIMARY_COLOR),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
         ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
         ("FONTSIZE", (0, 0), (-1, -1), 10),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 2 * mm),
-        ("LINEBELOW", (0, 0), (-1, -2), 0.25, BORDER_COLOR),
+        ("TOPPADDING", (0, 0), (-1, -1), 2 * mm),
+        ("LINEBELOW", (0, 1), (-1, -2), 0.25, BORDER_COLOR),
+        ("BOX", (0, 0), (-1, -1), 0.5, BORDER_COLOR),
+        ("INNERGRID", (0, 0), (-1, -1), 0.25, BORDER_COLOR),
     ]))
     elements.append(info_table)
     elements.append(Spacer(1, 4 * mm))
@@ -1405,6 +1412,7 @@ def generate_service_user_care_plan_pdf(
 
     elements.append(Paragraph("Lifecycle Dates", styles["SectionHeader"]))
     lifecycle_rows = [
+        ["Lifecycle Field", "Value"],
         ["Effective From", _pdf_value(care_plan_data.get("effective_from"))],
         ["Review Due Date", _pdf_value(care_plan_data.get("review_due_at"))],
         ["Created At", _pdf_value(care_plan_data.get("created_at"))],
@@ -1413,11 +1421,17 @@ def generate_service_user_care_plan_pdf(
     ]
     lifecycle_table = Table(lifecycle_rows, colWidths=[50 * mm, 120 * mm])
     lifecycle_table.setStyle(TableStyle([
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("BACKGROUND", (0, 0), (-1, 0), PRIMARY_COLOR),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
         ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
         ("FONTSIZE", (0, 0), (-1, -1), 9),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 2 * mm),
-        ("LINEBELOW", (0, 0), (-1, -2), 0.25, BORDER_COLOR),
+        ("TOPPADDING", (0, 0), (-1, -1), 2 * mm),
+        ("LINEBELOW", (0, 1), (-1, -2), 0.25, BORDER_COLOR),
+        ("BOX", (0, 0), (-1, -1), 0.5, BORDER_COLOR),
+        ("INNERGRID", (0, 0), (-1, -1), 0.25, BORDER_COLOR),
     ]))
     elements.append(lifecycle_table)
 

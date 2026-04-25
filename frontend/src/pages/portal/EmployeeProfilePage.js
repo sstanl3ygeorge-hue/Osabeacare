@@ -64,6 +64,11 @@ import {
 } from 'lucide-react';
 import { FileUploaderInline } from '../../components/ui/file-uploader';
 import { formatBackendDate, formatBackendDateTime, parseBackendDate } from '../../lib/dateUtils';
+import {
+  fetchProtectedFileBlob,
+  openBlobUrlInNewTab,
+  revokeBlobUrlLater,
+} from '../../lib/protectedFiles';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -3125,7 +3130,13 @@ export default function EmployeeProfilePage() {
         break;
       case 'view_document':
         if (extractionFailed?.file_url) {
-          window.open(extractionFailed.file_url, '_blank');
+          try {
+            const { blobUrl } = await fetchProtectedFileBlob(extractionFailed.file_url, token);
+            openBlobUrlInNewTab(blobUrl, 'extraction_source');
+            revokeBlobUrlLater(blobUrl);
+          } catch (error) {
+            toast.error('Failed to open extraction source document');
+          }
         }
         break;
       case 'retry':
@@ -3404,8 +3415,9 @@ export default function EmployeeProfilePage() {
       );
       
       if (response.data.file_url) {
-        // Open the generated PDF in a new tab
-        window.open(response.data.file_url, '_blank');
+        const { blobUrl } = await fetchProtectedFileBlob(response.data.file_url, token);
+        openBlobUrlInNewTab(blobUrl, `${formType || 'form'}_${submissionId}.pdf`);
+        revokeBlobUrlLater(blobUrl);
         toast.success('PDF generated successfully');
       }
     } catch (error) {

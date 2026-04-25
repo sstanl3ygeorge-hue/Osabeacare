@@ -101,6 +101,8 @@ test_reports/
 
 # Keep .gitkeep files
 !.gitkeep
+!frontend/src/lib/
+!frontend/src/lib/protectedFiles.js
 frontend/node_modules/.cache/default-development/293.pack
 frontend/node_modules/.cache/default-development/25.pack
 frontend/node_modules/.cache/default-development/0.pack

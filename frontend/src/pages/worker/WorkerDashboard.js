@@ -146,6 +146,12 @@ const RECURRING_TYPE_LABELS = {
   report_followup: 'Report follow-up',
 };
 
+const isCvDocumentRequirement = (doc) => {
+  const type = String(doc?.type || doc?.requirement_id || doc?.id || '').trim().toLowerCase();
+  const name = String(doc?.name || doc?.label || '').trim().toLowerCase();
+  return ['cv', 'resume', 'curriculum_vitae'].includes(type) || /\b(cv|resume|curriculum vitae)\b/.test(name);
+};
+
 const getDocumentWorkflowBadgeMeta = (doc) => {
   const status = (doc?.status || '').toLowerCase();
   if (doc?.verified) return DOCUMENT_WORKFLOW_UI.verified;
@@ -1660,6 +1666,7 @@ export default function WorkerDashboard() {
   // Safe array defaults — prevent .length / .map / .filter on undefined
   const forms = _forms || [];
   const missing_documents = _missing_documents || [];
+  const visibleMissingDocuments = missing_documents.filter((doc) => !isCvDocumentRequirement(doc));
   const missing_trainings = _missing_trainings || [];
   const completed_documents = _completed_documents || [];
   const completed_trainings = _completed_trainings || [];
@@ -1735,12 +1742,24 @@ export default function WorkerDashboard() {
     cv: cvDisplay,
     contract: contractDisplay,
     handbook: handbookDisplay,
-    missingDocuments: missing_documents,
+    missingDocuments: visibleMissingDocuments,
     missingTrainings: missing_trainings,
     expiredTrainings: expired_trainings,
     referencesNeedAction,
     gapsNeedAction: employment_readiness_blockers.some((blocker) => /employment|gap/i.test(blocker?.label || '')),
   });
+  const displayedNextAction = nextAction?.key === 'missing_cv'
+    ? getNextAction({
+        cv: null,
+        contract: contractDisplay,
+        handbook: handbookDisplay,
+        missingDocuments: visibleMissingDocuments,
+        missingTrainings: missing_trainings,
+        expiredTrainings: expired_trainings,
+        referencesNeedAction,
+        gapsNeedAction: employment_readiness_blockers.some((blocker) => /employment|gap/i.test(blocker?.label || '')),
+      })
+    : nextAction;
 
   const scrollToSection = (selector) => {
     const node = document.querySelector(selector);
@@ -1866,7 +1885,7 @@ export default function WorkerDashboard() {
           onLogout={handleLogout}
         />
       )}
-      nextAction={<NextActionCard action={nextAction} onPrimaryAction={handleNextAction} />}
+      nextAction={<NextActionCard action={displayedNextAction} onPrimaryAction={handleNextAction} />}
       readinessChecklist={readinessChecklist}
       support={supportCard}
     >
@@ -2383,56 +2402,6 @@ export default function WorkerDashboard() {
           </Card>
         )}
 
-        {/* ========== CV UPLOAD CARD (shown whenever backend CV truth says CV is missing/replacement required) ========== */}
-        {cvStatus
-          && !cvStatus.has_cv
-          && cvStatus.can_upload_cv
-          && (
-          <Card
-            className="shadow-md border-0 border-l-4 border-l-purple-500 bg-purple-50/40"
-          >
-            <CardHeader className="pb-2">
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle className="flex items-center gap-2 text-lg text-purple-800">
-                    <FileText className="h-5 w-5" />
-                    CV / Resume
-                  </CardTitle>
-                  <p className="text-xs text-purple-700 mt-1">
-                    {cvStatus.extraction_status === 'no_cv_uploaded'
-                      ? 'Upload your CV so we can build your employment history.'
-                      : 'Your previous CV needs to be replaced.'}
-                  </p>
-                </div>
-                <Badge className="bg-purple-100 text-purple-700">
-                  {cvStatus.extraction_status === 'no_cv_uploaded' ? 'Not uploaded' : 'Replacement required'}
-                </Badge>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="p-4 bg-white rounded-xl border border-purple-200">
-                <p className="text-sm text-slate-700 mb-3">
-                  Your CV is used as supporting evidence to bootstrap your employment history.
-                  PDF only. Admin will review after upload.
-                </p>
-                <Button
-                  size="sm"
-                  onClick={triggerCvFileInput}
-                  disabled={uploading === 'cv'}
-                  className="bg-purple-600 hover:bg-purple-700"
-                >
-                  {uploading === 'cv' ? (
-                    <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-                  ) : (
-                    <Upload className="h-4 w-4 mr-1" />
-                  )}
-                  {uploading === 'cv' ? 'Uploading…' : 'Upload CV (PDF)'}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
         {cvStatus && (
           <Card className="shadow-sm border border-slate-200" data-testid="documents-card">
             <CardHeader className="pb-3">
@@ -2475,10 +2444,12 @@ export default function WorkerDashboard() {
                           <Eye className="mr-2 h-4 w-4" />
                           View CV
                         </Button>
-                        <Button className="w-full sm:w-auto" onClick={triggerCvFileInput} disabled={uploading === 'cv'}>
-                          {uploading === 'cv' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
-                          Replace CV
-                        </Button>
+                        {cvStatus?.replacement_required ? (
+                          <Button className="w-full sm:w-auto" onClick={triggerCvFileInput} disabled={uploading === 'cv'}>
+                            {uploading === 'cv' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
+                            Replace CV
+                          </Button>
+                        ) : null}
                       </>
                     ) : cvDisplay.canUpload ? (
                       <Button className="w-full sm:w-auto" onClick={triggerCvFileInput} disabled={uploading === 'cv'}>
@@ -2781,12 +2752,12 @@ export default function WorkerDashboard() {
         )}
 
         {/* Missing Documents - Show for onboarding OR if there are rejected docs */}
-        {((!isActiveEmployee && missing_documents.length > 0) || missing_documents.some(d => d.rejection)) && (
+        {((!isActiveEmployee && visibleMissingDocuments.length > 0) || visibleMissingDocuments.some(d => d.rejection)) && (
           <Card className="shadow-md border-0" data-testid="missing-documents-section">
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center gap-2 text-lg">
                 <Upload className="h-5 w-5 text-red-500" />
-                {missing_documents.some(d => d.rejection)
+                {visibleMissingDocuments.some(d => d.rejection)
                   ? 'Action Required - Re-upload Documents'
                   : lifecycleStage === 'recruitment'
                     ? 'Documents for Verification'
@@ -2795,7 +2766,7 @@ export default function WorkerDashboard() {
             </CardHeader>
             <CardContent>
               <div className="space-y-3">
-                {missing_documents.map((doc, idx) => (
+                {visibleMissingDocuments.map((doc, idx) => (
                   <div 
                     key={idx} 
                     className={`p-4 rounded-xl ${doc.rejection ? 'bg-red-50 border border-red-200' : 'bg-slate-50'}`}

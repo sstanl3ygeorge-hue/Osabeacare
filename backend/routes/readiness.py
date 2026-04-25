@@ -1420,6 +1420,91 @@ async def get_compliance_alerts_summary(
             )
         )
 
+    # ------------------------------------------------------------------
+    # 7) Overdue competency reviews (reuses competency_records)
+    # ------------------------------------------------------------------
+    competency_collection = getattr(db, "competency_records", None)
+    competency_rows = []
+    if competency_collection is not None:
+        competency_rows = await competency_collection.find(
+            {
+                "$or": [
+                    {"review_due_date": {"$exists": True, "$ne": None}},
+                    {"review_due_at": {"$exists": True, "$ne": None}},
+                ]
+            },
+            {
+                "_id": 0,
+                "id": 1,
+                "employee_id": 1,
+                "competency_name": 1,
+                "review_due_date": 1,
+                "review_due_at": 1,
+            },
+        ).to_list(5000)
+
+    for row in competency_rows:
+        employee_id = str(row.get("employee_id") or "").strip()
+        if not employee_id:
+            continue
+        due_value = row.get("review_due_at") or row.get("review_due_date")
+        due_dt = _parse_iso_datetime(due_value)
+        if not due_dt or due_dt > now:
+            continue
+
+        alerts.append(
+            _make_alert_row(
+                title=f"Overdue competency review: {row.get('competency_name') or 'Competency'}",
+                category="staff_competency",
+                severity="urgent",
+                entity_type="employee",
+                entity_id=employee_id,
+                entity_name=employee_lookup.get(employee_id, employee_id),
+                due_date=due_value,
+                link_target=f"/portal/employees/{employee_id}?tab=competencies",
+                source="competency_records",
+            )
+        )
+
+    # ------------------------------------------------------------------
+    # 8) Overdue appraisals (minimal appraisal evidence rows)
+    # ------------------------------------------------------------------
+    appraisal_collection = getattr(db, "appraisal_records", None)
+    appraisal_rows = []
+    if appraisal_collection is not None:
+        appraisal_rows = await appraisal_collection.find(
+            {"next_due_at": {"$exists": True, "$ne": None}},
+            {
+                "_id": 0,
+                "id": 1,
+                "employee_id": 1,
+                "next_due_at": 1,
+            },
+        ).to_list(5000)
+
+    for row in appraisal_rows:
+        employee_id = str(row.get("employee_id") or "").strip()
+        if not employee_id:
+            continue
+        due_value = row.get("next_due_at")
+        due_dt = _parse_iso_datetime(due_value)
+        if not due_dt or due_dt > now:
+            continue
+
+        alerts.append(
+            _make_alert_row(
+                title="Overdue appraisal",
+                category="staff_appraisal",
+                severity="urgent",
+                entity_type="employee",
+                entity_id=employee_id,
+                entity_name=employee_lookup.get(employee_id, employee_id),
+                due_date=due_value,
+                link_target=f"/portal/employees/{employee_id}?tab=appraisals",
+                source="appraisal_records",
+            )
+        )
+
     severity_rank = {"urgent": 0, "safeguarding": 1, "missing": 2, "warning": 3}
     alerts.sort(
         key=lambda row: (

@@ -573,8 +573,8 @@ async def download_pre_interview_pdf(
     try:
         role = employee.get("role", "care_assistant")
         config = get_role_interview_config(role)
-        if config and config.get("pre_screen_questions"):
-            questions_config = config["pre_screen_questions"]
+        if config and config.get("questions"):
+            questions_config = config["questions"]
     except Exception:
         pass
     

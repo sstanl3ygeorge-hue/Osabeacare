@@ -28,6 +28,17 @@ const roles = [
   'Care Coordinator'
 ];
 
+const NURSE_ROLE_VARIANTS = new Set([
+  'nurse',
+  'nurse (registered)',
+  'registered nurse',
+  'rn',
+  'rgn',
+  'senior nurse'
+]);
+
+const isNurseVariantRole = (role) => NURSE_ROLE_VARIANTS.has((role || '').trim().toLowerCase());
+
 const steps = [
   { id: 1, icon: User, title: 'Personal Details' },
   { id: 2, icon: Briefcase, title: 'Employment History' },
@@ -205,6 +216,13 @@ export default function ApplyPage() {
       registration_body: '',
       registration_number: '',
       registration_expiry: '',
+      nmc_revalidation_date: '',
+      practice_restrictions: '',
+      professional_indemnity_provider: '',
+      professional_indemnity_policy_number: '',
+      acknowledges_nmc_code: false,
+      acknowledges_scope_of_practice: false,
+      acknowledges_clinical_record_keeping: false,
       has_disciplinary_history: false,
       disciplinary_details: '',
       previously_worked_nhs: false,
@@ -222,6 +240,51 @@ export default function ApplyPage() {
     emergency_contact_relationship: '',
     emergency_contact_address: ''
   });
+
+  const isNurseRole = useMemo(() => isNurseVariantRole(formData.role_applied), [formData.role_applied]);
+
+  useEffect(() => {
+    setFormData(prev => {
+      const declarations = prev.declarations;
+      if (isNurseVariantRole(prev.role_applied)) {
+        const nextDeclarations = {
+          ...declarations,
+          has_professional_registration: true,
+          registration_body: declarations.registration_body || 'NMC'
+        };
+
+        if (
+          nextDeclarations.has_professional_registration === declarations.has_professional_registration &&
+          nextDeclarations.registration_body === declarations.registration_body
+        ) {
+          return prev;
+        }
+
+        return { ...prev, declarations: nextDeclarations };
+      }
+
+      const nextDeclarations = {
+        ...declarations,
+        has_professional_registration: false,
+        registration_body: '',
+        registration_number: '',
+        registration_expiry: '',
+        nmc_revalidation_date: '',
+        practice_restrictions: '',
+        professional_indemnity_provider: '',
+        professional_indemnity_policy_number: '',
+        acknowledges_nmc_code: false,
+        acknowledges_scope_of_practice: false,
+        acknowledges_clinical_record_keeping: false,
+      };
+
+      const hasChanges = Object.keys(nextDeclarations).some(
+        (key) => nextDeclarations[key] !== declarations[key]
+      );
+
+      return hasChanges ? { ...prev, declarations: nextDeclarations } : prev;
+    });
+  }, [formData.role_applied]);
 
   const handleChange = (field, value) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -522,6 +585,28 @@ export default function ApplyPage() {
     }));
   };
 
+  const addNurseDeclarationValidation = (errors) => {
+    if (!isNurseVariantRole(formData.role_applied)) {
+      return;
+    }
+
+    if (!formData.declarations.registration_number.trim()) {
+      errors.registration_number = 'NMC PIN / registration number is required';
+    }
+    if (!formData.declarations.registration_expiry) {
+      errors.registration_expiry = 'NMC registration expiry is required';
+    }
+    if (!formData.declarations.acknowledges_nmc_code) {
+      errors.acknowledges_nmc_code = 'NMC Code declaration is required';
+    }
+    if (!formData.declarations.acknowledges_scope_of_practice) {
+      errors.acknowledges_scope_of_practice = 'Scope of practice declaration is required';
+    }
+    if (!formData.declarations.acknowledges_clinical_record_keeping) {
+      errors.acknowledges_clinical_record_keeping = 'Clinical record keeping declaration is required';
+    }
+  };
+
   const validateStep = (step) => {
     const errors = {};
     
@@ -594,6 +679,7 @@ export default function ApplyPage() {
         if (!formData.declarations.consents_to_reference_checks) errors.ref_consent = 'Reference check consent required';
         if (!formData.declarations.consents_to_background_checks) errors.bg_consent = 'Background check consent required';
         if (!formData.declarations.consents_to_data_processing) errors.data_consent = 'Data processing consent required (GDPR)';
+        addNurseDeclarationValidation(errors);
         break;
         
       case 6: // Health
@@ -604,6 +690,7 @@ export default function ApplyPage() {
       case 7: // Review
         if (!formData.declarations.information_accurate) errors.info_accurate = 'You must confirm information accuracy';
         if (!formData.declarations.understands_false_info_consequences) errors.false_info = 'You must acknowledge consequences of false information';
+        addNurseDeclarationValidation(errors);
         break;
     }
     
@@ -1621,49 +1708,161 @@ export default function ApplyPage() {
         </CardContent>
       </Card>
       
-      {/* Professional Registration */}
-      <Card className="border-border-default">
-        <CardHeader>
-          <CardTitle className="text-lg">Professional Registration (if applicable)</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center gap-2">
-            <Checkbox 
-              checked={formData.declarations.has_professional_registration}
-              onCheckedChange={(c) => handleNestedChange('declarations', 'has_professional_registration', c)}
-            />
-            <Label className="cursor-pointer">I hold a professional registration (e.g., NMC, HCPC)</Label>
-          </div>
-          
-          {formData.declarations.has_professional_registration && (
-            <div className="grid sm:grid-cols-3 gap-4">
+      {isNurseRole ? (
+        <>
+          <Card className="border-border-default">
+            <CardHeader>
+              <CardTitle className="text-lg">NMC Registration</CardTitle>
+              <CardDescription>These fields are required for nurse applications.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid sm:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Registration Body</Label>
+                  <Input value="NMC" disabled />
+                </div>
+                <div className="space-y-2">
+                  <Label>NMC PIN / Registration Number *</Label>
+                  <Input 
+                    value={formData.declarations.registration_number}
+                    onChange={(e) => handleNestedChange('declarations', 'registration_number', e.target.value)}
+                    className={validationErrors.registration_number ? 'border-red-500' : ''}
+                  />
+                  {validationErrors.registration_number && <p className="text-xs text-red-500">{validationErrors.registration_number}</p>}
+                </div>
+                <div className="space-y-2">
+                  <Label>NMC Registration Expiry *</Label>
+                  <Input 
+                    type="date"
+                    value={formData.declarations.registration_expiry}
+                    onChange={(e) => handleNestedChange('declarations', 'registration_expiry', e.target.value)}
+                    className={validationErrors.registration_expiry ? 'border-red-500' : ''}
+                  />
+                  {validationErrors.registration_expiry && <p className="text-xs text-red-500">{validationErrors.registration_expiry}</p>}
+                </div>
+                <div className="space-y-2">
+                  <Label>NMC Revalidation Date</Label>
+                  <Input 
+                    type="date"
+                    value={formData.declarations.nmc_revalidation_date}
+                    onChange={(e) => handleNestedChange('declarations', 'nmc_revalidation_date', e.target.value)}
+                  />
+                </div>
+              </div>
+
               <div className="space-y-2">
-                <Label>Registration Body</Label>
-                <Input 
-                  value={formData.declarations.registration_body}
-                  onChange={(e) => handleNestedChange('declarations', 'registration_body', e.target.value)}
-                  placeholder="e.g., NMC"
+                <Label>Conditions / Restrictions on Practice</Label>
+                <Textarea 
+                  value={formData.declarations.practice_restrictions}
+                  onChange={(e) => handleNestedChange('declarations', 'practice_restrictions', e.target.value)}
+                  placeholder="Disclose any active conditions, restrictions, or note that there are none."
+                  rows={3}
                 />
               </div>
-              <div className="space-y-2">
-                <Label>Registration Number</Label>
-                <Input 
-                  value={formData.declarations.registration_number}
-                  onChange={(e) => handleNestedChange('declarations', 'registration_number', e.target.value)}
-                />
+
+              <div className="grid sm:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Professional Indemnity Provider</Label>
+                  <Input 
+                    value={formData.declarations.professional_indemnity_provider}
+                    onChange={(e) => handleNestedChange('declarations', 'professional_indemnity_provider', e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Professional Indemnity Policy Number</Label>
+                  <Input 
+                    value={formData.declarations.professional_indemnity_policy_number}
+                    onChange={(e) => handleNestedChange('declarations', 'professional_indemnity_policy_number', e.target.value)}
+                  />
+                </div>
               </div>
-              <div className="space-y-2">
-                <Label>Expiry Date</Label>
-                <Input 
-                  type="date"
-                  value={formData.declarations.registration_expiry}
-                  onChange={(e) => handleNestedChange('declarations', 'registration_expiry', e.target.value)}
+            </CardContent>
+          </Card>
+
+          <Card className="border-border-default">
+            <CardHeader>
+              <CardTitle className="text-lg">Nurse Professional Declarations</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-start gap-2">
+                <Checkbox 
+                  checked={formData.declarations.acknowledges_nmc_code}
+                  onCheckedChange={(c) => handleNestedChange('declarations', 'acknowledges_nmc_code', c)}
                 />
+                <Label className="cursor-pointer text-sm">
+                  I understand my professional accountability under the NMC Code. *
+                </Label>
               </div>
+              {validationErrors.acknowledges_nmc_code && <p className="text-xs text-red-500 ml-6">{validationErrors.acknowledges_nmc_code}</p>}
+
+              <div className="flex items-start gap-2">
+                <Checkbox 
+                  checked={formData.declarations.acknowledges_scope_of_practice}
+                  onCheckedChange={(c) => handleNestedChange('declarations', 'acknowledges_scope_of_practice', c)}
+                />
+                <Label className="cursor-pointer text-sm">
+                  I will work within my scope of practice and disclose restrictions. *
+                </Label>
+              </div>
+              {validationErrors.acknowledges_scope_of_practice && <p className="text-xs text-red-500 ml-6">{validationErrors.acknowledges_scope_of_practice}</p>}
+
+              <div className="flex items-start gap-2">
+                <Checkbox 
+                  checked={formData.declarations.acknowledges_clinical_record_keeping}
+                  onCheckedChange={(c) => handleNestedChange('declarations', 'acknowledges_clinical_record_keeping', c)}
+                />
+                <Label className="cursor-pointer text-sm">
+                  I understand my responsibility for accurate clinical record keeping and medication documentation. *
+                </Label>
+              </div>
+              {validationErrors.acknowledges_clinical_record_keeping && <p className="text-xs text-red-500 ml-6">{validationErrors.acknowledges_clinical_record_keeping}</p>}
+            </CardContent>
+          </Card>
+        </>
+      ) : (
+        <Card className="border-border-default">
+          <CardHeader>
+            <CardTitle className="text-lg">Professional Registration (if applicable)</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center gap-2">
+              <Checkbox 
+                checked={formData.declarations.has_professional_registration}
+                onCheckedChange={(c) => handleNestedChange('declarations', 'has_professional_registration', c)}
+              />
+              <Label className="cursor-pointer">I hold a professional registration (e.g., NMC, HCPC)</Label>
             </div>
-          )}
-        </CardContent>
-      </Card>
+            
+            {formData.declarations.has_professional_registration && (
+              <div className="grid sm:grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <Label>Registration Body</Label>
+                  <Input 
+                    value={formData.declarations.registration_body}
+                    onChange={(e) => handleNestedChange('declarations', 'registration_body', e.target.value)}
+                    placeholder="e.g., NMC"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Registration Number</Label>
+                  <Input 
+                    value={formData.declarations.registration_number}
+                    onChange={(e) => handleNestedChange('declarations', 'registration_number', e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Expiry Date</Label>
+                  <Input 
+                    type="date"
+                    value={formData.declarations.registration_expiry}
+                    onChange={(e) => handleNestedChange('declarations', 'registration_expiry', e.target.value)}
+                  />
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 

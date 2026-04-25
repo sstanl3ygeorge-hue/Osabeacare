@@ -30,6 +30,7 @@ import EmploymentGapPanel from '../../components/compliance/EmploymentGapPanel';
 import CompetencyAssessmentsPanel from '../../components/compliance/CompetencyAssessmentsPanel';
 import SpotChecksPanel from '../../components/compliance/SpotChecksPanel';
 import SupervisionsPanel from '../../components/compliance/SupervisionsPanel';
+import AppraisalsPanel from '../../components/compliance/AppraisalsPanel';
 import PendingVerificationBanner from '../../components/compliance/PendingVerificationBanner';
 import { SendReminderButton, RequestRenewalButton } from '../../components/admin/AdminActionButtons';
 import EditPersonalDetailsDialog from '../../components/admin/EditPersonalDetailsDialog';
@@ -5000,6 +5001,12 @@ export default function EmployeeProfilePage() {
               Supervisions
             </TabsTrigger>
           )}
+          {lifecycleStage === 'active' && !isRecruitmentView && (
+            <TabsTrigger value="appraisals" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
+              <CalendarClock className="h-4 w-4 mr-2" />
+              Appraisals
+            </TabsTrigger>
+          )}
           <TabsTrigger value="audit" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
             <History className="h-4 w-4 mr-2" />
             Audit
@@ -6913,6 +6920,15 @@ export default function EmployeeProfilePage() {
         {lifecycleStage === 'active' && !isRecruitmentView && (
           <TabsContent value="supervisions" data-testid="section-supervisions-root">
             <SupervisionsPanel
+              employeeId={employeeId}
+              employeeName={employee ? `${employee.first_name} ${employee.last_name}` : ''}
+            />
+          </TabsContent>
+        )}
+
+        {lifecycleStage === 'active' && !isRecruitmentView && (
+          <TabsContent value="appraisals" data-testid="section-appraisals-root">
+            <AppraisalsPanel
               employeeId={employeeId}
               employeeName={employee ? `${employee.first_name} ${employee.last_name}` : ''}
             />

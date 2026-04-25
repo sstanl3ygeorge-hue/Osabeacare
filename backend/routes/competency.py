@@ -74,6 +74,7 @@ class CompetencyRecordCreate(BaseModel):
     competency_name: str
     status: str  # competent, not_competent, training_required
     review_due_date: Optional[str] = None
+    review_due_at: Optional[str] = None
     notes: Optional[str] = None
     evidence_document_id: Optional[str] = None
 
@@ -89,6 +90,21 @@ class CompetencyRecordResultRequest(BaseModel):
     status: str  # competent, not_competent, training_required
     notes: Optional[str] = None
     review_due_date: Optional[str] = None
+    review_due_at: Optional[str] = None
+
+
+def _resolve_review_due_alias(review_due_date: Optional[str], review_due_at: Optional[str]) -> Optional[str]:
+    """Prefer explicit review_due_at input, then fall back to review_due_date."""
+    return review_due_at or review_due_date
+
+
+def _apply_review_due_alias(record: dict) -> dict:
+    """Ensure competency payload exposes both review_due_date and review_due_at."""
+    due_value = record.get("review_due_date") or record.get("review_due_at")
+    if due_value:
+        record["review_due_date"] = due_value
+        record["review_due_at"] = due_value
+    return record
 
 
 @router.get("/employees/{employee_id}/competencies")
@@ -111,7 +127,7 @@ async def get_employee_competencies(
     formatted = []
     for c in competencies:
         c.pop("_id", None)
-        formatted.append(c)
+        formatted.append(_apply_review_due_alias(c))
     
     return {"competencies": formatted}
 
@@ -142,9 +158,7 @@ async def create_competency_record(
         assessor_name = f"{assessor.get('first_name', '')} {assessor.get('last_name', '')}".strip() or assessor.get('email', 'Admin')
     
     # Parse review_due_date
-    review_due = None
-    if payload.review_due_date:
-        review_due = payload.review_due_date
+    review_due = _resolve_review_due_alias(payload.review_due_date, payload.review_due_at)
     
     competency_id = str(uuid.uuid4())
     
@@ -159,6 +173,7 @@ async def create_competency_record(
         "assessed_by_name": assessor_name,
         "assessed_at": now,
         "review_due_date": review_due,
+        "review_due_at": review_due,
         "notes": payload.notes,
         "evidence_document_id": payload.evidence_document_id,
         "created_at": now,
@@ -235,7 +250,8 @@ async def update_competency_record(
         "assessed_by": user['user_id'],
         "assessed_by_name": assessor_name,
         "assessed_at": now,
-        "review_due_date": payload.review_due_date,
+        "review_due_date": _resolve_review_due_alias(payload.review_due_date, payload.review_due_at),
+        "review_due_at": _resolve_review_due_alias(payload.review_due_date, payload.review_due_at),
         "notes": payload.notes,
         "evidence_document_id": payload.evidence_document_id,
         "updated_at": now,
@@ -344,8 +360,8 @@ async def record_competency_result(
     now_str = now.isoformat()
     
     # Calculate review due date (default 1 year from today)
-    if payload.review_due_date:
-        review_due = payload.review_due_date
+    if payload.review_due_at or payload.review_due_date:
+        review_due = _resolve_review_due_alias(payload.review_due_date, payload.review_due_at)
     else:
         review_due = (now + timedelta(days=365)).strftime('%Y-%m-%d')
     
@@ -372,6 +388,7 @@ async def record_competency_result(
         "assessed_by": user['user_id'],
         "assessed_by_name": user_name,
         "review_due_date": review_due,
+        "review_due_at": review_due,
         "last_assessed": now_str,
         "notes": payload.notes
     }
@@ -461,9 +478,9 @@ async def get_missing_competencies(
                     "assessed_by_name": existing_comp.get("assessed_by_name")
                 }
             })
-        elif existing_comp.get("review_due_date"):
+        elif existing_comp.get("review_due_date") or existing_comp.get("review_due_at"):
             try:
-                due_str = existing_comp["review_due_date"]
+                due_str = existing_comp.get("review_due_date") or existing_comp.get("review_due_at")
                 if isinstance(due_str, str):
                     due_date = datetime.fromisoformat(due_str.replace('Z', '+00:00'))
                 else:
@@ -473,7 +490,8 @@ async def get_missing_competencies(
                     expiring_soon.append({
                         "competency_type": comp_type,
                         "competency_name": req["competency_name"],
-                        "review_due_date": existing_comp["review_due_date"],
+                        "review_due_date": due_str,
+                        "review_due_at": due_str,
                         "days_until_due": days_until,
                         "is_critical": req.get("is_critical", True)
                     })

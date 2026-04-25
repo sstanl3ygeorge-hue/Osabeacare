@@ -9,3 +9,4 @@ from .documents import router as documents_router
 from .recruitment import router as recruitment_router
 from .employees import router as employees_router
 from .references import router as references_router
+from .appraisals import router as appraisals_router

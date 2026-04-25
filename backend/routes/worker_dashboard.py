@@ -1623,6 +1623,7 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
     competency_status = []
     spot_check_status = []
     supervisions_status = []
+    appraisals_status = []
 
     if is_active_employee:
         # Competency assessments (canonical source: competency_records)
@@ -1651,13 +1652,44 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
                 "status": comp.get("status", "pending"),
                 "scheduled_date": comp.get("scheduled_date") or comp.get("due_date"),
                 "completed_date": comp.get("completed_date") or comp.get("assessment_date") or comp.get("assessed_at"),
-                "review_due_date": comp.get("review_due_date"),
+                "review_due_date": comp.get("review_due_date") or comp.get("review_due_at"),
+                "review_due_at": comp.get("review_due_at") or comp.get("review_due_date"),
                 "outcome": derived_outcome,
                 "assessed_by_name": comp.get("assessed_by_name") or comp.get("assessor_name"),
                 "notes": comp.get("notes"),
                 "follow_up_required": comp.get("follow_up_required", False),
                 "follow_up_date": comp.get("follow_up_date")
             })
+
+        # Overdue competency review alerts (minimal additive visibility)
+        for comp in competency_status:
+            review_due = comp.get("review_due_at") or comp.get("review_due_date")
+            if not review_due:
+                continue
+            try:
+                if isinstance(review_due, str):
+                    if 'T' in review_due or '+' in review_due or 'Z' in review_due:
+                        due_dt = datetime.fromisoformat(review_due.replace('Z', '+00:00'))
+                    else:
+                        due_dt = datetime.strptime(review_due, '%Y-%m-%d').replace(tzinfo=timezone.utc)
+                else:
+                    due_dt = review_due
+                    if due_dt.tzinfo is None:
+                        due_dt = due_dt.replace(tzinfo=timezone.utc)
+
+                days_left = (due_dt - now).days
+                if days_left < 0:
+                    alerts.append({
+                        "type": "competency_review",
+                        "title": f"Competency Review Overdue: {comp.get('competency_name') or 'Competency'}",
+                        "date": review_due,
+                        "days_left": days_left,
+                        "urgent": True,
+                        "is_expired": True,
+                        "competency_id": comp.get("id"),
+                    })
+            except Exception as e:
+                logger.warning(f"Error parsing competency review due date for alert: {e}")
         
         # Spot checks
         spot_check_records = await db.spot_checks.find({
@@ -1693,6 +1725,48 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
                 "supervisor_name": sv.get("supervisor_name") or sv.get("supervisor_id"),
                 "notes": sv.get("notes"),
             })
+
+        # Appraisals (minimal evidence records)
+        appraisal_records = await db.appraisal_records.find({
+            "employee_id": employee_id
+        }, {"_id": 0}).sort("appraisal_date", -1).to_list(20)
+        for appraisal in appraisal_records:
+            appraisals_status.append({
+                "id": appraisal.get("id"),
+                "appraisal_date": appraisal.get("appraisal_date"),
+                "reviewer": appraisal.get("reviewer"),
+                "notes": appraisal.get("notes"),
+                "actions": appraisal.get("actions") or [],
+                "next_due_at": appraisal.get("next_due_at"),
+            })
+
+            next_due = appraisal.get("next_due_at")
+            if not next_due:
+                continue
+            try:
+                if isinstance(next_due, str):
+                    if 'T' in next_due or '+' in next_due or 'Z' in next_due:
+                        due_dt = datetime.fromisoformat(next_due.replace('Z', '+00:00'))
+                    else:
+                        due_dt = datetime.strptime(next_due, '%Y-%m-%d').replace(tzinfo=timezone.utc)
+                else:
+                    due_dt = next_due
+                    if due_dt.tzinfo is None:
+                        due_dt = due_dt.replace(tzinfo=timezone.utc)
+
+                days_left = (due_dt - now).days
+                if days_left < 0:
+                    alerts.append({
+                        "type": "appraisal",
+                        "title": "Appraisal Overdue",
+                        "date": next_due,
+                        "days_left": days_left,
+                        "urgent": True,
+                        "is_expired": True,
+                        "appraisal_id": appraisal.get("id"),
+                    })
+            except Exception as e:
+                logger.warning(f"Error parsing appraisal due date for alert: {e}")
 
     # Recurring compliance snapshot (active workforce surfacing only, no new truth path)
     recurring_summary = {
@@ -1781,6 +1855,7 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
         "competency_assessments": competency_status,
         "spot_checks": spot_check_status,
         "supervisions": supervisions_status,
+        "appraisals": appraisals_status,
         "recurring_compliance_summary": recurring_summary,
         "agreements": agreements_status
     }

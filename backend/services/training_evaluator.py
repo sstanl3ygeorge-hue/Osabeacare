@@ -125,7 +125,83 @@ TRAINING_BLOCKER_CONFIG = {
         "reason_code": "prevent_training_missing",
         "reason_message": "Prevent (Counter-Terrorism Awareness) training required",
     },
+    "news2_clinical_observations": {
+        "blocker_for_work": True,
+        "evidence_required": True,
+        "reason_code": "news2_clinical_observations_missing",
+        "reason_message": "NEWS2 / Clinical Observations training required",
+    },
+    "sepsis_awareness": {
+        "blocker_for_work": True,
+        "evidence_required": True,
+        "reason_code": "sepsis_awareness_training_missing",
+        "reason_message": "Sepsis Awareness training required",
+    },
+    "pressure_ulcer_prevention": {
+        "blocker_for_work": True,
+        "evidence_required": True,
+        "reason_code": "pressure_ulcer_prevention_training_missing",
+        "reason_message": "Pressure Ulcer Prevention training required",
+    },
+    "enhanced_infection_prevention": {
+        "blocker_for_work": True,
+        "evidence_required": True,
+        "reason_code": "enhanced_infection_prevention_training_missing",
+        "reason_message": "Enhanced Infection Prevention / Clinical IPC training required",
+    },
+    "mca_dols": {
+        "blocker_for_work": True,
+        "evidence_required": True,
+        "reason_code": "mca_dols_training_missing",
+        "reason_message": "MCA / DoLS training required",
+    },
 }
+
+
+NURSE_EFFECTIVE_REQUIRED_TRAININGS = [
+    {
+        "id": "medication_administration",
+        "name": "Medication Administration Training",
+        "type": "training",
+        "training_name": "Medication Administration",
+        "mandatory_for_compliance": True,
+    },
+    {
+        "id": "news2_clinical_observations",
+        "name": "NEWS2 / Clinical Observations",
+        "type": "training",
+        "training_name": "NEWS2 / Clinical Observations",
+        "mandatory_for_compliance": True,
+    },
+    {
+        "id": "sepsis_awareness",
+        "name": "Sepsis Awareness",
+        "type": "training",
+        "training_name": "Sepsis Awareness",
+        "mandatory_for_compliance": True,
+    },
+    {
+        "id": "pressure_ulcer_prevention",
+        "name": "Pressure Ulcer Prevention",
+        "type": "training",
+        "training_name": "Pressure Ulcer Prevention",
+        "mandatory_for_compliance": True,
+    },
+    {
+        "id": "mca_dols",
+        "name": "MCA & DoLS Training",
+        "type": "training",
+        "training_name": "MCA and DoLs",
+        "mandatory_for_compliance": True,
+    },
+    {
+        "id": "enhanced_infection_prevention",
+        "name": "Enhanced Infection Prevention / Clinical IPC",
+        "type": "training",
+        "training_name": "Enhanced Infection Prevention / Clinical IPC",
+        "mandatory_for_compliance": True,
+    },
+]
 
 
 # ---------------------------------------------------------------------------
@@ -488,6 +564,23 @@ TRAINING_ALIASES = {
     "safe_handling_and_administration_of_medication": "medication_administration",
     "safe_handling_&_administration_of_medication": "medication_administration",
     "medication": "medication_administration",
+    "medication_administration": "medication_administration",
+    # Nurse effective training aliases
+    "news2": "news2_clinical_observations",
+    "news_2": "news2_clinical_observations",
+    "clinical_observations": "news2_clinical_observations",
+    "news2_clinical_observations": "news2_clinical_observations",
+    "sepsis": "sepsis_awareness",
+    "sepsis_awareness": "sepsis_awareness",
+    "pressure_ulcer_prevention": "pressure_ulcer_prevention",
+    "pressure_ulcer": "pressure_ulcer_prevention",
+    "pressure_area_care": "pressure_ulcer_prevention",
+    "mca_and_dols": "mca_dols",
+    "mental_capacity_act": "mca_dols",
+    "dols": "mca_dols",
+    "enhanced_infection_prevention": "enhanced_infection_prevention",
+    "clinical_ipc": "enhanced_infection_prevention",
+    "enhanced_ipc": "enhanced_infection_prevention",
     # Common CSTF non-mandatory-but-trackable aliases
     "cstf_equality_diversity_and_human_rights": "equality_diversity",
     "equality_diversity_and_human_rights": "equality_diversity",
@@ -652,6 +745,11 @@ _MANDATORY_KEYWORD_MAP = {
     "infection_control": ["infection control", "infection prevention", "ipc"],
     "information_governance": ["information governance", "data protection", "gdpr", "confidentiality"],
     "prevent": ["prevent", "counter terrorism", "radicalisation", "prevent duty"],
+    "news2_clinical_observations": ["news2", "news 2", "clinical observations", "vital signs"],
+    "sepsis_awareness": ["sepsis"],
+    "pressure_ulcer_prevention": ["pressure ulcer", "pressure sore", "tissue viability"],
+    "mca_dols": ["mca", "mental capacity", "dols", "deprivation of liberty"],
+    "enhanced_infection_prevention": ["clinical ipc", "enhanced infection prevention", "infection prevention level 2"],
 }
 
 
@@ -719,10 +817,21 @@ async def get_required_training_for_employee(employee_id: str, role: str) -> Lis
     system_role = normalize_to_system_role(role) if role else SystemRole.UNKNOWN
 
     if is_nurse_role(system_role):
-        # Nurses: full generic list + nurse-specific training
+        # Nurses: full generic list + nurse-specific training + effective-domain
+        # nurse clinical training requirements.
         items = all_training.copy()
         nurse_training = [i for i in MANDATORY_ITEMS["nurse_specific"] if i.get("type") == "training"]
         items.extend(nurse_training)
+        items.extend(get_nurse_effective_required_training_items())
+
+        # Dedupe by requirement id to avoid duplicate matrix rows when an item
+        # exists in both generic and nurse-specific sources.
+        deduped = {}
+        for item in items:
+            item_id = item.get("id")
+            if item_id:
+                deduped[item_id] = item
+        items = list(deduped.values())
     else:
         # HCA / support-worker / unknown: only mandatory-for-compliance items,
         # plus any item whose role_required list includes the raw role.
@@ -736,6 +845,11 @@ async def get_required_training_for_employee(employee_id: str, role: str) -> Lis
             # else: skip — not mandatory and not role-required
 
     return items
+
+
+def get_nurse_effective_required_training_items() -> List[dict]:
+    """Return additive nurse Effective-domain clinical training requirements."""
+    return [dict(item) for item in NURSE_EFFECTIVE_REQUIRED_TRAININGS]
 
 
 async def evaluate_employee_training_status(employee_id: str, role: str = "") -> dict:

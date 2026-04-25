@@ -158,7 +158,7 @@ SUPPORT_WORKER_INTERVIEW_QUESTIONS = [
 HCA_INTERVIEW_QUESTIONS = SUPPORT_WORKER_INTERVIEW_QUESTIONS
 
 # ============================================================================
-# NURSE ADDITIONAL CLINICAL QUESTIONS (6 Questions - Added to Support Worker base)
+# NURSE ADDITIONAL CLINICAL QUESTIONS (9 Questions - Added to Support Worker base)
 # For Registered Nurses: Use Support Worker questions + these clinical questions
 # ============================================================================
 
@@ -261,6 +261,54 @@ NURSE_CLINICAL_QUESTIONS = [
         "order": 14,
         "max_score": 3,
         "is_critical": True
+    },
+    {
+        "id": "nurse_q7",
+        "question": "Describe how you would recognise a safeguarding concern in adult care and escalate it appropriately.",
+        "category": "safeguarding",
+        "skills_assessed": "Safeguarding recognition, escalation, duty of candour",
+        "scoring_criteria": {
+            "0": "Cannot describe safeguarding concerns or escalation steps",
+            "1": "Shows limited awareness of safeguarding indicators or escalation routes",
+            "2": "Describes appropriate safeguarding concerns, immediate safety actions, and escalation process",
+            "3": "Demonstrates strong safeguarding judgment, prompt escalation, accurate reporting, and reflection on professional duty"
+        },
+        "expected_answer_notes": "Look for recognition of abuse or neglect indicators, immediate safety actions, escalation to the safeguarding lead or emergency services, and clear documentation.",
+        "required": True,
+        "order": 15,
+        "max_score": 3
+    },
+    {
+        "id": "nurse_q8",
+        "question": "How do you maintain accurate clinical records and medication documentation during a busy shift?",
+        "category": "documentation",
+        "skills_assessed": "Clinical record keeping, medication documentation, accuracy under pressure",
+        "scoring_criteria": {
+            "0": "No clear approach to documentation or medication records",
+            "1": "Basic awareness of documentation requirements but limited detail on accuracy controls",
+            "2": "Explains a clear, safe approach to timely and accurate clinical and medication documentation",
+            "3": "Demonstrates a robust, professional approach with contemporaneous recording, escalation of omissions, and strong audit awareness"
+        },
+        "expected_answer_notes": "Look for contemporaneous notes, MAR accuracy, escalation of discrepancies, legibility and completeness, and safe handover practices.",
+        "required": True,
+        "order": 16,
+        "max_score": 3
+    },
+    {
+        "id": "nurse_q9",
+        "question": "Tell me about a time you had to delegate care or decline a task because it was outside your scope of practice.",
+        "category": "scope_of_practice",
+        "skills_assessed": "Delegation, professional boundaries, scope of practice, patient safety",
+        "scoring_criteria": {
+            "0": "No understanding of delegation or scope-of-practice boundaries",
+            "1": "Basic example but limited insight into accountability or safe delegation",
+            "2": "Provides a clear example of safe delegation or appropriate refusal with explanation",
+            "3": "Demonstrates strong judgment, accountability, escalation, and patient safety focus when managing delegation or scope limits"
+        },
+        "expected_answer_notes": "Look for awareness of accountability after delegation, competence checks, supervision, and willingness to escalate when a task is outside scope.",
+        "required": True,
+        "order": 17,
+        "max_score": 3
     }
 ]
 
@@ -375,6 +423,7 @@ def get_interview_question_count(role: str) -> dict:
         Dict with total, required, optional, and max_score
     """
     questions = get_interview_questions_for_role(role)
+    is_nurse = len(questions) > len(SUPPORT_WORKER_INTERVIEW_QUESTIONS)
     
     required = sum(1 for q in questions if q.get("required", True))
     optional = sum(1 for q in questions if not q.get("required", True))
@@ -385,7 +434,7 @@ def get_interview_question_count(role: str) -> dict:
         "required": required,
         "optional": optional,
         "max_score": max_score,
-        "pass_score": INTERVIEW_SCORING["minimum_total_score"] if "nurse" not in role.lower() else int(max_score * 0.46)
+        "pass_score": INTERVIEW_SCORING["minimum_total_score"] if not is_nurse else int(max_score * 0.46)
     }
 
 
@@ -419,7 +468,7 @@ def calculate_interview_result(scores: dict, role: str) -> dict:
             critical_passed = False
     
     percentage = round((total_score / max_score) * 100) if max_score > 0 else 0
-    pass_score = INTERVIEW_SCORING["minimum_total_score"]
+    pass_score = get_interview_question_count(role)["pass_score"]
     
     return {
         "total_score": total_score,
@@ -442,8 +491,7 @@ def get_role_interview_config(role: str) -> dict:
     questions = get_interview_questions_for_role(role)
     counts = get_interview_question_count(role)
     
-    role_lower = role.lower().strip() if role else ""
-    is_nurse = "nurse" in role_lower
+    is_nurse = len(questions) > len(SUPPORT_WORKER_INTERVIEW_QUESTIONS)
     
     return {
         "role": role,
@@ -455,7 +503,7 @@ def get_role_interview_config(role: str) -> dict:
         "scoring": INTERVIEW_SCORING,
         "max_possible_score": counts["max_score"],
         "pass_threshold_score": counts["pass_score"],
-        "question_count": 8 if not is_nurse else 14,
+        "question_count": counts["total"],
         "scale_description": "0 = Does not meet, 1 = Part meets, 2 = Meets, 3 = Exceeds"
     }
 

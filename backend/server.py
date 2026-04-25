@@ -166,6 +166,7 @@ from routes.test_cleanup import router as test_cleanup_router
 from routes.reference_comparison import router as reference_comparison_router
 from routes.cqc_evidence import router as cqc_evidence_router, CQC_EVIDENCE_MAPPING
 from routes.inspection_pack import router as inspection_pack_router
+from routes.appraisals import router as appraisals_router
 from routes.shifts import router as shifts_router
 from routes.care_plans import router as care_plans_router
 from routes.care_locations import router as care_locations_router
@@ -7458,6 +7459,27 @@ class ApplicationDeclarations(BaseModel):
     registration_body: Optional[str] = None        # NMC, GMC, HCPC, Social Work England
     registration_number: Optional[str] = None
     registration_expiry: Optional[str] = None
+    nmc_revalidation_date: Optional[str] = None
+    practice_restrictions: Optional[str] = None
+    professional_indemnity_provider: Optional[str] = None
+    professional_indemnity_policy_number: Optional[str] = None
+    acknowledges_nmc_code: bool = False
+    acknowledges_scope_of_practice: bool = False
+    acknowledges_clinical_record_keeping: bool = False
+
+
+NURSE_APPLICATION_ROLE_VARIANTS = {
+    "nurse",
+    "nurse (registered)",
+    "registered nurse",
+    "rn",
+    "rgn",
+    "senior nurse",
+}
+
+
+def is_nurse_application_role(role: Optional[str]) -> bool:
+    return (role or "").strip().lower() in NURSE_APPLICATION_ROLE_VARIANTS
 
 
 # ==================== DBS CHECK MODELS ====================
@@ -26402,6 +26424,17 @@ async def submit_structured_application(form: StructuredApplicationForm):
         raise HTTPException(status_code=400, detail="You must acknowledge DBS check requirement")
     if not form.criminal_declaration.consents_to_dbs_check:
         raise HTTPException(status_code=400, detail="Consent to DBS check is required")
+    if is_nurse_application_role(form.role_applied):
+        if not (form.declarations.registration_number or "").strip():
+            raise HTTPException(status_code=400, detail="NMC registration number is required for nurse applications")
+        if not form.declarations.registration_expiry:
+            raise HTTPException(status_code=400, detail="NMC registration expiry is required for nurse applications")
+        if not form.declarations.acknowledges_nmc_code:
+            raise HTTPException(status_code=400, detail="NMC Code declaration is required for nurse applications")
+        if not form.declarations.acknowledges_scope_of_practice:
+            raise HTTPException(status_code=400, detail="Scope of practice declaration is required for nurse applications")
+        if not form.declarations.acknowledges_clinical_record_keeping:
+            raise HTTPException(status_code=400, detail="Clinical record keeping declaration is required for nurse applications")
     
     # Validation: Minimum 2 references required for NHS-level compliance
     if len(form.references) < 2:
@@ -42694,6 +42727,7 @@ api_router.include_router(test_cleanup_router)
 api_router.include_router(reference_comparison_router)
 api_router.include_router(cqc_evidence_router)
 api_router.include_router(inspection_pack_router)
+api_router.include_router(appraisals_router)
 api_router.include_router(shifts_router)
 api_router.include_router(care_plans_router)
 api_router.include_router(care_locations_router)

@@ -231,7 +231,11 @@ export default function ShiftsPage() {
       setAssignNotes('');
       fetchShifts();
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'Failed to assign worker');
+      if (error.response?.status === 409) {
+        toast.error('Shift already assigned — duplicate assignment blocked');
+      } else {
+        toast.error(error.response?.data?.detail || 'Failed to assign worker');
+      }
     } finally {
       setAssigning(false);
     }

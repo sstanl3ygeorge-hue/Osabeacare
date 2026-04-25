@@ -300,6 +300,7 @@ async def create_shift(
         "updated_by": user.get("user_id"),
     }
     await db.shifts.insert_one(shift_doc)
+    shift_doc.pop("_id", None)  # Motor mutates doc in-place with ObjectId; strip before JSON response
     await log_audit_action(
         user.get("user_id"),
         "shift_created",
@@ -538,6 +539,7 @@ async def assign_worker_to_shift(
         "worker_responded_at": None,
     }
     await db.shift_assignments.insert_one(assignment_doc)
+    assignment_doc.pop("_id", None)  # Motor mutates doc in-place with ObjectId; strip before JSON response
     await db.shifts.update_one(
         {"id": shift_id},
         {"$set": {"status": "assigned", "assigned_employee_id": payload.employee_id, "updated_at": now, "updated_by": user.get("user_id")}},
@@ -889,6 +891,7 @@ async def clock_in_worker_shift(
         "updated_by": f"worker:{employee_id}",
     }
     await db.shift_attendance_records.insert_one(attendance)
+    attendance.pop("_id", None)  # Motor mutates doc in-place with ObjectId; strip before JSON response
     await log_audit_action(
         f"worker:{employee_id}",
         "shift_clock_in",

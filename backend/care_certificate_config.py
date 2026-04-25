@@ -53,6 +53,12 @@ _ROLE_PROMPTS = {
             "examples": "A service user refusing care, a colleague acting unsafely, a near-miss incident you would report.",
         },
     },
+    "equality_diversity": {
+        "_default": {
+            "prompt": "Describe how you will promote equality, diversity, dignity, and inclusion in your day-to-day work.",
+            "examples": "Respecting protected characteristics, challenging exclusion, making reasonable adjustments, and reporting discriminatory behaviour.",
+        },
+    },
     "work_person_centred": {
         "_default": {
             "prompt": "Describe how you would support someone in a way that respects their individual preferences and choices.",
@@ -101,6 +107,21 @@ HYBRID_LEARNING_CONTENT = {
         ],
         "dos": ["Do ask for supervision when unsure.", "Do report unsafe practice."],
         "donts": ["Do not perform clinical tasks outside your competence.", "Do not ignore concerns."],
+    },
+    "equality_diversity": {
+        "overview": "This standard confirms you understand equality, diversity, inclusion, human rights, and respectful care in your role.",
+        "expected_to_know": [
+            "What discrimination, harassment, and exclusion can look like in care settings.",
+            "How to respect protected characteristics, beliefs, identity, and individual preferences.",
+            "How to challenge poor practice and escalate concerns appropriately.",
+        ],
+        "guidance": [
+            "Treat each person as an individual and avoid assumptions about their needs or choices.",
+            "Make reasonable adjustments and use communication support where needed.",
+            "Raise concerns promptly if you witness discriminatory language, behaviour, or decisions.",
+        ],
+        "dos": ["Do respect identity, culture, faith, and personal choices.", "Do report discriminatory behaviour or barriers to inclusion."],
+        "donts": ["Do not make assumptions based on age, disability, ethnicity, gender, religion, or sexuality.", "Do not ignore exclusionary or degrading behaviour."],
     },
     "personal_development": {
         "overview": "This standard confirms you understand supervision, learning, and development in your role.",
@@ -286,19 +307,22 @@ CARE_CERTIFICATE_CONFIG = [
         "code": "equality_diversity",
         "standard_number": 4,
         "title": "Equality and Diversity",
-        "completion_type": "automatic",
-        "worker_input_required": False,
-        "admin_signoff_required": False,
-        "auto_complete_allowed": True,
-        "worker_form_id": None,
-        "evidence_sources": ["verified_training_record"],
+        "completion_type": "hybrid",
+        "worker_input_required": True,
+        "admin_signoff_required": True,
+        "auto_complete_allowed": False,
+        "worker_form_id": "cc_equality_diversity",
+        "evidence_sources": ["worker_submission", "manager_signoff"],
         "status_rules": [
-            {"condition": "has_verified_training", "status": "completed"},
-            {"condition": "none", "status": "pending_evidence"},
+            {"condition": "admin_signed_off", "status": "completed"},
+            {"condition": "worker_submitted", "status": "awaiting_signoff"},
+            {"condition": "worker_returned", "status": "returned"},
+            {"condition": "worker_draft", "status": "in_progress"},
+            {"condition": "none", "status": "awaiting_worker"},
         ],
         "description": (
-            "Verified equality, diversity, and inclusion training confirms this standard. "
-            "No manual sign-off required; this completes automatically when training is verified."
+            "The worker confirms their understanding of equality, diversity, inclusion, and human rights, "
+            "then a manager reviews and signs off the standard."
         ),
     },
     {

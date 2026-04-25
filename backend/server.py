@@ -23493,33 +23493,100 @@ async def _resolve_file_url_for_id(record_id: str):
     return None, record or doc or None
 
 
-@api_router.get("/training-records/{record_id}/certificate/file")
-async def get_training_certificate_file(record_id: str, user: dict = Depends(get_current_user)):
-    """Get certificate file for viewing."""
+def _is_internal_training_evidence_record(record: dict) -> bool:
+    evidence_type = (record or {}).get('evidence_type')
+    source_type = (record or {}).get('source_type')
+    return evidence_type == 'temporary_internal' or source_type in {'internal_course', 'questionnaire', 'form_submission'}
+
+
+def _format_training_evidence_source_label(record: dict) -> str:
+    source_type = (record or {}).get('source_type')
+    return {
+        'internal_course': 'Internal course completion',
+        'questionnaire': 'Internal questionnaire or assessment',
+        'form_submission': 'Internal form submission',
+        'certificate': 'External certificate',
+    }.get(source_type, 'Training record')
+
+
+async def _generate_internal_training_evidence_pdf(record: dict) -> bytes:
+    from services.pdf_service import generate_evidence_record_pdf
+
+    employee = await db.employees.find_one(
+        {'id': record.get('employee_id')},
+        {'_id': 0, 'id': 1, 'first_name': 1, 'last_name': 1, 'employee_code': 1, 'applicant_reference': 1},
+    ) or {'id': record.get('employee_id')}
+
+    computed = compute_training_record_status(record)
+    expiry_date = computed.get('expiry_date') or record.get('expiry_date')
+    notes = []
+    if expiry_date:
+        notes.append(
+            f"Temporary internal evidence valid for 90 days. External certificate required before expiry. Expiry date: {expiry_date}."
+        )
+    if record.get('notes'):
+        notes.append(str(record.get('notes')))
+
+    return generate_evidence_record_pdf(
+        'Training Evidence Record',
+        employee,
+        {
+            'item_name': record.get('training_name') or record.get('name') or record.get('requirement_id') or 'Training',
+            'evidence_type': 'Temporary internal evidence',
+            'source_label': _format_training_evidence_source_label(record),
+            'completed_at': record.get('completion_date') or record.get('completed_at') or record.get('verified_at'),
+            'reviewed_label': 'Verified by',
+            'reviewed_by': record.get('verified_by_name') or record.get('verified_by') or 'Internal verification record',
+            'reviewed_at': record.get('verified_at') or record.get('updated_at'),
+            'expiry_date': expiry_date,
+            'record_reference': record.get('id') or record.get('training_id') or record.get('record_id'),
+            'notes': notes,
+        },
+    )
+
+
+@api_router.get("/training-records/{record_id}/evidence/file")
+async def get_training_evidence_file(record_id: str, user: dict = Depends(get_current_user)):
+    """Get training evidence for viewing, returning the real file when present or a branded PDF record for internal evidence."""
     file_url, source = await _resolve_file_url_for_id(record_id)
     if not source:
         raise HTTPException(status_code=404, detail="Training record not found")
-    if not file_url:
-        raise HTTPException(status_code=404, detail="No certificate file found for this training")
-    
-    try:
-        file_bytes, stored_content_type = get_object(file_url)
-        
-        # Determine content type from extension or use stored type
-        ext = file_url.split('.')[-1].lower()
-        content_types = {
-            'pdf': 'application/pdf',
-            'jpg': 'image/jpeg',
-            'jpeg': 'image/jpeg',
-            'png': 'image/png',
-            'doc': 'application/msword',
-            'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-        }
-        content_type = content_types.get(ext, stored_content_type)
-        
-        return Response(content=file_bytes, media_type=content_type)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve certificate: {str(e)}")
+
+    if file_url:
+        try:
+            file_bytes, stored_content_type = get_object(file_url)
+
+            ext = file_url.split('.')[-1].lower()
+            content_types = {
+                'pdf': 'application/pdf',
+                'jpg': 'image/jpeg',
+                'jpeg': 'image/jpeg',
+                'png': 'image/png',
+                'doc': 'application/msword',
+                'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+            }
+            content_type = content_types.get(ext, stored_content_type)
+
+            return Response(content=file_bytes, media_type=content_type)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to retrieve certificate: {str(e)}")
+
+    if _is_internal_training_evidence_record(source):
+        pdf_bytes = await _generate_internal_training_evidence_pdf(source)
+        filename = f"training_evidence_{record_id}.pdf"
+        return Response(
+            content=pdf_bytes,
+            media_type='application/pdf',
+            headers={"Content-Disposition": f"inline; filename={filename}"},
+        )
+
+    raise HTTPException(status_code=404, detail="No certificate file found for this training")
+
+
+@api_router.get("/training-records/{record_id}/certificate/file")
+async def get_training_certificate_file(record_id: str, user: dict = Depends(get_current_user)):
+    """Get certificate file for viewing."""
+    return await get_training_evidence_file(record_id, user)
 
 
 @api_router.get("/training-records/{record_id}/certificate/download")
@@ -23528,21 +23595,30 @@ async def download_training_certificate(record_id: str, user: dict = Depends(get
     file_url, source = await _resolve_file_url_for_id(record_id)
     if not source:
         raise HTTPException(status_code=404, detail="Training record not found")
-    if not file_url:
-        raise HTTPException(status_code=404, detail="No certificate file found for this training")
-    
-    try:
-        file_bytes, _ = get_object(file_url)
-        
-        filename = source.get('original_filename') or source.get('file_name') or f"{source.get('training_name', 'training')}_certificate.pdf"
-        
+    if file_url:
+        try:
+            file_bytes, _ = get_object(file_url)
+
+            filename = source.get('original_filename') or source.get('file_name') or f"{source.get('training_name', 'training')}_certificate.pdf"
+
+            return Response(
+                content=file_bytes,
+                media_type='application/octet-stream',
+                headers={"Content-Disposition": f"attachment; filename={filename}"}
+            )
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to download certificate: {str(e)}")
+
+    if _is_internal_training_evidence_record(source):
+        pdf_bytes = await _generate_internal_training_evidence_pdf(source)
+        filename = f"{(source.get('training_name') or 'training').replace(' ', '_')}_evidence_record.pdf"
         return Response(
-            content=file_bytes, 
+            content=pdf_bytes,
             media_type='application/octet-stream',
-            headers={"Content-Disposition": f"attachment; filename={filename}"}
+            headers={"Content-Disposition": f"attachment; filename={filename}"},
         )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to download certificate: {str(e)}")
+
+    raise HTTPException(status_code=404, detail="No certificate file found for this training")
 
 
 @api_router.post("/employees/{employee_id}/training/{requirement_id}/upload-certificate")

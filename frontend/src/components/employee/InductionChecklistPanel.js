@@ -12,10 +12,49 @@ import { formatBackendDate } from '../../lib/dateUtils';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
+async function openAuthenticatedBlob(route, fallbackName = 'evidence.pdf') {
+  const token = localStorage.getItem('token');
+  const response = await axios.get(
+    route.startsWith('http') ? route : `${API}${route}`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+      responseType: 'blob',
+    }
+  );
+  const contentType = response.headers['content-type'] || response.data?.type || 'application/octet-stream';
+  const blob = new Blob([response.data], { type: contentType });
+  const objectUrl = window.URL.createObjectURL(blob);
+  const openedWindow = window.open(objectUrl, '_blank', 'noopener,noreferrer');
+  if (!openedWindow) {
+    const link = document.createElement('a');
+    link.href = objectUrl;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.download = fallbackName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
+  window.setTimeout(() => window.URL.revokeObjectURL(objectUrl), 60000);
+}
+
 // ─── Evidence detail modal ──────────────────────────────────────────────────
 
 function EvidenceModal({ item, onClose }) {
   const evidence = item.linked_evidence || [];
+  const [openingRoute, setOpeningRoute] = useState(null);
+
+  const handleOpenEvidence = async (ev) => {
+    if (!ev?.view_route) return;
+    setOpeningRoute(ev.view_route);
+    try {
+      await openAuthenticatedBlob(ev.view_route, ev.file_name || ev.title || 'evidence.pdf');
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to open evidence file.');
+    } finally {
+      setOpeningRoute(null);
+    }
+  };
 
   return (
     <div
@@ -53,14 +92,14 @@ function EvidenceModal({ item, onClose }) {
               </div>
               {ev.view_route && (
                 <div className="pl-5">
-                  <a
-                    href={`${API}${ev.view_route}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 text-[11px] text-blue-600 hover:text-blue-800 hover:underline"
+                  <button
+                    type="button"
+                    onClick={() => handleOpenEvidence(ev)}
+                    disabled={openingRoute === ev.view_route}
+                    className="inline-flex items-center gap-1 text-[11px] text-blue-600 hover:text-blue-800 hover:underline disabled:opacity-60"
                   >
-                    <Eye className="h-3 w-3" /> Open file
-                  </a>
+                    {openingRoute === ev.view_route ? <Loader2 className="h-3 w-3 animate-spin" /> : <Eye className="h-3 w-3" />} Open file
+                  </button>
                 </div>
               )}
             </div>
@@ -209,6 +248,7 @@ function SubmissionViewModal({ employeeId, item, onClose, onSignOff, onReturn, o
   const [adminNotes, setAdminNotes] = useState('');
   const [reopenReason, setReopenReason] = useState('');
   const [showReopen, setShowReopen] = useState(false);
+  const [openingEvidence, setOpeningEvidence] = useState(false);
 
   const getErrorMessage = (err, fallback) => {
     const detail = err?.response?.data?.detail;
@@ -307,6 +347,18 @@ function SubmissionViewModal({ employeeId, item, onClose, onSignOff, onReturn, o
   const schema = data?.schema || {};
   const submittedData = data?.submitted_data || {};
   const fields = schema.fields || [];
+
+  const handleOpenEvidenceRecord = async () => {
+    if (!item?.evidence_view_route) return;
+    setOpeningEvidence(true);
+    try {
+      await openAuthenticatedBlob(item.evidence_view_route, `${item.code || 'induction'}_evidence.pdf`);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to open evidence record.');
+    } finally {
+      setOpeningEvidence(false);
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 overflow-y-auto py-10 px-4">
@@ -414,6 +466,16 @@ function SubmissionViewModal({ employeeId, item, onClose, onSignOff, onReturn, o
           <button onClick={onClose} className="text-sm text-slate-500 hover:text-slate-700">Close</button>
           {!loading && (subStatus === 'submitted' || subStatus === 'signed_off') && (
             <div className="flex gap-2">
+              {subStatus === 'signed_off' && item?.evidence_view_route && (
+                <Button
+                  variant="outline" size="sm"
+                  onClick={handleOpenEvidenceRecord}
+                  disabled={acting || openingEvidence}
+                >
+                  {openingEvidence ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <FileText className="h-3 w-3 mr-1" />}
+                  Evidence record
+                </Button>
+              )}
               {!showReturn && !showReopen ? (
                 <>
                   <Button
@@ -497,6 +559,14 @@ export default function InductionChecklistPanel({ employeeId, employeeName, isAu
   useEffect(() => {
     if (employeeId) fetchChecklist();
   }, [employeeId, fetchChecklist]);
+
+  const openEvidenceRecord = useCallback(async (route, fileName) => {
+    try {
+      await openAuthenticatedBlob(route, fileName);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to open evidence record.');
+    }
+  }, []);
 
   const updateItem = async (itemName, newStatus, notes = '', extraPayload = {}) => {
     setUpdating(itemName);
@@ -768,13 +838,24 @@ export default function InductionChecklistPanel({ employeeId, employeeName, isAu
                         </Button>
                       )}
                       {isHybrid && isComplete && (
-                        <Button
-                          size="sm" variant="ghost"
-                          onClick={() => setViewSubmissionItem(item)}
-                          className="h-8 px-3 text-xs rounded-lg text-slate-400"
-                        >
-                          <Eye className="h-3 w-3 mr-1" /> View
-                        </Button>
+                        <>
+                          <Button
+                            size="sm" variant="ghost"
+                            onClick={() => setViewSubmissionItem(item)}
+                            className="h-8 px-3 text-xs rounded-lg text-slate-400"
+                          >
+                            <Eye className="h-3 w-3 mr-1" /> View
+                          </Button>
+                          {item.evidence_view_route && (
+                            <Button
+                              size="sm" variant="ghost"
+                              onClick={() => openEvidenceRecord(item.evidence_view_route, `${item.code || 'induction'}_evidence.pdf`)}
+                              className="h-8 px-3 text-xs rounded-lg text-slate-400 hover:text-slate-600"
+                            >
+                              <FileText className="h-3 w-3 mr-1" /> Evidence
+                            </Button>
+                          )}
+                        </>
                       )}
 
                       {/* Manual (shadow shift) sign-off */}
@@ -786,6 +867,15 @@ export default function InductionChecklistPanel({ employeeId, employeeName, isAu
                           className="h-8 px-3 text-xs rounded-lg hover:bg-green-50 hover:text-green-700 hover:border-green-300"
                         >
                           {updating === item.name ? <Loader2 className="h-3 w-3 animate-spin" /> : <><CheckCircle className="h-3 w-3 mr-1" />Sign off</>}
+                        </Button>
+                      )}
+                      {isManual && isComplete && item.evidence_view_route && (
+                        <Button
+                          size="sm" variant="ghost"
+                          onClick={() => openEvidenceRecord(item.evidence_view_route, `${item.code || 'induction'}_evidence.pdf`)}
+                          className="h-8 px-3 text-xs rounded-lg text-slate-400 hover:text-slate-600"
+                        >
+                          <FileText className="h-3 w-3 mr-1" /> Evidence
                         </Button>
                       )}
 

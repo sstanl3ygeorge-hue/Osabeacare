@@ -14,8 +14,11 @@ from induction_definitions import (
     TRAINING_TO_INDUCTION_MAP,
     get_induction_item_for_training,
 )
+from care_certificate_config import get_config_for_item
+from care_certificate_forms import get_worker_form_schema
 from services.pdf_service import generate_admin_form_pdf, generate_induction_pdf_content
 from services.pdf_service import create_pdf_styles
+from services.pdf_service import generate_evidence_record_pdf
 
 
 def _std_by_id(std_id: str):
@@ -110,12 +113,19 @@ def test_questionnaire_source_type_is_treated_as_temporary_internal():
     assert computed["computed_status"] == "expired"
 
 
-def test_equality_and_diversity_is_manual_only_and_not_auto_completed_from_training():
+def test_equality_and_diversity_uses_hybrid_form_and_not_training_sync():
     standard = _std_by_id("equality_diversity")
     assert standard is not None
     assert standard.get("training_sync") is None
-    assert INDUCTION_RULE_METADATA["equality_diversity"]["completion_type"] == "manual"
+    assert INDUCTION_RULE_METADATA["equality_diversity"]["completion_type"] == "hybrid"
     assert TRAINING_TO_INDUCTION_MAP.get("equality_diversity") is None
+    cfg = get_config_for_item("equality_diversity")
+    assert cfg is not None
+    assert cfg.get("completion_type") == "hybrid"
+    assert cfg.get("worker_form_id") == "cc_equality_diversity"
+    form_schema = get_worker_form_schema("cc_equality_diversity")
+    assert form_schema.get("standard_code") == "equality_diversity"
+    assert len(form_schema.get("fields", [])) >= 3
 
 
 def test_safeguarding_and_bls_still_auto_map_to_induction():
@@ -152,3 +162,28 @@ def test_induction_pdf_includes_signed_off_by_column_and_renders():
     )
     assert isinstance(pdf_bytes, (bytes, bytearray))
     assert len(pdf_bytes) > 0
+
+
+def test_evidence_record_pdf_renders_internal_temporary_notice():
+    pdf_bytes = generate_evidence_record_pdf(
+        "Training Evidence Record",
+        {"first_name": "Test", "last_name": "User", "employee_code": "E001"},
+        {
+            "item_name": "Health and Safety",
+            "evidence_type": "Temporary internal evidence",
+            "source_label": "Internal course completion",
+            "completed_at": "2026-01-10",
+            "reviewed_label": "Verified by",
+            "reviewed_by": "Manager A",
+            "reviewed_at": "2026-01-11",
+            "expiry_date": "2026-04-10",
+            "record_reference": "rec-123",
+            "notes": [
+                "Temporary internal evidence valid for 90 days. External certificate required before expiry.",
+            ],
+        },
+    )
+
+    assert isinstance(pdf_bytes, (bytes, bytearray))
+    assert len(pdf_bytes) > 0
+    assert pdf_bytes.startswith(b"%PDF")

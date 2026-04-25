@@ -201,6 +201,58 @@ CC_WORKER_FORMS = {
         ],
     },
 
+    # ── Standard 4: Equality and Diversity ──────────────────────────────────
+    "cc_equality_diversity": {
+        "form_id": "cc_equality_diversity",
+        "standard_code": "equality_diversity",
+        "standard_number": 4,
+        "title": "Equality and Diversity",
+        "description": (
+            "Answer the questions below to confirm you understand equality, diversity, "
+            "inclusion, and respectful practice in your role."
+        ),
+        "fields": [
+            {
+                "key": "inclusive_practice",
+                "label": "Describe how you will promote equality, diversity, dignity, and inclusion in your day-to-day work.",
+                "helper_text": "Tip: Think about how you treat people fairly, respect differences, and adapt your approach to the individual.",
+                "type": "textarea",
+                "required": True,
+                "max_words": 80,
+                "role_prompt_key": "equality_diversity",
+            },
+            {
+                "key": "discrimination_response",
+                "label": "What would you do if you saw or heard discriminatory behaviour from a colleague, visitor, or service user?",
+                "helper_text": "Tip: Explain how you would keep people safe, challenge poor practice appropriately, and report the concern.",
+                "type": "textarea",
+                "required": True,
+                "max_words": 70,
+            },
+            {
+                "key": "reasonable_adjustments",
+                "label": "How would you make sure someone is supported in a way that respects their identity, culture, beliefs, or communication needs?",
+                "helper_text": "Tip: Think about preferences, protected characteristics, reasonable adjustments, and communication support.",
+                "type": "textarea",
+                "required": True,
+                "max_words": 70,
+            },
+            {
+                "key": "edi_topics_covered",
+                "label": "Which of the following have been covered during your induction?",
+                "type": "checkboxes",
+                "required": True,
+                "options": [
+                    {"value": "protected_characteristics", "label": "Protected characteristics and fair treatment"},
+                    {"value": "challenging_discrimination", "label": "Challenging discrimination or exclusion"},
+                    {"value": "reasonable_adjustments", "label": "Reasonable adjustments and accessible communication"},
+                    {"value": "human_rights", "label": "Human rights, dignity, and respect"},
+                    {"value": "reporting_concerns", "label": "Reporting concerns and escalating poor practice"},
+                ],
+            },
+        ],
+    },
+
     # ── Standard 5: Work in a Person-Centred Way ──────────────────────────────
     "cc_person_centred_care": {
         "form_id": "cc_person_centred_care",

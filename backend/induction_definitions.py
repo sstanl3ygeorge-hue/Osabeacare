@@ -21,7 +21,7 @@ CARE_CERTIFICATE_STANDARDS = [
     {"id": "understand_your_role",    "num": 1,  "name": "Understand Your Role",                                                     "training_sync": None,                    "auto_complete": "manual"},
     {"id": "personal_development",    "num": 2,  "name": "Your Personal Development",                                                "training_sync": None,                    "auto_complete": "manual"},
     {"id": "duty_of_care",            "num": 3,  "name": "Duty of Care",                                                             "training_sync": None,                    "auto_complete": "manual"},
-    {"id": "equality_diversity",      "num": 4,  "name": "Equality and Diversity",                                                   "training_sync": None,                    "auto_complete": "manual"},
+    {"id": "equality_diversity",      "num": 4,  "name": "Equality and Diversity",                                                   "training_sync": None,                    "auto_complete": "hybrid"},
     {"id": "work_person_centred",     "num": 5,  "name": "Work in a Person-Centred Way",                                             "training_sync": None,                    "auto_complete": "manual"},
     {"id": "communication",           "num": 6,  "name": "Communication",                                                            "training_sync": None,                    "auto_complete": "interview"},
     {"id": "privacy_dignity",         "num": 7,  "name": "Privacy and Dignity",                                                      "training_sync": None,                    "auto_complete": "manual"},
@@ -75,11 +75,11 @@ INDUCTION_RULE_METADATA = {
         "next_action": "Worker must complete and submit the self-assessment form.",
     },
     "equality_diversity": {
-        "description": "Confirms equality, diversity, inclusion, and human rights standards have been reviewed and signed off.",
-        "completion_type": "manual",
-        "evidence_sources": ["manager_signoff"],
-        "completion_rules": ["Manager sign-off is required for this standard."],
-        "next_action": "Manager must review evidence and sign off this standard.",
+        "description": "Confirms equality, diversity, inclusion, and human rights standards have been reviewed through worker self-assessment and manager sign-off.",
+        "completion_type": "hybrid",
+        "evidence_sources": ["worker_submission", "manager_signoff"],
+        "completion_rules": ["Worker must submit a self-assessment form. Admin must sign off."],
+        "next_action": "Worker must complete and submit the self-assessment form.",
     },
     "work_person_centred": {
         "description": "Confirms the worker understands person-centred care and individual preferences.",
@@ -448,15 +448,16 @@ def _build_training_evidence_by_induction(training_records: list, training_docs:
         induction_id = get_induction_item_for_training(training_code, training_name)
         if not induction_id:
             continue
+        record_id = tr.get("id") or tr.get("training_id") or tr.get("record_id")
         doc_id = tr.get("source_document_id") or tr.get("certificate_document_id") or tr.get("document_id")
         raw_source = tr.get("upload_source") or tr.get("source") or "training_record"
         evidence_by_item.setdefault(induction_id, []).append({
             "type": "training_record",
-            "id": tr.get("id") or tr.get("training_id") or tr.get("record_id"),
+            "id": record_id,
             "title": training_name or training_code,
             "code": training_code,
             "document_id": doc_id,
-            "view_route": f"/employee-documents/{doc_id}/file" if doc_id else None,
+            "view_route": f"/training-records/{record_id}/evidence/file" if record_id else (f"/employee-documents/{doc_id}/file" if doc_id else None),
             "source": "training_record",
             "source_label": _source_label(raw_source),
             "document_type": "training_certificate",
@@ -736,6 +737,11 @@ async def get_employee_induction_status(
             "next_action": None if is_completed else rule["next_action"],
             "linked_evidence_ids": [e.get("id") for e in linked_evidence if e.get("id")],
             "linked_evidence": linked_evidence,
+            "evidence_view_route": (
+                f"/employees/{employee_id}/induction/items/{std_id}/evidence/file"
+                if is_completed and completion_type in ["hybrid", "manual"] and not synced_from_training
+                else None
+            ),
             "status": "completed" if is_completed else "pending",
             "completed": is_completed,
             "completed_at": completed_at,

@@ -21,7 +21,7 @@ from .dependencies import (
     get_db, get_current_user, require_admin, require_manager_or_admin,
     log_audit_action
 )
-from services.pdf_service import generate_admin_form_pdf
+from services.pdf_service import generate_admin_form_pdf, generate_evidence_record_pdf
 from induction_definitions import (
     DEFAULT_INDUCTION_ITEMS,
     INDUCTION_NAME_TO_TRAINING_PATTERNS,
@@ -150,6 +150,7 @@ async def get_induction_checklist(
             "role_relevance": item.get("role_relevance"),
             "linked_evidence_ids": item.get("linked_evidence_ids", []),
             "linked_evidence": item.get("linked_evidence", []),
+            "evidence_view_route": item.get("evidence_view_route"),
             "notes": item.get("notes"),
             "shadow_shift_signoff": item.get("shadow_shift_signoff"),
             "completed_at": item["completed_at"],
@@ -778,6 +779,108 @@ async def get_item_submission(
         "admin_notes": (submission or {}).get("admin_notes"),
         "status_history": (submission or {}).get("status_history", []),
     }
+
+
+@router.get("/employees/{employee_id}/induction/items/{item_code}/evidence/file")
+async def get_induction_item_evidence_file(
+    employee_id: str,
+    item_code: str,
+    user: dict = Depends(require_manager_or_admin),
+):
+    """Generate a branded evidence record PDF for internal induction evidence."""
+    db = get_db()
+
+    employee = await db.employees.find_one(
+        {"id": employee_id},
+        {"_id": 0, "id": 1, "first_name": 1, "last_name": 1, "employee_code": 1, "applicant_reference": 1},
+    )
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    submission_by_id = await db.induction_item_submissions.find_one(
+        {"employee_id": employee_id, "id": item_code}, {"_id": 0}
+    )
+    target = _resolve_induction_item_target(item_code, submission_by_id)
+    cfg = target["cfg"]
+    if not cfg:
+        raise HTTPException(status_code=404, detail=f"Unknown induction item code: {item_code}")
+    if cfg.get("completion_type") == "automatic":
+        raise HTTPException(status_code=400, detail="Automatic items use linked training evidence files.")
+
+    checklist = await db.induction_checklists.find_one({"employee_id": employee_id}, {"_id": 0})
+    checklist_item = None
+    if checklist:
+        ensure_checklist_list_format(checklist)
+        checklist_item = next(
+            (
+                item for item in checklist.get("items", [])
+                if item.get("id") == target["item_code"] or item.get("name") == cfg.get("title")
+            ),
+            None,
+        )
+
+    submission = submission_by_id or await db.induction_item_submissions.find_one(
+        {"employee_id": employee_id, "form_id": target.get("form_id")}, {"_id": 0}
+    )
+
+    completed_at = (
+        (checklist_item or {}).get("completed_at")
+        or (submission or {}).get("signoff_at")
+        or (submission or {}).get("submitted_at")
+    )
+    signed_off_by = (
+        (checklist_item or {}).get("completed_by_name")
+        or (submission or {}).get("signoff_by_name")
+        or (submission or {}).get("signoff_by")
+    )
+
+    if not completed_at and not signed_off_by and not checklist_item and not submission:
+        raise HTTPException(status_code=404, detail="No induction evidence record found for this item")
+
+    evidence_type = "Worker self-assessment and manager sign-off"
+    notes = []
+    if cfg.get("completion_type") == "manual":
+        evidence_type = "Manager sign-off"
+        shadow_shift = (checklist_item or {}).get("shadow_shift_signoff") or {}
+        if shadow_shift.get("shift_date"):
+            notes.append(f"Shadow shift date: {shadow_shift['shift_date']}")
+        if shadow_shift.get("location_unit"):
+            notes.append(f"Location / unit: {shadow_shift['location_unit']}")
+        if shadow_shift.get("supervisor_name"):
+            notes.append(f"Supervisor: {shadow_shift['supervisor_name']}")
+        if shadow_shift.get("summary_notes"):
+            notes.append(f"Summary: {shadow_shift['summary_notes']}")
+        if shadow_shift.get("follow_up_actions"):
+            notes.append(f"Follow-up actions: {shadow_shift['follow_up_actions']}")
+    else:
+        notes.append("Worker self-assessment submitted and reviewed as part of the Care Certificate induction process.")
+        if (submission or {}).get("admin_notes"):
+            notes.append(f"Manager notes: {(submission or {}).get('admin_notes')}")
+    if (checklist_item or {}).get("notes"):
+        notes.append(f"Checklist notes: {(checklist_item or {}).get('notes')}")
+
+    pdf_bytes = generate_evidence_record_pdf(
+        "Induction Evidence Record",
+        employee,
+        {
+            "item_name": cfg.get("title") or target["item_code"],
+            "evidence_type": evidence_type,
+            "source_label": "Internal induction record",
+            "completed_at": completed_at,
+            "reviewed_label": "Signed off by",
+            "reviewed_by": signed_off_by,
+            "reviewed_at": (submission or {}).get("signoff_at") or completed_at,
+            "record_reference": (submission or {}).get("id") or target["item_code"],
+            "notes": notes,
+        },
+    )
+
+    filename = f"induction_evidence_{employee_id}_{target['item_code']}.pdf"
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"inline; filename={filename}"},
+    )
 
 
 @router.post("/employees/{employee_id}/induction/items/{item_code}/signoff")

@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
+from .care_plans import CARE_PLAN_REQUIRED_SECTIONS
 
 from .dependencies import (
     get_db,
@@ -271,6 +272,253 @@ async def get_service_user_sections_legacy_alias(user: dict = Depends(require_ma
     """Legacy alias for service-user sections. Keep for backward compatibility."""
     return {
         **_service_user_sections_payload()
+    }
+
+
+def _parse_iso_datetime(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _status_from_bool(ready: bool) -> str:
+    return "ready" if ready else "missing"
+
+
+def _collect_missing_fields(record: Dict[str, Any], required_fields: List[str]) -> List[str]:
+    return [field for field in required_fields if not record.get(field)]
+
+
+def _doc_matches_keywords(doc: Dict[str, Any], keywords: List[str]) -> bool:
+    text = " ".join([
+        str(doc.get("document_type") or ""),
+        str(doc.get("title") or ""),
+        str(doc.get("notes") or ""),
+    ]).lower()
+    return any(keyword in text for keyword in keywords)
+
+
+@router.get("/service-users/{service_user_id}/onboarding-readiness")
+async def get_service_user_onboarding_readiness(
+    service_user_id: str,
+    user: dict = Depends(require_manager_or_admin),
+):
+    """Read-only onboarding readiness summary for service-user profile dashboards."""
+    db = get_db()
+    service_user = await db.service_users.find_one({"id": service_user_id}, {"_id": 0})
+    if not service_user:
+        raise HTTPException(status_code=404, detail="Service user not found")
+
+    documents = await db.service_user_documents.find(
+        {"service_user_id": service_user_id},
+        {"_id": 0},
+    ).to_list(2000)
+
+    active_care_plan = await db.service_user_care_plans.find_one(
+        {"service_user_id": service_user_id, "status": "active"},
+        {"_id": 0},
+        sort=[("updated_at", -1), ("created_at", -1)],
+    )
+
+    docs_by_section: Dict[str, List[Dict[str, Any]]] = {}
+    for doc in documents:
+        docs_by_section.setdefault(doc.get("section_id") or "", []).append(doc)
+
+    section_statuses = active_care_plan.get("section_statuses") if active_care_plan else {}
+    section_statuses = section_statuses or {}
+
+    rows: List[Dict[str, Any]] = []
+
+    personal_required = [
+        "full_name",
+        "date_of_birth",
+        "nhs_number",
+        "address_line_1",
+        "postcode",
+        "phone",
+    ]
+    missing_personal = _collect_missing_fields(service_user, personal_required)
+    rows.append({
+        "key": "personal_details_complete",
+        "label": "Personal details complete",
+        "status": _status_from_bool(len(missing_personal) == 0),
+        "reason": "Complete" if len(missing_personal) == 0 else f"Missing: {', '.join(missing_personal)}",
+        "target_tab": "overview",
+    })
+
+    emergency_required = [
+        "emergency_contact_name",
+        "emergency_contact_phone",
+        "emergency_contact_relationship",
+    ]
+    missing_emergency = _collect_missing_fields(service_user, emergency_required)
+    rows.append({
+        "key": "emergency_contacts_added",
+        "label": "Emergency contacts added",
+        "status": _status_from_bool(len(missing_emergency) == 0),
+        "reason": "Complete" if len(missing_emergency) == 0 else f"Missing: {', '.join(missing_emergency)}",
+        "target_tab": "overview",
+    })
+
+    professional_required = ["gp_name", "gp_surgery", "gp_phone"]
+    missing_professional = _collect_missing_fields(service_user, professional_required)
+    rows.append({
+        "key": "professional_contacts_added",
+        "label": "Professional contacts added",
+        "status": _status_from_bool(len(missing_professional) == 0),
+        "reason": "Complete" if len(missing_professional) == 0 else f"Missing: {', '.join(missing_professional)}",
+        "target_tab": "overview",
+    })
+
+    consent_docs = docs_by_section.get("2_consent_contracts", []) + docs_by_section.get("3_assessments", [])
+    has_consent_capacity_doc = any(
+        _doc_matches_keywords(doc, ["consent", "capacity"]) for doc in consent_docs
+    )
+    consent_section_complete = (section_statuses.get("Consent and capacity") == "complete") if active_care_plan else False
+    consent_ready = has_consent_capacity_doc or consent_section_complete
+    rows.append({
+        "key": "consent_capacity_recorded",
+        "label": "Consent/capacity recorded",
+        "status": _status_from_bool(consent_ready),
+        "reason": "Recorded" if consent_ready else "Add consent/capacity evidence or complete care-plan section",
+        "target_tab": "2_consent_contracts",
+    })
+
+    has_active_care_plan = active_care_plan is not None
+    rows.append({
+        "key": "active_care_plan_exists",
+        "label": "Active care plan exists",
+        "status": _status_from_bool(has_active_care_plan),
+        "reason": "Active care plan found" if has_active_care_plan else "No active care plan",
+        "target_tab": "4_care_plans",
+    })
+
+    if has_active_care_plan:
+        not_complete_sections = [
+            section_name for section_name in CARE_PLAN_REQUIRED_SECTIONS
+            if section_statuses.get(section_name) != "complete"
+        ]
+        has_review_due_sections = any(
+            section_statuses.get(section_name) == "review_due" for section_name in CARE_PLAN_REQUIRED_SECTIONS
+        )
+        if not_complete_sections:
+            section_status = "review_due" if has_review_due_sections else "missing"
+            section_reason = f"Incomplete: {', '.join(not_complete_sections[:3])}"
+            if len(not_complete_sections) > 3:
+                section_reason += f" (+{len(not_complete_sections) - 3} more)"
+        else:
+            section_status = "ready"
+            section_reason = "All required care-plan sections complete"
+    else:
+        section_status = "missing"
+        section_reason = "No active care plan"
+
+    rows.append({
+        "key": "care_plan_sections_complete",
+        "label": "Care plan sections complete",
+        "status": section_status,
+        "reason": section_reason,
+        "target_tab": "4_care_plans",
+    })
+
+    if has_active_care_plan:
+        review_due_raw = active_care_plan.get("next_review_due_at") or active_care_plan.get("review_due_at")
+        review_due_dt = _parse_iso_datetime(review_due_raw)
+        now = datetime.now(timezone.utc)
+        if not review_due_dt:
+            review_status = "missing"
+            review_reason = "Review due date not recorded"
+        elif review_due_dt < now:
+            review_status = "review_due"
+            review_reason = "Review overdue"
+        else:
+            review_status = "ready"
+            review_reason = "Review date current"
+    else:
+        review_status = "missing"
+        review_reason = "No active care plan"
+
+    rows.append({
+        "key": "review_date_not_overdue",
+        "label": "Review date not overdue",
+        "status": review_status,
+        "reason": review_reason,
+        "target_tab": "4_care_plans",
+    })
+
+    risk_docs = docs_by_section.get("5_risk_assessments", [])
+    has_risk_docs = len(risk_docs) > 0
+    risk_section_complete = (section_statuses.get("Risk assessments") == "complete") if has_active_care_plan else False
+    risk_ready = has_risk_docs or risk_section_complete
+    rows.append({
+        "key": "risk_assessments_complete",
+        "label": "Risk assessments complete",
+        "status": _status_from_bool(risk_ready),
+        "reason": "Recorded" if risk_ready else "No risk-assessment evidence found",
+        "target_tab": "5_risk_assessments",
+    })
+
+    notes_text = str(service_user.get("notes") or "").lower()
+
+    def optional_document_row(key: str, label: str, keywords: List[str], target_tab: str) -> Dict[str, Any]:
+        has_doc = any(_doc_matches_keywords(doc, keywords) for doc in documents)
+        applicable = any(keyword in notes_text for keyword in keywords)
+        if has_doc:
+            status = "ready"
+            reason = "Recorded"
+        elif applicable:
+            status = "missing"
+            reason = "Marked applicable but document not uploaded"
+        else:
+            status = "ready"
+            reason = "Not marked as applicable"
+        return {
+            "key": key,
+            "label": label,
+            "status": status,
+            "reason": reason,
+            "target_tab": target_tab,
+        }
+
+    rows.append(optional_document_row(
+        "peep_recorded_if_applicable",
+        "PEEP recorded if applicable",
+        ["peep", "personal emergency evacuation plan"],
+        "5_risk_assessments",
+    ))
+    rows.append(optional_document_row(
+        "dnacpr_recorded_if_applicable",
+        "DNACPR recorded if applicable",
+        ["dnacpr", "do not attempt cardiopulmonary resuscitation"],
+        "2_consent_contracts",
+    ))
+    rows.append(optional_document_row(
+        "hospital_passport_or_health_overview_if_applicable",
+        "Hospital passport / health overview uploaded if applicable",
+        ["hospital passport", "health overview"],
+        "8_health_visits",
+    ))
+
+    has_missing = any(row.get("status") == "missing" for row in rows)
+    has_review_due = any(row.get("status") == "review_due" for row in rows)
+    overall_status = "missing" if has_missing else ("review_due" if has_review_due else "ready")
+
+    return {
+        "service_user_id": service_user_id,
+        "overall_status": overall_status,
+        "rows": rows,
+        "counts": {
+            "total": len(rows),
+            "ready": len([row for row in rows if row.get("status") == "ready"]),
+            "missing": len([row for row in rows if row.get("status") == "missing"]),
+            "review_due": len([row for row in rows if row.get("status") == "review_due"]),
+        },
     }
 
 

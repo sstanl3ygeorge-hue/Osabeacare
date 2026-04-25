@@ -68,6 +68,10 @@ export default function EmployeesPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [viewMode, setViewMode] = useState(searchParams.get('view') === 'compliance' ? 'compliance' : 'staff');
+  const [complianceStatusFilter, setComplianceStatusFilter] = useState(searchParams.get('compliance_status') || 'all');
+  const [complianceRows, setComplianceRows] = useState([]);
+  const [complianceLoading, setComplianceLoading] = useState(false);
   
   // Initialize state from URL params for navigation state persistence
   const [search, setSearch] = useState(searchParams.get('q') || '');
@@ -107,6 +111,10 @@ export default function EmployeesPage() {
   useEffect(() => {
     const newParams = new URLSearchParams();
     if (search) newParams.set('q', search);
+    if (viewMode === 'compliance') newParams.set('view', 'compliance');
+    if (viewMode === 'compliance' && complianceStatusFilter && complianceStatusFilter !== 'all') {
+      newParams.set('compliance_status', complianceStatusFilter);
+    }
     if (statusFilter) newParams.set('status', statusFilter);
     if (onboardingStatusFilter) newParams.set('onboarding', onboardingStatusFilter);
     if (workReadinessFilter === 'READY_TO_WORK') newParams.set('is_work_ready', 'true');
@@ -122,7 +130,17 @@ export default function EmployeesPage() {
     if (currentString !== newString) {
       setSearchParams(newParams, { replace: true });
     }
-  }, [search, statusFilter, onboardingStatusFilter, workReadinessFilter, stagePreset, requirementFilter, showArchived]);
+  }, [
+    search,
+    viewMode,
+    complianceStatusFilter,
+    statusFilter,
+    onboardingStatusFilter,
+    workReadinessFilter,
+    stagePreset,
+    requirementFilter,
+    showArchived,
+  ]);
 
   const [newEmployee, setNewEmployee] = useState({
     first_name: '',
@@ -193,10 +211,37 @@ export default function EmployeesPage() {
     }
   };
 
+  const fetchComplianceDashboard = async () => {
+    setComplianceLoading(true);
+    try {
+      const response = await axios.get(`${API}/staff/compliance-dashboard`, {
+        params: {
+          status: complianceStatusFilter || 'all',
+        },
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setComplianceRows(response.data?.items || []);
+    } catch (error) {
+      console.error('Failed to fetch staff compliance dashboard:', error);
+      toast.error(error.response?.data?.detail || 'Failed to load compliance dashboard');
+      setComplianceRows([]);
+    } finally {
+      setComplianceLoading(false);
+    }
+  };
+
   useEffect(() => {
-    fetchEmployees();
-    fetchOnboardingStatuses();
-  }, [token, search, statusFilter, onboardingStatusFilter, showArchived]);
+    if (viewMode === 'staff') {
+      fetchEmployees();
+      fetchOnboardingStatuses();
+    }
+  }, [token, search, statusFilter, onboardingStatusFilter, showArchived, viewMode]);
+
+  useEffect(() => {
+    if (viewMode === 'compliance') {
+      fetchComplianceDashboard();
+    }
+  }, [token, viewMode, complianceStatusFilter]);
 
   const handleArchiveEmployee = async () => {
     if (!selectedEmployee) return;
@@ -515,6 +560,26 @@ export default function EmployeesPage() {
           <p className="text-xs text-text-muted/70 mt-0.5">
             Staff appear here after recruitment approval. Applicants are in the Recruitment Pipeline.
           </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant={viewMode === 'staff' ? 'default' : 'outline'}
+              className="rounded-xl"
+              onClick={() => setViewMode('staff')}
+            >
+              Staff List
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant={viewMode === 'compliance' ? 'default' : 'outline'}
+              className="rounded-xl"
+              onClick={() => setViewMode('compliance')}
+            >
+              Compliance Dashboard
+            </Button>
+          </div>
         </div>
         
         <div className="flex items-center gap-2">
@@ -687,6 +752,8 @@ export default function EmployeesPage() {
         </div>
       </div>
 
+      {viewMode === 'staff' ? (
+      <>
       {/* Filters */}
       <Card className="border-[#E4E8EB] shadow-sm">
         <CardContent className="p-4">
@@ -1090,6 +1157,128 @@ export default function EmployeesPage() {
           )}
         </CardContent>
       </Card>
+      </>
+      ) : (
+      <>
+      <Card className="border-[#E4E8EB] shadow-sm">
+        <CardContent className="p-4 flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
+          <div>
+            <p className="text-sm text-text-muted">
+              Read-only compliance view for rapid triage. Use profile links to resolve issues.
+            </p>
+          </div>
+          <Select
+            value={complianceStatusFilter}
+            onValueChange={(value) => setComplianceStatusFilter(value)}
+          >
+            <SelectTrigger className="w-full sm:w-48 rounded-xl" data-testid="compliance-status-filter">
+              <Shield className="h-4 w-4 mr-2" />
+              <SelectValue placeholder="Compliance Status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All</SelectItem>
+              <SelectItem value="compliant">Compliant</SelectItem>
+              <SelectItem value="missing">Missing</SelectItem>
+              <SelectItem value="expiring">Expiring Soon</SelectItem>
+              <SelectItem value="expired">Expired</SelectItem>
+            </SelectContent>
+          </Select>
+        </CardContent>
+      </Card>
+
+      <Card className="border-[#E4E8EB] shadow-sm">
+        <CardContent className="p-0">
+          {complianceLoading ? (
+            <div className="flex items-center justify-center h-64">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            </div>
+          ) : complianceRows.length === 0 ? (
+            <div className="text-center py-12 text-text-muted">
+              <Shield className="h-12 w-12 mx-auto mb-3 opacity-50" />
+              <p>No staff match the selected compliance filter</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-[#E4E8EB] bg-[#F8FAFA]">
+                    <th className="text-left p-4 font-medium text-text-muted text-sm">Employee</th>
+                    <th className="text-left p-4 font-medium text-text-muted text-sm hidden md:table-cell">Role</th>
+                    <th className="text-left p-4 font-medium text-text-muted text-sm">Status</th>
+                    <th className="text-left p-4 font-medium text-text-muted text-sm hidden lg:table-cell">Checklist Summary</th>
+                    <th className="text-left p-4 font-medium text-text-muted text-sm w-32">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {complianceRows.map((row) => {
+                    const statusClass = row.overall_status === 'compliant'
+                      ? 'status-success'
+                      : row.overall_status === 'expired'
+                        ? 'status-error'
+                        : row.overall_status === 'expiring'
+                          ? 'status-warning'
+                          : 'status-error';
+                    const statusLabel = row.overall_status === 'compliant'
+                      ? 'Compliant'
+                      : row.overall_status === 'expired'
+                        ? 'Expired'
+                        : row.overall_status === 'expiring'
+                          ? 'Expiring soon'
+                          : 'Missing items';
+                    const summaryChips = [
+                      ...(row.expired_items || []).slice(0, 2).map((item) => ({ label: item, tone: 'error' })),
+                      ...(row.missing_items || []).slice(0, 2).map((item) => ({ label: item, tone: 'error' })),
+                      ...(row.expiring_soon || []).slice(0, 2).map((item) => ({ label: item, tone: 'warning' })),
+                    ];
+
+                    return (
+                      <tr key={row.employee_id} className="border-b border-[#E4E8EB] hover:bg-[#F8FAFA] transition-colors">
+                        <td className="p-4">
+                          <Link to={`/portal/employees/${row.employee_id}`} className="font-medium text-text-primary hover:underline">
+                            {row.employee_name}
+                          </Link>
+                        </td>
+                        <td className="p-4 hidden md:table-cell text-text-primary">{row.job_title || row.role || '—'}</td>
+                        <td className="p-4">
+                          <span className={`status-chip ${statusClass}`}>
+                            {statusLabel}
+                          </span>
+                        </td>
+                        <td className="p-4 hidden lg:table-cell">
+                          <div className="flex flex-wrap gap-1">
+                            {summaryChips.length > 0 ? summaryChips.map((chip, index) => (
+                              <span
+                                key={`${row.employee_id}-chip-${index}`}
+                                className={`status-chip ${chip.tone === 'error' ? 'status-error' : 'status-warning'}`}
+                              >
+                                {chip.label}
+                              </span>
+                            )) : (
+                              <span className="text-xs text-text-muted">No open checklist items</span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="p-4">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => navigate(`/portal/employees/${row.employee_id}`)}
+                            className="rounded-xl"
+                          >
+                            Open Profile
+                          </Button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+      </>
+      )}
 
       {/* Archive Confirmation Dialog */}
       <Dialog open={archiveDialogOpen} onOpenChange={setArchiveDialogOpen}>

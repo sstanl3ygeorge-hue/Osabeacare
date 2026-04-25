@@ -15,7 +15,7 @@ all UI components (dashboard, profile, list badges, exports).
 
 import logging
 from datetime import datetime, timezone, timedelta
-from typing import Optional
+from typing import Optional, List, Dict, Any
 
 from fastapi import APIRouter, HTTPException, Depends, Query
 from stageGates import StageGateService
@@ -359,6 +359,28 @@ def calculate_audit_score(ready: int, review: int, pending: int,
         "color": color,
         "staff_readiness": staff_score
     }
+
+
+def _extract_requirement_rows(compliance_requirements: Any) -> List[Dict[str, Any]]:
+    if not compliance_requirements:
+        return []
+    if isinstance(compliance_requirements, list):
+        return [row for row in compliance_requirements if isinstance(row, dict)]
+    if isinstance(compliance_requirements, dict):
+        statuses = compliance_requirements.get("statuses") or {}
+        requirements = statuses.get("requirements")
+        if isinstance(requirements, list):
+            return [row for row in requirements if isinstance(row, dict)]
+    return []
+
+
+def _safe_lower(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def _append_unique(target: List[str], value: str):
+    if value and value not in target:
+        target.append(value)
 
 
 # ==================== READINESS ENDPOINTS ====================
@@ -934,6 +956,139 @@ async def get_audit_readiness_dashboard(user: dict = Depends(require_manager_or_
             ready_for_placement, under_review, documents_pending,
             policies_missing, insurance_missing, missing_critical
         )
+    }
+
+
+@router.get("/staff/compliance-dashboard")
+async def get_staff_compliance_dashboard(
+    status: str = Query(default="all"),
+    user: dict = Depends(require_manager_or_admin),
+):
+    """
+    Thin dashboard aggregation endpoint for cross-employee compliance triage.
+
+    Reuses existing employee list + compliance requirement evaluation + readiness reasons,
+    without introducing a second compliance engine.
+    """
+    allowed_filters = {"all", "compliant", "missing", "expiring", "expired"}
+    normalized_filter = _safe_lower(status) or "all"
+    if normalized_filter not in allowed_filters:
+        raise HTTPException(status_code=400, detail="Invalid status filter")
+
+    employees_repo = get_employees_repo()
+    get_compliance_requirements_for_employee = get_compliance_requirements_func()
+    calculate_work_readiness_3tier = get_work_readiness_3tier_func()
+    db = get_db()
+
+    employees = await employees_repo.list_employees(
+        projection={"_id": 0, "id": 1, "first_name": 1, "last_name": 1, "role": 1, "job_title": 1}
+    )
+
+    missing_statuses = {"missing", "pending", "not_started", "not_completed", "awaiting_review", "rejected"}
+    expiring_statuses = {"expiring", "expiring_soon", "due_soon", "urgent"}
+    expired_statuses = {"expired", "overdue"}
+
+    items: List[Dict[str, Any]] = []
+    for employee in employees:
+        employee_id = employee.get("id")
+        if not employee_id:
+            continue
+
+        compliance_requirements = await get_compliance_requirements_for_employee(employee_id, employee.get("role", ""))
+        requirement_rows = _extract_requirement_rows(compliance_requirements)
+
+        missing_items: List[str] = []
+        expiring_soon: List[str] = []
+        expired_items: List[str] = []
+
+        for requirement in requirement_rows:
+            label = (
+                requirement.get("name")
+                or requirement.get("label")
+                or requirement.get("title")
+                or requirement.get("key")
+                or requirement.get("id")
+                or "Unknown requirement"
+            )
+            req_status = _safe_lower(requirement.get("status"))
+            if req_status in expired_statuses:
+                _append_unique(expired_items, label)
+            elif req_status in expiring_statuses:
+                _append_unique(expiring_soon, label)
+            elif req_status in missing_statuses:
+                _append_unique(missing_items, label)
+
+        blockers: List[str] = []
+        warnings: List[str] = []
+
+        cached_summary = await db.employee_compliance_summary.find_one(
+            {"employee_id": employee_id},
+            {"_id": 0, "blockers": 1, "warnings": 1, "requirements": 1},
+        )
+        for blocker in (cached_summary or {}).get("blockers", []):
+            blocker_message = blocker.get("reason") or blocker.get("label") or blocker.get("requirement")
+            _append_unique(blockers, str(blocker_message or ""))
+        for warning in (cached_summary or {}).get("warnings", []):
+            warning_message = warning.get("message") or warning.get("label") or warning.get("requirement")
+            _append_unique(warnings, str(warning_message or ""))
+
+        readiness = await calculate_work_readiness_3tier(
+            employee_id,
+            requirement_rows,
+            employee,
+            employee.get("role", ""),
+        )
+        for reason in readiness.get("reasons", []) or []:
+            reason_message = str(reason.get("message") or reason.get("code") or "").strip()
+            if not reason_message:
+                continue
+            reason_type = _safe_lower(reason.get("type"))
+            if reason_type in {"hard_block", "blocker"}:
+                _append_unique(blockers, reason_message)
+            else:
+                _append_unique(warnings, reason_message)
+
+        # Ensure employment gaps and interview signals are represented if pending.
+        for requirement in requirement_rows:
+            req_key = _safe_lower(requirement.get("key") or requirement.get("id"))
+            req_status = _safe_lower(requirement.get("status"))
+            req_name = requirement.get("name") or requirement.get("label") or req_key
+            if req_key in {"employment_history_verification", "interview_record"} and req_status in missing_statuses.union(expired_statuses):
+                _append_unique(missing_items, str(req_name))
+
+        if expired_items:
+            overall_status = "expired"
+        elif missing_items:
+            overall_status = "missing"
+        elif expiring_soon:
+            overall_status = "expiring"
+        else:
+            overall_status = "compliant"
+
+        if normalized_filter != "all" and overall_status != normalized_filter:
+            continue
+
+        employee_name = f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip() or employee_id
+        role_or_job_title = employee.get("job_title") or employee.get("role") or "—"
+
+        items.append({
+            "employee_id": employee_id,
+            "employee_name": employee_name,
+            "role": role_or_job_title,
+            "job_title": role_or_job_title,
+            "overall_status": overall_status,
+            "compliant": overall_status == "compliant",
+            "missing_items": missing_items,
+            "expiring_soon": expiring_soon,
+            "expired_items": expired_items,
+            "blockers": blockers,
+            "warnings": warnings,
+        })
+
+    return {
+        "filter": normalized_filter,
+        "total": len(items),
+        "items": items,
     }
 
 

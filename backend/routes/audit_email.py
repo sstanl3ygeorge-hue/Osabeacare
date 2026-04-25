@@ -494,3 +494,58 @@ async def export_training_audit_data(
         "total_employees": len(export_data),
         "employees": export_data
     }
+
+
+# ==================== GLOBAL AUDIT LOG ====================
+
+@router.get("/audit/global-log")
+async def get_global_audit_log(
+    resource_type: Optional[str] = None,
+    action: Optional[str] = None,
+    user_id: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    limit: int = Query(default=200, le=500),
+    user: dict = Depends(require_manager_or_admin),
+):
+    """Read-only global audit log viewer. Reads from existing audit_logs collection.
+    Filters on fields actually written by log_audit_action: resource_type, action, user_id, timestamp."""
+    db = get_db()
+
+    query: Dict = {}
+
+    if resource_type:
+        query["resource_type"] = resource_type
+    if action:
+        query["action"] = action
+    if user_id:
+        query["user_id"] = user_id
+
+    # timestamp is stored as ISO string by log_audit_action
+    if date_from or date_to:
+        ts_filter: Dict = {}
+        if date_from:
+            ts_filter["$gte"] = date_from
+        if date_to:
+            # include the full end day
+            ts_filter["$lte"] = date_to + "T23:59:59Z"
+        query["timestamp"] = ts_filter
+
+    logs = (
+        await db.audit_logs.find(query, {"_id": 0})
+        .sort("timestamp", -1)
+        .limit(limit)
+        .to_list(limit)
+    )
+
+    # Enrich with actor name where possible
+    user_cache: Dict = {}
+    for log in logs:
+        uid = log.get("user_id")
+        if uid:
+            if uid not in user_cache:
+                u = await db.users.find_one({"user_id": uid}, {"_id": 0, "name": 1, "email": 1})
+                user_cache[uid] = u.get("name") or u.get("email") or uid if u else uid
+            log["actor_name"] = user_cache[uid]
+
+    return {"logs": logs, "count": len(logs)}

@@ -9,7 +9,7 @@ Scope:
 """
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Dict, Any
 
 from fastapi import APIRouter, HTTPException, Depends, Query, Response
@@ -24,6 +24,53 @@ from .dependencies import (
 router = APIRouter(tags=["Service User Care Plans"])
 
 CARE_PLAN_STATUSES = {"draft", "active", "superseded", "archived"}
+CARE_PLAN_SECTION_STATUSES = {"missing", "draft", "complete", "review_due"}
+CARE_PLAN_REQUIRED_SECTIONS = [
+    "Personal information / This is me",
+    "Consent and capacity",
+    "Mobility and falls",
+    "Nutrition and hydration",
+    "Medication",
+    "Personal care",
+    "Mental wellbeing",
+    "Health conditions",
+    "Risk assessments",
+    "Daily notes / monitoring link",
+    "Care plan review",
+]
+
+
+def _default_section_statuses() -> Dict[str, str]:
+    return {section_name: "missing" for section_name in CARE_PLAN_REQUIRED_SECTIONS}
+
+
+def _normalize_section_statuses(section_statuses: Optional[Dict[str, Any]]) -> Dict[str, str]:
+    normalized = _default_section_statuses()
+    for section_name, status in (section_statuses or {}).items():
+        if section_name in normalized and status in CARE_PLAN_SECTION_STATUSES:
+            normalized[section_name] = status
+    return normalized
+
+
+def _serialize_care_plan(plan: Dict[str, Any]) -> Dict[str, Any]:
+    serialized = dict(plan)
+    serialized["section_statuses"] = _normalize_section_statuses(plan.get("section_statuses"))
+    serialized["reviewed_at"] = plan.get("reviewed_at")
+    serialized["reviewed_by"] = plan.get("reviewed_by")
+    serialized["review_notes"] = plan.get("review_notes") or ""
+    serialized["next_review_due_at"] = plan.get("next_review_due_at") or plan.get("review_due_at")
+    return serialized
+
+
+async def _get_care_plan_or_404(service_user_id: str, care_plan_id: str) -> Dict[str, Any]:
+    db = get_db()
+    plan = await db.service_user_care_plans.find_one(
+        {"id": care_plan_id, "service_user_id": service_user_id},
+        {"_id": 0},
+    )
+    if not plan:
+        raise HTTPException(status_code=404, detail="Care plan not found")
+    return plan
 
 
 class CarePlanCreate(BaseModel):
@@ -48,6 +95,17 @@ class CarePlanArchiveRequest(BaseModel):
     replacement_care_plan_id: Optional[str] = None
 
 
+class CarePlanSectionStatusUpdateRequest(BaseModel):
+    section_name: str
+    status: str
+
+
+class CarePlanReviewRecordRequest(BaseModel):
+    review_notes: str = ""
+    reviewed_at: Optional[str] = None
+    next_review_due_at: Optional[str] = None
+
+
 class CarePlanResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str
@@ -60,12 +118,17 @@ class CarePlanResponse(BaseModel):
     support_instructions: str = ""
     effective_from: Optional[str] = None
     review_due_at: Optional[str] = None
+    section_statuses: Dict[str, str] = Field(default_factory=_default_section_statuses)
     created_by: Optional[str] = None
     created_at: str
     updated_at: str
     approved_by: Optional[str] = None
     approved_at: Optional[str] = None
     superseded_by: Optional[str] = None
+    reviewed_at: Optional[str] = None
+    reviewed_by: Optional[str] = None
+    review_notes: str = ""
+    next_review_due_at: Optional[str] = None
 
 
 async def _require_service_user_or_404(service_user_id: str) -> Dict[str, Any]:
@@ -108,12 +171,17 @@ async def create_care_plan_draft(
         "support_instructions": payload.support_instructions or "",
         "effective_from": payload.effective_from,
         "review_due_at": payload.review_due_at,
+        "section_statuses": _default_section_statuses(),
         "created_by": user.get("user_id"),
         "created_at": now,
         "updated_at": now,
         "approved_by": None,
         "approved_at": None,
         "superseded_by": None,
+        "reviewed_at": None,
+        "reviewed_by": None,
+        "review_notes": "",
+        "next_review_due_at": payload.review_due_at,
     }
     await db.service_user_care_plans.insert_one(doc)
 
@@ -130,7 +198,7 @@ async def create_care_plan_draft(
         },
     )
 
-    return doc
+    return _serialize_care_plan(doc)
 
 
 @router.get("/service-users/{service_user_id}/care-plans", response_model=List[CarePlanResponse])
@@ -146,7 +214,7 @@ async def list_service_user_care_plans(
         query["status"] = {"$ne": "archived"}
 
     plans = await db.service_user_care_plans.find(query, {"_id": 0}).sort("version_number", -1).to_list(200)
-    return plans
+    return [_serialize_care_plan(plan) for plan in plans]
 
 
 @router.get("/service-users/{service_user_id}/care-plans/{care_plan_id}", response_model=CarePlanResponse)
@@ -156,14 +224,8 @@ async def get_service_user_care_plan(
     user: dict = Depends(require_manager_or_admin),
 ):
     await _require_service_user_or_404(service_user_id)
-    db = get_db()
-    plan = await db.service_user_care_plans.find_one(
-        {"id": care_plan_id, "service_user_id": service_user_id},
-        {"_id": 0},
-    )
-    if not plan:
-        raise HTTPException(status_code=404, detail="Care plan not found")
-    return plan
+    plan = await _get_care_plan_or_404(service_user_id, care_plan_id)
+    return _serialize_care_plan(plan)
 
 
 @router.put("/service-users/{service_user_id}/care-plans/{care_plan_id}", response_model=CarePlanResponse)
@@ -175,18 +237,15 @@ async def update_service_user_care_plan_draft(
 ):
     await _require_service_user_or_404(service_user_id)
     db = get_db()
-    existing = await db.service_user_care_plans.find_one(
-        {"id": care_plan_id, "service_user_id": service_user_id},
-        {"_id": 0},
-    )
-    if not existing:
-        raise HTTPException(status_code=404, detail="Care plan not found")
+    existing = await _get_care_plan_or_404(service_user_id, care_plan_id)
     if existing.get("status") != "draft":
         raise HTTPException(status_code=400, detail="Only draft care plans can be updated")
 
     update_data = {k: v for k, v in payload.model_dump().items() if v is not None}
     if not update_data:
-        return existing
+        return _serialize_care_plan(existing)
+    if "review_due_at" in update_data:
+        update_data["next_review_due_at"] = update_data["review_due_at"]
     update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
 
     await db.service_user_care_plans.update_one(
@@ -206,7 +265,7 @@ async def update_service_user_care_plan_draft(
         },
     )
 
-    return updated
+    return _serialize_care_plan(updated)
 
 
 @router.post("/service-users/{service_user_id}/care-plans/{care_plan_id}/activate", response_model=CarePlanResponse)
@@ -217,12 +276,7 @@ async def activate_service_user_care_plan_draft(
 ):
     await _require_service_user_or_404(service_user_id)
     db = get_db()
-    plan = await db.service_user_care_plans.find_one(
-        {"id": care_plan_id, "service_user_id": service_user_id},
-        {"_id": 0},
-    )
-    if not plan:
-        raise HTTPException(status_code=404, detail="Care plan not found")
+    plan = await _get_care_plan_or_404(service_user_id, care_plan_id)
     if plan.get("status") != "draft":
         raise HTTPException(status_code=400, detail="Only draft care plans can be activated")
 
@@ -272,7 +326,7 @@ async def activate_service_user_care_plan_draft(
         },
     )
 
-    return activated
+    return _serialize_care_plan(activated)
 
 
 @router.post("/service-users/{service_user_id}/care-plans/{care_plan_id}/archive", response_model=CarePlanResponse)
@@ -284,19 +338,14 @@ async def archive_service_user_care_plan(
 ):
     await _require_service_user_or_404(service_user_id)
     db = get_db()
-    plan = await db.service_user_care_plans.find_one(
-        {"id": care_plan_id, "service_user_id": service_user_id},
-        {"_id": 0},
-    )
-    if not plan:
-        raise HTTPException(status_code=404, detail="Care plan not found")
+    plan = await _get_care_plan_or_404(service_user_id, care_plan_id)
 
     status = plan.get("status")
     payload = payload or CarePlanArchiveRequest()
     if status not in CARE_PLAN_STATUSES:
         raise HTTPException(status_code=400, detail="Invalid care plan status")
     if status == "archived":
-        return plan
+        return _serialize_care_plan(plan)
     if status == "active":
         replacement_id = (payload.replacement_care_plan_id or "").strip()
         if not replacement_id:
@@ -333,7 +382,95 @@ async def archive_service_user_care_plan(
         },
     )
 
-    return archived
+    return _serialize_care_plan(archived)
+
+
+@router.patch("/service-users/{service_user_id}/care-plans/{care_plan_id}/section-status", response_model=CarePlanResponse)
+async def update_care_plan_section_status(
+    service_user_id: str,
+    care_plan_id: str,
+    payload: CarePlanSectionStatusUpdateRequest,
+    user: dict = Depends(require_manager_or_admin),
+):
+    await _require_service_user_or_404(service_user_id)
+    db = get_db()
+    plan = await _get_care_plan_or_404(service_user_id, care_plan_id)
+    if plan.get("status") not in {"draft", "active"}:
+        raise HTTPException(status_code=400, detail="Section status can only be updated on draft or active care plans")
+    if payload.section_name not in CARE_PLAN_REQUIRED_SECTIONS:
+        raise HTTPException(status_code=400, detail="Invalid section_name")
+    if payload.status not in CARE_PLAN_SECTION_STATUSES:
+        raise HTTPException(status_code=400, detail="Invalid section status")
+
+    section_statuses = _normalize_section_statuses(plan.get("section_statuses"))
+    section_statuses[payload.section_name] = payload.status
+    now = datetime.now(timezone.utc).isoformat()
+    await db.service_user_care_plans.update_one(
+        {"id": care_plan_id},
+        {"$set": {"section_statuses": section_statuses, "updated_at": now}},
+    )
+    updated = await db.service_user_care_plans.find_one({"id": care_plan_id}, {"_id": 0})
+
+    await log_audit_action(
+        user.get("user_id"),
+        "update_service_user_care_plan_section_status",
+        "service_user_care_plan",
+        care_plan_id,
+        {
+            "service_user_id": service_user_id,
+            "section_name": payload.section_name,
+            "status": payload.status,
+        },
+    )
+
+    return _serialize_care_plan(updated)
+
+
+@router.post("/service-users/{service_user_id}/care-plans/{care_plan_id}/record-review", response_model=CarePlanResponse)
+async def record_care_plan_review(
+    service_user_id: str,
+    care_plan_id: str,
+    payload: CarePlanReviewRecordRequest,
+    user: dict = Depends(require_manager_or_admin),
+):
+    await _require_service_user_or_404(service_user_id)
+    db = get_db()
+    plan = await _get_care_plan_or_404(service_user_id, care_plan_id)
+    if plan.get("status") != "active":
+        raise HTTPException(status_code=400, detail="Only active care plans can be reviewed")
+
+    reviewed_at_value = payload.reviewed_at or datetime.now(timezone.utc).isoformat()
+    reviewed_at = datetime.fromisoformat(reviewed_at_value.replace("Z", "+00:00"))
+    next_review_due_at = payload.next_review_due_at
+    if next_review_due_at:
+        datetime.fromisoformat(next_review_due_at.replace("Z", "+00:00"))
+    else:
+        next_review_due_at = (reviewed_at + timedelta(days=28)).isoformat()
+
+    update_data = {
+        "reviewed_at": reviewed_at.isoformat(),
+        "reviewed_by": user.get("user_id"),
+        "review_notes": (payload.review_notes or "").strip(),
+        "next_review_due_at": next_review_due_at,
+        "review_due_at": next_review_due_at,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.service_user_care_plans.update_one({"id": care_plan_id}, {"$set": update_data})
+    updated = await db.service_user_care_plans.find_one({"id": care_plan_id}, {"_id": 0})
+
+    await log_audit_action(
+        user.get("user_id"),
+        "record_service_user_care_plan_review",
+        "service_user_care_plan",
+        care_plan_id,
+        {
+            "service_user_id": service_user_id,
+            "reviewed_at": update_data["reviewed_at"],
+            "next_review_due_at": next_review_due_at,
+        },
+    )
+
+    return _serialize_care_plan(updated)
 
 
 @router.get("/service-users/{service_user_id}/care-plans/{care_plan_id}/download-pdf")

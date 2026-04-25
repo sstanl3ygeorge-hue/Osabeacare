@@ -1,5 +1,6 @@
 import os
 import sys
+from datetime import datetime
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -127,6 +128,19 @@ def test_create_draft_care_plan(monkeypatch):
     assert created["status"] == "draft"
     assert created["version_number"] == 1
     assert created["care_plan_title"] == "Care Plan v1"
+    assert created["section_statuses"] == {
+        "Personal information / This is me": "missing",
+        "Consent and capacity": "missing",
+        "Mobility and falls": "missing",
+        "Nutrition and hydration": "missing",
+        "Medication": "missing",
+        "Personal care": "missing",
+        "Mental wellbeing": "missing",
+        "Health conditions": "missing",
+        "Risk assessments": "missing",
+        "Daily notes / monitoring link": "missing",
+        "Care plan review": "missing",
+    }
 
 
 def test_list_care_plans_for_service_user(monkeypatch):
@@ -274,6 +288,54 @@ def test_audit_events_written_for_create_update_activate_archive(monkeypatch):
     assert "update_service_user_care_plan" in actions
     assert "activate_service_user_care_plan" in actions
     assert "archive_service_user_care_plan" in actions
+
+
+def test_update_section_status_on_active_plan(monkeypatch):
+    client, _, _ = _make_app(monkeypatch)
+    created = _create_draft(client)
+    activated = client.post(f"/api/service-users/su-1/care-plans/{created['id']}/activate")
+    assert activated.status_code == 200
+
+    response = client.patch(
+        f"/api/service-users/su-1/care-plans/{created['id']}/section-status",
+        json={
+            "section_name": "Medication",
+            "status": "complete",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["section_statuses"]["Medication"] == "complete"
+    assert payload["section_statuses"]["Consent and capacity"] == "missing"
+
+
+def test_record_review_sets_next_due_and_syncs_review_due(monkeypatch):
+    client, _, audit_events = _make_app(monkeypatch)
+    created = _create_draft(client)
+    activated = client.post(f"/api/service-users/su-1/care-plans/{created['id']}/activate")
+    assert activated.status_code == 200
+
+    response = client.post(
+        f"/api/service-users/su-1/care-plans/{created['id']}/record-review",
+        json={
+            "review_notes": "Monthly review completed",
+            "reviewed_at": "2026-04-25T12:00:00+00:00",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["reviewed_by"] == "mgr-1"
+    assert payload["review_notes"] == "Monthly review completed"
+    assert payload["reviewed_at"] == "2026-04-25T12:00:00+00:00"
+    assert payload["next_review_due_at"] == payload["review_due_at"]
+    reviewed_at = datetime.fromisoformat(payload["reviewed_at"])
+    next_review_due_at = datetime.fromisoformat(payload["next_review_due_at"])
+    assert (next_review_due_at - reviewed_at).days == 28
+
+    actions = [entry["action"] for entry in audit_events]
+    assert "record_service_user_care_plan_review" in actions
 
 
 def test_download_care_plan_pdf_returns_pdf_and_logs_audit(monkeypatch):

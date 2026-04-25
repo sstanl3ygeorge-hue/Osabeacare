@@ -35,6 +35,7 @@ import DocumentsPage from "./pages/portal/DocumentsPage";
 // DocumentsPage kept for backward compatibility but route disabled
 import TrainingPage from "./pages/portal/TrainingPage";
 import AuditViewPage from "./pages/portal/AuditViewPage";
+import GlobalAuditLogPage from "./pages/portal/GlobalAuditLogPage";
 import DBSRegisterPage from "./pages/portal/DBSRegisterPage";
 import SettingsPage from "./pages/portal/SettingsPage";
 import TemplatesPage from "./pages/portal/TemplatesPage";
@@ -130,6 +131,7 @@ function AppRouter() {
         <Route path="incidents" element={<IncidentsPage />} />
         <Route path="forms/:formId" element={<FormEditorPage />} />
         <Route path="audit" element={<AuditViewPage />} />
+        <Route path="global-audit" element={<GlobalAuditLogPage />} />
         <Route path="service-users" element={<ServiceUsersPage />} />
         <Route path="service-users/:id" element={<ServiceUserProfilePage />} />
         <Route path="shifts" element={<ShiftsPage />} />

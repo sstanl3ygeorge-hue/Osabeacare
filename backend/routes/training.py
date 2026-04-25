@@ -203,7 +203,13 @@ async def get_training_records(
     if employee_ids:
         employee_query = {"id": {"$in": employee_ids}}
         if not employee_id:
-            employee_query["status"] = {"$nin": ["archived", "deleted", "inactive"]}
+            employee_query["status"] = {"$in": ["active", "active_employee"]}
+            employee_query["$or"] = [
+                {"lifecycle": {"$exists": False}},
+                {"lifecycle": None},
+                {"lifecycle": ""},
+                {"lifecycle": "Active Workforce"},
+            ]
 
         employees = await db.employees.find(
             employee_query,

@@ -1803,12 +1803,23 @@ export default function WorkerDashboard() {
     }
   };
 
-  const readinessTone = progress.percentage === 100 && employment_readiness_blockers.length === 0 ? 'green' : employment_readiness_blockers.length > 0 ? 'amber' : 'blue';
+  const readinessState = (employment_readiness || '').toLowerCase();
+  const isReadinessReady = readinessState === 'ready_for_work';
+  const readinessTone =
+    readinessState === 'system_issue_preventing_completion'
+      ? 'red'
+      : isReadinessReady
+        ? 'green'
+        : 'amber';
+  const readinessHeadline = employment_readiness_label || (isReadinessReady ? 'Ready for Work' : 'Not ready for work');
+  const nextReadinessBlocker = employment_readiness_blockers[0];
   const readinessChecklist = (
     <Card
       className={`border shadow-sm ${
         readinessTone === 'green'
           ? 'border-green-200 bg-green-50/60'
+          : readinessTone === 'red'
+            ? 'border-red-200 bg-red-50/60'
           : readinessTone === 'amber'
             ? 'border-amber-200 bg-amber-50/60'
             : 'border-blue-200 bg-blue-50/60'
@@ -1823,14 +1834,20 @@ export default function WorkerDashboard() {
               {progress.completed} of {progress.required} required items complete
             </p>
           </div>
-          <Badge className={readinessTone === 'green' ? 'bg-green-100 text-green-700' : readinessTone === 'amber' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}>
-            {progress.percentage}%
+          <Badge className={readinessTone === 'green' ? 'bg-green-100 text-green-700' : readinessTone === 'red' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}>
+            {readinessHeadline}
           </Badge>
         </div>
       </CardHeader>
       <CardContent className="pt-0">
         <Progress value={progress.percentage} className="h-2.5" />
-        {employment_readiness_blockers.length > 0 ? (
+        {!isReadinessReady && nextReadinessBlocker ? (
+          <p className="mt-3 text-sm text-slate-700">
+            <span className="font-medium">Next action:</span>{' '}
+            {nextReadinessBlocker.label}
+          </p>
+        ) : null}
+        {!isReadinessReady && employment_readiness_blockers.length > 0 ? (
           <ul className="mt-3 space-y-2">
             {employment_readiness_blockers.map((blocker, index) => (
               <li key={`${blocker.label}-${index}`} className="flex items-start gap-2 text-sm text-slate-700">

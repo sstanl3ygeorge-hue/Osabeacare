@@ -18,20 +18,20 @@ logger = logging.getLogger(__name__)
 # 15 Care Certificate Standards (Adults ONLY)
 # =============================================================================
 CARE_CERTIFICATE_STANDARDS = [
-    {"id": "understand_your_role",    "num": 1,  "name": "Understand Your Role",                                                     "training_sync": None,                    "auto_complete": "manual"},
-    {"id": "personal_development",    "num": 2,  "name": "Your Personal Development",                                                "training_sync": None,                    "auto_complete": "manual"},
-    {"id": "duty_of_care",            "num": 3,  "name": "Duty of Care",                                                             "training_sync": None,                    "auto_complete": "manual"},
+    {"id": "understand_your_role",    "num": 1,  "name": "Understand Your Role",                                                     "training_sync": None,                    "auto_complete": "hybrid"},
+    {"id": "personal_development",    "num": 2,  "name": "Your Personal Development",                                                "training_sync": None,                    "auto_complete": "hybrid"},
+    {"id": "duty_of_care",            "num": 3,  "name": "Duty of Care",                                                             "training_sync": None,                    "auto_complete": "hybrid"},
     {"id": "equality_diversity",      "num": 4,  "name": "Equality and Diversity",                                                   "training_sync": None,                    "auto_complete": "hybrid"},
     {"id": "work_person_centred",     "num": 5,  "name": "Work in a Person-Centred Way",                                             "training_sync": None,                    "auto_complete": "manual"},
-    {"id": "communication",           "num": 6,  "name": "Communication",                                                            "training_sync": None,                    "auto_complete": "interview"},
-    {"id": "privacy_dignity",         "num": 7,  "name": "Privacy and Dignity",                                                      "training_sync": None,                    "auto_complete": "manual"},
-    {"id": "fluids_nutrition",        "num": 8,  "name": "Fluids and Nutrition",                                                     "training_sync": "food_hygiene",          "auto_complete": "training_or_form"},
-    {"id": "awareness_mental_health", "num": 9,  "name": "Awareness of Mental Health, Dementia and Learning Disabilities",           "training_sync": "mental_health",         "auto_complete": "training_or_form"},
-    {"id": "safeguarding_adults",     "num": 10, "name": "Safeguarding Adults",                                                      "training_sync": "safeguarding",          "auto_complete": "training"},
-    {"id": "basic_life_support",      "num": 11, "name": "Basic Life Support",                                                       "training_sync": "bls",                   "auto_complete": "training"},
-    {"id": "health_safety",           "num": 12, "name": "Health and Safety",                                                        "training_sync": "health_safety",         "auto_complete": "training"},
-    {"id": "handling_information",    "num": 13, "name": "Handling Information",                                                     "training_sync": "information_governance","auto_complete": "training"},
-    {"id": "infection_control",       "num": 14, "name": "Infection Prevention and Control",                                         "training_sync": "infection_control",     "auto_complete": "training"},
+    {"id": "communication",           "num": 6,  "name": "Communication",                                                            "training_sync": None,                    "auto_complete": "hybrid"},
+    {"id": "privacy_dignity",         "num": 7,  "name": "Privacy and Dignity",                                                      "training_sync": None,                    "auto_complete": "hybrid"},
+    {"id": "fluids_nutrition",        "num": 8,  "name": "Fluids and Nutrition",                                                     "training_sync": "food_hygiene",          "auto_complete": "hybrid"},
+    {"id": "awareness_mental_health", "num": 9,  "name": "Awareness of Mental Health, Dementia and Learning Disabilities",           "training_sync": "mental_health",         "auto_complete": "hybrid"},
+    {"id": "safeguarding_adults",     "num": 10, "name": "Safeguarding Adults",                                                      "training_sync": "safeguarding",          "auto_complete": "automatic"},
+    {"id": "basic_life_support",      "num": 11, "name": "Basic Life Support",                                                       "training_sync": "bls",                   "auto_complete": "automatic"},
+    {"id": "health_safety",           "num": 12, "name": "Health and Safety",                                                        "training_sync": "health_safety",         "auto_complete": "automatic"},
+    {"id": "handling_information",    "num": 13, "name": "Handling Information",                                                     "training_sync": "information_governance","auto_complete": "automatic"},
+    {"id": "infection_control",       "num": 14, "name": "Infection Prevention and Control",                                         "training_sync": "infection_control",     "auto_complete": "automatic"},
     {"id": "shadow_shift",            "num": 15, "name": "Shadow Shift Completed",                                                   "training_sync": None,                    "auto_complete": "manual"},
 ]
 
@@ -91,9 +91,9 @@ INDUCTION_RULE_METADATA = {
     "communication": {
         "description": "Confirms communication expectations have been discussed and assessed for the role.",
         "completion_type": "hybrid",
-        "evidence_sources": ["interview_assessment", "manager_signoff"],
-        "completion_rules": ["Interview content can support this item, but manager sign-off is still required until interview rules are fully role-aware."],
-        "next_action": "Manager must sign off communication after reviewing interview/application evidence.",
+        "evidence_sources": ["worker_submission", "manager_signoff"],
+        "completion_rules": ["Worker must submit a communication self-assessment form. Admin must review and sign off."],
+        "next_action": "Worker must complete and submit the communication form. Admin then reviews and signs off.",
     },
     "privacy_dignity": {
         "description": "Confirms the worker understands privacy, dignity, consent, and respect.",
@@ -475,6 +475,18 @@ def _build_training_evidence_by_induction(training_records: list, training_docs:
         if not induction_id:
             continue
         doc_id = doc.get("id") or doc.get("file_id") or doc.get("document_id")
+        linked_record_id = (
+            doc.get("training_record_id")
+            or doc.get("source_record_id")
+            or doc.get("record_id")
+        )
+        if not linked_record_id and doc_id:
+            for tr in (training_records or []):
+                tr_doc_id = tr.get("source_document_id") or tr.get("certificate_document_id") or tr.get("document_id")
+                if tr_doc_id and str(tr_doc_id) == str(doc_id):
+                    linked_record_id = tr.get("id") or tr.get("training_id") or tr.get("record_id")
+                    if linked_record_id:
+                        break
         raw_source = doc.get("upload_source") or doc.get("source") or "admin_upload"
         evidence_by_item.setdefault(induction_id, []).append({
             "type": "training_document",
@@ -482,7 +494,7 @@ def _build_training_evidence_by_induction(training_records: list, training_docs:
             "title": title,
             "code": req_id,
             "document_id": doc_id,
-            "view_route": f"/employee-documents/{doc_id}/file" if doc_id else None,
+            "view_route": f"/training-records/{linked_record_id}/evidence/file" if linked_record_id else (f"/employee-documents/{doc_id}/file" if doc_id else None),
             "source": raw_source,
             "source_label": _source_label(raw_source),
             "document_type": "training_document",
@@ -616,6 +628,9 @@ async def get_employee_induction_status(
         "source": 1,
         "upload_source": 1,
         "uploaded_by_name": 1,
+        "training_record_id": 1,
+        "source_record_id": 1,
+        "record_id": 1,
     }).to_list(50)
 
     verified_set = _build_verified_training_set(training_records, training_docs)
@@ -767,7 +782,7 @@ async def get_employee_induction_status(
         "role_normalized": normalized_role,
         "role_rule_warning": "Employee role is missing or not mapped; direct-care induction rules are shown by default." if role_unknown else None,
         "rule_todos": [
-            "Interview and form question sets are not fully role-aware yet; communication remains manager sign-off supported by interview evidence.",
+            "Communication uses worker self-assessment plus manager review/sign-off; role-aware question sets are still being improved.",
         ],
         "items": result_items,
         "completed": completed_count,

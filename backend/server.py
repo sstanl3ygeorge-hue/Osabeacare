@@ -25897,6 +25897,12 @@ async def build_training_matrix_read_model():
     employees = await db.employees.find(
         {
             "status": {"$in": matrix_statuses},
+            "$or": [
+                {"lifecycle": {"$exists": False}},
+                {"lifecycle": None},
+                {"lifecycle": ""},
+                {"lifecycle": "Active Workforce"},
+            ],
         },
         {
             "_id": 0,

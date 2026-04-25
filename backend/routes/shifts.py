@@ -30,6 +30,7 @@ router = APIRouter(tags=["Shifts"])
 
 SHIFT_STATUSES = {"open", "assigned", "completed", "cancelled"}
 ASSIGNMENT_STATUSES = {"active", "completed", "cancelled"}
+ATTENDANCE_STATUSES = {"open", "submitted", "approved", "rejected"}
 SHIFT_TRANSITIONS = {
     "open": {"assigned", "cancelled"},
     "assigned": {"open", "completed", "cancelled"},
@@ -73,6 +74,18 @@ class WorkerShiftResponseRequest(BaseModel):
     note: Optional[str] = None
 
 
+class WorkerClockInRequest(BaseModel):
+    note: Optional[str] = None
+
+
+class WorkerClockOutRequest(BaseModel):
+    note: Optional[str] = None
+
+
+class AdminAttendanceReviewRequest(BaseModel):
+    reason: Optional[str] = None
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -81,6 +94,17 @@ def _normalize_required_text(value: str, field_name: str) -> str:
     text = (value or "").strip()
     if len(text) < 2:
         raise HTTPException(status_code=400, detail=f"{field_name} is required")
+    return text
+
+
+def _normalize_optional_id(value: Optional[str], field_name: str) -> Optional[str]:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise HTTPException(status_code=400, detail=f"{field_name} must be a string")
+    text = value.strip()
+    if not text or text.lower() in {"none", "null", "undefined"}:
+        return None
     return text
 
 
@@ -168,6 +192,14 @@ async def _get_latest_assignment_for_shift(shift_id: str) -> Optional[Dict[str, 
     return items[0] if items else None
 
 
+async def _get_attendance_or_404(attendance_id: str) -> Dict[str, Any]:
+    db = get_db()
+    row = await db.shift_attendance_records.find_one({"id": attendance_id}, {"_id": 0})
+    if not row:
+        raise HTTPException(status_code=404, detail="Shift attendance record not found")
+    return row
+
+
 async def _require_active_worker_employee(worker: dict, db) -> str:
     employee_id = worker.get("employee_id")
     if not employee_id:
@@ -233,8 +265,21 @@ async def create_shift(
 ):
     db = get_db()
     start_dt, end_dt = _ensure_valid_window(payload.start_at, payload.end_at)
-    if payload.care_location_id:
-        await _get_active_care_location_or_404(payload.care_location_id)
+    service_user_id = _normalize_optional_id(payload.service_user_id, "service_user_id")
+    care_location_id = _normalize_optional_id(payload.care_location_id, "care_location_id")
+
+    if service_user_id:
+        service_user = await db.service_users.find_one({"id": service_user_id}, {"_id": 0, "id": 1})
+        if not service_user:
+            raise HTTPException(status_code=400, detail="Invalid service_user_id")
+
+    if care_location_id:
+        try:
+            await _get_active_care_location_or_404(care_location_id)
+        except HTTPException as exc:
+            if exc.status_code in {404, 409}:
+                raise HTTPException(status_code=400, detail="Invalid care_location_id")
+            raise
     now = _now_iso()
     shift_id = str(uuid.uuid4())
 
@@ -244,8 +289,8 @@ async def create_shift(
         "end_at": end_dt.isoformat(),
         "location_text": _normalize_required_text(payload.location_text, "location_text"),
         "role_required": _normalize_required_text(payload.role_required, "role_required"),
-        "service_user_id": payload.service_user_id,
-        "care_location_id": payload.care_location_id,
+        "service_user_id": service_user_id,
+        "care_location_id": care_location_id,
         "notes": payload.notes,
         "status": "open",
         "assigned_employee_id": None,
@@ -364,11 +409,25 @@ async def update_shift(
     if payload.role_required is not None:
         update["role_required"] = _normalize_required_text(payload.role_required, "role_required")
     if payload.service_user_id is not None:
-        update["service_user_id"] = payload.service_user_id
+        normalized_service_user_id = _normalize_optional_id(payload.service_user_id, "service_user_id")
+        if normalized_service_user_id:
+            service_user = await db.service_users.find_one(
+                {"id": normalized_service_user_id},
+                {"_id": 0, "id": 1},
+            )
+            if not service_user:
+                raise HTTPException(status_code=400, detail="Invalid service_user_id")
+        update["service_user_id"] = normalized_service_user_id
     if payload.care_location_id is not None:
-        if payload.care_location_id:
-            await _get_active_care_location_or_404(payload.care_location_id)
-            update["care_location_id"] = payload.care_location_id
+        normalized_care_location_id = _normalize_optional_id(payload.care_location_id, "care_location_id")
+        if normalized_care_location_id:
+            try:
+                await _get_active_care_location_or_404(normalized_care_location_id)
+            except HTTPException as exc:
+                if exc.status_code in {404, 409}:
+                    raise HTTPException(status_code=400, detail="Invalid care_location_id")
+                raise
+            update["care_location_id"] = normalized_care_location_id
         else:
             update["care_location_id"] = None
     if payload.notes is not None:
@@ -773,3 +832,250 @@ async def reject_worker_shift(
         },
     )
     return {"success": True, "assignment": updated_assignment, "shift": updated_shift}
+
+
+@router.post("/worker/shifts/{shift_id}/clock-in")
+async def clock_in_worker_shift(
+    shift_id: str,
+    payload: WorkerClockInRequest,
+    worker: dict = Depends(get_current_worker),
+):
+    db = get_db()
+    employee_id = await _require_active_worker_employee(worker, db)
+    shift = await _get_shift_or_404(shift_id)
+    await _attach_care_location_metadata([shift])
+
+    assignment = await db.shift_assignments.find_one(
+        {"shift_id": shift_id, "employee_id": employee_id, "status": "active"},
+        {"_id": 0},
+    )
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Active assignment not found for this shift")
+
+    existing = await db.shift_attendance_records.find_one(
+        {
+            "assignment_id": assignment.get("id"),
+            "status": {"$in": ["open", "submitted", "approved"]},
+        },
+        {"_id": 0},
+    )
+    if existing:
+        raise HTTPException(
+            status_code=409,
+            detail="Attendance already exists for this assignment",
+        )
+
+    now = _now_iso()
+    attendance_id = str(uuid.uuid4())
+    attendance = {
+        "id": attendance_id,
+        "shift_id": shift_id,
+        "assignment_id": assignment.get("id"),
+        "employee_id": employee_id,
+        "care_location_id": shift.get("care_location_id"),
+        "service_user_id": shift.get("service_user_id"),
+        "clock_in_at": now,
+        "clock_out_at": None,
+        "clock_in_note": payload.note,
+        "clock_out_note": None,
+        "status": "open",
+        "reviewed_by": None,
+        "reviewed_at": None,
+        "review_note": None,
+        "approved_for_timesheet": False,
+        "created_at": now,
+        "created_by": f"worker:{employee_id}",
+        "updated_at": now,
+        "updated_by": f"worker:{employee_id}",
+    }
+    await db.shift_attendance_records.insert_one(attendance)
+    await log_audit_action(
+        f"worker:{employee_id}",
+        "shift_clock_in",
+        "shift_attendance",
+        attendance_id,
+        {
+            "shift_id": shift_id,
+            "assignment_id": assignment.get("id"),
+            "employee_id": employee_id,
+            "status": "open",
+        },
+    )
+    return {"success": True, "attendance": attendance, "shift": shift}
+
+
+@router.post("/worker/shifts/{shift_id}/clock-out")
+async def clock_out_worker_shift(
+    shift_id: str,
+    payload: WorkerClockOutRequest,
+    worker: dict = Depends(get_current_worker),
+):
+    db = get_db()
+    employee_id = await _require_active_worker_employee(worker, db)
+    shift = await _get_shift_or_404(shift_id)
+    await _attach_care_location_metadata([shift])
+
+    assignment = await db.shift_assignments.find_one(
+        {"shift_id": shift_id, "employee_id": employee_id, "status": "active"},
+        {"_id": 0},
+    )
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Active assignment not found for this shift")
+
+    open_record = await db.shift_attendance_records.find_one(
+        {"assignment_id": assignment.get("id"), "status": "open"},
+        {"_id": 0},
+    )
+    if not open_record:
+        raise HTTPException(status_code=409, detail="No open attendance record found for clock-out")
+
+    now = _now_iso()
+    await db.shift_attendance_records.update_one(
+        {"id": open_record.get("id")},
+        {
+            "$set": {
+                "clock_out_at": now,
+                "clock_out_note": payload.note,
+                "status": "submitted",
+                "updated_at": now,
+                "updated_by": f"worker:{employee_id}",
+            }
+        },
+    )
+    updated = await _get_attendance_or_404(open_record.get("id"))
+    await log_audit_action(
+        f"worker:{employee_id}",
+        "shift_clock_out",
+        "shift_attendance",
+        open_record.get("id"),
+        {
+            "shift_id": shift_id,
+            "assignment_id": assignment.get("id"),
+            "employee_id": employee_id,
+            "old_status": "open",
+            "new_status": "submitted",
+        },
+    )
+    return {"success": True, "attendance": updated, "shift": shift}
+
+
+@router.get("/shift-attendance")
+async def list_shift_attendance(
+    status: Optional[str] = Query(default=None),
+    employee_id: Optional[str] = Query(default=None),
+    shift_id: Optional[str] = Query(default=None),
+    user: dict = Depends(require_manager_or_admin),
+):
+    db = get_db()
+    query: Dict[str, Any] = {}
+    if status:
+        if status not in ATTENDANCE_STATUSES:
+            raise HTTPException(status_code=400, detail="Invalid status filter")
+        query["status"] = status
+    if employee_id:
+        query["employee_id"] = employee_id
+    if shift_id:
+        query["shift_id"] = shift_id
+
+    rows = await db.shift_attendance_records.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    return {"attendance_records": rows, "total": len(rows)}
+
+
+@router.get("/shift-attendance/{attendance_id}")
+async def get_shift_attendance(
+    attendance_id: str,
+    user: dict = Depends(require_manager_or_admin),
+):
+    row = await _get_attendance_or_404(attendance_id)
+    return {"attendance": row}
+
+
+@router.post("/shift-attendance/{attendance_id}/approve")
+async def approve_shift_attendance(
+    attendance_id: str,
+    payload: AdminAttendanceReviewRequest,
+    user: dict = Depends(require_manager_or_admin),
+):
+    db = get_db()
+    row = await _get_attendance_or_404(attendance_id)
+    if row.get("status") != "submitted":
+        raise HTTPException(status_code=409, detail="Only submitted attendance can be approved")
+
+    now = _now_iso()
+    await db.shift_attendance_records.update_one(
+        {"id": attendance_id},
+        {
+            "$set": {
+                "status": "approved",
+                "reviewed_by": user.get("user_id"),
+                "reviewed_at": now,
+                "review_note": payload.reason,
+                "approved_for_timesheet": True,
+                "updated_at": now,
+                "updated_by": user.get("user_id"),
+            }
+        },
+    )
+    updated = await _get_attendance_or_404(attendance_id)
+    await log_audit_action(
+        user.get("user_id"),
+        "shift_attendance_approved",
+        "shift_attendance",
+        attendance_id,
+        {
+            "shift_id": row.get("shift_id"),
+            "assignment_id": row.get("assignment_id"),
+            "employee_id": row.get("employee_id"),
+            "old_status": "submitted",
+            "new_status": "approved",
+        },
+    )
+    return {"success": True, "attendance": updated}
+
+
+@router.post("/shift-attendance/{attendance_id}/reject")
+async def reject_shift_attendance(
+    attendance_id: str,
+    payload: AdminAttendanceReviewRequest,
+    user: dict = Depends(require_manager_or_admin),
+):
+    db = get_db()
+    row = await _get_attendance_or_404(attendance_id)
+    if row.get("status") != "submitted":
+        raise HTTPException(status_code=409, detail="Only submitted attendance can be rejected")
+
+    reason = (payload.reason or "").strip()
+    if len(reason) < 3:
+        raise HTTPException(status_code=400, detail="reason is required to reject attendance")
+
+    now = _now_iso()
+    await db.shift_attendance_records.update_one(
+        {"id": attendance_id},
+        {
+            "$set": {
+                "status": "rejected",
+                "reviewed_by": user.get("user_id"),
+                "reviewed_at": now,
+                "review_note": reason,
+                "approved_for_timesheet": False,
+                "updated_at": now,
+                "updated_by": user.get("user_id"),
+            }
+        },
+    )
+    updated = await _get_attendance_or_404(attendance_id)
+    await log_audit_action(
+        user.get("user_id"),
+        "shift_attendance_rejected",
+        "shift_attendance",
+        attendance_id,
+        {
+            "shift_id": row.get("shift_id"),
+            "assignment_id": row.get("assignment_id"),
+            "employee_id": row.get("employee_id"),
+            "reason": reason,
+            "old_status": "submitted",
+            "new_status": "rejected",
+        },
+    )
+    return {"success": True, "attendance": updated}

@@ -67,6 +67,15 @@ function toIso(value) {
   return dt.toISOString();
 }
 
+function normalizeOptionalId(value) {
+  if (value === null || value === undefined) return null;
+  const text = String(value).trim();
+  if (!text) return null;
+  const lowered = text.toLowerCase();
+  if (lowered === 'none' || lowered === 'null' || lowered === 'undefined') return null;
+  return text;
+}
+
 export default function ShiftsPage() {
   const { token, isAuditor } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -167,8 +176,8 @@ export default function ShiftsPage() {
           end_at: endIso,
           location_text: newShift.location_text,
           role_required: newShift.role_required,
-          service_user_id: newShift.service_user_id || null,
-          care_location_id: newShift.care_location_id || null,
+          service_user_id: normalizeOptionalId(newShift.service_user_id),
+          care_location_id: normalizeOptionalId(newShift.care_location_id),
           notes: newShift.notes || null,
         },
         { headers }

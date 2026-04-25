@@ -75,6 +75,10 @@ class _FakeDb:
         self.shifts = _FakeCollection([])
         self.shift_assignments = _FakeCollection([])
         self.audit_logs = _FakeCollection([])
+        self.care_locations = _FakeCollection([])
+        self.service_users = _FakeCollection([
+            {"id": "su-1"},
+        ])
         self.employees = _FakeCollection(
             [
                 {
@@ -297,3 +301,57 @@ def test_cancel_assigned_shift_records_reason_and_closes_assignment(shift_client
     assert assignment["status"] == "cancelled"
     assert assignment["unassign_reason"] == "Client canceled visit"
     assert assignment.get("ended_at") is not None
+
+
+def test_create_shift_normalizes_blank_optional_ids_to_none(shift_client):
+    client, _ = shift_client
+
+    response = client.post(
+        "/api/shifts",
+        json={
+            "start_at": "2026-05-03T09:00:00Z",
+            "end_at": "2026-05-03T17:00:00Z",
+            "location_text": "london",
+            "role_required": "HCA",
+            "service_user_id": "   ",
+            "care_location_id": "none",
+            "notes": None,
+        },
+    )
+
+    assert response.status_code == 200
+    shift = response.json()["shift"]
+    assert shift["service_user_id"] is None
+    assert shift["care_location_id"] is None
+
+
+def test_create_shift_invalid_optional_ids_return_400(shift_client):
+    client, _ = shift_client
+
+    invalid_service_user = client.post(
+        "/api/shifts",
+        json={
+            "start_at": "2026-05-04T09:00:00Z",
+            "end_at": "2026-05-04T17:00:00Z",
+            "location_text": "london",
+            "role_required": "HCA",
+            "service_user_id": "unknown-su",
+            "care_location_id": None,
+        },
+    )
+    assert invalid_service_user.status_code == 400
+    assert invalid_service_user.json()["detail"] == "Invalid service_user_id"
+
+    invalid_care_location = client.post(
+        "/api/shifts",
+        json={
+            "start_at": "2026-05-05T09:00:00Z",
+            "end_at": "2026-05-05T17:00:00Z",
+            "location_text": "london",
+            "role_required": "HCA",
+            "service_user_id": None,
+            "care_location_id": "unknown-location",
+        },
+    )
+    assert invalid_care_location.status_code == 400
+    assert invalid_care_location.json()["detail"] == "Invalid care_location_id"

@@ -732,6 +732,7 @@ export default function WorkerDashboard() {
   const [workerShiftResponseItem, setWorkerShiftResponseItem] = useState(null);
   const [workerShiftResponseNote, setWorkerShiftResponseNote] = useState('');
   const [workerShiftResponding, setWorkerShiftResponding] = useState(false);
+  const [workerShiftClocking, setWorkerShiftClocking] = useState(false);
   const [workerIncidents, setWorkerIncidents] = useState([]);
   const [workerIncidentsLoading, setWorkerIncidentsLoading] = useState(false);
   const [incidentDetailOpen, setIncidentDetailOpen] = useState(false);
@@ -952,6 +953,57 @@ export default function WorkerDashboard() {
       toast.error(message);
     } finally {
       setWorkerShiftResponding(false);
+    }
+  };
+
+  const getWorkerShiftAttendanceStatus = (item) => {
+    return item?.current_attendance?.status || null;
+  };
+
+  const canWorkerClockIn = (item) => {
+    const assignmentStatus = item?.assignment_status || item?.assignment?.status;
+    const workerResponseStatus = item?.worker_response_status || item?.assignment?.worker_response_status || 'pending';
+    const attendanceStatus = getWorkerShiftAttendanceStatus(item);
+    return assignmentStatus === 'active'
+      && workerResponseStatus === 'accepted'
+      && !['open', 'submitted', 'approved'].includes(attendanceStatus || '');
+  };
+
+  const canWorkerClockOut = (item) => {
+    return getWorkerShiftAttendanceStatus(item) === 'open';
+  };
+
+  const handleWorkerShiftClock = async (item, mode) => {
+    const shiftId = item?.shift?.id;
+    if (!shiftId) {
+      toast.error('Shift not found');
+      return;
+    }
+    setWorkerShiftClocking(true);
+    try {
+      const token = localStorage.getItem('workerToken');
+      const endpoint = mode === 'in'
+        ? `${API}/worker/shifts/${shiftId}/clock-in`
+        : `${API}/worker/shifts/${shiftId}/clock-out`;
+      await axios.post(
+        endpoint,
+        { note: null },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success(mode === 'in' ? 'Clocked in successfully' : 'Clocked out successfully');
+      await fetchWorkerShifts();
+      if (selectedWorkerShift?.shift?.id === shiftId) {
+        await handleOpenWorkerShift(shiftId);
+      }
+    } catch (error) {
+      const message = typeof error.response?.data?.detail === 'string'
+        ? error.response.data.detail
+        : mode === 'in'
+          ? 'Could not clock in'
+          : 'Could not clock out';
+      toast.error(message);
+    } finally {
+      setWorkerShiftClocking(false);
     }
   };
 
@@ -2018,6 +2070,7 @@ export default function WorkerDashboard() {
                     const shift = item.shift || {};
                     const responseStatus = item.worker_response_status || item.assignment?.worker_response_status || 'pending';
                     const assignmentStatus = item.assignment_status || item.assignment?.status || 'active';
+                    const attendanceStatus = getWorkerShiftAttendanceStatus(item);
                     const canRespond = (item.assignment_status === 'active') && (responseStatus === 'pending' || !responseStatus);
                     return (
                       <div key={item.assignment_id || shift.id} className="rounded-lg border border-slate-200 bg-white p-3">
@@ -2055,6 +2108,19 @@ export default function WorkerDashboard() {
                                   : 'bg-slate-100 text-slate-700'
                             }>
                               {responseStatus === 'accepted' ? 'Accepted' : responseStatus === 'rejected' ? 'Rejected' : 'Awaiting response'}
+                            </Badge>
+                            <Badge className={
+                              attendanceStatus === 'approved'
+                                ? 'bg-green-100 text-green-700'
+                                : attendanceStatus === 'submitted'
+                                  ? 'bg-blue-100 text-blue-700'
+                                  : attendanceStatus === 'open'
+                                    ? 'bg-amber-100 text-amber-700'
+                                    : attendanceStatus === 'rejected'
+                                      ? 'bg-red-100 text-red-700'
+                                      : 'bg-slate-100 text-slate-700'
+                            }>
+                              Attendance: {attendanceStatus || 'not started'}
                             </Badge>
                             {canRespond && (
                               <div className="flex items-center gap-1">
@@ -4466,6 +4532,22 @@ export default function WorkerDashboard() {
                 <p className="text-xs text-slate-500">Assignment status</p>
                 <p className="font-medium">{selectedWorkerShift.assignment?.status || '—'}</p>
               </div>
+              <div>
+                <p className="text-xs text-slate-500">Attendance status</p>
+                <Badge className={
+                  selectedWorkerShift.current_attendance?.status === 'approved'
+                    ? 'bg-green-100 text-green-700'
+                    : selectedWorkerShift.current_attendance?.status === 'submitted'
+                      ? 'bg-blue-100 text-blue-700'
+                      : selectedWorkerShift.current_attendance?.status === 'open'
+                        ? 'bg-amber-100 text-amber-700'
+                        : selectedWorkerShift.current_attendance?.status === 'rejected'
+                          ? 'bg-red-100 text-red-700'
+                          : 'bg-slate-100 text-slate-700'
+                }>
+                  {selectedWorkerShift.current_attendance?.status || 'not started'}
+                </Badge>
+              </div>
               {(selectedWorkerShift.assignment?.unassign_reason || selectedWorkerShift.shift.cancelled_reason) ? (
                 <div>
                   <p className="text-xs text-slate-500">Cancellation reason</p>
@@ -4474,6 +4556,31 @@ export default function WorkerDashboard() {
                   </p>
                 </div>
               ) : null}
+              {(canWorkerClockIn(selectedWorkerShift) || canWorkerClockOut(selectedWorkerShift)) && (
+                <div className="flex items-center gap-2 pt-2">
+                  {canWorkerClockIn(selectedWorkerShift) && (
+                    <Button
+                      size="sm"
+                      onClick={() => handleWorkerShiftClock(selectedWorkerShift, 'in')}
+                      disabled={workerShiftClocking}
+                    >
+                      {workerShiftClocking ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+                      Clock In
+                    </Button>
+                  )}
+                  {canWorkerClockOut(selectedWorkerShift) && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleWorkerShiftClock(selectedWorkerShift, 'out')}
+                      disabled={workerShiftClocking}
+                    >
+                      {workerShiftClocking ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+                      Clock Out
+                    </Button>
+                  )}
+                </div>
+              )}
             </div>
           ) : (
             <p className="text-sm text-slate-600">Shift detail unavailable.</p>

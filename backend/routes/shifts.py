@@ -667,6 +667,7 @@ async def list_worker_shifts(
         {"employee_id": employee_id, "status": {"$in": assignment_statuses}},
         {"_id": 0}
     ).sort("shift_start_at", 1).to_list(500)
+    assignment_ids = [a.get("id") for a in assignments if a.get("id")]
 
     shift_ids = [a.get("shift_id") for a in assignments if a.get("shift_id")]
     shifts = []
@@ -674,6 +675,17 @@ async def list_worker_shifts(
         shifts = await db.shifts.find({"id": {"$in": shift_ids}}, {"_id": 0}).to_list(500)
     await _attach_care_location_metadata(shifts)
     shifts_by_id = {s.get("id"): s for s in shifts}
+
+    latest_attendance_by_assignment: Dict[str, Dict[str, Any]] = {}
+    if assignment_ids:
+        attendance_rows = await db.shift_attendance_records.find(
+            {"assignment_id": {"$in": assignment_ids}},
+            {"_id": 0},
+        ).sort("created_at", -1).to_list(1000)
+        for row in attendance_rows:
+            assignment_id = row.get("assignment_id")
+            if assignment_id and assignment_id not in latest_attendance_by_assignment:
+                latest_attendance_by_assignment[assignment_id] = row
 
     result = []
     for assignment in assignments:
@@ -689,6 +701,7 @@ async def list_worker_shifts(
             "worker_response_note": assignment.get("worker_response_note"),
             "worker_responded_at": assignment.get("worker_responded_at"),
             "cancellation_reason": cancellation_reason,
+            "current_attendance": latest_attendance_by_assignment.get(assignment.get("id")),
             "shift": shift,
         })
     return {"shifts": result, "total": len(result)}
@@ -710,7 +723,12 @@ async def get_worker_shift(
         raise HTTPException(status_code=404, detail="Shift not found for this worker")
     shift = await _get_shift_or_404(shift_id)
     await _attach_care_location_metadata([shift])
-    return {"assignment": assignment, "shift": shift}
+    current_attendance = await db.shift_attendance_records.find_one(
+        {"assignment_id": assignment.get("id")},
+        {"_id": 0},
+        sort=[("created_at", -1)],
+    )
+    return {"assignment": assignment, "shift": shift, "current_attendance": current_attendance}
 
 
 @router.post("/worker/shifts/{shift_id}/accept")

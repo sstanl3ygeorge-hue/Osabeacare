@@ -96,6 +96,12 @@ export default function ShiftsPage() {
   const [assignEmployeeId, setAssignEmployeeId] = useState('');
   const [assignNotes, setAssignNotes] = useState('');
   const [cancelReason, setCancelReason] = useState('');
+  const [attendanceRecords, setAttendanceRecords] = useState([]);
+  const [attendanceLoading, setAttendanceLoading] = useState(false);
+  const [attendanceSaving, setAttendanceSaving] = useState(false);
+  const [selectedAttendance, setSelectedAttendance] = useState(null);
+  const [isRejectAttendanceOpen, setIsRejectAttendanceOpen] = useState(false);
+  const [attendanceRejectReason, setAttendanceRejectReason] = useState('');
 
   const [newShift, setNewShift] = useState({
     start_at: '',
@@ -152,12 +158,77 @@ export default function ShiftsPage() {
     }
   };
 
+  const fetchAttendanceQueue = async () => {
+    try {
+      setAttendanceLoading(true);
+      const res = await axios.get(`${API}/shift-attendance`, {
+        headers,
+        params: { status: 'submitted' },
+      });
+      setAttendanceRecords(res.data?.attendance_records || []);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to load attendance review queue');
+    } finally {
+      setAttendanceLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (!token) return;
     fetchShifts();
     fetchActiveEmployees();
     fetchActiveCareLocations();
+    if (!isAuditor()) {
+      fetchAttendanceQueue();
+    }
   }, [token, statusFilter, serviceUserIdFilter]);
+
+  const handleApproveAttendance = async (attendanceId) => {
+    if (!attendanceId) return;
+    try {
+      setAttendanceSaving(true);
+      await axios.post(
+        `${API}/shift-attendance/${attendanceId}/approve`,
+        { reason: null },
+        { headers }
+      );
+      toast.success('Attendance approved');
+      fetchAttendanceQueue();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to approve attendance');
+    } finally {
+      setAttendanceSaving(false);
+    }
+  };
+
+  const handleRejectAttendance = async () => {
+    if (!selectedAttendance?.id) {
+      toast.error('Attendance record not found');
+      return;
+    }
+    const reason = (attendanceRejectReason || '').trim();
+    if (reason.length < 3) {
+      toast.error('Rejection reason must be at least 3 characters');
+      return;
+    }
+    try {
+      setAttendanceSaving(true);
+      await axios.post(
+        `${API}/shift-attendance/${selectedAttendance.id}/reject`,
+        { reason },
+        { headers }
+      );
+      toast.success('Attendance rejected');
+      setIsRejectAttendanceOpen(false);
+      setSelectedAttendance(null);
+      setAttendanceRejectReason('');
+      fetchAttendanceQueue();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to reject attendance');
+    } finally {
+      setAttendanceSaving(false);
+    }
+  };
 
   const handleCreateShift = async (e) => {
     e.preventDefault();
@@ -544,6 +615,62 @@ export default function ShiftsPage() {
         </CardContent>
       </Card>
 
+      {!isAuditor() && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Attendance Review Queue</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {attendanceLoading ? (
+              <div className="flex items-center justify-center py-6">
+                <Loader2 className="h-5 w-5 animate-spin text-primary" />
+              </div>
+            ) : attendanceRecords.length === 0 ? (
+              <p className="text-text-muted py-2">No submitted attendance records waiting for review.</p>
+            ) : (
+              <div className="space-y-3">
+                {attendanceRecords.map((row) => (
+                  <div key={row.id} className="rounded-lg border p-3 sm:p-4">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="space-y-1 text-sm">
+                        <p className="font-medium text-text-primary">Shift: {row.shift_id}</p>
+                        <p className="text-text-muted">Employee: {row.employee_id}</p>
+                        <p className="text-text-muted">Clock in: {formatDateTime(row.clock_in_at)}</p>
+                        <p className="text-text-muted">Clock out: {formatDateTime(row.clock_out_at)}</p>
+                        {row.clock_in_note ? <p className="text-text-muted">Clock-in note: {row.clock_in_note}</p> : null}
+                        {row.clock_out_note ? <p className="text-text-muted">Clock-out note: {row.clock_out_note}</p> : null}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">submitted</Badge>
+                        <Button
+                          size="sm"
+                          onClick={() => handleApproveAttendance(row.id)}
+                          disabled={attendanceSaving}
+                        >
+                          Approve
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          onClick={() => {
+                            setSelectedAttendance(row);
+                            setAttendanceRejectReason('');
+                            setIsRejectAttendanceOpen(true);
+                          }}
+                          disabled={attendanceSaving}
+                        >
+                          Reject
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       <Dialog open={isAssignOpen} onOpenChange={setIsAssignOpen}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
@@ -689,6 +816,49 @@ export default function ShiftsPage() {
             <Button variant="destructive" onClick={handleCancelShift} disabled={saving || cancelReason.trim().length < 3}>
               {saving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
               Cancel shift
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={isRejectAttendanceOpen}
+        onOpenChange={(open) => {
+          setIsRejectAttendanceOpen(open);
+          if (!open) {
+            setSelectedAttendance(null);
+            setAttendanceRejectReason('');
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Reject Attendance</DialogTitle>
+            <DialogDescription>
+              Rejection reason is required and recorded in attendance audit metadata.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="attendance_reject_reason">Reason</Label>
+            <Textarea
+              id="attendance_reject_reason"
+              value={attendanceRejectReason}
+              onChange={(e) => setAttendanceRejectReason(e.target.value)}
+              rows={3}
+              placeholder="Explain why this attendance is being rejected"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsRejectAttendanceOpen(false)}>
+              Back
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleRejectAttendance}
+              disabled={attendanceSaving || attendanceRejectReason.trim().length < 3}
+            >
+              {attendanceSaving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+              Reject attendance
             </Button>
           </DialogFooter>
         </DialogContent>

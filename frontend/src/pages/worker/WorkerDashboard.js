@@ -3941,6 +3941,22 @@ export default function WorkerDashboard() {
                           Waiting for Osabea review
                         </Badge>
                       )}
+                      {training.source_document_id && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="text-xs h-7"
+                          onClick={() => openDocumentViewer({
+                            id: training.source_document_id,
+                            document_id: training.source_document_id,
+                            name: training.name,
+                          })}
+                          data-testid={`view-training-evidence-${training.id}`}
+                        >
+                          <Eye className="h-3 w-3 mr-1" />
+                          View evidence
+                        </Button>
+                      )}
                     </div>
                   </div>
                 ))}

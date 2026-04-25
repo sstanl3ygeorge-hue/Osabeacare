@@ -7020,6 +7020,7 @@ from services.training_evaluator import (
     normalize_training_text,
     normalize_training_key,
     resolve_mandatory_training_code,
+    get_nurse_effective_required_training_items,
 )
 # Keep module-level EXPIRY_WARNING_DAYS aligned (used in a few other places)
 EXPIRY_WARNING_DAYS = _TE_EXPIRY_WARNING_DAYS
@@ -25608,23 +25609,48 @@ async def auto_generate_form_pdf(form_id: str, user: dict):
 # ============================================================================
 
 def _training_matrix_columns():
-    """Single column definition used by visible matrix, summary, and exports."""
-    return [
-        {"id": "induction", "name": "Induction", "has_refresher": False},
-        {"id": "manual_handling", "name": "Moving & Handling", "has_refresher": True},
-        {"id": "medication", "name": "Medication", "has_refresher": True},
-        {"id": "health_safety", "name": "Health and Safety", "has_refresher": True},
-        {"id": "food_hygiene", "name": "Food Hygiene", "has_refresher": True},
-        {"id": "basic_life_support", "name": "First Aid", "has_refresher": True},
-        {"id": "safeguarding", "name": "Safeguarding Adults & Child", "has_refresher": True},
-        {"id": "mca_dols", "name": "MCA and DoLs", "has_refresher": True},
-        {"id": "dementia", "name": "Dementia", "has_refresher": True},
-        {"id": "fire_safety", "name": "Fire", "has_refresher": True},
-        {"id": "autism", "name": "Autism Awareness", "has_refresher": True},
-        {"id": "infection_control", "name": "Infection Control", "has_refresher": True},
-        {"id": "information_governance", "name": "Info Governance", "has_refresher": True},
-        {"id": "prevent", "name": "Prevent", "has_refresher": True},
-    ]
+    """Single column definition used by visible matrix, summary, and exports.
+
+    Policy:
+    - One column per canonical training item (no separate refresher columns).
+    - Nurse-only mandatory additions are included as role-scoped columns.
+    """
+    columns = []
+    seen_ids = set()
+
+    canonical_training = sorted(
+        [
+            item for item in MANDATORY_ITEMS["training"]
+            if item.get("mandatory_for_compliance")
+        ],
+        key=lambda x: x.get("priority_order", 999),
+    )
+
+    for item in canonical_training:
+        col_id = item.get("id")
+        if not col_id or col_id in seen_ids:
+            continue
+        seen_ids.add(col_id)
+        columns.append({
+            "id": col_id,
+            "name": item.get("training_name") or item.get("name", col_id),
+            "has_refresher": False,
+            "scope": "all",
+        })
+
+    for item in get_nurse_effective_required_training_items():
+        col_id = item.get("id")
+        if not col_id or col_id in seen_ids:
+            continue
+        seen_ids.add(col_id)
+        columns.append({
+            "id": col_id,
+            "name": f"Nurse: {item.get('training_name') or item.get('name', col_id)}",
+            "has_refresher": False,
+            "scope": "nurse",
+        })
+
+    return columns
 
 
 def _format_training_matrix_date(date_val):
@@ -25735,18 +25761,22 @@ async def build_training_matrix_read_model():
 
     alt_keys = {
         "manual_handling": ["moving_handling", "moving_and_handling"],
-        "basic_life_support": ["bls", "first_aid"],
+        "bls": ["basic_life_support", "first_aid"],
         "safeguarding": ["safeguarding_adults", "safeguarding_children"],
         "mca_dols": ["mca", "dols", "mental_capacity", "mental_capacity_act"],
         "dementia": ["dementia_awareness"],
         "autism": ["autism_awareness"],
         "food_hygiene": ["food_safety"],
         "health_safety": ["health_and_safety"],
+        "medication_administration": ["medication", "medication_competency"],
+        "enhanced_infection_prevention": ["infection_prevention", "clinical_ipc"],
     }
 
     rows = []
     for emp in employees:
         emp_id = emp.get("id")
+        system_role = normalize_to_system_role(emp.get("role", ""))
+        is_nurse = is_nurse_role(system_role)
         training_records = records_by_employee.get(emp_id, [])
         training_lookup = {}
         for record in training_records:
@@ -25778,6 +25808,17 @@ async def build_training_matrix_read_model():
 
         for col in columns:
             training_id = col["id"]
+
+            if col.get("scope") == "nurse" and not is_nurse:
+                row["training"][training_id] = {
+                    "status": "not_applicable",
+                    "verified": False,
+                    "completion_date": "",
+                    "expiry_date": "",
+                    "days_until_expiry": None,
+                }
+                continue
+
             record = training_lookup.get(training_id)
             if not record:
                 for alt_key in alt_keys.get(training_id, []):

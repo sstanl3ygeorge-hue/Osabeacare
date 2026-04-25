@@ -404,19 +404,20 @@ def generate_induction_pdf_content(form_data: Dict[str, Any], styles) -> list:
     
     checklist_items = form_data.get('checklist_items', [])
     if isinstance(checklist_items, list):
-        checklist_data = [['Item', 'Status', 'Completed']]
+        checklist_data = [['Item', 'Status', 'Completed', 'Signed Off By']]
         for item in checklist_items:
             if isinstance(item, dict):
                 checklist_data.append([
                     item.get('name', 'Unknown'),
                     'Completed' if item.get('completed', False) else 'Pending',
-                    item.get('completed_date', '-')
+                    item.get('completed_date', '-'),
+                    item.get('completed_by', '-') or '-'
                 ])
             else:
-                checklist_data.append([str(item), 'Completed', '-'])
+                checklist_data.append([str(item), 'Completed', '-', '-'])
         
         if len(checklist_data) > 1:
-            checklist_table = Table(checklist_data, colWidths=[80*mm, 45*mm, 45*mm])
+            checklist_table = Table(checklist_data, colWidths=[70*mm, 30*mm, 30*mm, 40*mm])
             checklist_table.setStyle(TableStyle([
                 ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
                 ('BACKGROUND', (0, 0), (-1, 0), PRIMARY_COLOR),

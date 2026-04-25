@@ -1015,6 +1015,7 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             "expiry_date": item.get("expires_at"),
             "verified": item.get("verified", False),
             "record_id": item.get("record_id"),
+            "source_document_id": item.get("source_document_id"),
             "days_until_expiry": item.get("days_until_expiry"),
             "detail": item.get("detail"),
             "blocker": item.get("blocker", False),
@@ -1047,6 +1048,7 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
                 "completion_date": item.get("completion_date"),
                 "expiry_date": item.get("expires_at"),
                 "verified": item.get("verified", False),
+                "source_document_id": item.get("source_document_id"),
             })
     
     # Get expiry alerts

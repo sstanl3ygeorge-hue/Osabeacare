@@ -39,6 +39,7 @@ def _get_db():
 # Constants
 # ---------------------------------------------------------------------------
 EXPIRY_WARNING_DAYS = 30  # Show "Expiring Soon" when within 30 days
+TEMP_INTERNAL_EVIDENCE_VALIDITY_DAYS = 90
 
 TRAINING_VALIDITY_PERIODS = {
     "safeguarding": 365,
@@ -243,10 +244,97 @@ def normalize_date_only(date_value) -> Optional[str]:
     return date_value
 
 
+def _parse_iso_or_date(date_value):
+    """Parse YYYY-MM-DD or ISO datetime into an aware UTC datetime."""
+    if not date_value:
+        return None
+    if isinstance(date_value, datetime):
+        return date_value if date_value.tzinfo else date_value.replace(tzinfo=timezone.utc)
+    if isinstance(date_value, str):
+        if "T" in date_value:
+            return datetime.fromisoformat(date_value.replace("Z", "+00:00"))
+        return datetime.strptime(date_value, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    return None
+
+
+def _format_date_only(dt: datetime) -> str:
+    return dt.strftime("%Y-%m-%d")
+
+
+def _is_external_certificate_evidence(record: dict) -> bool:
+    """Return True when the training evidence is from an external certificate path."""
+    source_type = (record.get("source_type") or "").strip().lower()
+    completion_method = (record.get("completion_method") or "").strip().lower()
+
+    if completion_method == "certificate":
+        return True
+    if record.get("certificate_url"):
+        return True
+    if record.get("source_document_id") or record.get("certificate_document_id"):
+        return True
+    return source_type in {"certificate", "certificate_extraction", "replacement", "migrated"}
+
+
+def _is_internal_temporary_evidence(record: dict) -> bool:
+    """Return True when evidence is internal/questionnaire/manual and should be temporary."""
+    source_type = (record.get("source_type") or "").strip().lower()
+    completion_method = (record.get("completion_method") or "").strip().lower()
+
+    if source_type in {"form_submission", "structured_form"}:
+        return True
+    if completion_method == "manual":
+        return True
+    # Fallback: if not certificate-backed but marked completed, treat as temporary.
+    return not _is_external_certificate_evidence(record)
+
+
+def _resolve_effective_expiry_date(record: dict) -> Optional[str]:
+    """Resolve expiry policy by evidence type.
+
+    - Internal course/questionnaire evidence: max 90 days from completion.
+    - External certificate evidence: normal training expiry policy.
+    """
+    completion_date = record.get("completion_date")
+    if not completion_date:
+        return record.get("expiry_date")
+
+    completion_dt = _parse_iso_or_date(completion_date)
+    if not completion_dt:
+        return record.get("expiry_date")
+
+    raw_expiry = record.get("expiry_date")
+    raw_expiry_dt = _parse_iso_or_date(raw_expiry) if raw_expiry else None
+
+    if _is_internal_temporary_evidence(record):
+        temp_expiry_dt = completion_dt + timedelta(days=TEMP_INTERNAL_EVIDENCE_VALIDITY_DAYS)
+        if raw_expiry_dt and raw_expiry_dt < temp_expiry_dt:
+            return _format_date_only(raw_expiry_dt)
+        return _format_date_only(temp_expiry_dt)
+
+    if _is_external_certificate_evidence(record):
+        if raw_expiry_dt:
+            return _format_date_only(raw_expiry_dt)
+        requirement_id = (
+            record.get("requirement_id")
+            or record.get("mapped_training_code")
+            or record.get("code")
+            or record.get("training_name")
+            or "default"
+        )
+        normalized_completion = normalize_date_only(completion_date)
+        if isinstance(normalized_completion, datetime):
+            normalized_completion = _format_date_only(normalized_completion)
+        if not isinstance(normalized_completion, str):
+            normalized_completion = _format_date_only(completion_dt)
+        return calculate_training_expiry(normalized_completion, str(requirement_id))
+
+    return raw_expiry
+
+
 def compute_training_record_status(record: dict) -> dict:
     """SINGLE SOURCE OF TRUTH for training record status."""
     completion_date = record.get("completion_date")
-    expiry_date = record.get("expiry_date")
+    expiry_date = _resolve_effective_expiry_date(record)
     verified = record.get("verified", False)
 
     if not completion_date:
@@ -1096,6 +1184,7 @@ async def evaluate_employee_training_status(employee_id: str, role: str = "") ->
             "days_until_expiry": computed.get("days_until_expiry"),
             "certificate_url": record.get("certificate_url"),
             "record_id": record.get("id"),
+            "source_document_id": record.get("source_document_id") or record.get("certificate_document_id") or record.get("document_id"),
             "rejection_reason": record.get("rejection_reason") if status == "rejected" else None,
         })
 

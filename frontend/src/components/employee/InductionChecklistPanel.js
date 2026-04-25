@@ -631,9 +631,20 @@ export default function InductionChecklistPanel({ employeeId, employeeName, isAu
 
   const getStatusBadge = (status) => {
     if (status === 'complete' || status === 'completed') return <Badge className="bg-green-100 text-green-700">Completed</Badge>;
+    if (status === 'not_started') return <Badge variant="outline" className="text-slate-600 border-slate-300">Not started</Badge>;
+    if (status === 'awaiting_manager_signoff' || status === 'submitted') return <Badge className="bg-amber-100 text-amber-700">Awaiting manager sign-off</Badge>;
+    if (status === 'returned') return <Badge className="bg-red-100 text-red-700">Returned</Badge>;
     if (status === 'pending_review') return <Badge className="bg-blue-100 text-blue-700">Pending review</Badge>;
     if (status === 'cannot_assess') return <Badge className="bg-red-100 text-red-700">Cannot assess</Badge>;
     return <Badge variant="outline" className="text-amber-600 border-amber-300">Pending</Badge>;
+  };
+
+  const getHybridDisplayStatus = (item) => {
+    const subStatus = item?.submission_status;
+    if (subStatus === 'returned') return 'returned';
+    if (subStatus === 'submitted') return 'awaiting_manager_signoff';
+    if (subStatus === 'signed_off') return 'completed';
+    return 'not_started';
   };
 
   const getOverallStatusBadge = (status) => {
@@ -746,8 +757,10 @@ export default function InductionChecklistPanel({ employeeId, employeeName, isAu
           <div className="space-y-1">
             {items.map((item, idx) => {
               const itemRuleStatus = item.rule_status || (item.status === 'completed' ? 'complete' : 'incomplete');
-              const isComplete = item.status === 'completed' || itemRuleStatus === 'complete';
               const isHybrid = item.completion_type === 'hybrid';
+              const hybridDisplayStatus = isHybrid ? getHybridDisplayStatus(item) : null;
+              const rowStatus = isHybrid ? hybridDisplayStatus : itemRuleStatus;
+              const isComplete = rowStatus === 'complete' || rowStatus === 'completed';
               const isManual = item.completion_type === 'manual';
               const isAutomatic = item.completion_type === 'automatic';
               const canManualComplete = !isAuditor && item.manual_action_allowed !== false && item.status !== 'completed' && !isHybrid && !isAutomatic && !isManual;
@@ -762,14 +775,14 @@ export default function InductionChecklistPanel({ employeeId, employeeName, isAu
                   data-testid={`induction-item-${idx}`}
                 >
                   <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <div className={`flex-shrink-0 ${isComplete ? 'text-green-600' : itemRuleStatus === 'pending_review' ? 'text-blue-500' : 'text-gray-300'}`}>
+                    <div className={`flex-shrink-0 ${isComplete ? 'text-green-600' : rowStatus === 'awaiting_manager_signoff' || rowStatus === 'submitted' || rowStatus === 'pending_review' ? 'text-blue-500' : rowStatus === 'returned' ? 'text-red-500' : 'text-gray-300'}`}>
                       {isComplete ? <CheckCircle className="h-5 w-5" /> : <Circle className="h-5 w-5" />}
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className={`font-medium ${isComplete ? 'text-green-800' : 'text-gray-800'}`}>{item.name}</span>
                         {item.mandatory && <span className="text-[10px] text-red-600 bg-red-50 px-1.5 py-0.5 rounded font-medium">REQUIRED</span>}
-                        {getStatusBadge(itemRuleStatus)}
+                        {getStatusBadge(rowStatus)}
                         {item.completion_type && (
                           <span className="text-[10px] text-gray-600 bg-white border border-gray-200 px-1.5 py-0.5 rounded font-medium uppercase">
                             {item.completion_type}

@@ -127,10 +127,19 @@ async def get_induction_checklist(
     
     # Use canonical induction status function
     induction_status = await get_employee_induction_status(db, employee_id)
+
+    submission_map = {}
+    async for sub in db.induction_item_submissions.find(
+        {"employee_id": employee_id}, {"_id": 0, "form_id": 1, "status": 1}
+    ):
+        submission_map[sub["form_id"]] = sub
     
     # Map canonical items to the shape InductionChecklistPanel expects
     items = []
     for item in induction_status["items"]:
+        cfg = get_config_for_item(item.get("code", ""))
+        worker_form_id = cfg.get("worker_form_id") if cfg else None
+        sub = submission_map.get(worker_form_id) if worker_form_id else None
         items.append({
             "id": item["id"],
             "code": item.get("code"),
@@ -157,6 +166,9 @@ async def get_induction_checklist(
             "completed_by_name": item["completed_by_name"],
             "synced_from_training": item["synced_from_training"],
             "manual_action_allowed": item.get("manual_action_allowed", True),
+            "worker_form_id": worker_form_id,
+            "form_id": worker_form_id,
+            "submission_status": sub.get("status") if sub else None,
         })
     
     now = datetime.now(timezone.utc).isoformat()

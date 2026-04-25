@@ -99,12 +99,16 @@ async def worker_induction_overview(worker: dict = Depends(get_current_worker)):
             "status": item.get("status"),
             "rule_status": item.get("rule_status"),
             "next_action": item.get("next_action"),
+            "worker_form_id": form_id,
+            "submission_status": None,
+            "worker_action_available": False,
             "synced_from_training": item.get("synced_from_training", False),
         }
 
         # Hybrid items: add worker-specific submission info
         if form_id:
             entry["form_id"] = form_id
+            entry["worker_action_available"] = True
             if sub:
                 entry["submission_status"] = sub.get("status")  # draft|submitted|returned|signed_off
                 entry["has_draft"] = bool(sub.get("draft_data"))

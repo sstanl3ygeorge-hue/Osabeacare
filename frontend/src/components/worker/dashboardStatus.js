@@ -199,6 +199,7 @@ export function getNextAction(status) {
   const cv = status.cv || null;
   const contract = status.contract || null;
   const handbook = status.handbook || null;
+  const induction = status.induction || null;
   const missingDocuments = status.missingDocuments || [];
   const missingTrainings = status.missingTrainings || [];
   const expiredTrainings = status.expiredTrainings || [];
@@ -235,6 +236,28 @@ export function getNextAction(status) {
       primaryLabel: 'Open handbook',
       route: '#agreements-handbook',
       level: 'critical',
+    };
+  }
+
+  if (induction && induction.state === 'worker_action_required') {
+    return {
+      key: 'induction',
+      title: induction.title || 'Complete your induction item',
+      description: induction.description || 'Your induction checklist has a self-assessment to complete.',
+      primaryLabel: induction.primaryLabel || 'Open induction',
+      route: '#induction',
+      level: 'high',
+    };
+  }
+
+  if (induction && induction.state === 'awaiting_manager_signoff') {
+    return {
+      key: 'induction_waiting_signoff',
+      title: induction.title || 'Induction awaiting manager sign-off',
+      description: induction.description || 'Your submitted induction form is waiting for manager review.',
+      primaryLabel: induction.primaryLabel || 'View induction',
+      route: '#induction',
+      level: 'medium',
     };
   }
 

@@ -22,6 +22,8 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const STATUS_CONFIG = {
   completed:          { label: 'Completed',           color: 'bg-green-100 text-green-800' },
   signed_off:         { label: 'Completed',           color: 'bg-green-100 text-green-800' },
+  not_started:        { label: 'Not started',         color: 'bg-slate-100 text-slate-600' },
+  awaiting_manager_signoff: { label: 'Awaiting manager sign-off', color: 'bg-amber-100 text-amber-800' },
   awaiting_signoff:   { label: 'Awaiting manager',    color: 'bg-amber-100 text-amber-800' },
   submitted:          { label: 'Awaiting manager',    color: 'bg-amber-100 text-amber-800' },
   returned:           { label: 'Returned – revise',   color: 'bg-red-100 text-red-800' },
@@ -38,6 +40,14 @@ function StatusBadge({ status }) {
       {cfg.label}
     </span>
   );
+}
+
+function getHybridDisplayStatus(item) {
+  const subStatus = item?.submission_status;
+  if (subStatus === 'returned') return 'returned';
+  if (subStatus === 'submitted') return 'awaiting_manager_signoff';
+  if (subStatus === 'signed_off') return 'completed';
+  return 'not_started';
 }
 
 // ─── Form field renderers ──────────────────────────────────────────────────
@@ -461,7 +471,9 @@ export default function CareCertificateInductionPanel() {
           </thead>
           <tbody className="divide-y divide-slate-100">
             {items.map(item => {
-              const displayStatus = item.submission_status || item.status || 'pending';
+              const displayStatus = item.completion_type === 'hybrid'
+                ? getHybridDisplayStatus(item)
+                : (item.status || 'pending');
               const completionType = item.completion_type;
 
               // Determine worker action button
@@ -501,7 +513,16 @@ export default function CareCertificateInductionPanel() {
                       onClick={() => setActiveForm(item)}
                       className="px-3 py-1 rounded-md text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200"
                     >
-                      View
+                      View submission
+                    </button>
+                  );
+                } else if (item.form_id || item.worker_form_id) {
+                  actionBtn = (
+                    <button
+                      onClick={() => setActiveForm(item)}
+                      className="px-3 py-1 rounded-md text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200"
+                    >
+                      View submission
                     </button>
                   );
                 }

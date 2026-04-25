@@ -687,6 +687,7 @@ function FormsSection() {
 
 export default function WorkerDashboard() {
   const [dashboard, setDashboard] = useState(null);
+  const [inductionOverview, setInductionOverview] = useState(null);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(null);
   const [showSignaturePad, setShowSignaturePad] = useState(false);
@@ -781,6 +782,16 @@ export default function WorkerDashboard() {
         headers: { Authorization: `Bearer ${token}` }
       });
       setDashboard(response.data);
+
+      try {
+        const inductionRes = await axios.get(`${API}/worker/induction/overview`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        setInductionOverview(inductionRes.data || null);
+      } catch (err) {
+        console.warn('Could not fetch induction overview:', err);
+        setInductionOverview(null);
+      }
       
       // Fetch org settings for dynamic branding
       try {
@@ -1738,10 +1749,38 @@ export default function WorkerDashboard() {
   const completedSupervisionCount = (supervisions || []).filter(
     (item) => (item?.status || '').toLowerCase() === 'completed'
   ).length;
+  const inductionItems = inductionOverview?.items || [];
+  const pendingInductionItem = inductionItems.find((item) =>
+    item?.completion_type === 'hybrid' && ['start_form', 'complete_form', 'resubmit'].includes(item?.worker_action)
+  );
+  const awaitingInductionItem = !pendingInductionItem
+    ? inductionItems.find((item) =>
+      item?.completion_type === 'hybrid' && (
+        item?.worker_action === 'awaiting_review' ||
+        item?.submission_status === 'submitted'
+      )
+    )
+    : null;
+  const inductionNextAction = pendingInductionItem
+    ? {
+        state: 'worker_action_required',
+        title: `Complete induction: ${pendingInductionItem?.title || 'self-assessment'}`,
+        description: pendingInductionItem?.next_action || 'Complete and submit your induction self-assessment for manager review.',
+        primaryLabel: 'Open induction',
+      }
+    : awaitingInductionItem
+      ? {
+          state: 'awaiting_manager_signoff',
+          title: `Awaiting sign-off: ${awaitingInductionItem?.title || 'induction item'}`,
+          description: 'Your induction submission is waiting for manager sign-off.',
+          primaryLabel: 'View induction',
+        }
+      : null;
   const nextAction = getNextAction({
     cv: cvDisplay,
     contract: contractDisplay,
     handbook: handbookDisplay,
+    induction: inductionNextAction,
     missingDocuments: visibleMissingDocuments,
     missingTrainings: missing_trainings,
     expiredTrainings: expired_trainings,
@@ -1753,6 +1792,7 @@ export default function WorkerDashboard() {
         cv: null,
         contract: contractDisplay,
         handbook: handbookDisplay,
+        induction: inductionNextAction,
         missingDocuments: visibleMissingDocuments,
         missingTrainings: missing_trainings,
         expiredTrainings: expired_trainings,
@@ -1794,6 +1834,9 @@ export default function WorkerDashboard() {
         return;
       case '#training':
         scrollToSection('[data-testid="training-card"]') || scrollToSection('[data-testid="recommended-training-section"]');
+        return;
+      case '#induction':
+        scrollToSection('[data-testid="induction-section"]') || scrollToSection('[data-testid="employment-readiness-checklist"]');
         return;
       case '#checks':
         scrollToSection('[data-testid="checks-card"]') || scrollToSection('[data-testid="references-section"]') || scrollToSection('[data-testid="employment-gaps-section"]');

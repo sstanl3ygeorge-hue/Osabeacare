@@ -26,6 +26,11 @@ import {
 } from '../ui/dialog';
 import { formatBackendDate } from '../../lib/dateUtils';
 import { getEvidenceRules } from './evidenceRules';
+import {
+  fetchProtectedFileBlob,
+  downloadBlobUrl,
+  revokeBlobUrlLater,
+} from '../../lib/protectedFiles';
 
 // eslint-disable-next-line no-unused-vars
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -120,6 +125,16 @@ export default function UploadRequirementCard({
   // NEW: Stamp All state for RTW/DBS
   const [stampingAll, setStampingAll] = useState(false);
   const [stampAllDialog, setStampAllDialog] = useState({ open: false, message: '', files: [] });
+
+  const handleProtectedEvidenceDownload = async (url, filename = 'document') => {
+    try {
+      const { blobUrl } = await fetchProtectedFileBlob(url, token);
+      downloadBlobUrl(blobUrl, filename);
+      revokeBlobUrlLater(blobUrl);
+    } catch (error) {
+      toast.error('Failed to download file');
+    }
+  };
   
   // Handle Stamp All for RTW/DBS - stamps both evidence and verification proof
   const handleStampAll = async (requirementKey, filesToStamp) => {
@@ -722,9 +737,9 @@ export default function UploadRequirementCard({
                           size="sm"
                           variant="ghost"
                           className="h-7 w-7 p-0 text-gray-500 hover:text-green-600"
-                          onClick={() => {
+                          onClick={async () => {
                             const url = file.file_url || `/api/employee-documents/${file.file_id || file.id}/file`;
-                            window.open(url, '_blank');
+                            await handleProtectedEvidenceDownload(url, file.file_name || file.original_filename || 'document');
                           }}
                           title="Download original"
                           data-testid={`${key}-evidence-download-${file.file_id || file.id}`}
@@ -738,7 +753,12 @@ export default function UploadRequirementCard({
                             size="sm"
                             variant="ghost"
                             className="h-7 px-1.5 text-xs text-green-600 hover:text-green-700 hover:bg-green-50"
-                            onClick={() => window.open(file.stamped_file_url, '_blank')}
+                            onClick={async () => {
+                              await handleProtectedEvidenceDownload(
+                                file.stamped_file_url,
+                                `stamped_${file.file_name || file.original_filename || 'document'}`
+                              );
+                            }}
                             title="Download stamped version"
                             data-testid={`${key}-evidence-download-stamped-${file.file_id || file.id}`}
                           >

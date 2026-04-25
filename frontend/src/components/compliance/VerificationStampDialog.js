@@ -25,6 +25,11 @@ import {
   ExternalLink,
   Trash2
 } from 'lucide-react';
+import {
+  fetchProtectedFileBlob,
+  openBlobUrlInNewTab,
+  revokeBlobUrlLater,
+} from '../../lib/protectedFiles';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -172,9 +177,14 @@ export default function VerificationStampDialog({
     }
   };
 
-  const handlePreview = () => {
-    if (file?.file_url) {
-      window.open(file.file_url, '_blank');
+  const handlePreview = async () => {
+    if (!file?.file_url) return;
+    try {
+      const { blobUrl } = await fetchProtectedFileBlob(file.file_url, token);
+      openBlobUrlInNewTab(blobUrl, file?.original_filename || file?.document_type_name || 'document');
+      revokeBlobUrlLater(blobUrl);
+    } catch (err) {
+      toast.error('Failed to open document preview');
     }
   };
 

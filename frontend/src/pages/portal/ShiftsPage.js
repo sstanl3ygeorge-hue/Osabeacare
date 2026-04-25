@@ -97,6 +97,7 @@ export default function ShiftsPage() {
   const [assignNotes, setAssignNotes] = useState('');
   const [cancelReason, setCancelReason] = useState('');
   const [attendanceRecords, setAttendanceRecords] = useState([]);
+  const [approvedAttendanceRecords, setApprovedAttendanceRecords] = useState([]);
   const [attendanceLoading, setAttendanceLoading] = useState(false);
   const [attendanceSaving, setAttendanceSaving] = useState(false);
   const [selectedAttendance, setSelectedAttendance] = useState(null);
@@ -114,6 +115,13 @@ export default function ShiftsPage() {
   });
 
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
+  const shiftLocationById = useMemo(() => {
+    const map = {};
+    for (const shift of shifts || []) {
+      if (shift?.id) map[shift.id] = shift.location_text || shift.care_location?.name || null;
+    }
+    return map;
+  }, [shifts]);
 
   const fetchShifts = async () => {
     try {
@@ -161,11 +169,18 @@ export default function ShiftsPage() {
   const fetchAttendanceQueue = async () => {
     try {
       setAttendanceLoading(true);
-      const res = await axios.get(`${API}/shift-attendance`, {
-        headers,
-        params: { status: 'submitted' },
-      });
-      setAttendanceRecords(res.data?.attendance_records || []);
+      const [submittedRes, approvedRes] = await Promise.all([
+        axios.get(`${API}/shift-attendance`, {
+          headers,
+          params: { status: 'submitted' },
+        }),
+        axios.get(`${API}/shift-attendance`, {
+          headers,
+          params: { status: 'approved' },
+        }),
+      ]);
+      setAttendanceRecords(submittedRes.data?.attendance_records || []);
+      setApprovedAttendanceRecords(approvedRes.data?.attendance_records || []);
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to load attendance review queue');
     } finally {
@@ -661,6 +676,44 @@ export default function ShiftsPage() {
                         >
                           Reject
                         </Button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {!isAuditor() && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Approved Attendance / Timesheet Ready</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {attendanceLoading ? (
+              <div className="flex items-center justify-center py-6">
+                <Loader2 className="h-5 w-5 animate-spin text-primary" />
+              </div>
+            ) : approvedAttendanceRecords.length === 0 ? (
+              <p className="text-text-muted py-2">No approved attendance records yet.</p>
+            ) : (
+              <div className="space-y-3">
+                {approvedAttendanceRecords.map((row) => (
+                  <div key={row.id} className="rounded-lg border p-3 sm:p-4">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="space-y-1 text-sm">
+                        <p className="font-medium text-text-primary">Employee: {row.employee_id}</p>
+                        <p className="text-text-muted">Shift: {row.shift_id}</p>
+                        <p className="text-text-muted">Location: {shiftLocationById[row.shift_id] || '—'}</p>
+                        <p className="text-text-muted">Clock in: {formatDateTime(row.clock_in_at)}</p>
+                        <p className="text-text-muted">Clock out: {formatDateTime(row.clock_out_at)}</p>
+                        <p className="text-text-muted">Approved at: {formatDateTime(row.reviewed_at)}</p>
+                        <p className="text-text-muted">Approved for timesheet: {row.approved_for_timesheet ? 'Yes' : 'No'}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">approved</Badge>
                       </div>
                     </div>
                   </div>

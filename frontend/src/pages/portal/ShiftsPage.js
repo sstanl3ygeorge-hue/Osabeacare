@@ -40,6 +40,8 @@ import {
   UserX,
   CheckCircle2,
   Eye,
+  Download,
+  Printer,
 } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -98,6 +100,7 @@ export default function ShiftsPage() {
   const [cancelReason, setCancelReason] = useState('');
   const [attendanceRecords, setAttendanceRecords] = useState([]);
   const [approvedAttendanceRecords, setApprovedAttendanceRecords] = useState([]);
+  const [attendanceShiftsById, setAttendanceShiftsById] = useState({});
   const [attendanceLoading, setAttendanceLoading] = useState(false);
   const [attendanceSaving, setAttendanceSaving] = useState(false);
   const [selectedAttendance, setSelectedAttendance] = useState(null);
@@ -115,6 +118,19 @@ export default function ShiftsPage() {
   });
 
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
+  const activeEmployees = useMemo(
+    () => (employees || []).filter((employee) => employee?.status === 'active'),
+    [employees]
+  );
+  const employeeById = useMemo(() => {
+    const map = {};
+    for (const employee of employees || []) {
+      if (employee?.id) {
+        map[employee.id] = employee;
+      }
+    }
+    return map;
+  }, [employees]);
   const shiftLocationById = useMemo(() => {
     const map = {};
     for (const shift of shifts || []) {
@@ -122,6 +138,200 @@ export default function ShiftsPage() {
     }
     return map;
   }, [shifts]);
+
+  const shiftById = useMemo(() => {
+    const map = { ...attendanceShiftsById };
+    for (const shift of shifts || []) {
+      if (shift?.id) {
+        map[shift.id] = shift;
+      }
+    }
+    return map;
+  }, [shifts, attendanceShiftsById]);
+
+  const getEmployeeDisplay = (employeeId) => {
+    if (!employeeId) return 'Unknown employee';
+    const employee = employeeById[employeeId];
+    if (!employee) return employeeId;
+    const fullName = `${employee.first_name || ''} ${employee.last_name || ''}`.trim();
+    return fullName || employee.employee_code || employee.id;
+  };
+
+  const getShiftDisplay = (shiftId) => {
+    if (!shiftId) return 'Unknown shift';
+    const shift = shiftById[shiftId];
+    if (!shift) return shiftId;
+    const location = shift.location_text || shift.care_location?.name || 'Location pending';
+    const role = shift.role_required || 'Role pending';
+    return `${location} — ${role} (${formatDateTime(shift.start_at)} → ${formatDateTime(shift.end_at)})`;
+  };
+
+  const getShiftLocationForAttendance = (shiftId) => {
+    const shift = shiftById[shiftId];
+    return shift?.location_text || shift?.care_location?.name || shiftLocationById[shiftId] || '—';
+  };
+
+  const getShiftRoleForAttendance = (shiftId) => {
+    const shift = shiftById[shiftId];
+    return shift?.role_required || '—';
+  };
+
+  const getShiftScheduledStartForAttendance = (shiftId) => {
+    const shift = shiftById[shiftId];
+    return shift?.start_at ? formatDateTime(shift.start_at) : '—';
+  };
+
+  const getShiftScheduledEndForAttendance = (shiftId) => {
+    const shift = shiftById[shiftId];
+    return shift?.end_at ? formatDateTime(shift.end_at) : '—';
+  };
+
+  const getEmployeeCodeForAttendance = (employeeId) => {
+    const employee = employeeById[employeeId];
+    return employee?.employee_code || '—';
+  };
+
+  const getApprovedAttendanceExportRows = () => {
+    return (approvedAttendanceRecords || []).map((row) => ({
+      employeeName: getEmployeeDisplay(row.employee_id),
+      employeeCode: getEmployeeCodeForAttendance(row.employee_id),
+      shiftLocation: getShiftLocationForAttendance(row.shift_id),
+      roleRequired: getShiftRoleForAttendance(row.shift_id),
+      scheduledStart: getShiftScheduledStartForAttendance(row.shift_id),
+      scheduledEnd: getShiftScheduledEndForAttendance(row.shift_id),
+      clockIn: formatDateTime(row.clock_in_at),
+      clockOut: formatDateTime(row.clock_out_at),
+      approvedAt: formatDateTime(row.reviewed_at),
+      approvedForTimesheet: row.approved_for_timesheet ? 'Yes' : 'No',
+    }));
+  };
+
+  const csvEscape = (value) => {
+    const text = value === null || value === undefined ? '' : String(value);
+    return `"${text.replace(/"/g, '""')}"`;
+  };
+
+  const htmlEscape = (value) => {
+    const text = value === null || value === undefined ? '' : String(value);
+    return text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  };
+
+  const handleExportApprovedAttendanceCsv = () => {
+    const rows = getApprovedAttendanceExportRows();
+    if (rows.length === 0) {
+      toast.error('No approved attendance records to export');
+      return;
+    }
+    const headersRow = [
+      'Employee Name',
+      'Employee Code',
+      'Shift Location/Care Location',
+      'Role Required',
+      'Scheduled Start',
+      'Scheduled End',
+      'Clock In',
+      'Clock Out',
+      'Approved At',
+      'Approved For Timesheet',
+    ];
+    const csvLines = [
+      headersRow.map(csvEscape).join(','),
+      ...rows.map((item) => [
+        item.employeeName,
+        item.employeeCode,
+        item.shiftLocation,
+        item.roleRequired,
+        item.scheduledStart,
+        item.scheduledEnd,
+        item.clockIn,
+        item.clockOut,
+        item.approvedAt,
+        item.approvedForTimesheet,
+      ].map(csvEscape).join(',')),
+    ];
+    const blob = new Blob([csvLines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `approved_attendance_timesheet_ready_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
+  };
+
+  const handlePrintApprovedAttendance = () => {
+    const rows = getApprovedAttendanceExportRows();
+    if (rows.length === 0) {
+      toast.error('No approved attendance records to print');
+      return;
+    }
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      toast.error('Could not open print window');
+      return;
+    }
+    const tableRows = rows.map((item) => `
+      <tr>
+        <td>${htmlEscape(item.employeeName)}</td>
+        <td>${htmlEscape(item.employeeCode)}</td>
+        <td>${htmlEscape(item.shiftLocation)}</td>
+        <td>${htmlEscape(item.roleRequired)}</td>
+        <td>${htmlEscape(item.scheduledStart)}</td>
+        <td>${htmlEscape(item.scheduledEnd)}</td>
+        <td>${htmlEscape(item.clockIn)}</td>
+        <td>${htmlEscape(item.clockOut)}</td>
+        <td>${htmlEscape(item.approvedAt)}</td>
+        <td>${htmlEscape(item.approvedForTimesheet)}</td>
+      </tr>
+    `).join('');
+
+    printWindow.document.write(`
+      <!doctype html>
+      <html>
+        <head>
+          <title>Approved Attendance / Timesheet Ready</title>
+          <style>
+            body { font-family: Arial, sans-serif; margin: 16px; color: #111827; }
+            h1 { font-size: 18px; margin: 0 0 6px; }
+            p { margin: 0 0 12px; color: #4b5563; font-size: 12px; }
+            table { width: 100%; border-collapse: collapse; font-size: 12px; }
+            th, td { border: 1px solid #d1d5db; padding: 6px; text-align: left; vertical-align: top; }
+            th { background: #f3f4f6; }
+          </style>
+        </head>
+        <body>
+          <h1>Approved Attendance / Timesheet Ready</h1>
+          <p>Generated: ${htmlEscape(formatDateTime(new Date().toISOString()))}</p>
+          <table>
+            <thead>
+              <tr>
+                <th>Employee Name</th>
+                <th>Employee Code</th>
+                <th>Shift Location/Care Location</th>
+                <th>Role Required</th>
+                <th>Scheduled Start</th>
+                <th>Scheduled End</th>
+                <th>Clock In</th>
+                <th>Clock Out</th>
+                <th>Approved At</th>
+                <th>Approved For Timesheet</th>
+              </tr>
+            </thead>
+            <tbody>${tableRows}</tbody>
+          </table>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.print();
+  };
 
   const fetchShifts = async () => {
     try {
@@ -142,10 +352,9 @@ export default function ShiftsPage() {
     try {
       const res = await axios.get(`${API}/staff/employees`, {
         headers,
-        params: { status: 'active' },
       });
       const rows = Array.isArray(res.data) ? res.data : (res.data?.employees || []);
-      setEmployees(rows.filter((e) => e?.status === 'active'));
+      setEmployees(rows);
     } catch (error) {
       toast.error('Failed to load active employees for assignment');
     }
@@ -179,8 +388,28 @@ export default function ShiftsPage() {
           params: { status: 'approved' },
         }),
       ]);
-      setAttendanceRecords(submittedRes.data?.attendance_records || []);
-      setApprovedAttendanceRecords(approvedRes.data?.attendance_records || []);
+      const submittedRows = submittedRes.data?.attendance_records || [];
+      const approvedRows = approvedRes.data?.attendance_records || [];
+      const combinedRows = [...submittedRows, ...approvedRows];
+      setAttendanceRecords(submittedRows);
+      setApprovedAttendanceRecords(approvedRows);
+
+      const knownShiftIds = new Set((shifts || []).map((shift) => shift?.id).filter(Boolean));
+      const missingShiftIds = [...new Set(combinedRows.map((row) => row?.shift_id).filter(Boolean))]
+        .filter((shiftId) => !knownShiftIds.has(shiftId));
+      if (missingShiftIds.length > 0) {
+        const shiftResponses = await Promise.all(
+          missingShiftIds.map((shiftId) => axios.get(`${API}/shifts/${shiftId}`, { headers }))
+        );
+        const next = {};
+        for (const response of shiftResponses) {
+          const shift = response.data?.shift;
+          if (shift?.id) next[shift.id] = shift;
+        }
+        if (Object.keys(next).length > 0) {
+          setAttendanceShiftsById((prev) => ({ ...prev, ...next }));
+        }
+      }
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to load attendance review queue');
     } finally {
@@ -648,8 +877,8 @@ export default function ShiftsPage() {
                   <div key={row.id} className="rounded-lg border p-3 sm:p-4">
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                       <div className="space-y-1 text-sm">
-                        <p className="font-medium text-text-primary">Shift: {row.shift_id}</p>
-                        <p className="text-text-muted">Employee: {row.employee_id}</p>
+                        <p className="font-medium text-text-primary">Shift: {getShiftDisplay(row.shift_id)}</p>
+                        <p className="text-text-muted">Employee: {getEmployeeDisplay(row.employee_id)}</p>
                         <p className="text-text-muted">Clock in: {formatDateTime(row.clock_in_at)}</p>
                         <p className="text-text-muted">Clock out: {formatDateTime(row.clock_out_at)}</p>
                         {row.clock_in_note ? <p className="text-text-muted">Clock-in note: {row.clock_in_note}</p> : null}
@@ -689,7 +918,31 @@ export default function ShiftsPage() {
       {!isAuditor() && (
         <Card>
           <CardHeader>
-            <CardTitle>Approved Attendance / Timesheet Ready</CardTitle>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <CardTitle>Approved Attendance / Timesheet Ready</CardTitle>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleExportApprovedAttendanceCsv}
+                  disabled={approvedAttendanceRecords.length === 0}
+                >
+                  <Download className="h-4 w-4 mr-1" />
+                  Export CSV
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handlePrintApprovedAttendance}
+                  disabled={approvedAttendanceRecords.length === 0}
+                >
+                  <Printer className="h-4 w-4 mr-1" />
+                  Print / PDF
+                </Button>
+              </div>
+            </div>
           </CardHeader>
           <CardContent>
             {attendanceLoading ? (
@@ -704,9 +957,13 @@ export default function ShiftsPage() {
                   <div key={row.id} className="rounded-lg border p-3 sm:p-4">
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                       <div className="space-y-1 text-sm">
-                        <p className="font-medium text-text-primary">Employee: {row.employee_id}</p>
-                        <p className="text-text-muted">Shift: {row.shift_id}</p>
+                        <p className="font-medium text-text-primary">Employee: {getEmployeeDisplay(row.employee_id)}</p>
+                        <p className="text-text-muted">Employee code: {getEmployeeCodeForAttendance(row.employee_id)}</p>
+                        <p className="text-text-muted">Shift: {getShiftDisplay(row.shift_id)}</p>
                         <p className="text-text-muted">Location: {shiftLocationById[row.shift_id] || '—'}</p>
+                        <p className="text-text-muted">Role required: {getShiftRoleForAttendance(row.shift_id)}</p>
+                        <p className="text-text-muted">Scheduled start: {getShiftScheduledStartForAttendance(row.shift_id)}</p>
+                        <p className="text-text-muted">Scheduled end: {getShiftScheduledEndForAttendance(row.shift_id)}</p>
                         <p className="text-text-muted">Clock in: {formatDateTime(row.clock_in_at)}</p>
                         <p className="text-text-muted">Clock out: {formatDateTime(row.clock_out_at)}</p>
                         <p className="text-text-muted">Approved at: {formatDateTime(row.reviewed_at)}</p>
@@ -740,7 +997,7 @@ export default function ShiftsPage() {
                   <SelectValue placeholder="Select employee" />
                 </SelectTrigger>
                 <SelectContent>
-                  {employees.map((emp) => (
+                  {activeEmployees.map((emp) => (
                     <SelectItem key={emp.id} value={emp.id}>
                       {emp.first_name} {emp.last_name} ({emp.employee_code || emp.id})
                     </SelectItem>

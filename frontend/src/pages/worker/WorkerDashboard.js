@@ -158,6 +158,28 @@ const getDocumentWorkflowBadgeMeta = (doc) => {
   return DOCUMENT_WORKFLOW_UI[status] || DOCUMENT_WORKFLOW_UI.awaiting_review;
 };
 
+const getCompletedDocumentDisplayStatus = (doc) => {
+  const status = String(doc?.status || '').trim().toLowerCase();
+  if (status) return status;
+  return doc?.verified ? 'verified' : 'awaiting_review';
+};
+
+const getCompletedTrainingBadgeMeta = (training) => {
+  const status = String(training?.status || '').trim().toLowerCase();
+  if (status && TRAINING_STATUS_CONFIG[status]) return TRAINING_STATUS_CONFIG[status];
+  return training?.verified ? TRAINING_STATUS_CONFIG.verified : TRAINING_STATUS_CONFIG.awaiting_review;
+};
+
+const isFormAdminComplete = (status) =>
+  ['verified', 'signed_off', 'reviewed', 'approved'].includes(status);
+
+const isReferenceComplete = (status) => status === 'verified';
+
+const BLOCKER_KEYS_EMPLOYMENT_GAPS = new Set(['employment_gaps']);
+const BLOCKER_KEYS_REFERENCES = new Set(['reference_1', 'reference_2', 'references']);
+
+const normalizeBlockerValue = (value) => String(value || '').trim().toLowerCase();
+
 // Employment Gaps Clarification Section
 function EmploymentGapsSection() {
   const [gaps, setGaps] = useState([]);
@@ -589,9 +611,8 @@ function FormsSection() {
     );
   }
 
-  const lockedStatuses = ['submitted', 'verified', 'signed_off', 'reviewed', 'approved'];
-  const pendingForms = forms.filter(f => !lockedStatuses.includes(f.status));
-  const completedForms = forms.filter(f => lockedStatuses.includes(f.status));
+  const pendingForms = forms.filter((f) => !isFormAdminComplete(f.status));
+  const completedForms = forms.filter((f) => isFormAdminComplete(f.status));
 
   if (pendingForms.length === 0 && completedForms.length === 0) {
     return null;
@@ -1688,6 +1709,9 @@ export default function WorkerDashboard() {
     recommended_trainings: _recommended_trainings,
     alerts: _alerts,
     contract_signed = false,
+    unified_blockers: _unified_blockers,
+    legal_blockers: _legal_blockers,
+    internal_blockers: _internal_blockers,
     employment_readiness,
     employment_readiness_label,
     employment_readiness_blockers: _employment_readiness_blockers,
@@ -1723,6 +1747,10 @@ export default function WorkerDashboard() {
     upcoming: recurringItems.filter((item) => item?.computed_status === 'upcoming'),
     scheduled: recurringItems.filter((item) => item?.computed_status === 'scheduled'),
   };
+  const unifiedBlockers = _unified_blockers || [];
+  const legalBlockers = _legal_blockers || [];
+  const internalBlockers = _internal_blockers || [];
+  const canonicalBlockers = [...unifiedBlockers, ...legalBlockers, ...internalBlockers];
   const competencyRecurringItems = recurringItems.filter((item) => item?.item_type === 'competency_assessment');
   const competencyRecurringCounts = {
     overdue: competencyRecurringItems.filter((item) => item?.computed_status === 'overdue').length,
@@ -1730,6 +1758,25 @@ export default function WorkerDashboard() {
     upcoming: competencyRecurringItems.filter((item) => item?.computed_status === 'upcoming').length,
   };
   const employment_readiness_blockers = _employment_readiness_blockers || [];
+  const hasCanonicalBlockerMatch = (keys, category) => {
+    const canonicalMatch = canonicalBlockers.some((blocker) => {
+      const blockerId = normalizeBlockerValue(blocker?.id);
+      const blockerGate = normalizeBlockerValue(blocker?.gate);
+      const blockerCategory = normalizeBlockerValue(blocker?.category);
+      const blockerClass = normalizeBlockerValue(blocker?.blocker_class);
+      return (
+        keys.has(blockerId) ||
+        keys.has(blockerGate) ||
+        blockerCategory === normalizeBlockerValue(category) ||
+        blockerClass === normalizeBlockerValue(category)
+      );
+    });
+    if (canonicalMatch) return true;
+    return employment_readiness_blockers.some((blocker) => keys.has(normalizeBlockerValue(blocker?.type)));
+  };
+
+  const gapsNeedAction = hasCanonicalBlockerMatch(BLOCKER_KEYS_EMPLOYMENT_GAPS, 'other');
+  const referencesNeedActionFromBlockers = hasCanonicalBlockerMatch(BLOCKER_KEYS_REFERENCES, 'references');
   const contractAgreement = agreements.find((agreement) => agreement.id === 'contract_acceptance');
   
   const isActiveEmployee =
@@ -1766,10 +1813,15 @@ export default function WorkerDashboard() {
     expiredTrainings: expired_trainings,
     allMandatoryTrainings: all_mandatory_trainings,
   });
-  const referencesNeedAction = references.some((reference) => {
-    const mismatch = reference?.mismatch;
-    return reference?.status !== 'verified' || (mismatch && mismatch.resolved !== true);
-  }) || Boolean(referenceMismatches?.has_mismatches);
+  const completedReferencesCount = references.filter((reference) => isReferenceComplete(reference?.status)).length;
+  const referencesNeedAction = referencesNeedActionFromBlockers || references.some((reference) => !isReferenceComplete(reference?.status));
+  const agreementDisplays = agreements.map((agreement) => ({
+    agreement,
+    display: getAgreementDisplay(agreement, { contractEligibility }),
+  }));
+  const agreementsActionRequiredCount = agreementDisplays.filter(({ display }) => display.tone === 'critical').length;
+  const agreementsCompletedCount = agreementDisplays.filter(({ display }) => display.tone === 'success').length;
+  const agreementsHasInProgressState = agreementDisplays.some(({ display }) => display.tone === 'info');
   const activeTrainingExpiringSoon = alerts.filter((entry) => entry?.type === 'training').length;
   const completedCompetencyCount = (competency_assessments || []).filter(
     (item) => item?.outcome === 'pass' || item?.status === 'completed'
@@ -1816,7 +1868,7 @@ export default function WorkerDashboard() {
     missingTrainings: missing_trainings,
     expiredTrainings: expired_trainings,
     referencesNeedAction,
-    gapsNeedAction: employment_readiness_blockers.some((blocker) => /employment|gap/i.test(blocker?.label || '')),
+    gapsNeedAction,
   });
   const displayedNextAction = nextAction?.key === 'missing_cv'
     ? getNextAction({
@@ -1828,7 +1880,7 @@ export default function WorkerDashboard() {
         missingTrainings: missing_trainings,
         expiredTrainings: expired_trainings,
         referencesNeedAction,
-        gapsNeedAction: employment_readiness_blockers.some((blocker) => /employment|gap/i.test(blocker?.label || '')),
+        gapsNeedAction,
       })
     : nextAction;
 
@@ -2146,7 +2198,7 @@ export default function WorkerDashboard() {
             <div className="space-y-2 text-sm text-slate-700">
               <div className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2">
                 <span>Forms</span>
-                <Badge className="bg-slate-100 text-slate-700">{forms.filter((form) => form.status === 'verified').length}/{forms.length || 0} complete</Badge>
+                <Badge className="bg-slate-100 text-slate-700">{forms.filter((form) => isFormAdminComplete(form.status)).length}/{forms.length || 0} complete</Badge>
               </div>
               <div className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2">
                 <span>References</span>
@@ -2156,8 +2208,8 @@ export default function WorkerDashboard() {
               </div>
               <div className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2">
                 <span>Employment history</span>
-                <Badge className={employment_readiness_blockers.some((blocker) => /employment|gap/i.test(blocker?.label || '')) ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}>
-                  {employment_readiness_blockers.some((blocker) => /employment|gap/i.test(blocker?.label || '')) ? 'Needs attention' : 'Complete'}
+                <Badge className={gapsNeedAction ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}>
+                  {gapsNeedAction ? 'Needs attention' : 'Complete'}
                 </Badge>
               </div>
             </div>
@@ -3180,11 +3232,11 @@ export default function WorkerDashboard() {
                   </p>
                 </div>
                 <Badge className={`${
-                  references.filter(r => r.status === 'verified').length === 2 
+                  completedReferencesCount === 2 
                     ? 'bg-green-100 text-green-700' 
                     : 'bg-amber-100 text-amber-700'
                 }`}>
-                  {references.filter(r => r.status === 'verified').length}/2 Verified
+                  {completedReferencesCount}/2 Verified
                 </Badge>
               </div>
             </CardHeader>
@@ -3492,21 +3544,20 @@ export default function WorkerDashboard() {
                     </p>
                 </div>
                 <Badge className={`${
-                  agreements.some(a => a.rejected) ? 'bg-red-100 text-red-700' :
-                  agreements.every(a => a.verified) ? 'bg-green-100 text-green-700' :
-                  agreements.some(a => a.signed || a.verified) ? 'bg-blue-100 text-blue-700' :
+                  agreementsActionRequiredCount > 0 ? 'bg-red-100 text-red-700' :
+                  agreements.length > 0 && agreementsCompletedCount === agreements.length ? 'bg-green-100 text-green-700' :
+                  agreementsHasInProgressState || agreementsCompletedCount > 0 ? 'bg-blue-100 text-blue-700' :
                   'bg-slate-100 text-slate-600'
                 }`}>
-                  {agreements.some(a => a.rejected)
-                    ? `${agreements.filter(a => a.rejected).length} action required`
-                    : `${agreements.filter(a => a.verified).length} of ${agreements.length} completed`}
+                  {agreementsActionRequiredCount > 0
+                    ? `${agreementsActionRequiredCount} action required`
+                    : `${agreementsCompletedCount} of ${agreements.length} completed`}
                 </Badge>
               </div>
             </CardHeader>
             <CardContent>
               <div className="space-y-3">
-                {agreements.map((agreement) => {
-                  const agreementDisplay = getAgreementDisplay(agreement, { contractEligibility });
+                {agreementDisplays.map(({ agreement, display: agreementDisplay }) => {
                   const toneClasses =
                     agreementDisplay.tone === 'critical'
                       ? 'bg-red-50 border-red-200'
@@ -3946,6 +3997,11 @@ export default function WorkerDashboard() {
             <CardContent>
               <div className="space-y-2">
                 {completed_documents?.map((doc, idx) => (
+                  (() => {
+                    const docDisplayStatus = getCompletedDocumentDisplayStatus(doc);
+                    const docBadgeMeta = DOCUMENT_WORKFLOW_UI[docDisplayStatus] || DOCUMENT_WORKFLOW_UI.awaiting_review;
+                    const isDocVerifiedDisplay = docDisplayStatus === 'verified';
+                    return (
                   <div key={idx} className="flex items-center justify-between p-3 bg-white rounded-xl" data-testid={`completed-doc-${doc.type}`}>
                     <div className="flex items-center gap-3">
                       <CheckCircle className="h-4 w-4 text-green-600 flex-shrink-0" />
@@ -3964,7 +4020,7 @@ export default function WorkerDashboard() {
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
-                      {doc.verified ? (
+                      {isDocVerifiedDisplay ? (
                         <>
                           <Badge className="bg-green-100 text-green-700 text-xs">
                             <Shield className="h-3 w-3 mr-1" />
@@ -3985,9 +4041,9 @@ export default function WorkerDashboard() {
                         </>
                       ) : (
                         <>
-                          <Badge className={`${getDocumentWorkflowBadgeMeta(doc).className} text-xs`} data-testid={`pending-verification-${doc.type}`}>
+                          <Badge className={`${docBadgeMeta.className} text-xs`} data-testid={`pending-verification-${doc.type}`}>
                             <Clock className="h-3 w-3 mr-1" />
-                            {getDocumentWorkflowBadgeMeta(doc).label}
+                            {docBadgeMeta.label}
                           </Badge>
                           {doc.file_url && (
                             <Button 
@@ -4008,8 +4064,14 @@ export default function WorkerDashboard() {
                       )}
                     </div>
                   </div>
+                    );
+                  })()
                 ))}
                 {completed_trainings?.map((training, idx) => (
+                  (() => {
+                    const trainingBadgeMeta = getCompletedTrainingBadgeMeta(training);
+                    const trainingIsVerifiedDisplay = trainingBadgeMeta === TRAINING_STATUS_CONFIG.verified;
+                    return (
                   <div key={idx} className="flex items-center justify-between p-3 bg-white rounded-xl" data-testid={`completed-training-${training.id}`}>
                     <div className="flex items-center gap-3">
                       <CheckCircle className="h-4 w-4 text-green-600 flex-shrink-0" />
@@ -4021,17 +4083,14 @@ export default function WorkerDashboard() {
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
-                      {training.verified ? (
-                        <Badge className="bg-green-100 text-green-700 text-xs">
+                      <Badge className={`${trainingBadgeMeta.badgeCls} text-xs`}>
+                        {trainingIsVerifiedDisplay ? (
                           <Shield className="h-3 w-3 mr-1" />
-                          Verified
-                        </Badge>
-                      ) : (
-                        <Badge className="bg-amber-100 text-amber-700 text-xs">
+                        ) : (
                           <Clock className="h-3 w-3 mr-1" />
-                          Waiting for Osabea review
-                        </Badge>
-                      )}
+                        )}
+                        {trainingBadgeMeta.badge}
+                      </Badge>
                       {training.source_document_id && (
                         <Button
                           size="sm"
@@ -4050,6 +4109,8 @@ export default function WorkerDashboard() {
                       )}
                     </div>
                   </div>
+                    );
+                  })()
                 ))}
               </div>
             </CardContent>

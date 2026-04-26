@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+// UI-only: Hide Staff Health Questionnaire from Checks & Evidence
+const STAFF_HEALTH_KEY = 'staff_health_questionnaire';
 import axios from 'axios';
 import { useAuth } from '../../context/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
@@ -769,7 +771,24 @@ export default function DualRowComplianceSection({
     return null;
   }
 
-  const { summary, sections } = complianceFile;
+  // UI-only: filter out staff_health_questionnaire from all sections before rendering
+  const { summary } = complianceFile;
+  // Deep clone sections to avoid mutating original
+  const filteredSections = (() => {
+    if (!complianceFile.sections) return complianceFile.sections;
+    const clone = {};
+    for (const [sectionKey, section] of Object.entries(complianceFile.sections)) {
+      if (!section || !Array.isArray(section.rows)) {
+        clone[sectionKey] = section;
+        continue;
+      }
+      clone[sectionKey] = {
+        ...section,
+        rows: section.rows.filter(row => row.key !== STAFF_HEALTH_KEY)
+      };
+    }
+    return clone;
+  })();
   const sectionRows = Object.values(sections || {}).flatMap((section) => section?.rows || []);
   const blockerCount = sectionRows.filter((row) => row.blocker_text).length;
   const pendingReviewCount = sectionRows.filter((row) => (
@@ -843,22 +862,22 @@ export default function DualRowComplianceSection({
       </div>
 
       {/* Compliance Sections */}
-      {sections && (
+      {filteredSections && (
         <>
           {/* Right to Work */}
-          {sections.right_to_work && renderUploadSection('right_to_work', sections.right_to_work)}
+          {filteredSections.right_to_work && renderUploadSection('right_to_work', filteredSections.right_to_work)}
           
           {/* DBS */}
-          {sections.dbs && renderUploadSection('dbs', sections.dbs)}
+          {filteredSections.dbs && renderUploadSection('dbs', filteredSections.dbs)}
           
           {/* Identity */}
-          {sections.identity && renderUploadSection('identity', sections.identity)}
+          {filteredSections.identity && renderUploadSection('identity', filteredSections.identity)}
           
           {/* Proof of Address */}
-          {sections.proof_of_address && renderUploadSection('proof_of_address', sections.proof_of_address)}
+          {filteredSections.proof_of_address && renderUploadSection('proof_of_address', filteredSections.proof_of_address)}
           
           {/* Agreements - Uses legacy section for now */}
-          {sections.agreements && renderSection('agreements', sections.agreements)}
+          {filteredSections.agreements && renderSection('agreements', filteredSections.agreements)}
           
           {/* NOTE: References REMOVED - Now ONLY in dedicated References tab */}
           {/* NOTE: Training REMOVED - Now ONLY in dedicated Training tab */}

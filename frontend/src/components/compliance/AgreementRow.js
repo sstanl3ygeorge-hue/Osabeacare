@@ -40,6 +40,29 @@ const AGREEMENT_TEMPLATE_MAP = {
   'handbook_acknowledgement': 'EMPLOYEE_HANDBOOK_ACKNOWLEDGEMENT_V1',
 };
 
+/**
+ * Returns a source contract id only when it is from a known generated-contract field.
+ *
+ * Why no fallback to row.key / acknowledgement_data.id / agreement id:
+ * those identifiers may represent acknowledgement/submission records rather
+ * than generated_contracts records, and sending them as source_contract_id can
+ * create false 409 conflicts or bind reissue to the wrong context.
+ */
+const getReissueSourceContractId = (agreement) => {
+  const generatedContractId = agreement?.generated_contract_id;
+  if (generatedContractId) return generatedContractId;
+
+  const latestContractId = agreement?.latest_contract_id;
+  if (latestContractId) return latestContractId;
+
+  // `contract_id` is accepted only when explicitly present on the
+  // acknowledgement payload as a contract pointer from backend contract state.
+  const contractId = agreement?.contract_id;
+  if (contractId) return contractId;
+
+  return null;
+};
+
 export default function AgreementRow({
   row,
   employeeId,
@@ -49,6 +72,7 @@ export default function AgreementRow({
   onOpenForm,      // Opens AgreementFormDrawer in create mode
   onViewSubmission, // Opens AgreementFormDrawer in view mode
   onViewHistory,
+  onReissueContract,
   isAuditor = false
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -83,6 +107,15 @@ export default function AgreementRow({
   };
 
   const lifecycleStatus = getLifecycleStatus();
+  const rawContractStatus =
+    acknowledgement_data?.status ||
+    acknowledgement_data?.contract_status ||
+    acknowledgement_data?.contract_state ||
+    status;
+  const normalizedContractStatus = String(rawContractStatus || '').trim().toLowerCase();
+  const canReissueContract =
+    key === 'contract_acceptance' &&
+    ['rejected', 'action_required', 'pending_signature', 'signed', 'fully_executed'].includes(normalizedContractStatus);
   const contractArtifactUrl =
     acknowledgement_data?.executed_contract_pdf_url ||
     acknowledgement_data?.worker_signed_contract_pdf_url ||
@@ -463,6 +496,27 @@ export default function AgreementRow({
                 >
                   {isProcessing ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <RotateCcw className="h-3.5 w-3.5 mr-1" />}
                   Regenerate Handbook
+                </Button>
+              )}
+
+              {canReissueContract && typeof onReissueContract === 'function' && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const sourceContractId = getReissueSourceContractId(acknowledgement_data);
+                    onReissueContract({
+                      id: sourceContractId,
+                      status: normalizedContractStatus || null,
+                      contract_state: acknowledgement_data?.contract_state || null,
+                    });
+                  }}
+                  disabled={isProcessing}
+                  className="h-8 text-xs rounded-lg"
+                >
+                  <RotateCcw className="h-3.5 w-3.5 mr-1" />
+                  Reissue contract
                 </Button>
               )}
             </>

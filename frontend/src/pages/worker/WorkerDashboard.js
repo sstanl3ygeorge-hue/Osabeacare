@@ -1809,6 +1809,17 @@ export default function WorkerDashboard() {
   const showOnboardingContractSection = false;
   const handbookAgreement = agreements.find((agreement) => agreement.id === 'handbook_acknowledgement');
   const contractDisplay = getAgreementDisplay(contractAgreement, { contractEligibility });
+  const contractLifecycleStatus = String(
+    contractAgreement?.contract_state ||
+    contractAgreement?.status ||
+    contractAgreement?.state ||
+    ''
+  ).trim().toLowerCase();
+  const hasPendingSignableContract = contractLifecycleStatus === 'pending_signature' && Boolean(contractEligibility?.can_sign);
+  const contractNeedsReissueMessage = !hasPendingSignableContract && (
+    ['rejected', 'superseded', 'action_required'].includes(contractLifecycleStatus) ||
+    contractLifecycleStatus !== 'pending_signature'
+  );
   const handbookDisplay = getAgreementDisplay(handbookAgreement, { contractEligibility });
   const cvDisplay = getCvDisplay(cvStatus);
   const trainingDisplay = getTrainingDisplay({
@@ -3659,6 +3670,11 @@ export default function WorkerDashboard() {
                             Sign
                           </Button>
                         )}
+                        {agreement.id === 'contract_acceptance' && contractNeedsReissueMessage && (
+                          <p className="w-full text-xs text-amber-700">
+                            This contract is not currently signable. Please contact your manager to reissue it.
+                          </p>
+                        )}
                         {agreement.id === 'handbook_acknowledgement' && handbookDisplay.workerActionable && agreement.id === handbookAgreement?.id && (
                           <Button
                             size="sm"
@@ -3743,9 +3759,11 @@ export default function WorkerDashboard() {
                 <div className="space-y-3">
                   <div className="flex items-center justify-between p-4 bg-amber-50 rounded-xl border border-amber-200">
                     <div>
-                      <span className="font-medium text-amber-800">Contract not ready yet</span>
+                      <span className="font-medium text-amber-800">{contractNeedsReissueMessage ? 'Contract not currently signable' : 'Contract not ready yet'}</span>
                       <p className="text-xs text-amber-600">
-                        Contract signing becomes available once your forms, employment history, documents, references, and training are complete.
+                        {contractNeedsReissueMessage
+                          ? 'This contract is not currently signable. Please contact your manager to reissue it.'
+                          : 'Contract signing becomes available once your forms, employment history, documents, references, and training are complete.'}
                       </p>
                     </div>
                     <Button 

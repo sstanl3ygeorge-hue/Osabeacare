@@ -52,6 +52,7 @@ export default function DualRowComplianceSection({
   onPreviewFile,
   onExtractReview,
   onRecordCheck,
+  onReissueContract,
   isAuditor = false,
   onRefresh
 }) {
@@ -518,6 +519,7 @@ export default function DualRowComplianceSection({
                     onExtractReview={onExtractReview}
                     onViewFiles={handleViewFiles}
                     onViewHistory={handleViewHistory}
+                    onReissueContract={onReissueContract}
                     isAuditor={isAuditor}
                   />
                 );

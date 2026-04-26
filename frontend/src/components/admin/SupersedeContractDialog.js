@@ -6,18 +6,18 @@ import { Button } from '../ui/button';
 import { Textarea } from '../ui/textarea';
 import { Label } from '../ui/label';
 import { toast } from 'sonner';
-import { AlertTriangle, FileX, Send } from 'lucide-react';
+import { AlertTriangle, FileX } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 /**
- * SupersedeContractDialog - Supersede an existing contract and request new signature
+ * SupersedeContractDialog - Reissue an existing contract for re-signature
  * 
  * CQC Compliance:
  * - Never deletes original contract
  * - Marks old contract as "superseded"
- * - Logs reason for superseding
- * - Sends new contract to worker for signature
+ * - Logs reason for reissuing
+ * - Immediately creates a new pending-signature contract
  */
 export default function SupersedeContractDialog({
   open,
@@ -30,35 +30,42 @@ export default function SupersedeContractDialog({
   const { token } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
   const [reason, setReason] = useState('');
-  const [sendNewContract, setSendNewContract] = useState(true);
   const [error, setError] = useState('');
+
+  const buildIdempotencyKey = () => {
+    const sourceId = currentContract?.id || 'unknown-source';
+    if (typeof window !== 'undefined' && window.crypto?.randomUUID) {
+      return `contract-reissue:${employeeId}:${sourceId}:${window.crypto.randomUUID()}`;
+    }
+    return `contract-reissue:${employeeId}:${sourceId}:${Date.now()}`;
+  };
 
   const handleSupersede = async () => {
     if (!reason.trim() || reason.trim().length < 20) {
-      setError('Please provide a detailed reason for superseding this contract (minimum 20 characters)');
+      setError('Please provide a detailed reason for reissuing this contract (minimum 20 characters)');
       return;
     }
 
     setIsLoading(true);
     try {
+      const payload = {
+        reason: reason.trim(),
+        idempotency_key: buildIdempotencyKey(),
+      };
+      if (currentContract?.id) {
+        payload.source_contract_id = currentContract.id;
+      }
       await axios.post(
-        `${API}/employees/${employeeId}/contract/supersede`,
-        {
-          reason: reason.trim(),
-          send_new_contract: sendNewContract
-        },
+        `${API}/employees/${employeeId}/contract/reissue`,
+        payload,
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      
-      toast.success(
-        sendNewContract 
-          ? 'Contract superseded. New contract sent to worker for signature.'
-          : 'Contract superseded. Worker will need to sign a new contract.'
-      );
+
+      toast.success('Contract reissued for re-signing. Worker can now sign the new contract.');
       if (onSuccess) onSuccess();
       handleClose();
     } catch (err) {
-      toast.error(err.response?.data?.detail || 'Failed to replace contract');
+      toast.error(err.response?.data?.detail || 'Failed to reissue contract');
     } finally {
       setIsLoading(false);
     }
@@ -67,7 +74,6 @@ export default function SupersedeContractDialog({
   const handleClose = () => {
     setReason('');
     setError('');
-    setSendNewContract(true);
     onClose();
   };
 
@@ -77,10 +83,10 @@ export default function SupersedeContractDialog({
         <DialogHeader>
           <DialogTitle className="font-heading flex items-center gap-2 text-amber-600">
             <AlertTriangle className="h-5 w-5" />
-            Replace contract
+            Reissue contract
           </DialogTitle>
           <DialogDescription>
-            Replace the existing contract for {employeeName}
+            Reissue the latest contract for {employeeName} so the worker can re-sign
           </DialogDescription>
         </DialogHeader>
 
@@ -104,24 +110,20 @@ export default function SupersedeContractDialog({
                 <strong>Current Contract:</strong>
               </p>
               <p className="text-sm text-gray-700 mt-1">
-                Signed: {currentContract.completed_at 
-                  ? new Date(currentContract.completed_at).toLocaleDateString('en-GB') 
-                  : 'Unknown'}
+                Status: {currentContract.status || currentContract.contract_state || 'Unknown'}
               </p>
-              {currentContract.completion_mode && (
+              {currentContract.id && (
                 <p className="text-sm text-gray-700">
-                  Method: {currentContract.completion_mode === 'admin_assisted' 
-                    ? 'Admin-Assisted (Non-Compliant)' 
-                    : currentContract.completion_mode}
+                  Contract ID: {currentContract.id}
                 </p>
               )}
             </div>
           )}
 
-          {/* Reason for Superseding */}
+          {/* Reason for Reissuing */}
           <div className="space-y-2">
             <Label className="font-medium">
-              Reason for replacing *
+              Reason for reissuing *
             </Label>
             <Textarea
               value={reason}
@@ -129,7 +131,7 @@ export default function SupersedeContractDialog({
                 setReason(e.target.value);
                 if (error) setError('');
               }}
-              placeholder="Explain why this contract needs to be replaced (e.g., 'Original contract was signed by admin, not worker', 'Contract terms need updating')"
+              placeholder="Explain why this contract needs reissue (e.g., 'Rejected signature requires re-sign', 'Contract terms corrected')"
               className="min-h-[100px] rounded-lg"
             />
             {error && (
@@ -138,27 +140,6 @@ export default function SupersedeContractDialog({
             <p className="text-xs text-gray-500">
               Minimum 20 characters. This will be logged in the audit trail.
             </p>
-          </div>
-
-          {/* Send New Contract Option */}
-          <div className="space-y-2">
-            <label className="flex items-center gap-3 cursor-pointer p-3 bg-green-50 border border-green-200 rounded-lg">
-              <input
-                type="checkbox"
-                checked={sendNewContract}
-                onChange={(e) => setSendNewContract(e.target.checked)}
-                className="rounded border-gray-300"
-              />
-              <div className="flex-1">
-                <span className="text-sm font-medium text-green-800 flex items-center gap-2">
-                  <Send className="h-4 w-4" />
-                  Send new contract to worker for signature
-                </span>
-                <p className="text-xs text-green-700 mt-0.5">
-                  Worker will receive a notification to sign the new contract
-                </p>
-              </div>
-            </label>
           </div>
         </div>
 
@@ -171,7 +152,7 @@ export default function SupersedeContractDialog({
             disabled={isLoading || !reason.trim()}
             className="bg-amber-600 hover:bg-amber-700 text-white"
           >
-            {isLoading ? 'Processing...' : 'Replace contract'}
+            {isLoading ? 'Processing...' : 'Reissue contract'}
           </Button>
         </DialogFooter>
       </DialogContent>

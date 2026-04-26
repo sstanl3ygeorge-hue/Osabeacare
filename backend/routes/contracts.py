@@ -43,6 +43,55 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Contracts"])
 
+REISSUE_ELIGIBLE_STATUSES = {
+    "rejected",
+    "signed",
+    "fully_executed",
+    "pending_signature",
+    "action_required",
+}
+
+
+def _build_contract_doc_for_signature(
+    *,
+    employee: dict,
+    employee_id: str,
+    template_id: str,
+    actor_user_id: Optional[str],
+    now_iso: str,
+    extra_fields: Optional[dict] = None,
+) -> dict:
+    """
+    Build a generated contract record in the same shape as the existing
+    /contract/generate flow, with optional extra metadata fields.
+    """
+    filled_contract = fill_contract_template(employee)
+    contract_doc = {
+        "id": str(uuid.uuid4()),
+        "employee_id": employee_id,
+        "template_id": template_id,
+        "template_name": filled_contract["name"],
+        "template_version": filled_contract["version"],
+        "filled_sections": filled_contract["sections"],
+        "employee_data_snapshot": {
+            "first_name": employee.get("first_name"),
+            "last_name": employee.get("last_name"),
+            "email": employee.get("email"),
+            "address": employee.get("address_line_1"),
+            "postcode": employee.get("postcode"),
+            "ni_number": employee.get("ni_number"),
+            "role": employee.get("role"),
+        },
+        "status": "pending_signature",
+        "generated_at": now_iso,
+        "generated_by": actor_user_id,
+        "signed_at": None,
+        "signed_by": None,
+    }
+    if extra_fields:
+        contract_doc.update(extra_fields)
+    return contract_doc
+
 
 # ==================== CONTRACT TEMPLATES ====================
 
@@ -171,34 +220,15 @@ async def generate_employee_contract(
             detail=f"Employee data incomplete: {', '.join(validation['missing_fields'])}"
         )
     
-    # Generate filled contract
-    filled_contract = fill_contract_template(employee)
-    
-    now = datetime.now(timezone.utc)
-    contract_id = str(uuid.uuid4())
-    
-    contract_doc = {
-        "id": contract_id,
-        "employee_id": employee_id,
-        "template_id": template_id,
-        "template_name": filled_contract["name"],
-        "template_version": filled_contract["version"],
-        "filled_sections": filled_contract["sections"],
-        "employee_data_snapshot": {
-            "first_name": employee.get("first_name"),
-            "last_name": employee.get("last_name"),
-            "email": employee.get("email"),
-            "address": employee.get("address_line_1"),
-            "postcode": employee.get("postcode"),
-            "ni_number": employee.get("ni_number"),
-            "role": employee.get("role"),
-        },
-        "status": "pending_signature",
-        "generated_at": now.isoformat(),
-        "generated_by": user.get("user_id"),
-        "signed_at": None,
-        "signed_by": None,
-    }
+    now_iso = datetime.now(timezone.utc).isoformat()
+    contract_doc = _build_contract_doc_for_signature(
+        employee=employee,
+        employee_id=employee_id,
+        template_id=template_id,
+        actor_user_id=user.get("user_id"),
+        now_iso=now_iso,
+    )
+    contract_id = contract_doc["id"]
     
     await db.generated_contracts.insert_one(contract_doc)
     
@@ -207,8 +237,8 @@ async def generate_employee_contract(
         {"id": employee_id},
         {"$set": {
             "pending_contract_id": contract_id,
-            "pending_contract_generated_at": now.isoformat(),
-            "updated_at": now.isoformat()
+            "pending_contract_generated_at": now_iso,
+            "updated_at": now_iso
         }}
     )
     
@@ -400,6 +430,435 @@ async def sign_employee_contract(
 
 
 # ==================== CONTRACT SUPERSEDING ====================
+
+@router.post("/employees/{employee_id}/contract/reissue")
+async def reissue_employee_contract(
+    employee_id: str,
+    request: Request,
+    user: dict = Depends(require_manager_or_admin),
+):
+    """
+    Reissue the latest non-superseded contract for worker re-signing.
+    This preserves the old contract record/artifacts and immediately
+    creates a replacement pending-signature contract.
+    """
+    db = get_db()
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    reason = str((body or {}).get("reason") or "").strip()
+    source_contract_id = (body or {}).get("source_contract_id")
+    idempotency_key = str((body or {}).get("idempotency_key") or "").strip() or None
+
+    if not reason:
+        raise HTTPException(status_code=400, detail="reason is required")
+
+    # Early idempotency replay when caller supplies a source contract id.
+    # This guarantees stable replay even after latest contract changes due to
+    # a successful first reissue.
+    if idempotency_key and source_contract_id:
+        source_scoped_reissue = await db.generated_contracts.find_one(
+            {
+                "employee_id": employee_id,
+                "reissue_idempotency_key": idempotency_key,
+                "reissued_from_contract_id": source_contract_id,
+            },
+            {"_id": 0},
+        )
+        if source_scoped_reissue:
+            old_contract = await db.generated_contracts.find_one(
+                {"id": source_contract_id},
+                {"_id": 0},
+            )
+            can_sign_result = await can_sign_contract(db, employee_id)
+            return {
+                "message": "Contract reissued",
+                "employee_id": employee_id,
+                "old_contract": {
+                    "id": (old_contract or {}).get("id"),
+                    "status": (old_contract or {}).get("status"),
+                    "superseded_at": (old_contract or {}).get("superseded_at"),
+                    "superseded_by_contract_id": (old_contract or {}).get("superseded_by_contract_id"),
+                },
+                "new_contract": {
+                    "id": source_scoped_reissue.get("id"),
+                    "status": source_scoped_reissue.get("status"),
+                    "template_id": source_scoped_reissue.get("template_id"),
+                    "template_version": source_scoped_reissue.get("template_version"),
+                    "generated_at": source_scoped_reissue.get("generated_at"),
+                    "reissued_from_contract_id": source_scoped_reissue.get("reissued_from_contract_id"),
+                },
+                "worker_action": {
+                    "can_sign": can_sign_result.get("can_sign", False),
+                    "contract_status": source_scoped_reissue.get("status"),
+                    "sign_route": f"/employees/{employee_id}/contract/sign",
+                },
+            }
+
+        conflicting_reissue_for_source = await db.generated_contracts.find_one(
+            {
+                "employee_id": employee_id,
+                "reissue_idempotency_key": idempotency_key,
+                "reissued_from_contract_id": {"$exists": True, "$ne": source_contract_id},
+            },
+            {"_id": 0},
+        )
+        if conflicting_reissue_for_source:
+            raise HTTPException(
+                status_code=409,
+                detail="idempotency_key already used for a different source_contract_id",
+            )
+
+    latest_contract = await db.generated_contracts.find(
+        {
+            "employee_id": employee_id,
+            "status": {"$ne": "superseded"},
+            "$or": [
+                {"superseded_by_contract_id": {"$exists": False}},
+                {"superseded_by_contract_id": None},
+            ],
+        },
+    ).sort([("generated_at", -1), ("created_at", -1), ("_id", -1)]).limit(1).to_list(length=1)
+
+    if not latest_contract:
+        raise HTTPException(status_code=404, detail="No contract available to reissue")
+
+    current_contract = latest_contract[0]
+
+    if source_contract_id and source_contract_id != current_contract.get("id"):
+        raise HTTPException(
+            status_code=409,
+            detail="source_contract_id does not match latest contract",
+        )
+    effective_source_contract_id = current_contract.get("id")
+
+    # Idempotency is scoped to employee_id + source_contract_id.
+    if idempotency_key:
+        existing_reissue = await db.generated_contracts.find_one(
+            {
+                "employee_id": employee_id,
+                "reissue_idempotency_key": idempotency_key,
+                "reissued_from_contract_id": effective_source_contract_id,
+            },
+            {"_id": 0},
+        )
+        if existing_reissue:
+            existing_source_contract_id = existing_reissue.get("reissued_from_contract_id")
+            if existing_source_contract_id != effective_source_contract_id:
+                raise HTTPException(
+                    status_code=409,
+                    detail="idempotency_key already used for a different source_contract_id",
+                )
+
+            old_contract = await db.generated_contracts.find_one(
+                {"id": existing_source_contract_id},
+                {"_id": 0},
+            )
+            can_sign_result = await can_sign_contract(db, employee_id)
+            return {
+                "message": "Contract reissued",
+                "employee_id": employee_id,
+                "old_contract": {
+                    "id": (old_contract or {}).get("id"),
+                    "status": (old_contract or {}).get("status"),
+                    "superseded_at": (old_contract or {}).get("superseded_at"),
+                    "superseded_by_contract_id": (old_contract or {}).get("superseded_by_contract_id"),
+                },
+                "new_contract": {
+                    "id": existing_reissue.get("id"),
+                    "status": existing_reissue.get("status"),
+                    "template_id": existing_reissue.get("template_id"),
+                    "template_version": existing_reissue.get("template_version"),
+                    "generated_at": existing_reissue.get("generated_at"),
+                    "reissued_from_contract_id": existing_reissue.get("reissued_from_contract_id"),
+                },
+                "worker_action": {
+                    "can_sign": can_sign_result.get("can_sign", False),
+                    "contract_status": existing_reissue.get("status"),
+                    "sign_route": f"/employees/{employee_id}/contract/sign",
+                },
+            }
+        conflicting_reissue = await db.generated_contracts.find_one(
+            {
+                "employee_id": employee_id,
+                "reissue_idempotency_key": idempotency_key,
+                "reissued_from_contract_id": {"$exists": True, "$ne": effective_source_contract_id},
+            },
+            {"_id": 0},
+        )
+        if conflicting_reissue:
+            raise HTTPException(
+                status_code=409,
+                detail="idempotency_key already used for a different source_contract_id",
+            )
+
+    current_status = current_contract.get("status")
+    if current_status not in REISSUE_ELIGIBLE_STATUSES:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Latest contract status '{current_status}' is not eligible for reissue",
+        )
+
+    # Validate current employee data before mutating old contract state.
+    validation = validate_contract_data(employee)
+    if not validation["valid"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Employee data incomplete: {', '.join(validation['missing_fields'])}",
+        )
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    reissue_attempt_id = str(uuid.uuid4())
+    employee_pointer_snapshot = {
+        "pending_contract_id": employee.get("pending_contract_id"),
+        "pending_contract_generated_at": employee.get("pending_contract_generated_at"),
+        "contract_signed": employee.get("contract_signed"),
+        "contract_signed_at": employee.get("contract_signed_at"),
+        "contract_id": employee.get("contract_id"),
+        "updated_at": employee.get("updated_at"),
+    }
+    template_id = current_contract.get("template_id") or "zero_hour_contract_v1"
+    new_contract_doc = _build_contract_doc_for_signature(
+        employee=employee,
+        employee_id=employee_id,
+        template_id=template_id,
+        actor_user_id=user.get("user_id"),
+        now_iso=now_iso,
+        extra_fields={
+            "reissued_from_contract_id": current_contract["id"],
+            "reissue_reason": reason,
+            "reissue_idempotency_key": idempotency_key,
+        },
+    )
+    new_contract_id = new_contract_doc["id"]
+
+    # Race guard + transitional lock: mark the old contract as being reissued
+    # before creating replacement artifacts, so failures can be compensated.
+    mark_in_progress_result = await db.generated_contracts.update_one(
+        {
+            "_id": current_contract["_id"],
+            "id": current_contract["id"],
+            "employee_id": employee_id,
+            "$and": [
+                {"status": current_status},
+                {"status": {"$ne": "superseded"}},
+                {
+                    "$or": [
+                        {"superseded_by_contract_id": {"$exists": False}},
+                        {"superseded_by_contract_id": None},
+                    ]
+                },
+                {
+                    "$or": [
+                        {"reissue_in_progress": {"$exists": False}},
+                        {"reissue_in_progress": None},
+                        {"reissue_in_progress": False},
+                    ]
+                },
+            ],
+        },
+        {
+            "$set": {
+                "reissue_in_progress": True,
+                "reissue_started_at": now_iso,
+                "reissue_attempt_id": reissue_attempt_id,
+                "reissue_target_contract_id": new_contract_id,
+            }
+        },
+    )
+    if mark_in_progress_result.modified_count == 0:
+        # If another request won with same idempotency scope, return replay.
+        if idempotency_key:
+            existing_reissue = await db.generated_contracts.find_one(
+                {
+                    "employee_id": employee_id,
+                    "reissue_idempotency_key": idempotency_key,
+                    "reissued_from_contract_id": effective_source_contract_id,
+                },
+                {"_id": 0},
+            )
+            if existing_reissue:
+                can_sign_result = await can_sign_contract(db, employee_id)
+                return {
+                    "message": "Contract reissued",
+                    "employee_id": employee_id,
+                    "old_contract": {
+                        "id": effective_source_contract_id,
+                        "status": "superseded",
+                        "superseded_at": None,
+                        "superseded_by_contract_id": existing_reissue.get("id"),
+                    },
+                    "new_contract": {
+                        "id": existing_reissue.get("id"),
+                        "status": existing_reissue.get("status"),
+                        "template_id": existing_reissue.get("template_id"),
+                        "template_version": existing_reissue.get("template_version"),
+                        "generated_at": existing_reissue.get("generated_at"),
+                        "reissued_from_contract_id": existing_reissue.get("reissued_from_contract_id"),
+                    },
+                    "worker_action": {
+                        "can_sign": can_sign_result.get("can_sign", False),
+                        "contract_status": existing_reissue.get("status"),
+                        "sign_route": f"/employees/{employee_id}/contract/sign",
+                    },
+                }
+        raise HTTPException(status_code=409, detail="Contract already superseded or reissued")
+
+    inserted_new_contract = False
+    try:
+        await db.generated_contracts.insert_one(new_contract_doc)
+        inserted_new_contract = True
+
+        finalize_old_result = await db.generated_contracts.update_one(
+            {
+                "_id": current_contract["_id"],
+                "employee_id": employee_id,
+                "reissue_in_progress": True,
+                "reissue_attempt_id": reissue_attempt_id,
+                "$or": [
+                    {"superseded_by_contract_id": {"$exists": False}},
+                    {"superseded_by_contract_id": None},
+                ],
+            },
+            {
+                "$set": {
+                    "status": "superseded",
+                    "superseded_at": now_iso,
+                    "superseded_by": user.get("user_id"),
+                    "supersede_reason": reason,
+                    "superseded_by_contract_id": new_contract_id,
+                },
+                "$unset": {
+                    "reissue_in_progress": "",
+                    "reissue_started_at": "",
+                    "reissue_attempt_id": "",
+                    "reissue_target_contract_id": "",
+                },
+            },
+        )
+        if finalize_old_result.modified_count == 0:
+            raise RuntimeError("Failed to finalize superseded old contract")
+
+        employee_pointer_result = await db.employees.update_one(
+            {"id": employee_id},
+            {
+                "$set": {
+                    "pending_contract_id": new_contract_id,
+                    "pending_contract_generated_at": now_iso,
+                    "contract_signed": False,
+                    "contract_signed_at": None,
+                    "contract_id": None,
+                    "updated_at": now_iso,
+                }
+            },
+        )
+        if employee_pointer_result.modified_count == 0:
+            raise RuntimeError("Failed to update employee contract pointers")
+
+        await log_audit_action(
+            user["user_id"],
+            "contract_reissued",
+            "contract",
+            new_contract_id,
+            {
+                "event_type": "contract_reissued",
+                "employee_id": employee_id,
+                "old_contract_id": current_contract["id"],
+                "new_contract_id": new_contract_id,
+                "old_status": current_status,
+                "new_status": new_contract_doc["status"],
+                "reason": reason,
+                "actor_user_id": user.get("user_id"),
+                "actor_role": user.get("role"),
+                "timestamp": now_iso,
+                "idempotency_key": idempotency_key,
+                "source": "contracts.reissue_endpoint",
+                "route": f"POST /employees/{employee_id}/contract/reissue",
+            },
+        )
+    except Exception as reissue_exc:
+        # Best-effort compensation to avoid deadlock: remove the new contract
+        # if present and restore the old contract to its previous state.
+        try:
+            if inserted_new_contract:
+                await db.generated_contracts.delete_one({"id": new_contract_id, "employee_id": employee_id})
+            await db.generated_contracts.update_one(
+                {
+                    "_id": current_contract["_id"],
+                    "employee_id": employee_id,
+                },
+                {
+                    "$set": {
+                        "status": current_status,
+                    },
+                    "$unset": {
+                        "reissue_in_progress": "",
+                        "reissue_started_at": "",
+                        "reissue_attempt_id": "",
+                        "reissue_target_contract_id": "",
+                        "superseded_at": "",
+                        "superseded_by": "",
+                        "supersede_reason": "",
+                        "superseded_by_contract_id": "",
+                    },
+                },
+            )
+            await db.employees.update_one(
+                {"id": employee_id},
+                {
+                    "$set": {
+                        "pending_contract_id": employee_pointer_snapshot.get("pending_contract_id"),
+                        "pending_contract_generated_at": employee_pointer_snapshot.get("pending_contract_generated_at"),
+                        "contract_signed": employee_pointer_snapshot.get("contract_signed"),
+                        "contract_signed_at": employee_pointer_snapshot.get("contract_signed_at"),
+                        "contract_id": employee_pointer_snapshot.get("contract_id"),
+                        "updated_at": employee_pointer_snapshot.get("updated_at"),
+                    }
+                },
+            )
+        except Exception as rollback_exc:
+            logger.exception(
+                "Contract reissue rollback failed employee_id=%s old_contract_id=%s new_contract_id=%s err=%s",
+                employee_id,
+                current_contract.get("id"),
+                new_contract_id,
+                rollback_exc,
+            )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to reissue contract safely; previous state restored where possible",
+        ) from reissue_exc
+
+    can_sign_result = await can_sign_contract(db, employee_id)
+    return {
+        "message": "Contract reissued",
+        "employee_id": employee_id,
+        "old_contract": {
+            "id": current_contract["id"],
+            "status": current_status,
+            "superseded_at": now_iso,
+            "superseded_by_contract_id": new_contract_id,
+        },
+        "new_contract": {
+            "id": new_contract_id,
+            "status": new_contract_doc["status"],
+            "template_id": new_contract_doc.get("template_id"),
+            "template_version": new_contract_doc.get("template_version"),
+            "generated_at": new_contract_doc.get("generated_at"),
+            "reissued_from_contract_id": current_contract["id"],
+        },
+        "worker_action": {
+            "can_sign": can_sign_result.get("can_sign", False),
+            "contract_status": new_contract_doc["status"],
+            "sign_route": f"/employees/{employee_id}/contract/sign",
+        },
+    }
 
 @router.post("/employees/{employee_id}/contract/supersede")
 async def supersede_employee_contract(

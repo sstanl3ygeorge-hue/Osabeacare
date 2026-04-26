@@ -6835,6 +6835,10 @@ export default function EmployeeProfilePage() {
                         setRecordCheckType(checkType);
                         setRecordCheckDialogOpen(true);
                       }}
+                      onReissueContract={(contract) => {
+                        setCurrentContract(contract || null);
+                        setSupersedeContractOpen(true);
+                      }}
                       employeeData={employee}
                       isAuditor={isAuditor()}
                       onRefresh={() => {
@@ -9894,6 +9898,8 @@ export default function EmployeeProfilePage() {
         onSuccess={() => {
           fetchEmployee();
           fetchComplianceFile();
+          fetchCompliance();
+          fetchData();
         }}
       />
       

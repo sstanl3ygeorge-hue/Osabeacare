@@ -789,7 +789,7 @@ export default function DualRowComplianceSection({
     }
     return clone;
   })();
-  const sectionRows = Object.values(sections || {}).flatMap((section) => section?.rows || []);
+  const sectionRows = Object.values(filteredSections || {}).flatMap((section) => section?.rows || []);
   const blockerCount = sectionRows.filter((row) => row.blocker_text).length;
   const pendingReviewCount = sectionRows.filter((row) => (
     row.status === 'submitted' ||
@@ -799,9 +799,9 @@ export default function DualRowComplianceSection({
     row.requires_admin_review
   )).length;
   const coreRequirementKeys = ['right_to_work', 'dbs', 'identity', 'proof_of_address'];
-  const presentCoreRequirementKeys = coreRequirementKeys.filter((key) => sections?.[key]);
+  const presentCoreRequirementKeys = coreRequirementKeys.filter((key) => filteredSections?.[key]);
   const coreSatisfiedCount = presentCoreRequirementKeys.filter((key) => {
-    const rows = sections[key]?.rows || [];
+    const rows = filteredSections[key]?.rows || [];
     const evidenceRow = rows.find((row) => row.row_type === 'evidence');
     const checkRow = rows.find((row) => row.row_type === 'check');
     const evidenceDocs = evidenceRow?.documents_preview || [];

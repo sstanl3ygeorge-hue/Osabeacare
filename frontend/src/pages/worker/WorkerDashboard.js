@@ -898,10 +898,14 @@ export default function WorkerDashboard() {
     if (dashboard) {
       const dashboardEmployee = dashboard?.employee || {};
       const workerIsActive =
-        dashboardEmployee?.is_active_employee ||
-        dashboardEmployee?.employee_status === 'active_employee' ||
-        dashboardEmployee?.status === 'active_employee' ||
-        dashboardEmployee?.status === 'active';
+        typeof dashboard?.is_active_employee === 'boolean'
+          ? dashboard.is_active_employee
+          : (
+              dashboardEmployee?.is_active_employee ||
+              dashboardEmployee?.employee_status === 'active_employee' ||
+              dashboardEmployee?.status === 'active_employee' ||
+              dashboardEmployee?.status === 'active'
+            );
       fetchCvStatus();
       fetchReferenceMismatches();
       if (workerIsActive) {
@@ -1729,10 +1733,14 @@ export default function WorkerDashboard() {
   const contractAgreement = agreements.find((agreement) => agreement.id === 'contract_acceptance');
   
   const isActiveEmployee =
-    employee?.is_active_employee ||
-    employee?.employee_status === 'active_employee' ||
-    employee?.status === 'active_employee' ||
-    employee?.status === 'active';
+    typeof dashboard?.is_active_employee === 'boolean'
+      ? dashboard.is_active_employee
+      : (
+          employee?.is_active_employee ||
+          employee?.employee_status === 'active_employee' ||
+          employee?.status === 'active_employee' ||
+          employee?.status === 'active'
+        );
   const isPreEmploymentEmployee =
     !isActiveEmployee && (
       employee?.person_stage === 'employee' ||

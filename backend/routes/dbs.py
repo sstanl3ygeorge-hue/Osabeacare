@@ -1,3 +1,101 @@
+from typing import Dict, Any
+# ==================== INTERNAL DBS AUTO-STAMP HELPER ====================
+
+async def auto_stamp_dbs_documents(
+    db,
+    employee_id: str,
+    evidence_file_ids: List[str],
+    user: dict,
+    stamp_verification_proof: bool = True,
+    audit_action: str = "auto_stamp_dbs_documents_after_check"
+) -> Dict[str, Any]:
+    """
+    Stamps all DBS evidence and proof documents for an employee, idempotently.
+    Returns a dict with stamp results and errors (never raises).
+    """
+    stamp_and_persist_document = get_stamp_and_persist_document()
+    admin_name = user.get('name', 'Admin')
+    stamped_count = 0
+    errors = []
+    # Evidence stamping (idempotent)
+    for doc_id in evidence_file_ids:
+        try:
+            document = await db.employee_documents.find_one({"id": doc_id})
+            if not document:
+                errors.append(f"Document {doc_id} not found")
+                continue
+            if document.get('verification_stamp'):
+                continue  # Already stamped, skip
+            await stamp_and_persist_document(
+                document,
+                {"user_id": user["user_id"], "name": admin_name, "email": user.get("email")},
+                db_handle=db,
+                status="verified",
+                review_status="verified",
+                stamp_type="original_seen",
+            )
+            stamped_count += 1
+        except Exception as e:
+            logging.error(f"Error auto-stamping DBS evidence {doc_id}: {e}")
+            errors.append(f"Failed to stamp {doc_id}")
+
+    # Proof stamping (idempotent)
+    proof_stamped = False
+    if stamp_verification_proof:
+        dbs_check = await db.employees.find_one(
+            {"id": employee_id},
+            {"dbs_check": 1}
+        )
+        check_data = dbs_check.get('dbs_check') if dbs_check else None
+        if check_data:
+            proof_doc_id = check_data.get('proof_document_id') or check_data.get('evidence_document_id')
+            if proof_doc_id:
+                try:
+                    proof_doc = await db.employee_documents.find_one({"id": proof_doc_id})
+                    if proof_doc and not proof_doc.get('verification_stamp'):
+                        await stamp_and_persist_document(
+                            proof_doc,
+                            {"user_id": user["user_id"], "name": admin_name, "email": user.get("email")},
+                            db_handle=db,
+                            status="verified",
+                            review_status="verified",
+                            stamp_type="online_check",
+                        )
+                        stamped_count += 1
+                        proof_stamped = True
+                except Exception as e:
+                    logging.error(f"Error auto-stamping DBS proof: {e}")
+                    errors.append("Failed to stamp proof document")
+
+    # Audit log (always log attempt)
+    verification_id = None
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        verification_id = str(uuid.uuid4())[:8].upper()
+        await log_audit_action(
+            user['user_id'],
+            audit_action,
+            "employee",
+            employee_id,
+            {
+                "verification_id": verification_id,
+                "evidence_files_stamped": len(evidence_file_ids),
+                "proof_stamped": proof_stamped,
+                "total_stamped": stamped_count,
+                "errors": errors if errors else None
+            }
+        )
+    except Exception as e:
+        logging.error(f"Audit log failed for auto-stamp: {e}")
+
+    return {
+        "success": len(errors) == 0,
+        "stamped_count": stamped_count,
+        "proof_stamped": proof_stamped,
+        "errors": errors,
+        "verification_id": verification_id,
+        "timestamp": now
+    }
 """
 DBS (Disclosure and Barring Service) routes for managing DBS certificates,
 Update Service checks, and the DBS Register.
@@ -462,7 +560,36 @@ async def record_dbs_check(
         data=data.model_dump(),
         recorded_by=user['user_id']
     )
-    
+
+    # Auto-stamp after successful check record (non-blocking)
+    dbs_evidence_ids = []
+    # Prefer explicit list, fallback to single doc
+    if hasattr(data, "linked_evidence_ids") and data.linked_evidence_ids:
+        dbs_evidence_ids = data.linked_evidence_ids
+    elif getattr(data, "evidence_document_id", None):
+        dbs_evidence_ids = [data.evidence_document_id]
+
+    try:
+        db_handle = get_db()
+        auto_stamp_result = await auto_stamp_dbs_documents(
+            db_handle,
+            employee_id,
+            dbs_evidence_ids,
+            user,
+            stamp_verification_proof=True,
+            audit_action="auto_stamp_dbs_documents_after_check"
+        )
+        if not auto_stamp_result["success"]:
+            result["auto_stamp_warning"] = auto_stamp_result["errors"]
+        result["auto_stamp_result"] = {
+            "stamped_count": auto_stamp_result["stamped_count"],
+            "proof_stamped": auto_stamp_result["proof_stamped"],
+            "errors": auto_stamp_result["errors"]
+        }
+    except Exception as e:
+        logging.error(f"Auto-stamp failed after DBS check: {e}")
+        result["auto_stamp_warning"] = ["Auto-stamp failed: " + str(e)]
+
     return result
 
 
@@ -559,72 +686,20 @@ async def stamp_all_dbs_documents(
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
     
-    stamp_and_persist_document = get_stamp_and_persist_document()
-    
-    verification_id = str(uuid.uuid4())[:8].upper()
+    # Use shared helper for stamping
+    stamp_result = await auto_stamp_dbs_documents(
+        db,
+        employee_id,
+        data.evidence_file_ids,
+        user,
+        stamp_verification_proof=data.stamp_verification_proof,
+        audit_action="stamp_all_dbs_documents"
+    )
+
+    # Update employee DBS status
     now = datetime.now(timezone.utc).isoformat()
     admin_name = user.get('name', 'Admin')
-    employee_name = employee.get('name') or f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip()
-    
-    stamped_count = 0
-    errors = []
-    
-    # STEP 1: Stamp all DBS certificate documents
-    for doc_id in data.evidence_file_ids:
-        try:
-            document = await db.employee_documents.find_one({"id": doc_id})
-            if not document:
-                errors.append(f"Document {doc_id} not found")
-                continue
-            await stamp_and_persist_document(
-                document,
-                {"user_id": user["user_id"], "name": admin_name, "email": user.get("email")},
-                db_handle=db,
-                status="verified",
-                review_status="verified",
-                stamp_type="original_seen",
-            )
-            stamped_count += 1
-        except Exception as e:
-            logging.error(f"Error stamping DBS evidence {doc_id}: {e}")
-            errors.append(f"Failed to stamp {doc_id}")
-
-    if errors:
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "message": "One or more DBS evidence documents could not be stamped and were not finalized.",
-                "errors": errors,
-            },
-        )
-    
-    # STEP 2: Stamp DBS Update Service proof (if exists)
-    if data.stamp_verification_proof:
-        dbs_check = await db.employees.find_one(
-            {"id": employee_id},
-            {"dbs_check": 1}
-        )
-        
-        check_data = dbs_check.get('dbs_check') if dbs_check else None
-        if check_data:
-            proof_doc_id = check_data.get('proof_document_id') or check_data.get('evidence_document_id')
-            if proof_doc_id:
-                try:
-                    proof_doc = await db.employee_documents.find_one({"id": proof_doc_id})
-                    if proof_doc and not proof_doc.get('verification_stamp'):
-                        await stamp_and_persist_document(
-                            proof_doc,
-                            {"user_id": user["user_id"], "name": admin_name, "email": user.get("email")},
-                            db_handle=db,
-                            status="verified",
-                            review_status="verified",
-                            stamp_type="online_check",
-                        )
-                        stamped_count += 1
-                except Exception as e:
-                    logging.error(f"Error stamping DBS proof: {e}")
-    
-    # STEP 3: Update employee DBS status
+    verification_id = stamp_result.get("verification_id")
     await db.employees.update_one(
         {"id": employee_id},
         {"$set": {
@@ -643,26 +718,11 @@ async def stamp_all_dbs_documents(
         {"$set": {"verified": True, "verified_at": now,
                   "verified_by_name": admin_name, "updated_at": now}}
     )
-    
-    # STEP 4: Log audit trail
-    await log_audit_action(
-        user['user_id'],
-        "stamp_all_dbs_documents",
-        "employee",
-        employee_id,
-        {
-            "verification_id": verification_id,
-            "evidence_files_stamped": len(data.evidence_file_ids),
-            "proof_stamped": data.stamp_verification_proof,
-            "total_stamped": stamped_count,
-            "errors": errors if errors else None
-        }
-    )
-    
+
     return {
-        "success": True,
-        "message": f"Successfully stamped {stamped_count} document(s) with verification ID {verification_id}",
+        "success": stamp_result["success"],
+        "message": f"Successfully stamped {stamp_result['stamped_count']} document(s) with verification ID {verification_id}",
         "verification_id": verification_id,
-        "documents_stamped": stamped_count,
-        "errors": errors if errors else None
+        "documents_stamped": stamp_result["stamped_count"],
+        "errors": stamp_result["errors"] if stamp_result["errors"] else None
     }

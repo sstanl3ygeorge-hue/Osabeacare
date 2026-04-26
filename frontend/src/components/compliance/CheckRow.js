@@ -267,6 +267,7 @@ export default function CheckRow({
                 </div>
                 <div className="flex items-center gap-1">
                   {/* View */}
+
                   <Button
                     size="sm"
                     variant="ghost"
@@ -274,9 +275,12 @@ export default function CheckRow({
                     onClick={(e) => {
                       e.stopPropagation();
                       if (onPreviewFile) {
+                        const proofDoc = check_data.evidence_document;
+                        const stampedFileUrl = proofDoc && proofDoc.verification_stamp ? proofDoc.verification_stamp : undefined;
                         onPreviewFile({
                           file_url: `/api/employee-documents/${check_data.evidence_document_id}/file`,
-                          file_name: check_data.evidence_document.filename || 'Check Proof'
+                          file_name: proofDoc?.filename || 'Check Proof',
+                          ...(stampedFileUrl ? { stamped_file_url: stampedFileUrl } : {})
                         });
                       }
                     }}

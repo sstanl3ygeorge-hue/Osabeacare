@@ -839,7 +839,7 @@ export default function DualRowComplianceSection({
       <div className="flex justify-end">
         <Button 
           variant="ghost" 
-          size="sm" 
+      const agreementRowsForSummary = filteredSections?.agreements?.rows?.filter((row) => row.row_type === 'form_acknowledgement') || [];
           onClick={handleRefresh}
           className="text-text-muted"
         >

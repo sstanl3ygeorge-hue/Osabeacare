@@ -1,4 +1,4 @@
-from typing import Dict, Any
+from typing import Dict, Any, List
 # ==================== INTERNAL DBS AUTO-STAMP HELPER ====================
 
 async def auto_stamp_dbs_documents(

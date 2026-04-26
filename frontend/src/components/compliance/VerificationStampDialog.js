@@ -17,17 +17,17 @@ import { RadioGroup, RadioGroupItem } from '../ui/radio-group';
 import { toast } from 'sonner';
 import {
   Eye,
+  Download,
   FileCheck,
   FileQuestion,
   Globe,
   Loader2,
   Stamp,
-  ExternalLink,
   Trash2
 } from 'lucide-react';
 import {
+  downloadBlobUrl,
   fetchProtectedFileBlob,
-  openBlobUrlInNewTab,
   revokeBlobUrlLater,
 } from '../../lib/protectedFiles';
 
@@ -181,10 +181,11 @@ export default function VerificationStampDialog({
     if (!file?.file_url) return;
     try {
       const { blobUrl } = await fetchProtectedFileBlob(file.file_url, token);
-      openBlobUrlInNewTab(blobUrl, file?.original_filename || file?.document_type_name || 'document');
-      revokeBlobUrlLater(blobUrl);
+      downloadBlobUrl(blobUrl, file?.original_filename || file?.document_type_name || 'document');
+      revokeBlobUrlLater(blobUrl, 1000);
+      toast.info('In-app preview is not available in this dialog. File downloaded for review.');
     } catch (err) {
-      toast.error('Failed to open document preview');
+      toast.error('Failed to download document');
     }
   };
 
@@ -226,8 +227,8 @@ export default function VerificationStampDialog({
                 className="text-xs"
                 data-testid="preview-document-btn"
               >
-                <ExternalLink className="h-3 w-3 mr-1" />
-                Preview
+                <Download className="h-3 w-3 mr-1" />
+                Download
               </Button>
             </div>
             

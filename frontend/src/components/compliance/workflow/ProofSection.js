@@ -24,6 +24,11 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { formatBackendDate } from '../../../lib/dateUtils';
+import {
+  downloadBlobUrl,
+  fetchProtectedFileBlob,
+  revokeBlobUrlLater,
+} from '../../../lib/protectedFiles';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -36,6 +41,21 @@ const PROOF_CHECK_ENDPOINTS = {
 const PROOF_CHECK_TYPE = {
   right_to_work: 'right_to_work_check',
   dbs: 'dbs_status_check',
+};
+
+const getProtectedRequestToken = (rawUrl, authToken) => {
+  if (!rawUrl || !authToken) return undefined;
+  if (typeof rawUrl !== 'string') return undefined;
+
+  try {
+    const resolvedUrl = new URL(rawUrl, window.location.origin);
+    const isSameOriginApi =
+      resolvedUrl.origin === window.location.origin &&
+      resolvedUrl.pathname.startsWith('/api/');
+    return isSameOriginApi ? authToken : undefined;
+  } catch {
+    return undefined;
+  }
 };
 
 /**
@@ -269,6 +289,18 @@ export function ProofSection({
       ? `${API}/employee-documents/${proofDocumentId}/file`
       : null);
 
+  const handleOpenProofFile = async () => {
+    if (!proofFileUrl) return;
+    try {
+      const requestToken = getProtectedRequestToken(proofFileUrl, token);
+      const { blobUrl } = await fetchProtectedFileBlob(proofFileUrl, requestToken);
+      downloadBlobUrl(blobUrl, proofFileName || 'proof-document');
+      revokeBlobUrlLater(blobUrl, 1000);
+    } catch {
+      // Preserve current UX: do not add new error toasts for this action.
+    }
+  };
+
   return (
     <div
       className="p-4"
@@ -393,9 +425,7 @@ export function ProofSection({
                 size="sm"
                 variant="ghost"
                 className="h-7 w-7 p-0 text-gray-400 hover:text-green-600"
-                onClick={() =>
-                  proofFileUrl && window.open(proofFileUrl, '_blank')
-                }
+                onClick={handleOpenProofFile}
                 title="Download proof document"
               >
                 <Download className="h-3.5 w-3.5" />

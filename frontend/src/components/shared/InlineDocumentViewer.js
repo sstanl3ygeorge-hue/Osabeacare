@@ -18,7 +18,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog';
 import { Button } from '../ui/button';
-import { Loader2, Download, AlertTriangle, FileText, ExternalLink } from 'lucide-react';
+import { Loader2, Download, AlertTriangle, FileText } from 'lucide-react';
 import axios from 'axios';
 
 // Detect Safari/iOS for fallback — they cannot render blob-URL PDFs in iframes
@@ -231,12 +231,6 @@ export default function InlineDocumentViewer({
             <Button variant="outline" size="sm" onClick={handleDownload}>
               <Download className="h-4 w-4 mr-2" />
               Download
-            </Button>
-          )}
-          {blobUrl && (
-            <Button variant="outline" size="sm" onClick={() => window.open(blobUrl, '_blank', 'noopener')}>
-              <ExternalLink className="h-4 w-4 mr-2" />
-              Open in New Tab
             </Button>
           )}
           <Button variant="outline" size="sm" onClick={handleClose}>

@@ -11,7 +11,7 @@ import { Label } from '../../components/ui/label';
 import { 
   CheckCircle, AlertCircle, Clock, Upload, FileText, 
   LogOut, Loader2, AlertTriangle, Calendar, RefreshCw,
-  Shield, X, PenTool, Lock, Download, ExternalLink, Eye, User, Award, Bell, ChevronDown, ChevronUp,
+  Shield, X, PenTool, Lock, Download, Eye, User, Award, Bell, ChevronDown, ChevronUp,
   ShieldCheck, Circle, Plus, Trash2
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -1331,6 +1331,27 @@ export default function WorkerDashboard() {
     };
   }, [documentBlobUrl]);
 
+  const getWorkerBlobRequestConfig = (url, workerToken) => {
+    const config = { responseType: 'blob' };
+    if (!url) return config;
+
+    try {
+      const resolvedUrl = new URL(url, window.location.origin);
+      const isSameOriginApi = resolvedUrl.origin === window.location.origin && resolvedUrl.pathname.startsWith('/api/');
+      if (isSameOriginApi && workerToken) {
+        config.headers = { Authorization: `Bearer ${workerToken}` };
+      }
+    } catch {
+      // If URL parsing fails, fall back to no auth headers.
+    }
+
+    return config;
+  };
+
+  const fetchWorkerBlob = (url, workerToken) => {
+    return axios.get(url, getWorkerBlobRequestConfig(url, workerToken));
+  };
+
   // Fetch document as blob with authentication
   const openDocumentViewer = async (doc) => {
     setViewerDocument(doc);
@@ -1346,7 +1367,8 @@ export default function WorkerDashboard() {
     try {
       let response;
       if (doc?.file_url && !doc?.document_id) {
-        response = await axios.get(doc.file_url, { responseType: 'blob' });
+        const token = localStorage.getItem('workerToken');
+        response = await fetchWorkerBlob(doc.file_url, token);
       } else {
         const token = localStorage.getItem('workerToken');
         response = await axios.get(
@@ -1386,7 +1408,8 @@ export default function WorkerDashboard() {
       return;
     }
     try {
-      const response = await axios.get(url, { responseType: 'blob' });
+      const token = localStorage.getItem('workerToken');
+      const response = await fetchWorkerBlob(url, token);
       const blobUrl = URL.createObjectURL(response.data);
       const link = document.createElement('a');
       link.href = blobUrl;
@@ -4244,16 +4267,6 @@ export default function WorkerDashboard() {
           <DialogFooter className="gap-2 pt-4 border-t">
             {documentBlobUrl && (
               <>
-                <Button 
-                  variant="outline" 
-                  onClick={() => {
-                    // Open blob URL in new tab
-                    window.open(documentBlobUrl, '_blank');
-                  }}
-                >
-                  <ExternalLink className="h-4 w-4 mr-2" />
-                  Open in New Tab
-                </Button>
                 <Button 
                   variant="outline" 
                   onClick={async () => {

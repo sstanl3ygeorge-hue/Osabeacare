@@ -5,7 +5,7 @@ import { Button } from '../ui/button';
 import { Slider } from '../ui/slider';
 import { VisuallyHidden } from '@radix-ui/react-visually-hidden';
 import { 
-  X, Download, ExternalLink, ZoomIn, ZoomOut, RotateCw,
+  X, Download, ZoomIn, ZoomOut, RotateCw,
   ChevronLeft, ChevronRight, Loader2, FileText, Image as ImageIcon,
   File, AlertCircle, Maximize2, Minimize2, ShieldCheck
 } from 'lucide-react';
@@ -209,13 +209,6 @@ export default function DocumentPreviewModal({
     }
   };
   
-  // Open in new tab
-  const handleOpenInNewTab = () => {
-    if (blobUrl) {
-      window.open(blobUrl, '_blank');
-    }
-  };
-
   // Toggle fullscreen
   const toggleFullscreen = () => setIsFullscreen(prev => !prev);
 
@@ -324,10 +317,6 @@ export default function DocumentPreviewModal({
                 This PDF cannot be displayed in the embedded viewer. You can still access the file using the options below.
               </p>
               <div className="flex gap-3">
-                <Button onClick={handleOpenInNewTab} className="bg-primary hover:bg-primary-hover text-white">
-                  <ExternalLink className="h-4 w-4 mr-2" />
-                  Open File
-                </Button>
                 <Button variant="outline" onClick={handleDownload}>
                   <Download className="h-4 w-4 mr-2" />
                   Download File
@@ -470,10 +459,6 @@ export default function DocumentPreviewModal({
           <Download className="h-4 w-4 mr-2" />
           Download File
         </Button>
-        <Button variant="outline" onClick={handleOpenInNewTab}>
-          <ExternalLink className="h-4 w-4 mr-2" />
-          Open in New Tab
-        </Button>
       </div>
     </div>
   );
@@ -491,21 +476,9 @@ export default function DocumentPreviewModal({
         {error || 'Unable to display this file in the browser.'}
       </p>
       <p className="text-sm text-gray-400 mb-6">
-        Try opening or downloading the file directly.
+        Try downloading the file directly.
       </p>
       <div className="flex gap-3">
-        <Button 
-          onClick={() => {
-            // Try to open the original URL in a new tab
-            if (fileUrl) {
-              window.open(fileUrl, '_blank');
-            }
-          }}
-          className="bg-primary hover:bg-primary-hover text-white"
-        >
-          <ExternalLink className="h-4 w-4 mr-2" />
-          Open File
-        </Button>
         <Button variant="outline" onClick={onClose}>
           Close
         </Button>
@@ -537,7 +510,7 @@ export default function DocumentPreviewModal({
         <VisuallyHidden>
           <DialogTitle>{activeFileName || 'Document Preview'}</DialogTitle>
           <DialogDescription>
-            Preview of {activeFileName || 'document'}. Use the toolbar to navigate pages, zoom, download, or open in a new tab.
+            Preview of {activeFileName || 'document'}. Use the toolbar to navigate pages, zoom, and download.
           </DialogDescription>
         </VisuallyHidden>
         
@@ -654,16 +627,6 @@ export default function DocumentPreviewModal({
               Download
             </Button>
             <Button
-              variant="outline"
-              size="sm"
-              onClick={handleOpenInNewTab}
-              className="hidden sm:flex"
-              disabled={loading || error}
-            >
-              <ExternalLink className="h-4 w-4 mr-2" />
-              New Tab
-            </Button>
-            <Button
               variant="ghost"
               size="sm"
               onClick={toggleFullscreen}
@@ -698,16 +661,6 @@ export default function DocumentPreviewModal({
           >
             <Download className="h-4 w-4 mr-2" />
             Download
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleOpenInNewTab}
-            disabled={loading || error}
-            className="flex-1"
-          >
-            <ExternalLink className="h-4 w-4 mr-2" />
-            New Tab
           </Button>
         </div>
 

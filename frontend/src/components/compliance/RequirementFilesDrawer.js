@@ -40,7 +40,6 @@ import DocumentActionMenu from './DocumentActionMenu';
 import {
   fetchProtectedFileBlob,
   downloadBlobUrl,
-  openBlobUrlInNewTab,
   revokeBlobUrlLater,
 } from '../../lib/protectedFiles';
 
@@ -120,17 +119,10 @@ export default function RequirementFilesDrawer({
         file_id: file.file_id
       });
     } else {
-      try {
-        const { blobUrl } = await fetchProtectedFileBlob(fileUrl, token);
-        openBlobUrlInNewTab(blobUrl, file.file_name || file.file_label || 'document');
-        revokeBlobUrlLater(blobUrl);
-        if (!isPreviewable) {
-          toast.info(`Opening ${file.file_name || 'file'} for download (preview not supported for this file type)`);
-        }
-      } catch (err) {
-        toast.error('Failed to open file. Please try downloading instead.');
-        console.error('File open error:', err);
+      if (!isPreviewable) {
+        toast.info(`Preview not supported for ${file.file_name || 'this file'}. Downloading instead.`);
       }
+      await handleDownloadFile(file);
     }
   };
 

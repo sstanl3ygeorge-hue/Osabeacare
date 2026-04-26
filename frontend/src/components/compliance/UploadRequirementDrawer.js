@@ -42,8 +42,29 @@ import {
   normalizeUploadDrawerData,
   buildDrawerSummary,
 } from './complianceRequirementMap';
+import {
+  downloadBlobUrl,
+  fetchProtectedFileBlob,
+  revokeBlobUrlLater,
+} from '../../lib/protectedFiles';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+
+const getProtectedRequestToken = (rawUrl, authToken) => {
+  if (!rawUrl || !authToken) return undefined;
+  if (typeof rawUrl !== 'string') return undefined;
+  if (!rawUrl.startsWith('/api/')) return undefined;
+
+  try {
+    const resolvedUrl = new URL(rawUrl, window.location.origin);
+    const isSameOriginApi =
+      resolvedUrl.origin === window.location.origin &&
+      resolvedUrl.pathname.startsWith('/api/');
+    return isSameOriginApi ? authToken : undefined;
+  } catch {
+    return undefined;
+  }
+};
 
 // =============================================================================
 // COMPONENT
@@ -132,14 +153,15 @@ export default function UploadRequirementDrawer({
   }, [fetchFiles, onRefresh]);
 
   // Handle file view - opens preview or falls back to download
-  const handleOpenFile = (file) => {
+  const handleOpenFile = async (file) => {
     if (!file) {
       toast.error('File data not available');
       return;
     }
     
     // Priority: openUrl > file_url > downloadUrl > download by ID
-    let url = file.openUrl || file.file_url || file.downloadUrl;
+    const rawUrl = file.openUrl || file.file_url || file.downloadUrl;
+    let url = rawUrl;
     
     if (!url && !file.file_available) {
       toast.error('File URL not available. The file may have been moved or deleted.');
@@ -163,15 +185,17 @@ export default function UploadRequirementDrawer({
         file_id: file.file_id || file.id
       });
     } else if (url) {
-      window.open(url, '_blank', 'noopener,noreferrer');
+      toast.info('Preview not supported for this file type. Downloading file instead.');
+      await handleDownloadFile(file);
     } else {
       handleDownloadFile(file);
     }
   };
 
   // Handle file download
-  const handleDownloadFile = (file) => {
-    let url = file.downloadUrl || file.download_url || file.file_url;
+  const handleDownloadFile = async (file) => {
+    const rawUrl = file.downloadUrl || file.download_url || file.file_url;
+    let url = rawUrl;
     
     if (!url) {
       toast.error('Download URL not available');
@@ -185,15 +209,12 @@ export default function UploadRequirementDrawer({
     }
     
     try {
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = file.file_name || file.file_label || 'document';
-      link.target = '_blank';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    } catch (err) {
-      window.open(url, '_blank');
+      const requestToken = getProtectedRequestToken(rawUrl, token);
+      const { blobUrl } = await fetchProtectedFileBlob(url, requestToken);
+      downloadBlobUrl(blobUrl, file.file_name || file.file_label || 'document');
+      revokeBlobUrlLater(blobUrl, 1000);
+    } catch {
+      // Preserve existing UX: no additional toast on download fallback failures.
     }
   };
 

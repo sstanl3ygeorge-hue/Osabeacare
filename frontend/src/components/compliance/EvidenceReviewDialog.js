@@ -22,11 +22,11 @@ import {
   FileText,
   Loader2,
   Eye,
-  ExternalLink
+  Download
 } from 'lucide-react';
 import {
+  downloadBlobUrl,
   fetchProtectedFileBlob,
-  openBlobUrlInNewTab,
   revokeBlobUrlLater,
 } from '../../lib/protectedFiles';
 
@@ -192,10 +192,11 @@ export default function EvidenceReviewDialog({
     if (!file?.file_url) return;
     try {
       const { blobUrl } = await fetchProtectedFileBlob(file.file_url, token);
-      openBlobUrlInNewTab(blobUrl, file?.filename || file?.original_filename || 'evidence');
-      revokeBlobUrlLater(blobUrl);
+      downloadBlobUrl(blobUrl, file?.filename || file?.original_filename || 'evidence');
+      revokeBlobUrlLater(blobUrl, 1000);
+      toast.info('In-app preview is not available in this dialog. File downloaded for review.');
     } catch (err) {
-      toast.error('Failed to open file preview');
+      toast.error('Failed to download file');
     }
   };
 
@@ -251,9 +252,8 @@ export default function EvidenceReviewDialog({
                   className="h-8 px-2"
                   data-testid="preview-file-btn"
                 >
-                  <Eye className="h-4 w-4 mr-1" />
-                  View
-                  <ExternalLink className="h-3 w-3 ml-1" />
+                  <Download className="h-4 w-4 mr-1" />
+                  Download
                 </Button>
               </div>
             </div>

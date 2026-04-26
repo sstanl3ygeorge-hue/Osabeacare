@@ -31,6 +31,27 @@ import {
   DropdownMenuTrigger,
 } from '../../ui/dropdown-menu';
 import { formatBackendDate } from '../../../lib/dateUtils';
+import { useAuth } from '../../../context/AuthContext';
+import {
+  downloadBlobUrl,
+  fetchProtectedFileBlob,
+  revokeBlobUrlLater,
+} from '../../../lib/protectedFiles';
+
+const getProtectedRequestToken = (rawUrl, authToken) => {
+  if (!rawUrl || !authToken) return undefined;
+  if (typeof rawUrl !== 'string') return undefined;
+
+  try {
+    const resolvedUrl = new URL(rawUrl, window.location.origin);
+    const isSameOriginApi =
+      resolvedUrl.origin === window.location.origin &&
+      resolvedUrl.pathname.startsWith('/api/');
+    return isSameOriginApi ? authToken : undefined;
+  } catch {
+    return undefined;
+  }
+};
 
 /**
  * EvidenceSection — Steps 1 (upload) and 2 (review)
@@ -58,6 +79,7 @@ export function EvidenceSection({
   onUpload,
   workflow,
 }) {
+  const { token } = useAuth();
   const [removeDialog, setRemoveDialog] = useState({ open: false, docId: null, fileName: '' });
   const [removeReason, setRemoveReason] = useState('Uploaded in error');
   const hasFiles = files.length > 0;
@@ -108,6 +130,18 @@ export function EvidenceSection({
     onRemove(removeDialog.docId, removeReason.trim() || 'Uploaded in error');
     setRemoveDialog({ open: false, docId: null, fileName: '' });
     setRemoveReason('Uploaded in error');
+  };
+
+  const handleOpenEvidenceFile = async (rawUrl, fallbackName) => {
+    if (!rawUrl) return;
+    try {
+      const requestToken = getProtectedRequestToken(rawUrl, token);
+      const { blobUrl } = await fetchProtectedFileBlob(rawUrl, requestToken);
+      downloadBlobUrl(blobUrl, fallbackName || 'document');
+      revokeBlobUrlLater(blobUrl, 1000);
+    } catch {
+      // Preserve current UX: do not add new error toasts for this action.
+    }
   };
 
   return (
@@ -257,10 +291,9 @@ export function EvidenceSection({
                     variant="ghost"
                     className="h-7 w-7 p-0 text-gray-400 hover:text-green-600"
                     onClick={() =>
-                      window.open(
-                        file.file_url ||
-                          `/api/employee-documents/${docId}/file`,
-                        '_blank',
+                      handleOpenEvidenceFile(
+                        file.file_url || `/api/employee-documents/${docId}/file`,
+                        fileName,
                       )
                     }
                     data-testid={`evidence-download-${docId}`}

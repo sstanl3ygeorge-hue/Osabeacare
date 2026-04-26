@@ -470,6 +470,7 @@ export default function RequirementWorkflowCard({
           setReviewDialog({ open: false, file: null });
           handleRefresh();
         }}
+        onPreviewFile={onPreviewFile}
       />
 
       {/* Full evidence review viewer for Identity/POA/RTW/DBS */}

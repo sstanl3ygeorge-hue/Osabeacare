@@ -43,6 +43,8 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
  * - At least one evidence file is ACCEPTED
  * - AND a Record Check has been completed
  */
+import { isPreviewableFile } from './complianceRequirementMap';
+
 export default function EvidenceReviewDialog({
   isOpen,
   onClose,
@@ -51,7 +53,8 @@ export default function EvidenceReviewDialog({
   requirementKey,
   requirementLabel,
   onReviewComplete,
-  onOpenRecordCheck // Optional: callback to open Record Check with this file attached
+  onOpenRecordCheck, // Optional: callback to open Record Check with this file attached
+  onPreviewFile // Optional: preview-first handler
 }) {
   const { token } = useAuth();
   const [reviewDecision, setReviewDecision] = useState('');
@@ -187,8 +190,13 @@ export default function EvidenceReviewDialog({
     }
   };
 
-  // Preview file
+  // Preview-first file handler
   const handlePreview = async () => {
+    if (onPreviewFile && isPreviewableFile(file)) {
+      onPreviewFile(file);
+      return;
+    }
+    // fallback to download
     if (!file?.file_url) return;
     try {
       const { blobUrl } = await fetchProtectedFileBlob(file.file_url, token);

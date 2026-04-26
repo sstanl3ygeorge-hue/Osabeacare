@@ -577,6 +577,9 @@ function FormsSection() {
   const getStatusBadge = (form) => {
     switch (form.status) {
       case 'submitted':
+        if (form.type === 'equal_opportunities') {
+          return <Badge className="bg-green-100 text-green-700"><CheckCircle className="h-3 w-3 mr-1" />Completed</Badge>;
+        }
         return <Badge className="bg-blue-100 text-blue-700">Sent for review</Badge>;
       case 'verified':
         return <Badge className="bg-green-100 text-green-700"><CheckCircle className="h-3 w-3 mr-1" />Verified</Badge>;

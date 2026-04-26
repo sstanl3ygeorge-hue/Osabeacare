@@ -145,19 +145,16 @@ export default function EvidenceManageDrawer({
       toast.error('File data not available');
       return;
     }
-    
     const rawUrl = file.openUrl || file.file_url || file.downloadUrl;
     let url = rawUrl;
-    
     if (!url && !file.file_available) {
       toast.error('File URL not available');
       return;
     }
-
     if (url && url.startsWith('/api/')) {
       url = `${API}${url.substring(4)}`;
     }
-
+    // Preview-first logic
     if (isPreviewableFile(file) && onPreviewFile) {
       onPreviewFile({
         file_url: url,
@@ -166,7 +163,6 @@ export default function EvidenceManageDrawer({
         file_id: file.file_id || file.id
       });
     } else if (url) {
-      toast.info('Preview not supported for this file type. Downloading file instead.');
       await handleDownloadFile(file);
     } else {
       handleDownloadFile(file);

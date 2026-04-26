@@ -42,6 +42,7 @@ import {
   downloadBlobUrl,
   revokeBlobUrlLater,
 } from '../../lib/protectedFiles';
+import { isPreviewableFile } from './complianceRequirementMap';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -78,40 +79,21 @@ export default function RequirementFilesDrawer({
   
   const { token } = useAuth();
 
-  // Previewable file types (can be displayed in browser)
-  const PREVIEWABLE_TYPES = [
-    'application/pdf',
-    'image/jpeg',
-    'image/png',
-    'image/gif',
-    'image/webp',
-    'image/svg+xml',
-    'text/plain',
-    'text/html'
-  ];
-
-  // Handle file view - opens preview or falls back to download
+  // Handle file view - preview-first logic
   const handleViewFile = async (file) => {
     if (!file) {
       toast.error('File data not available');
       return;
     }
-    
     // Use stamped file URL if available, otherwise use original
     const fileUrl = file.stamped_file_url || file.file_url;
     const isStamped = !!file.stamped_file_url;
-    
     if (!fileUrl || !file.file_available) {
       toast.error('File URL not available. The file may have been moved or deleted.');
       return;
     }
-
-    // Check if file type is previewable
     const mimeType = file.mime_type || file.content_type || '';
-    const isPreviewable = PREVIEWABLE_TYPES.some(type => mimeType.startsWith(type.split('/')[0]) || mimeType === type);
-    
-    if (isPreviewable && onPreviewFile) {
-      // Use the preview modal - pass full file object for consistency
+    if (isPreviewableFile(file) && onPreviewFile) {
       onPreviewFile({
         file_url: fileUrl,
         file_name: isStamped ? `[STAMPED] ${file.file_name || file.file_label || 'Document'}` : (file.file_name || file.file_label || 'Document'),
@@ -119,9 +101,6 @@ export default function RequirementFilesDrawer({
         file_id: file.file_id
       });
     } else {
-      if (!isPreviewable) {
-        toast.info(`Preview not supported for ${file.file_name || 'this file'}. Downloading instead.`);
-      }
       await handleDownloadFile(file);
     }
   };

@@ -158,25 +158,19 @@ export default function UploadRequirementDrawer({
       toast.error('File data not available');
       return;
     }
-    
     // Priority: openUrl > file_url > downloadUrl > download by ID
     const rawUrl = file.openUrl || file.file_url || file.downloadUrl;
     let url = rawUrl;
-    
     if (!url && !file.file_available) {
       toast.error('File URL not available. The file may have been moved or deleted.');
       return;
     }
-
-    // FIX: Construct absolute URL for API paths
-    // API variable already ends with /api, so we need to strip /api from the path
+    // Construct absolute URL for API paths
     if (url && url.startsWith('/api/')) {
-      // Remove /api prefix from path since API already includes it
-      url = `${API}${url.substring(4)}`; // "/api/foo" -> API + "/foo"
+      url = `${API}${url.substring(4)}`;
     }
-
     const mimeType = file.mime_type || file.content_type || '';
-
+    // Preview-first logic
     if (isPreviewableFile(file) && onPreviewFile) {
       onPreviewFile({
         file_url: url,
@@ -185,7 +179,6 @@ export default function UploadRequirementDrawer({
         file_id: file.file_id || file.id
       });
     } else if (url) {
-      toast.info('Preview not supported for this file type. Downloading file instead.');
       await handleDownloadFile(file);
     } else {
       handleDownloadFile(file);

@@ -1,3 +1,4 @@
+import { isPreviewableFile } from '../../compliance/complianceRequirementMap';
 import { useState, useRef } from 'react';
 import axios from 'axios';
 import { useAuth } from '../../../context/AuthContext';
@@ -391,12 +392,12 @@ export function ProofSection({
                 Attached
               </Badge>
 
-              {/* View */}
+              {/* View (preview-first) */}
               <Button
                 size="sm"
                 variant="ghost"
                 className="h-7 w-7 p-0 text-gray-400 hover:text-blue-600"
-                onClick={() => {
+                onClick={async () => {
                   const stampByName =
                     proofDocument?.verification_stamp_by_name ||
                     proofDocument?.verified_by_name ||
@@ -407,13 +408,25 @@ export function ProofSection({
                     proofDocument?.verified_at ||
                     (typeof proofDocument?.verification_stamp === 'object' ? proofDocument.verification_stamp?.verified_at : null) ||
                     null;
-                  onPreviewFile?.({
-                    file_url: proofFileUrl,
-                    file_name: proofFileName,
-                    stamped_file_url: proofDocument?.stamped_file_url || null,
-                    verification_stamp_by_name: stampByName,
-                    verification_stamp_at: stampAt,
-                  });
+                  if (isPreviewableFile(proofDocument) && onPreviewFile) {
+                    onPreviewFile({
+                      file_url: proofFileUrl,
+                      file_name: proofFileName,
+                      stamped_file_url: proofDocument?.stamped_file_url || null,
+                      verification_stamp_by_name: stampByName,
+                      verification_stamp_at: stampAt,
+                    });
+                  } else {
+                    // fallback to download
+                    try {
+                      const requestToken = getProtectedRequestToken(proofFileUrl, token);
+                      const { blobUrl } = await fetchProtectedFileBlob(proofFileUrl, requestToken);
+                      downloadBlobUrl(blobUrl, proofFileName || 'proof-document');
+                      revokeBlobUrlLater(blobUrl, 1000);
+                    } catch {
+                      // Preserve current UX: do not add new error toasts for this action.
+                    }
+                  }
                 }}
                 title="Preview proof document"
               >

@@ -37,6 +37,7 @@ import {
   fetchProtectedFileBlob,
   revokeBlobUrlLater,
 } from '../../../lib/protectedFiles';
+import { isPreviewableFile } from '../../compliance/complianceRequirementMap';
 
 const getProtectedRequestToken = (rawUrl, authToken) => {
   if (!rawUrl || !authToken) return undefined;
@@ -249,16 +250,12 @@ export function EvidenceSection({
                     size="sm"
                     variant="ghost"
                     className="h-7 w-7 p-0 text-gray-400 hover:text-blue-600"
-                    onClick={() => {
+                    onClick={async () => {
                       const hasStamp = file.verification_stamp && file.verification_stamp !== 'not_verified';
                       const hasBurnedStamp = Boolean(file.stamped_file_url);
                       if (hasStamp && !hasBurnedStamp) {
                         console.warn('[Stamp integrity] Verified doc missing stamped_file_url', { doc_id: docId, stamp: file.verification_stamp });
                       }
-                      // Resolve stamp metadata with fallbacks for legacy documents
-                      // Old shape: verified_by_name / verified_at  (flat, no verification_stamp_by_name)
-                      // New shape: verification_stamp_by_name / verification_stamp_at (explicit flat)
-                      // Nested shape: verification_stamp.verified_by_name (inside dict)
                       const stampByName =
                         file.verification_stamp_by_name ||
                         file.verified_by_name ||
@@ -269,15 +266,22 @@ export function EvidenceSection({
                         file.verified_at ||
                         (typeof file.verification_stamp === 'object' ? file.verification_stamp?.verified_at : null) ||
                         null;
-                      onPreviewFile?.({
-                        file_url:
-                          file.file_url ||
-                          `/api/employee-documents/${docId}/file`,
-                        file_name: fileName,
-                        stamped_file_url: file.stamped_file_url || null,
-                        verification_stamp_by_name: stampByName,
-                        verification_stamp_at: stampAt,
-                      });
+                      if (isPreviewableFile(file) && onPreviewFile) {
+                        onPreviewFile({
+                          file_url:
+                            file.file_url ||
+                            `/api/employee-documents/${docId}/file`,
+                          file_name: fileName,
+                          stamped_file_url: file.stamped_file_url || null,
+                          verification_stamp_by_name: stampByName,
+                          verification_stamp_at: stampAt,
+                        });
+                      } else {
+                        await handleOpenEvidenceFile(
+                          file.file_url || `/api/employee-documents/${docId}/file`,
+                          fileName,
+                        );
+                      }
                     }}
                     data-testid={`evidence-view-${docId}`}
                     title="View file"

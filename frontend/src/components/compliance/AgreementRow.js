@@ -119,6 +119,10 @@ export default function AgreementRow({
       lifecycleStatus === 'rejected'
     );
   const contractNeedsReissue = key === 'contract_acceptance' && ['rejected', 'action_required', 'superseded'].includes(normalizedContractStatus);
+  const shouldShowReissueButton =
+    key === 'contract_acceptance' &&
+    typeof onReissueContract === 'function' &&
+    (contractNeedsReissue || canReissueContract || lifecycleStatus === 'rejected');
   const contractArtifactUrl =
     acknowledgement_data?.executed_contract_pdf_url ||
     acknowledgement_data?.worker_signed_contract_pdf_url ||
@@ -439,7 +443,7 @@ export default function AgreementRow({
                 </Button>
               )}
               
-              {canReissueContract && typeof onReissueContract === 'function' && (
+              {shouldShowReissueButton && (
                 <Button
                   size="sm"
                   variant="default"

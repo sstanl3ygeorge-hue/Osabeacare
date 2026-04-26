@@ -116,6 +116,7 @@ export default function AgreementRow({
   const canReissueContract =
     key === 'contract_acceptance' &&
     ['rejected', 'action_required', 'pending_signature', 'signed', 'fully_executed'].includes(normalizedContractStatus);
+  const contractNeedsReissue = key === 'contract_acceptance' && ['rejected', 'action_required', 'superseded'].includes(normalizedContractStatus);
   const contractArtifactUrl =
     acknowledgement_data?.executed_contract_pdf_url ||
     acknowledgement_data?.worker_signed_contract_pdf_url ||
@@ -124,6 +125,9 @@ export default function AgreementRow({
 
   // Status colors and icons
   const getStatusConfig = () => {
+    if (contractNeedsReissue) {
+      return { color: 'amber', bgColor: 'bg-amber-100', textColor: 'text-amber-700', icon: AlertTriangle, label: 'Contract needs reissue' };
+    }
     switch (lifecycleStatus) {
       case 'verified':
         return { color: 'green', bgColor: 'bg-green-100', textColor: 'text-green-700', icon: CheckCircle, label: 'Verified' };
@@ -142,6 +146,9 @@ export default function AgreementRow({
 
   const statusConfig = getStatusConfig();
   const StatusIcon = statusConfig.icon;
+  const displaySummary = contractNeedsReissue
+    ? 'Worker cannot sign this version.'
+    : status_summary;
 
   // Completion mode display
   const getCompletionModeDisplay = (mode) => {
@@ -384,7 +391,7 @@ export default function AgreementRow({
               )}
             </div>
             <div className="flex items-center gap-2 mt-0.5">
-              <p className="text-sm text-text-muted truncate">{status_summary}</p>
+              <p className="text-sm text-text-muted truncate">{displaySummary}</p>
               {modeConfig && (
                 <Badge className="text-[9px] bg-gray-100 text-gray-600 border-gray-200">
                   <ModeIcon className="h-2.5 w-2.5 mr-0.5" />
@@ -502,7 +509,7 @@ export default function AgreementRow({
               {canReissueContract && typeof onReissueContract === 'function' && (
                 <Button
                   size="sm"
-                  variant="outline"
+                  variant="default"
                   onClick={(e) => {
                     e.stopPropagation();
                     const sourceContractId = getReissueSourceContractId(acknowledgement_data);
@@ -513,7 +520,7 @@ export default function AgreementRow({
                     });
                   }}
                   disabled={isProcessing}
-                  className="h-8 text-xs rounded-lg"
+                  className="h-8 text-xs rounded-lg bg-amber-600 hover:bg-amber-700 text-white"
                 >
                   <RotateCcw className="h-3.5 w-3.5 mr-1" />
                   Reissue contract
@@ -598,14 +605,18 @@ export default function AgreementRow({
             )}
             
             {/* Rejection Details */}
-            {lifecycleStatus === 'rejected' && (
+            {(lifecycleStatus === 'rejected' || contractNeedsReissue) && (
               <div className="col-span-2 p-3 bg-red-50 rounded-lg border border-red-200">
                 <div className="flex items-center gap-2">
                   <XCircle className="h-4 w-4 text-red-600" />
-                  <span className="font-medium text-red-800">Rejected / action required</span>
+                  <span className="font-medium text-red-800">
+                    {key === 'contract_acceptance' ? 'Contract needs reissue' : 'Rejected / action required'}
+                  </span>
                 </div>
                 <p className="text-sm text-red-700 mt-1">
-                  {submission_data?.rejection_reason || acknowledgement_data?.rejection_reason || 'No reason provided'}
+                  {key === 'contract_acceptance'
+                    ? 'Worker cannot sign this version.'
+                    : (submission_data?.rejection_reason || acknowledgement_data?.rejection_reason || 'No reason provided')}
                 </p>
               </div>
             )}

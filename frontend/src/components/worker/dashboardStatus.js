@@ -25,17 +25,6 @@ export function getAgreementDisplay(agreement, options = {}) {
     };
   }
 
-  if (agreement.rejected) {
-    return {
-      tone: 'critical',
-      badge: 'Action required',
-      title: agreement.id === 'contract_acceptance' ? 'Contract needs attention' : 'Handbook needs attention',
-      description: agreement.rejection_reason || 'Osabea has returned this item for you to review.',
-      workerActionable: true,
-      ctaLabel: agreement.id === 'contract_acceptance' ? 'Review contract' : 'Review handbook',
-    };
-  }
-
   if (agreement.id === 'contract_acceptance' && agreement.contract_state === 'awaiting_company_countersignature') {
     return {
       tone: 'info',
@@ -48,7 +37,38 @@ export function getAgreementDisplay(agreement, options = {}) {
   }
 
   if (agreement.id === 'contract_acceptance') {
+    const contractState = String(agreement.contract_state || agreement.status || '').trim().toLowerCase();
     const canSign = contractEligibility?.can_sign ?? agreement.can_sign;
+    if (canSign && contractState === 'pending_signature') {
+      return {
+        tone: 'critical',
+        badge: 'Ready to sign',
+        title: 'Contract signature needed',
+        description: 'Review the contract PDF, then add your signature.',
+        workerActionable: true,
+        ctaLabel: 'Review & sign contract',
+      };
+    }
+    if (['rejected', 'superseded'].includes(contractState) && !canSign) {
+      return {
+        tone: 'neutral',
+        badge: 'Historical',
+        title: 'Contract needs reissue',
+        description: 'Worker cannot sign this version.',
+        workerActionable: false,
+        ctaLabel: agreement.file_url || agreement.download_url ? 'View PDF' : null,
+      };
+    }
+    if (contractState === 'action_required' && !canSign) {
+      return {
+        tone: 'critical',
+        badge: 'Action required',
+        title: 'Contract needs reissue',
+        description: 'Worker cannot sign this version.',
+        workerActionable: false,
+        ctaLabel: agreement.file_url || agreement.download_url ? 'View PDF' : null,
+      };
+    }
     return {
       tone: canSign ? 'critical' : 'info',
       badge: canSign ? 'Ready to sign' : 'Locked',
@@ -58,6 +78,17 @@ export function getAgreementDisplay(agreement, options = {}) {
         : 'Complete your earlier onboarding steps and Osabea will unlock contract signing.',
       workerActionable: Boolean(canSign),
       ctaLabel: canSign ? 'Review and sign' : agreement.file_url || agreement.download_url ? 'View PDF' : null,
+    };
+  }
+
+  if (agreement.rejected) {
+    return {
+      tone: 'critical',
+      badge: 'Action required',
+      title: agreement.id === 'contract_acceptance' ? 'Contract needs attention' : 'Handbook needs attention',
+      description: agreement.rejection_reason || 'Osabea has returned this item for you to review.',
+      workerActionable: true,
+      ctaLabel: agreement.id === 'contract_acceptance' ? 'Review contract' : 'Review handbook',
     };
   }
 

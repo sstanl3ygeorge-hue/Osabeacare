@@ -61,7 +61,7 @@ export default function SupersedeContractDialog({
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
-      toast.success('Contract reissued for re-signing. Worker can now sign the new contract.');
+      toast.success('New contract issued. Worker can now sign it.');
       if (onSuccess) onSuccess();
       handleClose();
     } catch (err) {

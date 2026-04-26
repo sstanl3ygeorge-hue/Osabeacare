@@ -3637,13 +3637,13 @@ export default function WorkerDashboard() {
                           )}
                         </div>
                       </div>
-                      <div className="flex flex-wrap items-center justify-start gap-2 w-full sm:w-auto sm:justify-end sm:flex-nowrap sm:shrink-0">
+                      <div className="flex flex-wrap items-center justify-start gap-2 w-full sm:w-auto sm:justify-end sm:shrink-0">
                         {(agreement.file_url || agreement.download_url) && (
                           <>
                             <Button
                               size="sm"
                               variant="outline"
-                              className="gap-1 flex-1 sm:flex-none min-w-0"
+                              className="gap-1 whitespace-nowrap"
                               onClick={() => openDocumentViewer({ ...agreement, name: agreement.name })}
                             >
                               <Eye className="h-3.5 w-3.5" />
@@ -3652,7 +3652,7 @@ export default function WorkerDashboard() {
                             <Button
                               size="sm"
                               variant="outline"
-                              className="gap-1 flex-1 sm:flex-none min-w-0"
+                              className="gap-1 whitespace-nowrap"
                               onClick={() => downloadAgreement(agreement)}
                             >
                               <Download className="h-3.5 w-3.5" />
@@ -3663,11 +3663,11 @@ export default function WorkerDashboard() {
                         {agreement.id === 'contract_acceptance' && agreementDisplay.workerActionable && contractEligibility?.can_sign && (
                           <Button
                             size="sm"
-                            className="gap-1 flex-1 sm:flex-none min-w-0"
+                            className="gap-1 whitespace-nowrap"
                             onClick={() => setShowSignaturePad(true)}
                           >
                             <PenTool className="h-3.5 w-3.5" />
-                            Sign
+                            Review & sign contract
                           </Button>
                         )}
                         {agreement.id === 'contract_acceptance' && contractNeedsReissueMessage && (
@@ -3678,7 +3678,7 @@ export default function WorkerDashboard() {
                         {agreement.id === 'handbook_acknowledgement' && handbookDisplay.workerActionable && agreement.id === handbookAgreement?.id && (
                           <Button
                             size="sm"
-                            className="gap-1 flex-1 sm:flex-none min-w-0"
+                            className="gap-1 whitespace-nowrap"
                             disabled={!agreement.file_url && !agreement.download_url}
                             title={(!agreement.file_url && !agreement.download_url) ? 'Handbook PDF is not available yet' : undefined}
                             onClick={() => openHandbookAckModal(agreement)}

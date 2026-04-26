@@ -3572,6 +3572,13 @@ export default function WorkerDashboard() {
             <CardContent>
               <div className="space-y-3">
                 {agreementDisplays.map(({ agreement, display: agreementDisplay }) => {
+                  const agreementContractState = String(
+                    agreement?.contract_state || agreement?.status || agreement?.state || ''
+                  ).trim().toLowerCase();
+                  const isHistoricalRejectedContract =
+                    agreement.id === 'contract_acceptance' &&
+                    ['rejected', 'superseded'].includes(agreementContractState) &&
+                    !(agreementContractState === 'pending_signature' && contractEligibility?.can_sign);
                   const toneClasses =
                     agreementDisplay.tone === 'critical'
                       ? 'bg-red-50 border-red-200'
@@ -3594,8 +3601,44 @@ export default function WorkerDashboard() {
                     className={`p-4 rounded-xl border ${toneClasses}`}
                     data-testid={`agreement-${agreement.id}`}
                   >
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                      <div className="flex items-start gap-3 min-w-0 flex-1">
+                    {isHistoricalRejectedContract ? (
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="min-w-0 flex-1 w-full whitespace-normal break-normal [overflow-wrap:normal] [word-break:normal]">
+                          <p className="text-sm font-medium text-slate-700">
+                            Your contract needs to be reissued by your manager.
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto sm:justify-end">
+                          {(agreement.file_url || agreement.download_url) && (
+                            <>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="gap-1 whitespace-nowrap"
+                                onClick={() => openDocumentViewer({ ...agreement, name: agreement.name })}
+                              >
+                                <Eye className="h-3.5 w-3.5" />
+                                View PDF
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="gap-1 whitespace-nowrap"
+                                onClick={() => downloadAgreement(agreement)}
+                              >
+                                <Download className="h-3.5 w-3.5" />
+                                Download PDF
+                              </Button>
+                            </>
+                          )}
+                          <Badge className="shrink-0 text-xs bg-slate-100 text-slate-600">
+                            Historical
+                          </Badge>
+                        </div>
+                      </div>
+                    ) : (
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="flex items-start gap-3 min-w-0 flex-1 w-full">
                         <div className={`w-10 h-10 shrink-0 rounded-lg flex items-center justify-center ${iconClasses.split(' ')[0]}`}>
                           {agreement.verified ? (
                             <CheckCircle className={`h-5 w-5 ${iconClasses.split(' ')[1]}`} />
@@ -3607,9 +3650,9 @@ export default function WorkerDashboard() {
                             <Clock className={`h-5 w-5 ${iconClasses.split(' ')[1]}`} />
                           )}
                         </div>
-                        <div className="min-w-0 flex-1">
-                          <span className="font-medium text-slate-700 break-words">{agreement.name}</span>
-                          <p className="text-xs text-slate-500 mt-0.5 break-words">{agreementDisplay.description}</p>
+                        <div className="min-w-0 flex-1 w-full whitespace-normal break-normal [overflow-wrap:normal] [word-break:normal]">
+                          <span className="font-medium text-slate-700">{agreement.name}</span>
+                          <p className="text-xs text-slate-500 mt-0.5">{agreementDisplay.description}</p>
                           {agreement.verified && agreement.verified_at && (
                             <p className="text-xs text-green-600 mt-0.5">
                               Verified on {formatDate(agreement.verified_at)}
@@ -3697,6 +3740,7 @@ export default function WorkerDashboard() {
                         </Badge>
                       </div>
                     </div>
+                    )}
                   </div>
                 )})}
               </div>

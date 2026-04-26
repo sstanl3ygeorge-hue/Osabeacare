@@ -115,7 +115,7 @@ export default function AgreementRow({
   const normalizedContractStatus = String(rawContractStatus || '').trim().toLowerCase();
   const canReissueContract =
     key === 'contract_acceptance' &&
-    ['rejected', 'action_required', 'pending_signature', 'signed', 'fully_executed'].includes(normalizedContractStatus);
+    ['rejected', 'action_required', 'superseded', 'pending_signature', 'signed', 'fully_executed'].includes(normalizedContractStatus);
   const contractNeedsReissue = key === 'contract_acceptance' && ['rejected', 'action_required', 'superseded'].includes(normalizedContractStatus);
   const contractArtifactUrl =
     acknowledgement_data?.executed_contract_pdf_url ||
@@ -408,7 +408,7 @@ export default function AgreementRow({
         </div>
         
         {/* Actions */}
-        <div className="flex items-center gap-2 ml-4">
+        <div className="flex flex-wrap items-center justify-end gap-2 ml-4">
           {!isAuditor && (
             <>
               {/* Agreements are worker-owned. Admin never fills them.
@@ -437,6 +437,27 @@ export default function AgreementRow({
                 </Button>
               )}
               
+              {canReissueContract && typeof onReissueContract === 'function' && (
+                <Button
+                  size="sm"
+                  variant="default"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const sourceContractId = getReissueSourceContractId(acknowledgement_data);
+                    onReissueContract({
+                      id: sourceContractId,
+                      status: normalizedContractStatus || null,
+                      contract_state: acknowledgement_data?.contract_state || null,
+                    });
+                  }}
+                  disabled={isProcessing}
+                  className="h-8 text-xs rounded-lg bg-amber-600 hover:bg-amber-700 text-white"
+                >
+                  <RotateCcw className="h-3.5 w-3.5 mr-1" />
+                  Reissue contract
+                </Button>
+              )}
+
               {/* Verify / Reject for awaiting review */}
               {lifecycleStatus === 'submitted' && (
                 <>
@@ -506,26 +527,6 @@ export default function AgreementRow({
                 </Button>
               )}
 
-              {canReissueContract && typeof onReissueContract === 'function' && (
-                <Button
-                  size="sm"
-                  variant="default"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    const sourceContractId = getReissueSourceContractId(acknowledgement_data);
-                    onReissueContract({
-                      id: sourceContractId,
-                      status: normalizedContractStatus || null,
-                      contract_state: acknowledgement_data?.contract_state || null,
-                    });
-                  }}
-                  disabled={isProcessing}
-                  className="h-8 text-xs rounded-lg bg-amber-600 hover:bg-amber-700 text-white"
-                >
-                  <RotateCcw className="h-3.5 w-3.5 mr-1" />
-                  Reissue contract
-                </Button>
-              )}
             </>
           )}
           

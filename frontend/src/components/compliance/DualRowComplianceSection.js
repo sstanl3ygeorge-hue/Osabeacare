@@ -827,7 +827,7 @@ export default function DualRowComplianceSection({
 
     return hasAcceptedEvidence && hasVerifiedCheck && (!proofRequired || hasProof);
   }).length;
-  const agreementRowsForSummary = sections?.agreements?.rows?.filter((row) => row.row_type === 'form_acknowledgement') || [];
+  const agreementRowsForSummary = filteredSections?.agreements?.rows?.filter((row) => row.row_type === 'form_acknowledgement') || [];
   const agreementSatisfiedCount = agreementRowsForSummary.filter((row) => row.is_verified).length;
   const agreementBlockingCount = agreementRowsForSummary.filter((row) => row.blocker_text).length;
   const satisfiedRequirementCount = coreSatisfiedCount + agreementSatisfiedCount;
@@ -838,8 +838,7 @@ export default function DualRowComplianceSection({
       {/* Refresh Button */}
       <div className="flex justify-end">
         <Button 
-          variant="ghost" 
-      const agreementRowsForSummary = filteredSections?.agreements?.rows?.filter((row) => row.row_type === 'form_acknowledgement') || [];
+          variant="ghost"
           onClick={handleRefresh}
           className="text-text-muted"
         >

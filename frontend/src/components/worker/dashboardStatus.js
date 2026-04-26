@@ -1,5 +1,11 @@
 export function getAgreementDisplay(agreement, options = {}) {
   const contractEligibility = options.contractEligibility || null;
+  const truncateMessage = (value, max = 160) => {
+    const text = String(value || '').trim();
+    if (!text) return '';
+    if (text.length <= max) return text;
+    return `${text.slice(0, max - 1).trimEnd()}…`;
+  };
   if (!agreement) {
     return {
       tone: 'neutral',
@@ -49,22 +55,12 @@ export function getAgreementDisplay(agreement, options = {}) {
         ctaLabel: 'Review & sign contract',
       };
     }
-    if (['rejected', 'superseded'].includes(contractState) && !canSign) {
+    if (['rejected', 'superseded', 'action_required'].includes(contractState) && !canSign) {
       return {
         tone: 'neutral',
         badge: 'Historical',
         title: 'Contract needs reissue',
-        description: 'Worker cannot sign this version.',
-        workerActionable: false,
-        ctaLabel: agreement.file_url || agreement.download_url ? 'View PDF' : null,
-      };
-    }
-    if (contractState === 'action_required' && !canSign) {
-      return {
-        tone: 'critical',
-        badge: 'Action required',
-        title: 'Contract needs reissue',
-        description: 'Worker cannot sign this version.',
+        description: 'Your contract needs to be reissued by your manager.',
         workerActionable: false,
         ctaLabel: agreement.file_url || agreement.download_url ? 'View PDF' : null,
       };
@@ -73,9 +69,9 @@ export function getAgreementDisplay(agreement, options = {}) {
       tone: canSign ? 'critical' : 'info',
       badge: canSign ? 'Ready to sign' : 'Locked',
       title: canSign ? 'Contract signature needed' : 'Contract unlocks after earlier steps',
-      description: canSign
+      description: truncateMessage(canSign
         ? 'Review the contract PDF, then add your signature.'
-        : 'Complete your earlier onboarding steps and Osabea will unlock contract signing.',
+        : 'Complete your earlier onboarding steps and Osabea will unlock contract signing.'),
       workerActionable: Boolean(canSign),
       ctaLabel: canSign ? 'Review and sign' : agreement.file_url || agreement.download_url ? 'View PDF' : null,
     };
@@ -98,7 +94,7 @@ export function getAgreementDisplay(agreement, options = {}) {
         tone: 'info',
         badge: 'With Osabea',
         title: 'Handbook update in progress',
-        description: 'Osabea is finalising your handbook. You do not need to do anything yet.',
+        description: 'Your handbook is being prepared.',
         workerActionable: false,
         ctaLabel: null,
       };
@@ -119,7 +115,7 @@ export function getAgreementDisplay(agreement, options = {}) {
       tone: 'critical',
       badge: 'Action required',
       title: 'Read and acknowledge the handbook',
-      description: 'Open the handbook PDF, read it in full, then acknowledge it.',
+      description: 'Review and acknowledge your handbook.',
       workerActionable: true,
       ctaLabel: 'Acknowledge handbook',
     };

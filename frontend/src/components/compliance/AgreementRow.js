@@ -114,8 +114,10 @@ export default function AgreementRow({
     status;
   const normalizedContractStatus = String(rawContractStatus || '').trim().toLowerCase();
   const canReissueContract =
-    key === 'contract_acceptance' &&
-    ['rejected', 'action_required', 'superseded', 'pending_signature', 'signed', 'fully_executed'].includes(normalizedContractStatus);
+    key === 'contract_acceptance' && (
+      ['rejected', 'action_required', 'superseded', 'pending_signature', 'signed', 'fully_executed'].includes(normalizedContractStatus) ||
+      lifecycleStatus === 'rejected'
+    );
   const contractNeedsReissue = key === 'contract_acceptance' && ['rejected', 'action_required', 'superseded'].includes(normalizedContractStatus);
   const contractArtifactUrl =
     acknowledgement_data?.executed_contract_pdf_url ||

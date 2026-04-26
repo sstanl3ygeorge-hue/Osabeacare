@@ -1820,6 +1820,12 @@ export default function WorkerDashboard() {
     ['rejected', 'superseded', 'action_required'].includes(contractLifecycleStatus) ||
     contractLifecycleStatus !== 'pending_signature'
   );
+  const truncateAgreementCardText = (value, max = 160) => {
+    const text = String(value || '').trim();
+    if (!text) return '';
+    if (text.length <= max) return text;
+    return `${text.slice(0, max - 1).trimEnd()}…`;
+  };
   const handbookDisplay = getAgreementDisplay(handbookAgreement, { contractEligibility });
   const cvDisplay = getCvDisplay(cvStatus);
   const trainingDisplay = getTrainingDisplay({
@@ -3577,8 +3583,12 @@ export default function WorkerDashboard() {
                   ).trim().toLowerCase();
                   const isHistoricalRejectedContract =
                     agreement.id === 'contract_acceptance' &&
-                    ['rejected', 'superseded'].includes(agreementContractState) &&
+                    (
+                      ['rejected', 'superseded', 'action_required'].includes(agreementContractState) ||
+                      agreement.rejected
+                    ) &&
                     !(agreementContractState === 'pending_signature' && contractEligibility?.can_sign);
+                  const compactDescription = truncateAgreementCardText(agreementDisplay.description, 160);
                   const toneClasses =
                     agreementDisplay.tone === 'critical'
                       ? 'bg-red-50 border-red-200'
@@ -3652,34 +3662,9 @@ export default function WorkerDashboard() {
                         </div>
                         <div className="min-w-0 flex-1 w-full whitespace-normal break-normal [overflow-wrap:normal] [word-break:normal]">
                           <span className="font-medium text-slate-700">{agreement.name}</span>
-                          <p className="text-xs text-slate-500 mt-0.5">{agreementDisplay.description}</p>
-                          {agreement.verified && agreement.verified_at && (
-                            <p className="text-xs text-green-600 mt-0.5">
-                              Verified on {formatDate(agreement.verified_at)}
-                              {agreement.verified_by_name && ` by ${agreement.verified_by_name}`}
-                            </p>
-                          )}
-                            {!agreement.verified && agreement.signed && agreement.signed_at && (
-                              <p className="text-xs text-blue-600 mt-0.5">
-                                {agreement.contract_state === 'awaiting_company_countersignature'
-                                  ? `Signed on ${formatDate(agreement.signed_at)} - Awaiting Osabea countersignature`
-                                  : `Signed on ${formatDate(agreement.signed_at)}`}
-                              </p>
-                            )}
-                          {agreement.rejected && (
-                            <p className="text-xs text-red-600 mt-0.5">
-                              Rejected{agreement.rejected_at ? ` on ${formatDate(agreement.rejected_at)}` : ''}{agreement.rejected_by_name ? ` by ${agreement.rejected_by_name}` : ''}.
-                              {agreement.rejection_reason ? ` ${agreement.rejection_reason}` : ''}
-                            </p>
-                          )}
-                          {agreement.template_version && (
-                            <p className="text-[11px] text-slate-400 mt-1">
-                              Version {agreement.template_version}
-                              {agreement.rendered_at && ` • prepared ${formatDate(agreement.rendered_at)}`}
-                            </p>
-                          )}
+                          <p className="text-xs text-slate-500 mt-0.5">{compactDescription}</p>
                         </div>
-                      </div>
+                        </div>
                       <div className="flex flex-wrap items-center justify-start gap-2 w-full sm:w-auto sm:justify-end sm:shrink-0">
                         {(agreement.file_url || agreement.download_url) && (
                           <>
@@ -3712,11 +3697,6 @@ export default function WorkerDashboard() {
                             <PenTool className="h-3.5 w-3.5" />
                             Review & sign contract
                           </Button>
-                        )}
-                        {agreement.id === 'contract_acceptance' && contractNeedsReissueMessage && (
-                          <p className="w-full text-xs text-amber-700">
-                            This contract is not currently signable. Please contact your manager to reissue it.
-                          </p>
                         )}
                         {agreement.id === 'handbook_acknowledgement' && handbookDisplay.workerActionable && agreement.id === handbookAgreement?.id && (
                           <Button

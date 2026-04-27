@@ -58,6 +58,7 @@ _ss.download_file_from_storage = MagicMock()  # type: ignore
 _ss.upload_file_to_storage = MagicMock()      # type: ignore
 
 from agreement_document_service import (  # noqa: E402
+    CONTRACT_AGREEMENT_TYPE,
     _assert_no_unresolved_contract_placeholders,
     _apply_contract_signatures,
     _build_contract_replacements,
@@ -67,6 +68,7 @@ from agreement_document_service import (  # noqa: E402
     _replace_contract_text,
     _resolve_contract_fields,
     _validate_contract_fields,
+    build_agreement_rendering,
     CONTRACT_TEMPLATE_DOCX_PATH,
     ContractRenderError,
     REQUIRED_CONTRACT_FIELDS,
@@ -468,3 +470,43 @@ class TestContractQualityGuards:
         ]
         with pytest.raises(ContractRenderError, match="unresolved placeholders"):
             _assert_no_unresolved_contract_placeholders(blocks)
+
+
+def test_contract_render_uses_shared_branded_header_wrapper():
+    """Contract render should invoke the shared logo/header wrapper."""
+    import asyncio
+
+    mock_db = MagicMock()
+    mock_db.contract_templates.find_one = lambda *a, **kw: _coro(None)
+    mock_db.org_settings.find_one = lambda *a, **kw: _coro(_ORG_SETTINGS)
+
+    with patch("agreement_document_service.get_logo_image", return_value=None) as logo_mock:
+        rendering = asyncio.run(
+            build_agreement_rendering(mock_db, _COMPLETE_EMPLOYEE, CONTRACT_AGREEMENT_TYPE)
+        )
+
+    assert rendering.get("pdf_bytes"), "Expected rendered PDF bytes for contract"
+    assert logo_mock.called, "Shared logo/header helper was not called for contract render"
+
+    from PyPDF2 import PdfReader
+    reader = PdfReader(io.BytesIO(rendering["pdf_bytes"]))
+    all_text = "\n".join(page.extract_text() or "" for page in reader.pages)
+    assert "Employment Contract" in all_text
+    assert "Prepared for: Test Worker" in all_text
+
+
+def test_contract_render_does_not_crash_when_logo_missing():
+    """Missing logo must not break contract generation."""
+    import asyncio
+
+    mock_db = MagicMock()
+    mock_db.contract_templates.find_one = lambda *a, **kw: _coro(None)
+    mock_db.org_settings.find_one = lambda *a, **kw: _coro(_ORG_SETTINGS)
+
+    with patch("agreement_document_service.get_logo_image", return_value=None):
+        rendering = asyncio.run(
+            build_agreement_rendering(mock_db, _COMPLETE_EMPLOYEE, CONTRACT_AGREEMENT_TYPE)
+        )
+
+    assert isinstance(rendering.get("pdf_bytes"), (bytes, bytearray))
+    assert len(rendering["pdf_bytes"]) > 0

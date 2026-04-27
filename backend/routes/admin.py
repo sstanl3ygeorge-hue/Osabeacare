@@ -40,6 +40,23 @@ class OrgSettingsUpdate(BaseModel):
     logo_url: Optional[str] = None
     support_email: Optional[str] = None
     support_phone: Optional[str] = None
+    company_about: Optional[str] = None
+    company_history: Optional[str] = None
+    service_description: Optional[str] = None
+    company_values: Optional[str] = None
+    aims_objectives: Optional[str] = None
+    staff_structure_summary: Optional[str] = None
+    shadowing_duration: Optional[str] = None
+    payroll_frequency: Optional[str] = None
+    payroll_day: Optional[str] = None
+    mileage_rate: Optional[str] = None
+    mileage_submission_deadline: Optional[str] = None
+    employee_assistance_details: Optional[str] = None
+    other_benefits: Optional[str] = None
+    occupational_health_provider: Optional[str] = None
+    main_office_contact: Optional[str] = None
+    registered_manager_name: Optional[str] = None
+    on_call_contact: Optional[str] = None
 
 
 @router.get("/org-settings")
@@ -62,7 +79,24 @@ async def get_org_settings():
             "primary_color": "#2563EB",
             "logo_url": None,
             "support_email": "info@osabeacaresolutions.co.uk",
-            "support_phone": None
+            "support_phone": None,
+            "company_about": None,
+            "company_history": None,
+            "service_description": None,
+            "company_values": None,
+            "aims_objectives": None,
+            "staff_structure_summary": None,
+            "shadowing_duration": None,
+            "payroll_frequency": None,
+            "payroll_day": None,
+            "mileage_rate": "0.45",
+            "mileage_submission_deadline": None,
+            "employee_assistance_details": None,
+            "other_benefits": None,
+            "occupational_health_provider": None,
+            "main_office_contact": None,
+            "registered_manager_name": None,
+            "on_call_contact": None,
         }
     
     return settings

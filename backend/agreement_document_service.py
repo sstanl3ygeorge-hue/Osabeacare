@@ -399,6 +399,44 @@ REQUIRED_HANDBOOK_FIELDS = [
     "company_address",
 ]
 
+HANDBOOK_CONTENT_FIELDS = [
+    "company_about",
+    "company_history",
+    "service_description",
+    "company_values",
+    "aims_objectives",
+    "staff_structure_summary",
+    "shadowing_duration",
+    "payroll_frequency",
+    "payroll_day",
+    "mileage_rate",
+    "mileage_submission_deadline",
+    "employee_assistance_details",
+    "other_benefits",
+    "occupational_health_provider",
+    "main_office_contact",
+    "registered_manager_name",
+    "on_call_contact",
+]
+
+HANDBOOK_CONTENT_SAFE_FALLBACKS: Dict[str, str] = {
+    "company_about": "Osabea Healthcare Solutions delivers person-centred care and compliant staffing support.",
+    "company_history": "Osabea Healthcare Solutions continues to develop services in line with CQC standards and workforce needs.",
+    "service_description": "We provide safe, responsive and effective care services with dignity and respect at the centre.",
+    "company_values": "Our values are dignity, safety, compassion, accountability and continuous improvement.",
+    "aims_objectives": "Our objective is to deliver safe, high-quality care while supporting staff development and wellbeing.",
+    "staff_structure_summary": "Your line manager will explain local team structure, escalation routes and supervision arrangements.",
+    "shadowing_duration": "Shadowing is arranged according to role risk and service needs before independent working.",
+    "payroll_frequency": "Payroll is processed in line with your employment terms and issued on the published payroll schedule.",
+    "payroll_day": "Payroll day is confirmed in your employment communication and payroll notice.",
+    "mileage_submission_deadline": "Submit mileage claims by the published payroll cut-off for the relevant pay period.",
+    "employee_assistance_details": "Employee wellbeing support is available through your line manager and designated support channels.",
+    "other_benefits": "Additional benefits are provided in line with current company policy and eligibility rules.",
+    "occupational_health_provider": "Occupational health support is arranged through the company-approved provider where required.",
+    "main_office_contact": "Contact the main office through your usual manager or approved communication channels.",
+    "on_call_contact": "Use the designated on-call rota contact shared by your manager for urgent out-of-hours support.",
+}
+
 _HANDBOOK_UNRESOLVED_SENTINELS = {"TBC", "", "None", "none", "xxxxxx"}
 
 # {{token}} phrases that are known to appear in older handbook templates and
@@ -490,6 +528,21 @@ def _resolve_handbook_fields(org_settings: Optional[Dict[str, Any]], employee: O
     about_us_text = s.get("about_us_text") or None
     phone_number = s.get("phone_number") or s.get("contact_phone") or None
     website = s.get("website") or s.get("website_url") or None
+    company_about = s.get("company_about") or about_us_text
+    company_history = s.get("company_history") or None
+    service_description = s.get("service_description") or None
+    company_values = s.get("company_values") or None
+    aims_objectives = s.get("aims_objectives") or None
+    staff_structure_summary = s.get("staff_structure_summary") or None
+    shadowing_duration = s.get("shadowing_duration") or None
+    payroll_frequency = s.get("payroll_frequency") or None
+    payroll_day = s.get("payroll_day") or None
+    mileage_submission_deadline = s.get("mileage_submission_deadline") or None
+    employee_assistance_details = s.get("employee_assistance_details") or None
+    other_benefits = s.get("other_benefits") or None
+    occupational_health_provider = s.get("occupational_health_provider") or None
+    main_office_contact = s.get("main_office_contact") or None
+    on_call_contact = s.get("on_call_contact") or None
     return {
         "company_name": org_name,
         "company_address": org_address,
@@ -505,7 +558,34 @@ def _resolve_handbook_fields(org_settings: Optional[Dict[str, Any]], employee: O
         "about_us_text": about_us_text,
         "phone_number": phone_number,
         "website": website,
+        "company_about": company_about,
+        "company_history": company_history,
+        "service_description": service_description,
+        "company_values": company_values,
+        "aims_objectives": aims_objectives,
+        "staff_structure_summary": staff_structure_summary,
+        "shadowing_duration": shadowing_duration,
+        "payroll_frequency": payroll_frequency,
+        "payroll_day": payroll_day,
+        "mileage_submission_deadline": mileage_submission_deadline,
+        "employee_assistance_details": employee_assistance_details,
+        "other_benefits": other_benefits,
+        "occupational_health_provider": occupational_health_provider,
+        "main_office_contact": main_office_contact,
+        "on_call_contact": on_call_contact,
     }
+
+
+def _handbook_content_needed(fields: Dict[str, Any]) -> List[str]:
+    needed: List[str] = []
+    for key in HANDBOOK_CONTENT_FIELDS:
+        value = fields.get(key)
+        if value is None:
+            needed.append(key)
+            continue
+        if isinstance(value, str) and not value.strip():
+            needed.append(key)
+    return needed
 
 
 def _validate_handbook_fields(fields: Dict[str, Any]) -> None:
@@ -535,6 +615,15 @@ def _replace_handbook_text(text: str, fields: Dict[str, Any]) -> str:
     token_map = {
         "{{company_name}}": org_name,
         "{{company_address}}": org_address,
+        "{{company.about}}": fields.get("company_about") or HANDBOOK_CONTENT_SAFE_FALLBACKS["company_about"],
+        "{{company.history}}": fields.get("company_history") or HANDBOOK_CONTENT_SAFE_FALLBACKS["company_history"],
+        "{{company.service_description}}": fields.get("service_description") or HANDBOOK_CONTENT_SAFE_FALLBACKS["service_description"],
+        "{{company.values}}": fields.get("company_values") or HANDBOOK_CONTENT_SAFE_FALLBACKS["company_values"],
+        "{{company.aims_objectives}}": fields.get("aims_objectives") or HANDBOOK_CONTENT_SAFE_FALLBACKS["aims_objectives"],
+        "{{company.staff_structure_summary}}": fields.get("staff_structure_summary") or HANDBOOK_CONTENT_SAFE_FALLBACKS["staff_structure_summary"],
+        "{{policy.shadowing_duration}}": fields.get("shadowing_duration") or HANDBOOK_CONTENT_SAFE_FALLBACKS["shadowing_duration"],
+        "{{policy.payroll_frequency}}": fields.get("payroll_frequency") or HANDBOOK_CONTENT_SAFE_FALLBACKS["payroll_frequency"],
+        "{{policy.payroll_day}}": fields.get("payroll_day") or HANDBOOK_CONTENT_SAFE_FALLBACKS["payroll_day"],
         "{{registered_manager_name}}": fields.get("registered_manager_name") or "",
         "{{registered_manager_email}}": fields.get("registered_manager_email") or "",
         "{{grievance_contact_name}}": fields.get("grievance_contact_name") or "",
@@ -544,9 +633,31 @@ def _replace_handbook_text(text: str, fields: Dict[str, Any]) -> str:
         "{{hr_contact_name}}": fields.get("hr_contact_name") or "",
         "{{hr_contact_email}}": fields.get("hr_contact_email") or "",
         "{{mileage_rate}}": str(fields.get("mileage_rate") or "0.45"),
+        "{{policy.mileage_submission_deadline}}": fields.get("mileage_submission_deadline") or HANDBOOK_CONTENT_SAFE_FALLBACKS["mileage_submission_deadline"],
+        "{{policy.employee_assistance_details}}": fields.get("employee_assistance_details") or HANDBOOK_CONTENT_SAFE_FALLBACKS["employee_assistance_details"],
+        "{{policy.other_benefits}}": fields.get("other_benefits") or HANDBOOK_CONTENT_SAFE_FALLBACKS["other_benefits"],
+        "{{policy.occupational_health_provider}}": fields.get("occupational_health_provider") or HANDBOOK_CONTENT_SAFE_FALLBACKS["occupational_health_provider"],
+        "{{contact.main_office}}": fields.get("main_office_contact") or HANDBOOK_CONTENT_SAFE_FALLBACKS["main_office_contact"],
+        "{{contact.on_call}}": fields.get("on_call_contact") or HANDBOOK_CONTENT_SAFE_FALLBACKS["on_call_contact"],
         "{{about_us_text}}": fields.get("about_us_text") or "",
         "{{phone_number}}": fields.get("phone_number") or "",
         "{{website}}": fields.get("website") or "",
+        # Backward-compatible non-dotted tokens
+        "{{company_about}}": fields.get("company_about") or HANDBOOK_CONTENT_SAFE_FALLBACKS["company_about"],
+        "{{company_history}}": fields.get("company_history") or HANDBOOK_CONTENT_SAFE_FALLBACKS["company_history"],
+        "{{service_description}}": fields.get("service_description") or HANDBOOK_CONTENT_SAFE_FALLBACKS["service_description"],
+        "{{company_values}}": fields.get("company_values") or HANDBOOK_CONTENT_SAFE_FALLBACKS["company_values"],
+        "{{aims_objectives}}": fields.get("aims_objectives") or HANDBOOK_CONTENT_SAFE_FALLBACKS["aims_objectives"],
+        "{{staff_structure_summary}}": fields.get("staff_structure_summary") or HANDBOOK_CONTENT_SAFE_FALLBACKS["staff_structure_summary"],
+        "{{shadowing_duration}}": fields.get("shadowing_duration") or HANDBOOK_CONTENT_SAFE_FALLBACKS["shadowing_duration"],
+        "{{payroll_frequency}}": fields.get("payroll_frequency") or HANDBOOK_CONTENT_SAFE_FALLBACKS["payroll_frequency"],
+        "{{payroll_day}}": fields.get("payroll_day") or HANDBOOK_CONTENT_SAFE_FALLBACKS["payroll_day"],
+        "{{mileage_submission_deadline}}": fields.get("mileage_submission_deadline") or HANDBOOK_CONTENT_SAFE_FALLBACKS["mileage_submission_deadline"],
+        "{{employee_assistance_details}}": fields.get("employee_assistance_details") or HANDBOOK_CONTENT_SAFE_FALLBACKS["employee_assistance_details"],
+        "{{other_benefits}}": fields.get("other_benefits") or HANDBOOK_CONTENT_SAFE_FALLBACKS["other_benefits"],
+        "{{occupational_health_provider}}": fields.get("occupational_health_provider") or HANDBOOK_CONTENT_SAFE_FALLBACKS["occupational_health_provider"],
+        "{{main_office_contact}}": fields.get("main_office_contact") or HANDBOOK_CONTENT_SAFE_FALLBACKS["main_office_contact"],
+        "{{on_call_contact}}": fields.get("on_call_contact") or HANDBOOK_CONTENT_SAFE_FALLBACKS["on_call_contact"],
     }
     for token, val in token_map.items():
         updated = updated.replace(token, val)
@@ -555,6 +666,12 @@ def _replace_handbook_text(text: str, fields: Dict[str, Any]) -> str:
     # still exist in older handbook DOCX content.
     inline_map = {
         "(insert mileage rate)": str(fields.get("mileage_rate") or "0.45"),
+        "[Add company about]": fields.get("company_about") or HANDBOOK_CONTENT_SAFE_FALLBACKS["company_about"],
+        "[Add company history]": fields.get("company_history") or HANDBOOK_CONTENT_SAFE_FALLBACKS["company_history"],
+        "[Add service description]": fields.get("service_description") or HANDBOOK_CONTENT_SAFE_FALLBACKS["service_description"],
+        "[Add company values]": fields.get("company_values") or HANDBOOK_CONTENT_SAFE_FALLBACKS["company_values"],
+        "[Add aims and objectives]": fields.get("aims_objectives") or HANDBOOK_CONTENT_SAFE_FALLBACKS["aims_objectives"],
+        "[Add staff structure summary]": fields.get("staff_structure_summary") or HANDBOOK_CONTENT_SAFE_FALLBACKS["staff_structure_summary"],
     }
     for old, new in inline_map.items():
         updated = updated.replace(old, new)
@@ -1125,10 +1242,14 @@ async def resolve_employee_agreement_state(db, employee: Dict[str, Any], agreeme
         state_label = "Handbook acknowledged — awaiting admin verification"
     else:
         state_label = "Action required: please review and acknowledge the handbook"
+    org_settings = await db.org_settings.find_one({}, {"_id": 0}) or {}
+    handbook_fields = _resolve_handbook_fields(org_settings, employee)
+    content_needed = _handbook_content_needed(handbook_fields)
     return {
         "agreement_type": agreement_type,
         "acknowledgement": agreement or {},
         "render_issue": render_error_detail,
+        "content_needed": content_needed,
         "rejected": rejected,
         "rejection_reason": agreement.get("rejection_reason"),
         "rejected_at": agreement.get("rejected_at"),
@@ -1172,7 +1293,9 @@ async def build_agreement_rendering(db, employee: Dict[str, Any], agreement_type
             title,
             subtitle,
             employee_name,
-            add_generated_header=False,
+            # Contracts should use the same shared branded header/logo wrapper
+            # as other generated agreement documents.
+            add_generated_header=True,
             add_generated_footer=False,
         )
     else:

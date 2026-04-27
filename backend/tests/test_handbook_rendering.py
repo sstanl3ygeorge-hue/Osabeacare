@@ -58,6 +58,7 @@ _ss.download_file_from_storage = MagicMock()  # type: ignore
 _ss.upload_file_to_storage = MagicMock()      # type: ignore
 
 from agreement_document_service import (  # noqa: E402
+    HANDBOOK_CONTENT_FIELDS,
     HANDBOOK_AGREEMENT_TYPE,
     HANDBOOK_TEMPLATE_PATH,
     REQUIRED_HANDBOOK_FIELDS,
@@ -66,6 +67,7 @@ from agreement_document_service import (  # noqa: E402
     _docx_to_blocks,
     _render_pdf,
     _replace_handbook_text,
+    _handbook_content_needed,
     _resolve_handbook_fields,
     _validate_handbook_fields,
     build_agreement_rendering,
@@ -81,6 +83,22 @@ _ORG_SETTINGS = {
     "organisation_name": "Osabea Healthcare Solutions Ltd",
     "organisation_address": "19 Station Road, Harlow, CM20 2BB",
     "mileage_rate": "0.45",
+    "company_about": "Osabea provides person-centred care and staffing support.",
+    "company_history": "Osabea has expanded with a compliance-first operating model.",
+    "service_description": "Safe, responsive and effective care delivery.",
+    "company_values": "Dignity, safety, compassion and accountability.",
+    "aims_objectives": "Deliver high-quality care and continuous staff development.",
+    "staff_structure_summary": "Staff report to team leaders, then the registered manager.",
+    "shadowing_duration": "A minimum of 3 supervised shadow shifts.",
+    "payroll_frequency": "Monthly",
+    "payroll_day": "Last working day of each month",
+    "mileage_submission_deadline": "Submit claims by the 20th of each month",
+    "employee_assistance_details": "Confidential wellbeing support is available via EAP referral.",
+    "other_benefits": "Enhanced leave and learning support are available subject to policy.",
+    "occupational_health_provider": "OH Assist",
+    "main_office_contact": "Suite FA4D, 1 St Faith's Street, Maidstone Kent, ME14 1LH",
+    "registered_manager_name": "Registered Manager Test",
+    "on_call_contact": "On-call line available via rota and duty phone.",
 }
 
 _ORG_SETTINGS_NO_ADDRESS = {
@@ -155,6 +173,39 @@ def test_handbook_company_address_prefers_org_settings_over_employee_override():
     fields = _resolve_handbook_fields(org, employee)
     assert "Suite FA4D" in (fields.get("company_address") or "")
     assert "STALE OVERRIDE ADDRESS" not in (fields.get("company_address") or "")
+
+
+def test_handbook_content_needed_reports_missing_admin_content():
+    settings = {
+        "organisation_name": "Osabea Healthcare Solutions Ltd",
+        "organisation_address": "19 Station Road, Harlow, CM20 2BB",
+        "mileage_rate": "0.45",
+    }
+    fields = _resolve_handbook_fields(settings, _EMPLOYEE)
+    needed = _handbook_content_needed(fields)
+    # At least some admin-managed content fields should be flagged when omitted.
+    assert "company_about" in needed
+    assert "main_office_contact" in needed
+    assert "on_call_contact" in needed
+    # Ensure the expected field family is tracked by the helper.
+    assert set(HANDBOOK_CONTENT_FIELDS).issuperset(set(needed))
+
+
+def test_handbook_replacement_uses_safe_fallback_for_missing_content_tokens():
+    text = "{{company_about}} | {{policy.payroll_day}} | {{contact.main_office}}"
+    fields = _resolve_handbook_fields(
+        {
+            "organisation_name": "Osabea Healthcare Solutions Ltd",
+            "organisation_address": "19 Station Road, Harlow, CM20 2BB",
+            "mileage_rate": "0.45",
+        },
+        _EMPLOYEE,
+    )
+    rendered = _replace_handbook_text(text, fields)
+    assert "{{" not in rendered
+    assert "Osabea Healthcare Solutions delivers person-centred care" in rendered
+    assert "Payroll day is confirmed" in rendered
+    assert "Contact the main office" in rendered
 
 
 def _extract_pdf_text(pdf_bytes: bytes) -> str:

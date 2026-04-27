@@ -479,3 +479,33 @@ def test_pending_contract_with_unresolved_placeholders_not_signable(monkeypatch)
     assert res.status_code == 409
     assert res.json()["detail"]["status"] == "action_required"
     assert "unresolved placeholders" in res.json()["detail"]["render_issue"].lower()
+
+
+def test_reissue_pending_signature_repairs_ack_without_new_generation(monkeypatch):
+    fake_db = _FakeDb()
+    _seed_employee_and_contract(fake_db, contract_id="pending-1", status="pending_signature")
+    fake_db.agreement_acknowledgements.docs = [
+        {
+            "id": "agr_contract_acceptance_emp-1",
+            "employee_id": "emp-1",
+            "agreement_type": "contract_acceptance",
+            "status": "rejected",
+            "contract_state": "rejected_reopen_required",
+            "verification_status": "rejected",
+            "rendered_file_url": "https://example.test/old-contract.pdf",
+            "rendered_contract_pdf_url": "https://example.test/old-contract.pdf",
+        }
+    ]
+    client, _ = _build_client(monkeypatch, fake_db)
+
+    res = client.post(
+        "/api/employees/emp-1/contract/reissue",
+        json={"reason": "repair pending state", "source_contract_id": "pending-1"},
+    )
+    assert res.status_code == 200
+    assert res.json()["message"] == "Contract already pending signature"
+    assert res.json()["new_contract"]["id"] == "pending-1"
+    ack = fake_db.agreement_acknowledgements.docs[0]
+    assert ack["status"] == "pending_signature"
+    assert ack["contract_state"] == "awaiting_worker_signature"
+    assert ack["verification_status"] == "pending"

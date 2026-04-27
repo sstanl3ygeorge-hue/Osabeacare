@@ -760,6 +760,90 @@ async def reissue_employee_contract(
             detail=f"Latest contract status '{raw_current_status}' is not eligible for reissue",
         )
 
+    # If an active pending-signature contract already exists, do not attempt a
+    # fresh render/reissue (which may fail on missing optional render fields).
+    # Instead, normalize acknowledgement pointers so worker/admin views reflect
+    # the existing signable contract.
+    if current_status == "pending_signature":
+        now_iso = datetime.now(timezone.utc).isoformat()
+        await db.employees.update_one(
+            {"id": employee_id},
+            {
+                "$set": {
+                    "pending_contract_id": current_contract.get("id"),
+                    "pending_contract_generated_at": current_contract.get("generated_at") or now_iso,
+                    "contract_signed": False,
+                    "contract_signed_at": None,
+                    "contract_id": None,
+                    "updated_at": now_iso,
+                }
+            },
+        )
+        await db.agreement_acknowledgements.update_one(
+            {"employee_id": employee_id, "agreement_type": "contract_acceptance"},
+            {
+                "$set": {
+                    "employee_id": employee_id,
+                    "employee_name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
+                    "agreement_type": "contract_acceptance",
+                    "status": "pending_signature",
+                    "contract_state": "awaiting_worker_signature",
+                    "verification_status": "pending",
+                    "acknowledged": False,
+                    "acknowledged_at": None,
+                    "signed_at": None,
+                    "worker_signed_at": None,
+                    "worker_signer_name": None,
+                    "signed_document_url": None,
+                    "worker_signed_contract_pdf_url": None,
+                    "executed_contract_pdf_url": None,
+                    "template_version": current_contract.get("template_version"),
+                    "rendered_contract_pdf_url": (
+                        current_contract.get("rendered_contract_pdf_url")
+                        or current_contract.get("rendered_file_url")
+                        or current_contract.get("file_url")
+                    ),
+                    "rendered_file_url": (
+                        current_contract.get("rendered_contract_pdf_url")
+                        or current_contract.get("rendered_file_url")
+                        or current_contract.get("file_url")
+                    ),
+                    "active_contract_id": current_contract.get("id"),
+                    "updated_at": now_iso,
+                },
+                "$unset": {
+                    "rejection_reason": "",
+                    "rejected_at": "",
+                    "rejected_by": "",
+                    "rejected_by_name": "",
+                },
+                "$setOnInsert": {
+                    "id": f"agr_contract_acceptance_{employee_id}",
+                    "created_at": now_iso,
+                },
+            },
+            upsert=True,
+        )
+        can_sign_result = await can_sign_contract(db, employee_id)
+        return {
+            "message": "Contract already pending signature",
+            "employee_id": employee_id,
+            "old_contract": None,
+            "new_contract": {
+                "id": current_contract.get("id"),
+                "status": current_contract.get("status"),
+                "template_id": current_contract.get("template_id"),
+                "template_version": current_contract.get("template_version"),
+                "generated_at": current_contract.get("generated_at"),
+                "reissued_from_contract_id": current_contract.get("reissued_from_contract_id"),
+            },
+            "worker_action": {
+                "can_sign": can_sign_result.get("can_sign", False),
+                "contract_status": current_contract.get("status"),
+                "sign_route": f"/employees/{employee_id}/contract/sign",
+            },
+        }
+
     # Validate current employee data before mutating old contract state.
     validation = validate_contract_data(employee)
     if not validation["valid"]:

@@ -315,11 +315,6 @@ export default function AuditReadyTrainingMatrix({
       setProposedItems(proposedArray);
 
       const recordsFailed = recordsResult.status !== 'fulfilled';
-      const recordsData = recordsFailed ? [] : recordsResult.value?.data;
-      const canonicalRecords = Array.isArray(recordsData)
-        ? recordsData.map(normaliseCanonicalTrainingRecord)
-        : [];
-      setCanonicalTrainingRecords(canonicalRecords);
       
       // Get training certificates from merged endpoint (canonical + legacy)
       const certificatesFailed = docsResult.status !== 'fulfilled';
@@ -347,9 +342,6 @@ export default function AuditReadyTrainingMatrix({
         certificatesUploaded: certificatesFailed ? null : trainingCerts.length,
         needsReview: pendingReview
       });
-
-      // Store dependency warnings for later use
-      setDependencyWarnings(dependencyWarnings);
 
     } catch (err) {
       console.error('Error fetching training data:', err);
@@ -1124,7 +1116,6 @@ export default function AuditReadyTrainingMatrix({
                     <TableHead>Certificate(s)</TableHead>
                     <TableHead>Completed</TableHead>
                     <TableHead>Expires</TableHead>
-                    <TableHead>Verified</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -1207,23 +1198,6 @@ export default function AuditReadyTrainingMatrix({
                           ) : (
                             <span className="text-sm text-gray-400">-</span>
                           )}
-                        </TableCell>
-                        <TableCell>
-                          {item.verified || item.is_verified || getDisplayStatus(item) === 'verified' ? (
-                            <div className="flex flex-col">
-                              <Badge className="bg-green-100 text-green-700 border-green-200 w-fit">
-                                <CheckCircle className="h-3 w-3 mr-1" />
-                                Verified
-                              </Badge>
-                              {item.verified_by && (
-                                <span className="text-xs text-gray-500 mt-1">{item.verified_by}</span>
-                              )}
-                            </div>
-                          ) : getDisplayStatus(item) !== 'missing' ? (
-                            <Badge className="bg-amber-100 text-amber-700 border-amber-200">
-                              Submitted, not reviewed
-                            </Badge>
-                          ) : null}
                         </TableCell>
                         <TableCell className="text-right">
                           <div className="flex items-center justify-end gap-1">
@@ -1497,7 +1471,9 @@ export default function AuditReadyTrainingMatrix({
                                         onClick={() => openTrainingEvidenceReview(item)}
                                       >
                                         <Eye className="h-3 w-3 mr-1" />
-                                        Review Evidence
+                                        {item.is_unmapped || !item.mapped_training_code
+                                          ? 'Approve as optional qualification'
+                                          : 'Review Evidence'}
                                       </Button>
                                       <Button
                                         variant="ghost"

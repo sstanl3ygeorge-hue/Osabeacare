@@ -1,6 +1,7 @@
 import asyncio
 import os
 import sys
+from types import SimpleNamespace
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -162,3 +163,161 @@ def test_all_qualifications_excludes_raw_unmapped_proposed(monkeypatch):
     assert "Some Unmapped Specialist Course" not in all_titles
     assert len(payload["unmapped_items"]) == 1
     assert payload["unmapped_items"][0]["status"] == "unmapped"
+
+
+def test_verified_health_safety_welfare_hydrates_mandatory_row(monkeypatch):
+    payload = _run_matrix(
+        monkeypatch,
+        training_eval={
+            "overall": "current",
+            "evaluatedAt": "2026-01-01T00:00:00+00:00",
+            "items": [
+                {"code": "health_and_safety", "title": "CSTF Health, Safety and Welfare", "status": "verified", "blocker": True, "is_currently_blocking": False},
+            ],
+        },
+        training_records=[
+            {
+                "id": "r-hsw",
+                "employee_id": "emp-1",
+                "requirement_id": "health_safety_welfare",
+                "training_name": "CSTF Health, Safety and Welfare",
+                "verified": True,
+                "verified_by": "Verifier User",
+                "verified_at": "2026-01-10T10:00:00+00:00",
+                "source_document_id": "doc-1",
+                "certificate_url": "https://example.com/cert.pdf",
+                "completion_date": "2026-01-01",
+                "expiry_date": "2027-01-01",
+                "record_status": "active",
+            },
+        ],
+    )
+
+    req = payload["role_required_requirements"][0]
+    assert req["canonical_code"] == "health_safety_welfare"
+    assert req["status"] == "verified"
+    assert req["verified"] is True
+    assert req["completed_at"] == "2026-01-01"
+    assert req["expires_at"] == "2027-01-01"
+    assert req["source_document_id"] == "doc-1"
+    assert req["verified_by"] == "Verifier User"
+
+
+def test_optional_custom_qualification_appears_and_does_not_block(monkeypatch):
+    payload = _run_matrix(
+        monkeypatch,
+        training_eval={
+            "overall": "current",
+            "evaluatedAt": "2026-01-01T00:00:00+00:00",
+            "items": [
+                {"code": "manual_handling", "title": "Manual Handling", "status": "verified", "blocker": True, "is_currently_blocking": False},
+            ],
+        },
+        training_records=[
+            {
+                "id": "r-opt-1",
+                "employee_id": "emp-1",
+                "requirement_id": "additional_tissue_viability",
+                "training_name": "Tissue Viability",
+                "verified": True,
+                "completion_date": "2026-02-01",
+                "expiry_date": "2027-02-01",
+                "source_document_id": "doc-opt-1",
+                "record_status": "active",
+            }
+        ],
+    )
+
+    titles = {str(item.get("title")) for item in payload["all_qualifications"]}
+    assert "Tissue Viability" in titles
+    assert payload["completion_summary"]["missing_total"] == 0
+    # Required blockers should not include optional custom rows.
+    assert all(
+        str(blocker.get("code", "")).startswith("additional_") is False
+        for blocker in payload["readiness_blockers"]
+    )
+
+
+class _MutableCollection:
+    def __init__(self, rows=None):
+        self.rows = list(rows or [])
+
+    async def find_one(self, query, *_args, **_kwargs):
+        for row in self.rows:
+            if all(row.get(k) == v for k, v in query.items()):
+                return dict(row)
+        return None
+
+    async def update_one(self, query, update, *_args, **_kwargs):
+        for idx, row in enumerate(self.rows):
+            if all(row.get(k) == v for k, v in query.items()):
+                row = dict(row)
+                row.update(update.get("$set", {}))
+                self.rows[idx] = row
+                return SimpleNamespace(matched_count=1, modified_count=1)
+        return SimpleNamespace(matched_count=0, modified_count=0)
+
+    async def insert_one(self, row, *_args, **_kwargs):
+        self.rows.append(dict(row))
+        return SimpleNamespace(inserted_id=row.get("id"))
+
+    def find(self, *_args, **_kwargs):
+        return _FakeCursor(self.rows)
+
+
+def test_unmapped_review_approval_creates_additional_training_record(monkeypatch):
+    proposed = {
+        "id": "prop-1",
+        "employee_id": "emp-1",
+        "status": "proposed",
+        "raw_course_title": "Rare Specialist Course",
+        "mapped_training_code": None,
+        "mapped_training_title": None,
+        "source_document_id": "doc-1",
+        "completed_at": "2026-03-01",
+        "expires_at": "2027-03-01",
+    }
+
+    fake_db = SimpleNamespace(
+        proposed_training_items=_MutableCollection([proposed]),
+        employee_documents=_MutableCollection([{"id": "doc-1", "file_url": "https://example.com/doc.pdf", "original_filename": "doc.pdf"}]),
+        training_records=_MutableCollection([]),
+    )
+    monkeypatch.setattr(server, "db", fake_db)
+
+    async def _fake_find_active(*_args, **_kwargs):
+        return []
+
+    def _fake_pick_best(_records):
+        return None
+
+    async def _fake_reconcile(*_args, **_kwargs):
+        return {"superseded": 0}
+
+    monkeypatch.setattr("governance.training_dedup.find_active_canonical_records", _fake_find_active)
+    monkeypatch.setattr("governance.training_dedup.pick_best_training_record", _fake_pick_best)
+    monkeypatch.setattr("governance.training_dedup.reconcile_active_training_records", _fake_reconcile)
+
+    review_item = server.TrainingIntakeReviewItem(
+        item_id="prop-1",
+        approve=True,
+        mapped_training_code=None,
+        mapped_training_title=None,
+        completed_at="2026-03-01",
+        expires_at="2027-03-01",
+        notes="approve custom optional",
+    )
+    result = asyncio.run(
+        server.TrainingIntakeService.review_proposed_items(
+            employee_id="emp-1",
+            items=[review_item],
+            reviewer_id="admin-1",
+            reviewer_name="Admin One",
+        )
+    )
+
+    assert result["approved"] == 1
+    assert len(fake_db.training_records.rows) == 1
+    created = fake_db.training_records.rows[0]
+    assert created["requirement_id"].startswith("additional_")
+    assert created["training_name"] == "Rare Specialist Course"

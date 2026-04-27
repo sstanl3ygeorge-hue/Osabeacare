@@ -11012,6 +11012,36 @@ async def get_employee_training_matrix(
             "safeguarding": "safeguarding",
         }
         return aliases.get(normalized, normalized)
+
+    def _canonical_required_code(item: dict, canonical_code: str) -> str:
+        """
+        Prevent generic required keys in matrix output where split keys exist.
+        """
+        code = str(item.get("code") or "").strip()
+        title = str(item.get("title") or "").strip().lower()
+        if canonical_code in {"safeguarding", "basic_life_support", "mca_dols"}:
+            if canonical_code == "safeguarding":
+                mode = (item.get("breakdown") or {}).get("mode")
+                if mode == "children_only":
+                    return "safeguarding_children"
+                return "safeguarding_adults"
+            if canonical_code == "basic_life_support":
+                if "paediatric" in title or "pediatric" in title:
+                    return "paediatric_basic_life_support"
+                return "basic_life_support_adults"
+            if canonical_code == "mca_dols":
+                if "dols" in title or "deprivation" in title:
+                    return "deprivation_of_liberty_safeguards"
+                return "mental_capacity_act"
+        # Fallback for explicit legacy codes when canonical resolver did not split.
+        if code == "safeguarding":
+            mode = (item.get("breakdown") or {}).get("mode")
+            return "safeguarding_children" if mode == "children_only" else "safeguarding_adults"
+        if code in {"basic_life_support", "bls"}:
+            return "basic_life_support_adults"
+        if code == "mca_dols":
+            return "mental_capacity_act"
+        return canonical_code
     
     # Get canonical training evaluation
     training_eval = await evaluate_employee_training_status(employee_id, role)
@@ -11170,6 +11200,7 @@ async def get_employee_training_matrix(
         
         status_value = item.get('status', 'missing')
         canonical_code = _canonical_training_code(code or item.get('title', code))
+        canonical_code = _canonical_required_code(item, canonical_code)
         has_pending_proposed = canonical_code in pending_proposed_codes
         if status_value in ['missing', 'partial'] and has_pending_proposed:
             status_value = 'pending_review'
@@ -11189,7 +11220,7 @@ async def get_employee_training_matrix(
             "is_currently_blocking": item.get('is_currently_blocking', False),
             "evidence_required": blocker_config.get('evidence_required', True),
             "completed_at": record.get('completion_date') or record.get('completed_at'),
-            "expires_at": item.get('expires_at'),
+            "expires_at": item.get('expires_at') or record.get('expiry_date') or record.get('expires_at'),
             "days_until_expiry": item.get('days_until_expiry'),
             "has_evidence": has_evidence,
             "is_verified": is_verified,
@@ -11326,11 +11357,9 @@ async def get_employee_training_matrix(
         })
     role_required_requirements = [
         {
-            "code": item.get("code"),
-            "canonical_code": item.get("canonical_code"),
-            "title": item.get("title"),
-            "status": item.get("status"),
-            "is_currently_blocking": item.get("is_currently_blocking", False),
+            **item,
+            "is_required": True,
+            "is_mandatory": True,
         }
         for item in matrix_items
     ]

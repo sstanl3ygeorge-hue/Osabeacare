@@ -54,42 +54,61 @@ def _run_matrix(monkeypatch, *, training_eval, training_records=None, proposed_i
     return asyncio.run(server.get_employee_training_matrix("emp-1", user={"role": "admin"}))
 
 
-def test_dols_verified_without_mca_creates_dependency_warning(monkeypatch):
+def test_mca_and_dols_combined_requirement_is_single_row(monkeypatch):
     payload = _run_matrix(
         monkeypatch,
         training_eval={
             "overall": "missing",
             "evaluatedAt": "2026-01-01T00:00:00+00:00",
             "items": [
-                {"code": "deprivation_of_liberty_safeguards", "title": "DoLS", "status": "verified", "blocker": True, "is_currently_blocking": False},
+                {"code": "deprivation_of_liberty_safeguards", "title": "DoLS", "status": "missing", "blocker": True, "is_currently_blocking": True},
                 {"code": "mental_capacity_act", "title": "MCA", "status": "missing", "blocker": True, "is_currently_blocking": True},
             ],
         },
+        training_records=[
+            {
+                "id": "r-mca",
+                "employee_id": "emp-1",
+                "requirement_id": "mental_capacity_act",
+                "training_name": "Mental Capacity Act",
+                "verified": True,
+                "completion_date": "2026-01-01",
+                "record_status": "active",
+            },
+        ],
     )
 
-    warnings = payload.get("dependency_warnings", [])
-    assert len(warnings) == 1
-    assert warnings[0]["code"] == "dols_requires_mca"
-    assert payload["completion_summary"]["dependency_warning_total"] == 1
-    assert any(b.get("status") == "dependency_warning" for b in payload["readiness_blockers"])
+    mca_rows = [row for row in payload["role_required_requirements"] if row.get("canonical_code") == "mca_dols"]
+    assert len(mca_rows) == 1
+    assert mca_rows[0]["status"] in {"verified", "due_soon"}
+    assert payload["completion_summary"]["dependency_warning_total"] == 0
 
 
-def test_mca_verified_without_dols_keeps_dols_missing_blocker(monkeypatch):
+def test_mca_and_dols_alias_record_hydrates_combined_requirement(monkeypatch):
     payload = _run_matrix(
         monkeypatch,
         training_eval={
-            "overall": "missing",
+            "overall": "current",
             "evaluatedAt": "2026-01-01T00:00:00+00:00",
             "items": [
-                {"code": "mental_capacity_act", "title": "MCA", "status": "verified", "blocker": True, "is_currently_blocking": False},
-                {"code": "deprivation_of_liberty_safeguards", "title": "DoLS", "status": "missing", "blocker": True, "is_currently_blocking": True},
+                {"code": "mca_dols", "title": "MCA and DoLS", "status": "missing", "blocker": True, "is_currently_blocking": True},
             ],
         },
+        training_records=[
+            {
+                "id": "r-dols",
+                "employee_id": "emp-1",
+                "requirement_id": "deprivation_of_liberty_safeguards",
+                "training_name": "Deprivation of Liberty Safeguards",
+                "verified": True,
+                "completion_date": "2026-01-01",
+                "record_status": "active",
+            },
+        ],
     )
 
-    dols_item = next(i for i in payload["items"] if i["code"] == "deprivation_of_liberty_safeguards")
-    assert dols_item["status"] == "missing"
-    assert any(b.get("code") == "deprivation_of_liberty_safeguards" for b in payload["readiness_blockers"])
+    row = next(i for i in payload["role_required_requirements"] if i["canonical_code"] == "mca_dols")
+    assert row["status"] in {"verified", "due_soon"}
 
 
 def test_mapped_proposed_item_is_pending_review_not_missing(monkeypatch):
@@ -201,6 +220,92 @@ def test_verified_health_safety_welfare_hydrates_mandatory_row(monkeypatch):
     assert req["expires_at"] == "2027-01-01"
     assert req["source_document_id"] == "doc-1"
     assert req["verified_by"] == "Verifier User"
+
+
+def test_safeguarding_is_single_mandatory_row_and_alias_satisfies(monkeypatch):
+    payload = _run_matrix(
+        monkeypatch,
+        training_eval={
+            "overall": "current",
+            "evaluatedAt": "2026-01-01T00:00:00+00:00",
+            "items": [
+                {"code": "safeguarding_adults", "title": "Safeguarding Adults", "status": "missing", "blocker": True, "is_currently_blocking": True},
+                {"code": "safeguarding_children", "title": "Safeguarding Children", "status": "missing", "blocker": True, "is_currently_blocking": True},
+            ],
+        },
+        training_records=[
+            {
+                "id": "r-sg-1",
+                "employee_id": "emp-1",
+                "requirement_id": "cstf_safeguarding_children",
+                "training_name": "CSTF Safeguarding Children",
+                "verified": True,
+                "completion_date": "2026-01-01",
+                "record_status": "active",
+            },
+        ],
+    )
+
+    safeguarding_rows = [row for row in payload["role_required_requirements"] if row["canonical_code"] == "safeguarding"]
+    assert len(safeguarding_rows) == 1
+    assert safeguarding_rows[0]["status"] in {"verified", "due_soon"}
+
+
+def test_medication_alias_hydrates_medication_administration_requirement(monkeypatch):
+    payload = _run_matrix(
+        monkeypatch,
+        training_eval={
+            "overall": "current",
+            "evaluatedAt": "2026-01-01T00:00:00+00:00",
+            "items": [
+                {"code": "medication_administration", "title": "Medication", "status": "missing", "blocker": True, "is_currently_blocking": True},
+            ],
+        },
+        training_records=[
+            {
+                "id": "r-med-1",
+                "employee_id": "emp-1",
+                "requirement_id": "safe_handling_and_administration_of_medication",
+                "training_name": "Safe Handling and Administration of Medication",
+                "verified": True,
+                "completion_date": "2026-01-01",
+                "record_status": "active",
+            }
+        ],
+    )
+
+    req = payload["role_required_requirements"][0]
+    assert req["canonical_code"] == "medication_administration"
+    assert req["status"] == "verified"
+
+
+def test_paediatric_and_adult_bls_stay_distinct_in_mandatory(monkeypatch):
+    payload = _run_matrix(
+        monkeypatch,
+        training_eval={
+            "overall": "missing",
+            "evaluatedAt": "2026-01-01T00:00:00+00:00",
+            "items": [
+                {"code": "basic_life_support", "title": "Basic Life Support", "status": "missing", "blocker": True, "is_currently_blocking": True},
+                {"code": "paediatric_basic_life_support", "title": "Paediatric Basic Life Support", "status": "missing", "blocker": True, "is_currently_blocking": True},
+            ],
+        },
+        training_records=[
+            {
+                "id": "r-bls-adults",
+                "employee_id": "emp-1",
+                "requirement_id": "cstf_resuscitation_adults",
+                "training_name": "CSTF Resuscitation Adults",
+                "verified": True,
+                "completion_date": "2026-01-01",
+                "record_status": "active",
+            }
+        ],
+    )
+
+    by_code = {row["canonical_code"]: row for row in payload["role_required_requirements"]}
+    assert by_code["basic_life_support_adults"]["status"] == "verified"
+    assert by_code["paediatric_basic_life_support"]["status"] in {"missing", "pending_review"}
 
 
 def test_optional_custom_qualification_appears_and_does_not_block(monkeypatch):

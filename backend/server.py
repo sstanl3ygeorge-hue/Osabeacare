@@ -7095,9 +7095,10 @@ async def get_training_audit_export(employee_id: str, role: str = '') -> dict:
     
     # Build audit export items with full verification metadata
     audit_items = []
+    seen_required_codes = set()
     for item in training_eval.get('items', []):
         code = item.get('code', '')
-        record = resolve_training_record(records_by_req, code, item.get('title')) or {}
+        fallback_record = resolve_training_record(records_by_req, code, item.get('title')) or {}
         
         # Get verifier information
         verifier_name = None
@@ -10995,53 +10996,113 @@ async def get_employee_training_matrix(
         raise HTTPException(status_code=404, detail="Employee not found")
     
     role = employee.get('role', '')
+    CANONICAL_ALIAS_GROUPS = {
+        "health_safety_welfare": {
+            "health_safety_welfare",
+            "health_and_safety",
+            "health_safety",
+            "health_and_safety_and_welfare",
+            "health_safety_and_welfare",
+            "cstf_health_safety_and_welfare",
+            "cstf_health_and_safety_and_welfare",
+        },
+        "safeguarding": {
+            "safeguarding",
+            "safeguarding_adults",
+            "cstf_safeguarding_adults",
+            "adult_support_and_protection",
+            "safeguarding_children",
+            "cstf_safeguarding_children",
+            "safeguarding_level_1",
+            "safeguarding_level_2",
+            "safeguarding_level_3",
+        },
+        "basic_life_support_adults": {
+            "basic_life_support_adults",
+            "basic_life_support",
+            "bls",
+            "adult_basic_life_support",
+            "cstf_resuscitation_adults",
+            "adult_immediate_life_support",
+            "resuscitation_adults",
+        },
+        "paediatric_basic_life_support": {
+            "paediatric_basic_life_support",
+            "pediatric_basic_life_support",
+            "cstf_resuscitation_paediatric",
+            "paediatric_immediate_life_support",
+            "resuscitation_paediatric",
+        },
+        "medication_administration": {
+            "medication_administration",
+            "medication",
+            "safe_handling_and_administration_of_medication",
+            "the_safe_handling_and_administration_of_medication",
+            "medication_management",
+        },
+        "infection_control": {
+            "infection_control",
+            "infection_prevention_and_control",
+            "cstf_infection_prevention_and_control",
+        },
+        "information_governance": {
+            "information_governance",
+            "information_governance_and_data_security",
+            "gdpr",
+        },
+        "fire_safety": {"fire_safety", "cstf_fire_safety"},
+        "manual_handling": {"manual_handling", "moving_and_handling", "moving_handling"},
+        "prevent": {"prevent", "preventing_radicalisation", "anti_radicalisation"},
+        "equality_diversity_human_rights": {
+            "equality_diversity_human_rights",
+            "equality_diversity",
+            "equality_and_diversity",
+            "equality_diversity_and_human_rights",
+            "cstf_equality_diversity_and_human_rights",
+        },
+        # Product decision for now: MCA + DoLS combined in Mandatory.
+        "mca_dols": {
+            "mca_dols",
+            "mental_capacity_act",
+            "mca",
+            "deprivation_of_liberty_safeguards",
+            "dols",
+            "deprivation_of_liberty",
+        },
+    }
+
     def _canonical_training_code(value: str) -> str:
         shared = resolve_training_to_canonical_shared(value or "")
-        if shared:
-            return shared
         normalized = normalize_training_text(value or "")
         mapped = TRAINING_CODE_MAPPING.get(normalized)
-        if mapped:
-            normalized = mapped
-        aliases = {
-            "health_safety": "health_safety_welfare",
-            "health_and_safety": "health_safety_welfare",
-            "equality_diversity": "equality_diversity_human_rights",
-            # Keep legacy compatibility keys for existing rows/reads.
-            "bls": "basic_life_support",
-            "safeguarding": "safeguarding",
-        }
-        return aliases.get(normalized, normalized)
+        key = mapped or shared or normalized
+        key = normalize_training_key(str(key or ""))
+        for canonical_key, aliases in CANONICAL_ALIAS_GROUPS.items():
+            if key in aliases:
+                return canonical_key
+        if key in {"health_and_safety", "health_safety"}:
+            return "health_safety_welfare"
+        if key in {"equality_diversity", "equality_and_diversity"}:
+            return "equality_diversity_human_rights"
+        return key
 
     def _canonical_required_code(item: dict, canonical_code: str) -> str:
-        """
-        Prevent generic required keys in matrix output where split keys exist.
-        """
-        code = str(item.get("code") or "").strip()
-        title = str(item.get("title") or "").strip().lower()
-        if canonical_code in {"safeguarding", "basic_life_support", "mca_dols"}:
-            if canonical_code == "safeguarding":
-                mode = (item.get("breakdown") or {}).get("mode")
-                if mode == "children_only":
-                    return "safeguarding_children"
-                return "safeguarding_adults"
-            if canonical_code == "basic_life_support":
-                if "paediatric" in title or "pediatric" in title:
-                    return "paediatric_basic_life_support"
-                return "basic_life_support_adults"
-            if canonical_code == "mca_dols":
-                if "dols" in title or "deprivation" in title:
-                    return "deprivation_of_liberty_safeguards"
-                return "mental_capacity_act"
-        # Fallback for explicit legacy codes when canonical resolver did not split.
-        if code == "safeguarding":
-            mode = (item.get("breakdown") or {}).get("mode")
-            return "safeguarding_children" if mode == "children_only" else "safeguarding_adults"
-        if code in {"basic_life_support", "bls"}:
-            return "basic_life_support_adults"
+        code = normalize_training_key(str(item.get("code") or ""))
+        title = normalize_training_key(str(item.get("title") or ""))
+        merged = canonical_code
+        if merged in {"mental_capacity_act", "deprivation_of_liberty_safeguards"}:
+            merged = "mca_dols"
+        if merged in {"safeguarding", "safeguarding_adults", "safeguarding_children"}:
+            merged = "safeguarding"
+        if merged in {"basic_life_support", "bls"}:
+            merged = "paediatric_basic_life_support" if ("paediatric" in title or "pediatric" in title) else "basic_life_support_adults"
+        if merged in {"health_and_safety", "health_safety"}:
+            merged = "health_safety_welfare"
+        if merged in {"equality_diversity", "equality_and_diversity"}:
+            merged = "equality_diversity_human_rights"
         if code == "mca_dols":
-            return "mental_capacity_act"
-        return canonical_code
+            return "mca_dols"
+        return merged
     
     # Get canonical training evaluation
     training_eval = await evaluate_employee_training_status(employee_id, role)
@@ -11132,6 +11193,42 @@ async def get_employee_training_matrix(
     # Rebuild lookup from deduped records so mandatory resolution uses best records
     records_by_req = build_training_records_lookup(deduped_records)
 
+    def _record_effective_status(rec: dict) -> str:
+        computed = compute_training_record_status(rec)
+        computed_status = computed.get("computed_status", "completed")
+        if rec.get("verification_status") == "rejected":
+            return "rejected"
+        if not rec.get("completion_date"):
+            return "missing"
+        if not rec.get("verified", False):
+            return "completed"
+        if computed_status == "expired":
+            return "expired"
+        if computed_status == "needs_renewal":
+            return "due_soon"
+        return "verified"
+
+    QUALITY_PRIORITY = {
+        "verified": 0,
+        "due_soon": 1,
+        "completed": 2,
+        "expired": 3,
+        "rejected": 4,
+        "missing": 5,
+    }
+
+    canonical_record_groups = {}
+    for rec in deduped_records:
+        canonical = _canonical_training_code(rec.get("requirement_id") or rec.get("training_name") or "")
+        if not canonical:
+            continue
+        canonical_record_groups.setdefault(canonical, []).append(rec)
+
+    canonical_best_record = {}
+    for canonical, records in canonical_record_groups.items():
+        best = sorted(records, key=lambda r: QUALITY_PRIORITY.get(_record_effective_status(r), 99))[0]
+        canonical_best_record[canonical] = best
+
     # Separate additional (non-mandatory) records
     mandatory_codes = get_canonical_mandatory_training_ids()
     mandatory_record_ids = set()
@@ -11155,6 +11252,7 @@ async def get_employee_training_matrix(
     pending_review_total = 0
     pending_proposed_codes = set()
     unmapped_items = []
+    seen_required_codes = set()
     for proposed in proposed_items:
         mapped_value = (
             proposed.get("mapped_training_code")
@@ -11179,20 +11277,20 @@ async def get_employee_training_matrix(
     
     for item in training_eval.get('items', []):
         code = item.get('code', '')
-        record = resolve_training_record(records_by_req, code, item.get('title')) or {}
+        fallback_record = resolve_training_record(records_by_req, code, item.get('title')) or {}
         
         # Determine evidence status
         has_evidence = bool(
-            record.get('certificate_url') or 
-            record.get('evidence_files') or
-            record.get('certificate_document_id')
+            fallback_record.get('certificate_url') or 
+            fallback_record.get('evidence_files') or
+            fallback_record.get('certificate_document_id')
         )
         is_verified = (
-            record.get('verified', False) or 
-            record.get('verification_status') == 'verified'
+            fallback_record.get('verified', False) or 
+            fallback_record.get('verification_status') == 'verified'
         )
-        evidence_removed = bool(record.get('source_evidence_removed'))
-        needs_review = bool(record.get('needs_review'))
+        evidence_removed = bool(fallback_record.get('source_evidence_removed'))
+        needs_review = bool(fallback_record.get('needs_review'))
         
         # Get blocker config
         blocker_config = get_training_blocker_config(code)
@@ -11201,14 +11299,32 @@ async def get_employee_training_matrix(
         status_value = item.get('status', 'missing')
         canonical_code = _canonical_training_code(code or item.get('title', code))
         canonical_code = _canonical_required_code(item, canonical_code)
+        canonical_record = canonical_best_record.get(canonical_code) or fallback_record
+        if canonical_record:
+            has_evidence = bool(
+                canonical_record.get('certificate_url') or
+                canonical_record.get('evidence_files') or
+                canonical_record.get('certificate_document_id') or
+                canonical_record.get('source_document_id')
+            )
+            is_verified = bool(canonical_record.get('verified') or canonical_record.get('verification_status') == 'verified')
+            evidence_removed = bool(canonical_record.get('source_evidence_removed'))
+            needs_review = bool(canonical_record.get('needs_review'))
+            record_status = _record_effective_status(canonical_record)
+            if status_value in {'missing', 'partial', 'awaiting_review'} and record_status in {'verified', 'due_soon', 'completed', 'expired', 'rejected'}:
+                status_value = record_status
+
         has_pending_proposed = canonical_code in pending_proposed_codes
         if status_value in ['missing', 'partial'] and has_pending_proposed:
             status_value = 'pending_review'
             pending_review_total += 1
+        if canonical_code in seen_required_codes:
+            continue
+        seen_required_codes.add(canonical_code)
         matrix_item = {
             "code": code,
             "canonical_code": canonical_code,
-            "id": record.get('id') or code,
+            "id": canonical_record.get('id') or fallback_record.get('id') or code,
             "title": item.get('title', code),
             "status": status_value,
             "detail": (
@@ -11219,25 +11335,27 @@ async def get_employee_training_matrix(
             "blocker": item.get('blocker', False),
             "is_currently_blocking": item.get('is_currently_blocking', False),
             "evidence_required": blocker_config.get('evidence_required', True),
-            "completed_at": record.get('completion_date') or record.get('completed_at'),
-            "expires_at": item.get('expires_at') or record.get('expiry_date') or record.get('expires_at'),
+            "completed_at": canonical_record.get('completion_date') or canonical_record.get('completed_at') or fallback_record.get('completion_date') or fallback_record.get('completed_at'),
+            "expires_at": item.get('expires_at') or canonical_record.get('expiry_date') or canonical_record.get('expires_at') or fallback_record.get('expiry_date') or fallback_record.get('expires_at'),
             "days_until_expiry": item.get('days_until_expiry'),
             "has_evidence": has_evidence,
             "is_verified": is_verified,
             "verified": is_verified,
             "source_evidence_removed": evidence_removed,
             "needs_review": needs_review,
-            "needs_review_reason": record.get('needs_review_reason'),
-            "verified_by": record.get('verified_by'),
-            "verified_at": record.get('verified_at'),
-            "record_id": record.get('id'),
-            "provider": record.get('provider_name') or record.get('provider'),
+            "needs_review_reason": canonical_record.get('needs_review_reason') or fallback_record.get('needs_review_reason'),
+            "verified_by": canonical_record.get('verified_by') or fallback_record.get('verified_by'),
+            "verified_at": canonical_record.get('verified_at') or fallback_record.get('verified_at'),
+            "record_id": canonical_record.get('id') or fallback_record.get('id'),
+            "provider": canonical_record.get('provider_name') or canonical_record.get('provider') or fallback_record.get('provider_name') or fallback_record.get('provider'),
             "validity_days": validity_days,
-            "source_document_id": record.get('source_document_id') or record.get('certificate_document_id'),
-            "certificate_url": record.get('certificate_url'),
+            "source_document_id": canonical_record.get('source_document_id') or canonical_record.get('certificate_document_id') or fallback_record.get('source_document_id') or fallback_record.get('certificate_document_id'),
+            "certificate_url": canonical_record.get('certificate_url') or fallback_record.get('certificate_url'),
             "rejection_reason": item.get('rejection_reason'),
             "breakdown": item.get('breakdown'),
-            "history_count": len(training_history.get(_canonical_key(record), [])) if record else 0
+            "history_count": len(canonical_record_groups.get(canonical_code, [])),
+            "is_required": True,
+            "is_mandatory": True,
         }
         matrix_items.append(matrix_item)
         
@@ -11316,26 +11434,43 @@ async def get_employee_training_matrix(
             "history_count": len(training_history.get(_canonical_key(record), []))
         })
     
-    all_qualifications = matrix_items + additional_items
-
-    # Dependency warnings model (Batch 2):
-    # DoLS requires MCA evidence when DoLS is verified/current.
-    status_by_code = {}
-    for item in matrix_items:
-        code = str(item.get("canonical_code") or item.get("code") or "").strip()
-        if code:
-            status_by_code[code] = item.get("status")
-    dols_status = status_by_code.get("deprivation_of_liberty_safeguards")
-    mca_status = status_by_code.get("mental_capacity_act")
-    dependency_warnings = []
-    if dols_status == "verified" and mca_status not in {"verified", "due_soon"}:
-        dependency_warnings.append({
-            "code": "dols_requires_mca",
-            "message": "DoLS requires MCA evidence.",
-            "requires": "mental_capacity_act",
-            "dependent": "deprivation_of_liberty_safeguards",
-            "severity": "blocking",
+    required_codes = {item.get("canonical_code") for item in matrix_items if item.get("canonical_code")}
+    all_qualifications = []
+    for canonical_code, records in canonical_record_groups.items():
+        best = canonical_best_record.get(canonical_code)
+        if not best:
+            continue
+        status = _record_effective_status(best)
+        all_qualifications.append({
+            "code": canonical_code,
+            "canonical_code": canonical_code,
+            "id": best.get("id", canonical_code),
+            "record_id": best.get("id"),
+            "title": best.get("training_name") or TRAINING_TITLES.get(canonical_code) or canonical_code.replace("_", " ").title(),
+            "status": status,
+            "detail": (
+                "Awaiting verification"
+                if status == "completed"
+                else ("Expired" if status == "expired" else "Verified")
+            ),
+            "completed_at": best.get("completion_date") or best.get("completed_at"),
+            "expires_at": best.get("expiry_date") or best.get("expires_at"),
+            "source_document_id": best.get("source_document_id") or best.get("certificate_document_id"),
+            "certificate_url": best.get("certificate_url"),
+            "verified_by": best.get("verified_by"),
+            "verified_at": best.get("verified_at"),
+            "verified": bool(best.get("verified") or best.get("verification_status") == "verified"),
+            "is_verified": bool(best.get("verified") or best.get("verification_status") == "verified"),
+            "provider": best.get("provider_name") or best.get("provider"),
+            "history_count": max(0, len(records) - 1),
+            "is_required": canonical_code in required_codes,
+            "is_mandatory": canonical_code in required_codes,
+            "is_additional": canonical_code not in required_codes,
         })
+    all_qualifications.sort(key=lambda item: (str(item.get("title") or "").lower(), str(item.get("id") or "")))
+
+    # Current product policy: combined mandatory competency for MCA + DoLS.
+    dependency_warnings = []
 
     required_total = len(matrix_items)
     verified_total = len([item for item in matrix_items if item.get("status") == "verified"])

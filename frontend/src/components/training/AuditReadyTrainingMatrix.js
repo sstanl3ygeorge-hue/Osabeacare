@@ -265,19 +265,16 @@ export default function AuditReadyTrainingMatrix({
       setLoadError(false);
       setSourceErrors({ matrix: false, certificates: false, proposedItems: false, trainingRecords: false });
       // Fetch training matrix data
-      const [matrixResult, proposedResult, docsResult, recordsResult] = await Promise.allSettled([
+      const [matrixResult, proposedResult, docsResult] = await Promise.allSettled([
         axios.get(`${API}/api/employees/${employeeId}/training/matrix`, {
           headers: { Authorization: `Bearer ${token}` }
         }),
         axios.get(`${API}/api/employees/${employeeId}/training/proposed-items`, {
-          headers: { Authorization: `Bearer ${token}` }
+          headers: { Authorization: `Bearer ${token}` },
+          params: { status: 'proposed' },
         }),
         axios.get(`${API}/api/employees/${employeeId}/training/certificates`, {
           headers: { Authorization: `Bearer ${token}` }
-        }),
-        axios.get(`${API}/api/training-records`, {
-          headers: { Authorization: `Bearer ${token}` },
-          params: { employee_id: employeeId }
         })
       ]);
 
@@ -286,7 +283,7 @@ export default function AuditReadyTrainingMatrix({
           matrix: true,
           certificates: docsResult.status !== 'fulfilled',
           proposedItems: proposedResult.status !== 'fulfilled',
-          trainingRecords: recordsResult.status !== 'fulfilled',
+          trainingRecords: false,
         });
         throw new Error('Training matrix unavailable');
       }
@@ -314,8 +311,6 @@ export default function AuditReadyTrainingMatrix({
                            proposedData?.items || proposedData?.proposed_items || [];
       setProposedItems(proposedArray);
 
-      const recordsFailed = recordsResult.status !== 'fulfilled';
-      
       // Get training certificates from merged endpoint (canonical + legacy)
       const certificatesFailed = docsResult.status !== 'fulfilled';
       const docsData = certificatesFailed ? null : docsResult.value?.data;
@@ -325,7 +320,7 @@ export default function AuditReadyTrainingMatrix({
         matrix: false,
         certificates: certificatesFailed,
         proposedItems: proposedFailed,
-        trainingRecords: recordsFailed,
+        trainingRecords: false,
       });
       
       // Use completion_summary only
@@ -338,7 +333,7 @@ export default function AuditReadyTrainingMatrix({
         needsRenewal: apiSummary.needsRenewal || requiredItems.filter(isTrainingDueSoon).length,
         missing: apiSummary.missing || requiredItems.filter(item => item.status === 'missing').length,
         blockers: apiSummary.blockers || 0,
-        additionalQualifications: recordsFailed ? null : allQualifications.length,
+        additionalQualifications: allQualifications.length,
         certificatesUploaded: certificatesFailed ? null : trainingCerts.length,
         needsReview: pendingReview
       });
@@ -1755,7 +1750,9 @@ export default function AuditReadyTrainingMatrix({
                   <div>
                     <h4 className="font-semibold text-purple-900 mt-6 mb-2">Extracted/Proposed Items</h4>
                     <ul className="space-y-2">
-                      {(Array.isArray(proposedItems) ? proposedItems : []).map(item => (
+                      {(Array.isArray(proposedItems) ? proposedItems : [])
+                        .filter(item => item?.status === 'proposed')
+                        .map(item => (
                         <li key={item.id} className="border border-purple-200 rounded-lg p-3 flex items-center gap-3">
                           <Wand2 className="h-4 w-4 text-purple-600" />
                           <span className="font-medium">{item.mapped_training_title || item.raw_course_title}</span>

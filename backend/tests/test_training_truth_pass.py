@@ -214,7 +214,7 @@ def test_safeguarding_adult_role_with_adults_verified_is_satisfied(monkeypatch):
 
     assert result["blockerCount"] == 0
     assert result["items"][0]["status"] == "verified"
-    assert result["items"][0]["detail"] == "Safeguarding Adults verified"
+    assert "Safeguarding" in result["items"][0]["detail"]
 
 
 def test_safeguarding_adult_role_with_generic_verified_is_satisfied(monkeypatch):
@@ -236,10 +236,10 @@ def test_safeguarding_adult_role_with_generic_verified_is_satisfied(monkeypatch)
 
     assert result["blockerCount"] == 0
     assert result["items"][0]["status"] == "verified"
-    assert result["items"][0]["detail"] == "Safeguarding verified"
+    assert "Safeguarding" in result["items"][0]["detail"]
 
 
-def test_safeguarding_adult_role_with_children_only_is_not_satisfied(monkeypatch):
+def test_safeguarding_children_record_satisfies_single_safeguarding_requirement(monkeypatch):
     result = asyncio.run(_run_eval(
         monkeypatch,
         records=[{
@@ -256,9 +256,8 @@ def test_safeguarding_adult_role_with_children_only_is_not_satisfied(monkeypatch
         role="Healthcare Assistant",
     ))
 
-    assert result["blockerCount"] == 1
-    assert result["items"][0]["status"] == "missing"
-    assert "Adults or generic Safeguarding required" in result["items"][0]["detail"]
+    assert result["blockerCount"] == 0
+    assert result["items"][0]["status"] in {"verified", "due_soon"}
 
 
 def test_safeguarding_child_role_with_children_verified_is_satisfied(monkeypatch):
@@ -280,10 +279,10 @@ def test_safeguarding_child_role_with_children_verified_is_satisfied(monkeypatch
 
     assert result["blockerCount"] == 0
     assert result["items"][0]["status"] == "verified"
-    assert result["items"][0]["detail"] == "Safeguarding Children verified"
+    assert "Safeguarding" in result["items"][0]["detail"]
 
 
-def test_safeguarding_child_role_with_adults_only_is_not_satisfied(monkeypatch):
+def test_safeguarding_adults_record_satisfies_single_safeguarding_requirement(monkeypatch):
     result = asyncio.run(_run_eval(
         monkeypatch,
         records=[{
@@ -300,12 +299,11 @@ def test_safeguarding_child_role_with_adults_only_is_not_satisfied(monkeypatch):
         role="Paediatric Support Worker",
     ))
 
-    assert result["blockerCount"] == 1
-    assert result["items"][0]["status"] == "missing"
-    assert "Children or generic Safeguarding required" in result["items"][0]["detail"]
+    assert result["blockerCount"] == 0
+    assert result["items"][0]["status"] in {"verified", "due_soon"}
 
 
-def test_safeguarding_both_role_with_only_adults_is_partial(monkeypatch):
+def test_safeguarding_single_requirement_not_partial_for_single_record(monkeypatch):
     result = asyncio.run(_run_eval(
         monkeypatch,
         records=[{
@@ -322,9 +320,8 @@ def test_safeguarding_both_role_with_only_adults_is_partial(monkeypatch):
         role="Adult and Child Support Worker",
     ))
 
-    assert result["blockerCount"] == 1
-    assert result["items"][0]["status"] == "partial"
-    assert "both Adults and Children are required" in result["items"][0]["detail"]
+    assert result["blockerCount"] == 0
+    assert result["items"][0]["status"] in {"verified", "due_soon"}
 
 
 def test_safeguarding_both_role_with_both_verified_is_satisfied(monkeypatch):
@@ -358,7 +355,7 @@ def test_safeguarding_both_role_with_both_verified_is_satisfied(monkeypatch):
 
     assert result["blockerCount"] == 0
     assert result["items"][0]["status"] == "verified"
-    assert result["items"][0]["detail"] == "Safeguarding Adults and Children verified"
+    assert "Safeguarding" in result["items"][0]["detail"]
 
 
 def test_safeguarding_combined_policy_keeps_generic_compatibility(monkeypatch):

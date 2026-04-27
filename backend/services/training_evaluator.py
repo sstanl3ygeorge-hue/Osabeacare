@@ -1042,12 +1042,14 @@ async def evaluate_employee_training_status(employee_id: str, role: str = "") ->
         evidence_required = blocker_config.get("evidence_required", True)
 
         if req_id == "safeguarding":
-            adults_record = resolve_training_record(records_by_req, "safeguarding_adults", "Safeguarding Adults")
-            children_record = resolve_training_record(records_by_req, "safeguarding_children", "Safeguarding Children")
-            generic_record = resolve_training_record(records_by_req, "safeguarding", "Safeguarding")
-            safeguarding_mode = get_safeguarding_requirement_mode(role)
+            candidates = [
+                resolve_training_record(records_by_req, "safeguarding", "Safeguarding"),
+                resolve_training_record(records_by_req, "safeguarding_adults", "Safeguarding Adults"),
+                resolve_training_record(records_by_req, "safeguarding_children", "Safeguarding Children"),
+            ]
+            candidates = [record for record in candidates if record]
 
-            def _component_status(record: Optional[dict], label: str) -> str:
+            def _safeguarding_status(record: Optional[dict]) -> str:
                 if not record or not record.get("completion_date"):
                     return "missing"
                 if record.get("verification_status") == "rejected":
@@ -1063,62 +1065,45 @@ async def evaluate_employee_training_status(employee_id: str, role: str = "") ->
                     return "due_soon"
                 return "verified"
 
-            generic_status = _component_status(generic_record, "generic")
-            adults_status = _component_status(adults_record, "adults")
-            children_status = _component_status(children_record, "children")
+            status_priority = {
+                "verified": 0,
+                "due_soon": 1,
+                "awaiting_review": 2,
+                "rejected": 3,
+                "expired": 4,
+                "missing": 5,
+            }
 
-            generic_ok = generic_status in _SATISFIED_STATUSES
-            adults_ok = adults_status in _SATISFIED_STATUSES
-            children_ok = children_status in _SATISFIED_STATUSES
+            def _completion_sort_value(record: dict) -> str:
+                return str(record.get("completion_date") or "")
 
-            if SAFEGUARDING_COMPOSITE_POLICY == "combined" and generic_ok:
-                status = "verified"
+            best_record = None
+            best_status = "missing"
+            if candidates:
+                ranked = sorted(
+                    candidates,
+                    key=lambda rec: (
+                        status_priority.get(_safeguarding_status(rec), 99),
+                        -int(_completion_sort_value(rec).replace("-", "") or "0"),
+                    ),
+                    reverse=False,
+                )
+                best_record = ranked[0]
+                best_status = _safeguarding_status(best_record)
+
+            status = best_status if best_record else "missing"
+            if status in _SATISFIED_STATUSES:
                 detail = "Safeguarding verified"
-            elif safeguarding_mode in ("generic_or_adult", "adult_only"):
-                if generic_ok:
-                    status = "verified"
-                    detail = "Safeguarding verified"
-                elif adults_ok:
-                    status = "verified"
-                    detail = "Safeguarding Adults verified"
-                elif children_ok:
-                    status = "missing"
-                    detail = "Safeguarding Adults or generic Safeguarding required for this role"
-                    has_missing = True
-                else:
-                    status = "missing"
-                    detail = "Safeguarding training not recorded"
-                    has_missing = True
-            elif safeguarding_mode == "children_only":
-                if generic_ok:
-                    status = "verified"
-                    detail = "Safeguarding verified"
-                elif children_ok:
-                    status = "verified"
-                    detail = "Safeguarding Children verified"
-                elif adults_ok:
-                    status = "missing"
-                    detail = "Safeguarding Children or generic Safeguarding required for this role"
-                    has_missing = True
-                else:
-                    status = "missing"
-                    detail = "Safeguarding training not recorded"
-                    has_missing = True
-            else:  # both
-                if generic_ok:
-                    status = "verified"
-                    detail = "Safeguarding verified"
-                elif adults_ok and children_ok:
-                    status = "verified"
-                    detail = "Safeguarding Adults and Children verified"
-                elif adults_ok or children_ok:
-                    status = "partial"
-                    detail = "Safeguarding partially complete - both Adults and Children are required"
-                    has_missing = True
-                else:
-                    status = "missing"
-                    detail = "Safeguarding training not recorded"
-                    has_missing = True
+            elif status == "awaiting_review":
+                detail = "Safeguarding evidence pending verification"
+            elif status == "rejected":
+                detail = "Safeguarding evidence rejected"
+            elif status == "expired":
+                detail = "Safeguarding training expired"
+                has_expired = True
+            else:
+                detail = "Safeguarding training not recorded"
+                has_missing = True
 
             if is_blocker and status not in _SATISFIED_STATUSES:
                 blocker_count += 1
@@ -1133,23 +1118,11 @@ async def evaluate_employee_training_status(employee_id: str, role: str = "") ->
                 "blocker": is_blocker,
                 "is_currently_blocking": is_blocker and status not in _SATISFIED_STATUSES,
                 "detail": detail,
-                "expires_at": None,
+                "expires_at": best_record.get("expiry_date") if best_record else None,
                 "verified": status in _SATISFIED_STATUSES,
                 "evidence_required": evidence_required,
-                "record_id": (
-                    generic_record.get("id") if generic_record else (
-                        adults_record.get("id") if adults_record else (
-                            children_record.get("id") if children_record else None
-                        )
-                    )
-                ),
-                "rejection_reason": None,
-                "breakdown": {
-                    "mode": safeguarding_mode,
-                    "generic": generic_status,
-                    "adults": adults_status,
-                    "children": children_status,
-                },
+                "record_id": best_record.get("id") if best_record else None,
+                "rejection_reason": best_record.get("rejection_reason") if best_record else None,
             })
             continue
 

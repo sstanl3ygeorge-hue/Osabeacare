@@ -1221,7 +1221,7 @@ export default function AuditReadyTrainingMatrix({
                           )}
                         </TableCell>
                         <TableCell>
-                          {item.verified || item.is_verified ? (
+                          {isTrainingVerified({ ...item, status: displayStatus }) || displayStatus === 'verified' ? (
                             <div className="flex flex-col">
                               <Badge className="bg-green-100 text-green-700 border-green-200 w-fit">
                                 <CheckCircle className="h-3 w-3 mr-1" />
@@ -1231,7 +1231,7 @@ export default function AuditReadyTrainingMatrix({
                                 <span className="text-xs text-gray-500 mt-1">{item.verified_by}</span>
                               )}
                             </div>
-                          ) : item.status !== 'missing' ? (
+                          ) : displayStatus !== 'missing' ? (
                             <Badge className="bg-amber-100 text-amber-700 border-amber-200">
                               Submitted, not reviewed
                             </Badge>
@@ -1612,14 +1612,14 @@ export default function AuditReadyTrainingMatrix({
                       </TableCell>
                       <TableCell>
                         {item.expires_at ? (
-                          <span className={cn(
-                            "text-sm",
-                            item.status === 'expired' ? 'text-red-600 font-medium' :
-                            item.status === 'expiring_soon' ? 'text-amber-600' :
-                            'text-gray-600'
-                          )}>
-                            {formatBackendDate(item.expires_at, { format: 'short' })}
-                          </span>
+                            <span className={cn(
+                              "text-sm",
+                              displayStatus === 'expired' ? 'text-red-600 font-medium' :
+                              displayStatus === 'expiring_soon' ? 'text-amber-600' :
+                              'text-gray-600'
+                            )}>
+                              {formatBackendDate(item.expires_at, { format: 'short' })}
+                            </span>
                         ) : (
                           <span className="text-sm text-gray-400">N/A</span>
                         )}

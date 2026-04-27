@@ -7023,6 +7023,10 @@ from services.training_evaluator import (
     get_nurse_effective_required_training_items,
     derive_training_evidence_metadata,
 )
+from services.training_taxonomy import (
+    map_training_title_to_canonical as map_training_title_to_canonical_shared,
+    TRAINING_TITLES_CANONICAL as TRAINING_TITLES_CANONICAL_SHARED,
+)
 # Keep module-level EXPIRY_WARNING_DAYS aligned (used in a few other places)
 EXPIRY_WARNING_DAYS = _TE_EXPIRY_WARNING_DAYS
 
@@ -41357,6 +41361,11 @@ def map_training_title(raw_title: str) -> tuple:
     """
     if not raw_title:
         return (None, None)
+
+    # Shared canonical taxonomy (authoritative anti-drift layer).
+    shared_code, shared_title = map_training_title_to_canonical_shared(raw_title)
+    if shared_code:
+        return (shared_code, shared_title or TRAINING_TITLES_CANONICAL_SHARED.get(shared_code, raw_title))
     
     normalized = normalize_training_text(raw_title)
     

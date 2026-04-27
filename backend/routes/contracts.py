@@ -115,6 +115,44 @@ def _extract_missing_contract_fields(render_issue: str) -> list[str]:
     return missing
 
 
+def _clean_optional_string(value) -> Optional[str]:
+    if value is None:
+        return None
+    cleaned = str(value).strip()
+    return cleaned or None
+
+
+def _validate_iso_date_like(value: str, field_name: str) -> str:
+    """
+    Accept YYYY-MM-DD (preferred) and other ISO-8601 date values.
+    Persist as YYYY-MM-DD for renderer stability.
+    """
+    cleaned = _clean_optional_string(value)
+    if not cleaned:
+        raise HTTPException(status_code=400, detail=f"{field_name} is required")
+    try:
+        if len(cleaned) == 10:
+            parsed = datetime.strptime(cleaned, "%Y-%m-%d")
+        else:
+            parsed = datetime.fromisoformat(cleaned.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"{field_name} must be a valid ISO date") from exc
+    return parsed.strftime("%Y-%m-%d")
+
+
+def _validate_hourly_rate(value) -> str:
+    cleaned = _clean_optional_string(value)
+    if not cleaned:
+        raise HTTPException(status_code=400, detail="hourly_rate is required")
+    try:
+        numeric = float(cleaned)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="hourly_rate must be numeric") from exc
+    if numeric <= 0:
+        raise HTTPException(status_code=400, detail="hourly_rate must be greater than zero")
+    return f"{numeric:.2f}"
+
+
 def _build_contract_doc_for_signature(
     *,
     employee: dict,
@@ -632,6 +670,122 @@ async def sign_employee_contract(
 
 
 # ==================== CONTRACT SUPERSEDING ====================
+
+@router.patch("/employees/{employee_id}/contract/render-fields")
+async def update_contract_render_fields(
+    employee_id: str,
+    request: Request,
+    user: dict = Depends(require_manager_or_admin),
+):
+    """
+    Save missing contract render fields directly from admin reissue recovery flow.
+    Employee-specific fields are stored on employee profile.
+    Company address is stored in org_settings (default row) and mirrored to an
+    employee-scoped override for deterministic rendering fallback.
+    """
+    db = get_db()
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Invalid request body")
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    requested_fields = {
+        "hourly_rate": body.get("hourly_rate"),
+        "contract_start_date": body.get("contract_start_date"),
+        "continuous_service_date": body.get("continuous_service_date"),
+        "company_address": body.get("company_address"),
+    }
+    if all(value in (None, "") for value in requested_fields.values()):
+        raise HTTPException(status_code=400, detail="At least one render field is required")
+
+    employee_updates = {}
+    employee_overrides = dict(employee.get("contract_render_overrides") or {})
+    org_updates = {}
+
+    if requested_fields["hourly_rate"] not in (None, ""):
+        hourly_rate = _validate_hourly_rate(requested_fields["hourly_rate"])
+        employee_updates["hourly_rate"] = hourly_rate
+        employee_overrides["hourly_rate"] = hourly_rate
+
+    if requested_fields["contract_start_date"] not in (None, ""):
+        contract_start_date = _validate_iso_date_like(requested_fields["contract_start_date"], "contract_start_date")
+        employee_updates["contract_start_date"] = contract_start_date
+        employee_overrides["contract_start_date"] = contract_start_date
+
+    if requested_fields["continuous_service_date"] not in (None, ""):
+        continuous_service_date = _validate_iso_date_like(
+            requested_fields["continuous_service_date"],
+            "continuous_service_date",
+        )
+        employee_updates["continuous_service_date"] = continuous_service_date
+        employee_overrides["continuous_service_date"] = continuous_service_date
+
+    if requested_fields["company_address"] not in (None, ""):
+        company_address = _clean_optional_string(requested_fields["company_address"])
+        if not company_address:
+            raise HTTPException(status_code=400, detail="company_address is required")
+        org_updates["company_address"] = company_address
+        # Keep legacy/fallback compatibility for older readers.
+        org_updates["organisation_address"] = company_address
+        employee_overrides["company_address"] = company_address
+
+    if employee_updates or employee_overrides:
+        employee_updates["contract_render_overrides"] = employee_overrides
+        employee_updates["updated_at"] = now_iso
+        employee_updates["updated_by"] = user.get("user_id")
+        await db.employees.update_one({"id": employee_id}, {"$set": employee_updates})
+
+    if org_updates:
+        org_updates["updated_at"] = now_iso
+        org_updates["updated_by"] = user.get("user_id")
+        await db.org_settings.update_one(
+            {"id": "default"},
+            {"$set": org_updates, "$setOnInsert": {"id": "default", "created_at": now_iso}},
+            upsert=True,
+        )
+
+    await log_audit_action(
+        user.get("user_id"),
+        "update_contract_render_fields",
+        "employee",
+        employee_id,
+        {
+            "employee_id": employee_id,
+            "updated_fields": sorted([k for k, v in requested_fields.items() if v not in (None, "")]),
+            "route": f"PATCH /employees/{employee_id}/contract/render-fields",
+            "source": "contracts.render_fields_endpoint",
+            "timestamp": now_iso,
+        },
+    )
+
+    updated_employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    org_settings = await db.org_settings.find_one({"id": "default"}, {"_id": 0}) or {}
+
+    return {
+        "message": "Contract render fields updated",
+        "employee_id": employee_id,
+        "fields": {
+            "hourly_rate": updated_employee.get("hourly_rate"),
+            "contract_start_date": updated_employee.get("contract_start_date"),
+            "continuous_service_date": updated_employee.get("continuous_service_date"),
+            "company_address": (
+                org_settings.get("company_address")
+                or org_settings.get("organisation_address")
+                or (updated_employee.get("contract_render_overrides") or {}).get("company_address")
+            ),
+        },
+        "stored_in": {
+            "employee": [k for k in ("hourly_rate", "contract_start_date", "continuous_service_date", "contract_render_overrides") if k in (updated_employee or {})],
+            "org_settings": [k for k in ("company_address", "organisation_address") if k in org_settings],
+        },
+    }
 
 @router.post("/employees/{employee_id}/contract/reissue")
 async def reissue_employee_contract(

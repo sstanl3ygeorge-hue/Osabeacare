@@ -145,6 +145,7 @@ class _FakeDb:
         self.generated_contracts = _FakeCollection([])
         self.agreement_acknowledgements = _FakeCollection([])
         self.audit_logs = _FakeCollection([])
+        self.org_settings = _FakeCollection([{"id": "default", "company_name": "Osabea Healthcare"}])
 
 
 def _build_client(monkeypatch, fake_db):
@@ -168,6 +169,16 @@ def _build_client(monkeypatch, fake_db):
 
     monkeypatch.setattr(contracts, "can_sign_contract", _can_sign)
     monkeypatch.setattr(contracts, "log_audit_action", _log_audit_action)
+    async def _ensure_agreement_rendered(_db, employee, agreement_type):
+        assert agreement_type == "contract_acceptance"
+        return {
+            "template_version": "contract_acceptance_v_testcanon123",
+            "template_source_name": "zero_hour_contract_template.docx",
+            "rendered_at": "2026-04-27T00:00:00+00:00",
+            "rendered_file_url": f"https://example.test/contracts/{employee['id']}.pdf",
+            "rendered_contract_pdf_url": f"https://example.test/contracts/{employee['id']}.pdf",
+        }
+    monkeypatch.setattr(contracts, "ensure_agreement_rendered", _ensure_agreement_rendered)
     async def _download_file(_url):
         pdf_b64 = (
             "JVBERi0xLjMKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5k"
@@ -361,6 +372,18 @@ def test_audit_failure_rolls_back_employee_pointers(monkeypatch):
     monkeypatch.setattr(contracts, "can_sign_contract", _can_sign)
     monkeypatch.setattr(contracts, "log_audit_action", _log_audit_action)
 
+    async def _ensure_agreement_rendered(_db, employee, agreement_type):
+        assert agreement_type == "contract_acceptance"
+        return {
+            "template_version": "contract_acceptance_v_testcanon123",
+            "template_source_name": "zero_hour_contract_template.docx",
+            "rendered_at": "2026-04-27T00:00:00+00:00",
+            "rendered_file_url": f"https://example.test/contracts/{employee['id']}.pdf",
+            "rendered_contract_pdf_url": f"https://example.test/contracts/{employee['id']}.pdf",
+        }
+
+    monkeypatch.setattr(contracts, "ensure_agreement_rendered", _ensure_agreement_rendered)
+
     app = FastAPI()
     app.include_router(contracts.router, prefix="/api")
     app.dependency_overrides[contracts.require_manager_or_admin] = lambda: {
@@ -434,6 +457,83 @@ def test_reissue_blocks_when_canonical_render_fails(monkeypatch):
     body = res.json()
     assert body["detail"]["status"] == "action_required"
     assert "render_issue" in body["detail"]
+    assert "company_address" in body["detail"].get("missing_fields", [])
+
+
+def test_patch_render_fields_saves_employee_and_org_values(monkeypatch):
+    fake_db = _FakeDb()
+    _seed_employee_and_contract(fake_db, status="rejected")
+    client, _ = _build_client(monkeypatch, fake_db)
+
+    res = client.patch(
+        "/api/employees/emp-1/contract/render-fields",
+        json={
+            "hourly_rate": "12.5",
+            "contract_start_date": "2026-04-01",
+            "continuous_service_date": "2026-04-01",
+            "company_address": "19 Station Road, Harlow, CM20 2BB",
+        },
+    )
+    assert res.status_code == 200
+    payload = res.json()
+    assert payload["fields"]["hourly_rate"] == "12.50"
+    assert payload["fields"]["company_address"] == "19 Station Road, Harlow, CM20 2BB"
+
+    employee = fake_db.employees.docs[0]
+    assert employee["hourly_rate"] == "12.50"
+    assert employee["contract_start_date"] == "2026-04-01"
+    assert employee["continuous_service_date"] == "2026-04-01"
+    assert employee["contract_render_overrides"]["company_address"] == "19 Station Road, Harlow, CM20 2BB"
+
+    org = fake_db.org_settings.docs[0]
+    assert org["company_address"] == "19 Station Road, Harlow, CM20 2BB"
+    assert org["organisation_address"] == "19 Station Road, Harlow, CM20 2BB"
+
+
+def test_patch_render_fields_then_reissue_succeeds(monkeypatch):
+    fake_db = _FakeDb()
+    _seed_employee_and_contract(fake_db, status="rejected")
+    client, _ = _build_client(monkeypatch, fake_db)
+
+    async def _requires_fields(_db, employee, _type):
+        if not employee.get("hourly_rate"):
+            raise contracts.ContractRenderError("missing hourly_rate, company_address")
+        if not (fake_db.org_settings.docs and fake_db.org_settings.docs[0].get("company_address")):
+            raise contracts.ContractRenderError("missing company_address")
+        return {
+            "template_version": "contract_acceptance_v_testcanon123",
+            "template_source_name": "zero_hour_contract_template.docx",
+            "rendered_at": "2026-04-27T00:00:00+00:00",
+            "rendered_file_url": f"https://example.test/contracts/{employee['id']}.pdf",
+            "rendered_contract_pdf_url": f"https://example.test/contracts/{employee['id']}.pdf",
+        }
+
+    monkeypatch.setattr(contracts, "ensure_agreement_rendered", _requires_fields)
+
+    missing_res = client.post(
+        "/api/employees/emp-1/contract/reissue",
+        json={"reason": "Need reissue after bad render", "source_contract_id": "old-1"},
+    )
+    assert missing_res.status_code == 409
+    assert set(missing_res.json()["detail"]["missing_fields"]) == {"hourly_rate", "company_address"}
+
+    patch_res = client.patch(
+        "/api/employees/emp-1/contract/render-fields",
+        json={
+            "hourly_rate": "13.25",
+            "company_address": "1 Care Road, London, SW1A 1AA",
+            "contract_start_date": "2026-04-01",
+            "continuous_service_date": "2026-04-01",
+        },
+    )
+    assert patch_res.status_code == 200
+
+    reissue_res = client.post(
+        "/api/employees/emp-1/contract/reissue",
+        json={"reason": "Need reissue after bad render", "source_contract_id": "old-1"},
+    )
+    assert reissue_res.status_code == 200
+    assert reissue_res.json()["new_contract"]["status"] == "pending_signature"
 
 
 def test_reissue_uses_existing_canonical_artifact_when_render_fields_missing(monkeypatch):

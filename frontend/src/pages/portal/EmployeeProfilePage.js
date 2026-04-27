@@ -9901,15 +9901,6 @@ export default function EmployeeProfilePage() {
           fetchCompliance();
           fetchData();
         }}
-        onEditEmployeeContractDetails={() => {
-          setActiveTab('employment');
-          const next = new URLSearchParams(searchParams);
-          next.set('tab', 'employment');
-          setSearchParams(next, { replace: true });
-        }}
-        onEditOrganisationSettings={() => {
-          navigate('/portal/settings');
-        }}
       />
       
       {/* Edit Declarations Dialog */}

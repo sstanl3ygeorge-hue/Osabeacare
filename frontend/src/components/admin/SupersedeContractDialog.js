@@ -4,6 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../ui/dialog';
 import { Button } from '../ui/button';
 import { Textarea } from '../ui/textarea';
+import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { toast } from 'sonner';
 import { AlertTriangle, FileX } from 'lucide-react';
@@ -26,14 +27,38 @@ export default function SupersedeContractDialog({
   employeeName,
   currentContract,
   onSuccess,
-  onEditEmployeeContractDetails,
-  onEditOrganisationSettings,
 }) {
   const { token } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
   const [reason, setReason] = useState('');
   const [error, setError] = useState('');
   const [missingFields, setMissingFields] = useState([]);
+  const [renderFieldValues, setRenderFieldValues] = useState({
+    hourly_rate: '',
+    company_address: '',
+    contract_start_date: '',
+    continuous_service_date: '',
+  });
+
+  const reissuePayload = () => {
+    const payload = {
+      reason: reason.trim(),
+      idempotency_key: buildIdempotencyKey(),
+    };
+    if (currentContract?.id) {
+      payload.source_contract_id = currentContract.id;
+    }
+    return payload;
+  };
+
+  const attemptReissue = async () => {
+    setMissingFields([]);
+    return axios.post(
+      `${API}/employees/${employeeId}/contract/reissue`,
+      reissuePayload(),
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+  };
 
   const buildIdempotencyKey = () => {
     const sourceId = currentContract?.id || 'unknown-source';
@@ -51,19 +76,7 @@ export default function SupersedeContractDialog({
 
     setIsLoading(true);
     try {
-      setMissingFields([]);
-      const payload = {
-        reason: reason.trim(),
-        idempotency_key: buildIdempotencyKey(),
-      };
-      if (currentContract?.id) {
-        payload.source_contract_id = currentContract.id;
-      }
-      await axios.post(
-        `${API}/employees/${employeeId}/contract/reissue`,
-        payload,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
+      await attemptReissue();
 
       toast.success('New contract issued. Worker can now sign it.');
       if (onSuccess) {
@@ -85,23 +98,69 @@ export default function SupersedeContractDialog({
     }
   };
 
+  const handleSaveFieldsAndReissue = async () => {
+    if (!reason.trim() || reason.trim().length < 20) {
+      setError('Please provide a detailed reason for reissuing this contract (minimum 20 characters)');
+      return;
+    }
+    setIsLoading(true);
+    try {
+      const payload = {};
+      missingFields.forEach((field) => {
+        const value = renderFieldValues[field];
+        if (typeof value === 'string' && value.trim()) {
+          payload[field] = value.trim();
+        }
+      });
+
+      const stillMissing = missingFields.filter((field) => !payload[field]);
+      if (stillMissing.length > 0) {
+        setError(`Please complete: ${stillMissing.join(', ')}`);
+        setIsLoading(false);
+        return;
+      }
+
+      await axios.patch(
+        `${API}/employees/${employeeId}/contract/render-fields`,
+        payload,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      await attemptReissue();
+
+      toast.success('New contract issued. Worker can now sign it.');
+      if (onSuccess) {
+        await Promise.resolve(onSuccess());
+      }
+      handleClose();
+    } catch (err) {
+      const detail = err.response?.data?.detail;
+      const message =
+        (typeof detail === 'string' && detail) ||
+        detail?.render_issue ||
+        detail?.detail ||
+        'Failed to save fields and reissue contract';
+      const fields = Array.isArray(detail?.missing_fields) ? detail.missing_fields : [];
+      if (fields.length > 0) {
+        setMissingFields(fields);
+      }
+      toast.error(message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleClose = () => {
     setReason('');
     setError('');
     setMissingFields([]);
+    setRenderFieldValues({
+      hourly_rate: '',
+      company_address: '',
+      contract_start_date: '',
+      continuous_service_date: '',
+    });
     onClose();
-  };
-
-  const openEmployeeDetails = () => {
-    if (typeof onEditEmployeeContractDetails === 'function') {
-      onEditEmployeeContractDetails();
-    }
-  };
-
-  const openOrgSettings = () => {
-    if (typeof onEditOrganisationSettings === 'function') {
-      onEditOrganisationSettings();
-    }
   };
 
   return (
@@ -170,7 +229,7 @@ export default function SupersedeContractDialog({
           </div>
 
           {missingFields.length > 0 && (
-            <div className="p-4 bg-red-50 border border-red-200 rounded-lg space-y-2">
+            <div className="p-4 bg-red-50 border border-red-200 rounded-lg space-y-3">
               <p className="text-sm font-medium text-red-700">
                 Cannot reissue yet. Complete these required contract fields first.
               </p>
@@ -179,14 +238,59 @@ export default function SupersedeContractDialog({
                   <li key={field}>{field}</li>
                 ))}
               </ul>
-              <div className="flex flex-wrap gap-2 pt-1">
-                <Button type="button" size="sm" variant="outline" onClick={openEmployeeDetails}>
-                  Edit employee contract details
-                </Button>
-                <Button type="button" size="sm" variant="outline" onClick={openOrgSettings}>
-                  Edit organisation settings
-                </Button>
+              <div className="grid grid-cols-1 gap-3">
+                {missingFields.includes('hourly_rate') && (
+                  <div className="space-y-1">
+                    <Label htmlFor="render-hourly-rate">Hourly rate</Label>
+                    <Input
+                      id="render-hourly-rate"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={renderFieldValues.hourly_rate}
+                      onChange={(e) => setRenderFieldValues((prev) => ({ ...prev, hourly_rate: e.target.value }))}
+                      placeholder="e.g. 12.50"
+                    />
+                  </div>
+                )}
+                {missingFields.includes('company_address') && (
+                  <div className="space-y-1">
+                    <Label htmlFor="render-company-address">Company address</Label>
+                    <Textarea
+                      id="render-company-address"
+                      value={renderFieldValues.company_address}
+                      onChange={(e) => setRenderFieldValues((prev) => ({ ...prev, company_address: e.target.value }))}
+                      placeholder="Registered/business address"
+                      className="min-h-[72px]"
+                    />
+                  </div>
+                )}
+                {missingFields.includes('contract_start_date') && (
+                  <div className="space-y-1">
+                    <Label htmlFor="render-contract-start-date">Contract start date</Label>
+                    <Input
+                      id="render-contract-start-date"
+                      type="date"
+                      value={renderFieldValues.contract_start_date}
+                      onChange={(e) => setRenderFieldValues((prev) => ({ ...prev, contract_start_date: e.target.value }))}
+                    />
+                  </div>
+                )}
+                {missingFields.includes('continuous_service_date') && (
+                  <div className="space-y-1">
+                    <Label htmlFor="render-continuous-service-date">Continuous service date</Label>
+                    <Input
+                      id="render-continuous-service-date"
+                      type="date"
+                      value={renderFieldValues.continuous_service_date}
+                      onChange={(e) => setRenderFieldValues((prev) => ({ ...prev, continuous_service_date: e.target.value }))}
+                    />
+                  </div>
+                )}
               </div>
+              <p className="text-xs text-red-700">
+                Fill required fields here, then use <strong>Save fields and reissue</strong>.
+              </p>
             </div>
           )}
         </div>
@@ -203,6 +307,16 @@ export default function SupersedeContractDialog({
           >
             {isLoading ? 'Processing...' : 'Reissue contract'}
           </Button>
+          {missingFields.length > 0 && (
+            <Button
+              type="button"
+              onClick={handleSaveFieldsAndReissue}
+              disabled={isLoading || !reason.trim()}
+              className="bg-green-600 hover:bg-green-700 text-white"
+            >
+              {isLoading ? 'Saving...' : 'Save fields and reissue'}
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

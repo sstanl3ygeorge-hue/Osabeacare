@@ -14,6 +14,12 @@ from typing import Dict, List, Optional
 import logging
 import re
 import os
+from services.training_taxonomy import (
+    CANONICAL_TRAINING_ALIASES as SHARED_CANONICAL_TRAINING_ALIASES,
+    normalize_training_text as shared_normalize_training_text,
+    normalize_training_key as shared_normalize_training_key,
+    resolve_training_to_canonical as shared_resolve_training_to_canonical,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -155,6 +161,18 @@ TRAINING_BLOCKER_CONFIG = {
         "evidence_required": True,
         "reason_code": "mca_dols_training_missing",
         "reason_message": "MCA / DoLS training required",
+    },
+    "mental_capacity_act": {
+        "blocker_for_work": True,
+        "evidence_required": True,
+        "reason_code": "mental_capacity_act_training_missing",
+        "reason_message": "Mental Capacity Act training required",
+    },
+    "deprivation_of_liberty_safeguards": {
+        "blocker_for_work": True,
+        "evidence_required": True,
+        "reason_code": "dols_training_missing",
+        "reason_message": "Deprivation of Liberty Safeguards training required",
     },
 }
 
@@ -324,8 +342,10 @@ def _is_internal_temporary_evidence(record: dict) -> bool:
         return True
     if completion_method == "manual":
         return True
-    # Fallback: if not certificate-backed but marked completed, treat as temporary.
-    return not _is_external_certificate_evidence(record)
+    # Fallback: only treat unknown-source, unverified records as temporary.
+    # Verified records may come from migrated/existing certificate data that
+    # does not carry modern source_type markers in legacy datasets/tests.
+    return (not _is_external_certificate_evidence(record)) and (not record.get("verified", False))
 
 
 def _resolve_effective_expiry_date(record: dict) -> Optional[str]:
@@ -484,18 +504,12 @@ def get_training_blocker_config(requirement_id: str) -> dict:
 
 def normalize_training_text(value: str) -> str:
     """Normalize extracted training text for deterministic matching."""
-    if not value:
-        return ""
-    normalized = value.lower()
-    normalized = normalized.replace("&", " and ")
-    normalized = re.sub(r"[^a-z0-9]+", " ", normalized)
-    normalized = re.sub(r"\s+", " ", normalized).strip()
-    return normalized
+    return shared_normalize_training_text(value)
 
 
 def normalize_training_key(value: str) -> str:
     """Normalize extracted training text to the underscore-key alias format."""
-    return normalize_training_text(value).replace(" ", "_")
+    return shared_normalize_training_key(value)
 
 
 # ---------------------------------------------------------------------------
@@ -742,6 +756,10 @@ TRAINING_ALIASES["adult_safeguarding_level_1"] = "safeguarding_adults"
 TRAINING_ALIASES["adult_safeguarding_level_2"] = "safeguarding_adults"
 TRAINING_ALIASES["safeguarding_children_levels_1_2"] = "safeguarding_children"
 
+# Shared canonical taxonomy is authoritative for anti-drift behavior.
+for _alias_key, _canonical_key in SHARED_CANONICAL_TRAINING_ALIASES.items():
+    TRAINING_ALIASES[_alias_key] = _canonical_key
+
 
 def _record_quality_score(record: dict) -> int:
     """Lower = better quality record for lookup preference.
@@ -873,9 +891,9 @@ _MANDATORY_KEYWORD_MAP = {
     "manual_handling": ["manual handling", "moving and handling", "people handling", "moving & handling"],
     "fire_safety": ["fire safety", "fire awareness", "fire marshal", "fire warden"],
     "health_and_safety": ["health and safety", "health safety", "health safety and welfare", "health and safety and welfare", "h s awareness"],
-    "basic_life_support": ["basic life support", "bls", "first aid", "resuscitation", "cpr"],
     "basic_life_support_adults": ["resuscitation adults", "adult resuscitation", "cpr adults"],
     "paediatric_basic_life_support": ["paediatric resuscitation", "pediatric resuscitation", "paediatric basic life support", "pbls"],
+    "basic_life_support": ["basic life support", "bls", "first aid", "resuscitation", "cpr"],
     "infection_control": ["infection control", "infection prevention", "ipc"],
     "information_governance": ["information governance", "data protection", "gdpr", "confidentiality"],
     "prevent": ["prevent", "counter terrorism", "radicalisation", "prevent duty"],
@@ -883,7 +901,8 @@ _MANDATORY_KEYWORD_MAP = {
     "news2_clinical_observations": ["news2", "news 2", "clinical observations", "vital signs"],
     "sepsis_awareness": ["sepsis"],
     "pressure_ulcer_prevention": ["pressure ulcer", "pressure sore", "tissue viability"],
-    "mca_dols": ["mca", "mental capacity", "dols", "deprivation of liberty"],
+    "mental_capacity_act": ["mca", "mental capacity", "mental capacity act"],
+    "deprivation_of_liberty_safeguards": ["dols", "deprivation of liberty", "deprivation of liberty safeguards"],
     "enhanced_infection_prevention": ["clinical ipc", "enhanced infection prevention", "infection prevention level 2"],
 }
 
@@ -898,6 +917,9 @@ def resolve_mandatory_training_code(training_name: str):
     if not training_name:
         return None
     name_lower = normalize_training_text(training_name)
+    shared_canonical = shared_resolve_training_to_canonical(training_name)
+    if shared_canonical:
+        return shared_canonical
     # Alias match
     normalised = normalize_training_key(name_lower)
     canon = TRAINING_ALIASES.get(normalised)

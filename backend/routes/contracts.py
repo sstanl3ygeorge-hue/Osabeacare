@@ -45,6 +45,7 @@ router = APIRouter(tags=["Contracts"])
 
 REISSUE_ELIGIBLE_STATUSES = {
     "rejected",
+    "rejected_reopen_required",
     "signed",
     "fully_executed",
     "pending_signature",

@@ -221,7 +221,31 @@ async def check_can_sign_contract(
         raise HTTPException(status_code=404, detail="Employee not found")
     
     result = await can_sign_contract(db, employee_id)
-    
+
+    # Hard override: when there is an active pending-signature contract, the
+    # worker must be allowed to sign it even if other readiness gates are still
+    # pending. Contract signing itself is the actionable step in this state.
+    pending_contract = await db.generated_contracts.find_one(
+        {
+            "employee_id": employee_id,
+            "status": "pending_signature",
+            "$or": [
+                {"superseded_by_contract_id": {"$exists": False}},
+                {"superseded_by_contract_id": None},
+                {"superseded_by_contract_id": ""},
+            ],
+        },
+        {"_id": 0},
+    )
+    if pending_contract:
+        result = dict(result or {})
+        result["can_sign"] = True
+        result["reason"] = "Pending contract available for worker signature"
+        result["contract_override"] = {
+            "active_pending_contract_id": pending_contract.get("id"),
+            "status": pending_contract.get("status"),
+        }
+
     return {
         "employee_id": employee_id,
         "can_sign": result.get("can_sign", False),
@@ -300,14 +324,39 @@ async def generate_employee_contract(
         render_record = await ensure_agreement_rendered(db, employee, CONTRACT_AGREEMENT_TYPE)
     except ContractRenderError as exc:
         render_issue = str(exc)
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "status": "action_required",
-                "render_issue": render_issue,
-                "missing_fields": _extract_missing_contract_fields(render_issue),
-            },
-        ) from exc
+        # Recovery fallback: if there is already a canonical rendered contract
+        # artifact on the latest contract, reuse it for reissue so admin can
+        # reopen signing without being blocked by missing profile/org fields.
+        existing_rendered_url = (
+            current_contract.get("rendered_contract_pdf_url")
+            or current_contract.get("rendered_file_url")
+            or current_contract.get("file_url")
+        )
+        existing_template_version = str(current_contract.get("template_version") or "")
+        if existing_rendered_url and existing_template_version.startswith(CANONICAL_CONTRACT_TEMPLATE_PREFIX):
+            render_record = {
+                "template_version": existing_template_version,
+                "template_source_name": current_contract.get("template_id") or "reissue_existing_canonical_artifact",
+                "rendered_contract_pdf_url": existing_rendered_url,
+                "rendered_file_url": existing_rendered_url,
+                "rendered_at": current_contract.get("rendered_at") or datetime.now(timezone.utc).isoformat(),
+                "employee_name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
+            }
+            logger.warning(
+                "Reissue fallback using existing canonical artifact employee_id=%s contract_id=%s reason=%s",
+                employee_id,
+                current_contract.get("id"),
+                render_issue,
+            )
+        else:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "status": "action_required",
+                    "render_issue": render_issue,
+                    "missing_fields": _extract_missing_contract_fields(render_issue),
+                },
+            ) from exc
     except Exception as exc:
         raise HTTPException(
             status_code=500,
@@ -855,14 +904,36 @@ async def reissue_employee_contract(
         render_record = await ensure_agreement_rendered(db, employee, CONTRACT_AGREEMENT_TYPE)
     except ContractRenderError as exc:
         render_issue = str(exc)
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "status": "action_required",
-                "render_issue": render_issue,
-                "missing_fields": _extract_missing_contract_fields(render_issue),
-            },
-        ) from exc
+        existing_rendered_url = (
+            current_contract.get("rendered_contract_pdf_url")
+            or current_contract.get("rendered_file_url")
+            or current_contract.get("file_url")
+        )
+        existing_template_version = str(current_contract.get("template_version") or "")
+        if existing_rendered_url and existing_template_version.startswith(CANONICAL_CONTRACT_TEMPLATE_PREFIX):
+            render_record = {
+                "template_version": existing_template_version,
+                "template_source_name": current_contract.get("template_id") or "reissue_existing_canonical_artifact",
+                "rendered_contract_pdf_url": existing_rendered_url,
+                "rendered_file_url": existing_rendered_url,
+                "rendered_at": current_contract.get("rendered_at") or datetime.now(timezone.utc).isoformat(),
+                "employee_name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
+            }
+            logger.warning(
+                "Reissue fallback using existing canonical artifact employee_id=%s contract_id=%s reason=%s",
+                employee_id,
+                current_contract.get("id"),
+                render_issue,
+            )
+        else:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "status": "action_required",
+                    "render_issue": render_issue,
+                    "missing_fields": _extract_missing_contract_fields(render_issue),
+                },
+            ) from exc
     except Exception as exc:
         raise HTTPException(
             status_code=500,

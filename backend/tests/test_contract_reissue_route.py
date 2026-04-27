@@ -436,6 +436,33 @@ def test_reissue_blocks_when_canonical_render_fails(monkeypatch):
     assert "render_issue" in body["detail"]
 
 
+def test_reissue_uses_existing_canonical_artifact_when_render_fields_missing(monkeypatch):
+    fake_db = _FakeDb()
+    _seed_employee_and_contract(fake_db, status="signed")
+    # Ensure latest contract has canonical rendered artifact to reuse.
+    fake_db.generated_contracts.docs[0]["template_version"] = "contract_acceptance_v_testcanon123"
+    fake_db.generated_contracts.docs[0]["rendered_contract_pdf_url"] = "https://example.test/contracts/existing-canonical.pdf"
+    fake_db.generated_contracts.docs[0]["rendered_file_url"] = "https://example.test/contracts/existing-canonical.pdf"
+    client, _ = _build_client(monkeypatch, fake_db)
+
+    async def _bad_render(_db, _employee, _type):
+        raise contracts.ContractRenderError("missing hourly_rate, company_address")
+
+    monkeypatch.setattr(contracts, "ensure_agreement_rendered", _bad_render)
+
+    res = client.post(
+        "/api/employees/emp-1/contract/reissue",
+        json={"reason": "reopen with existing canonical artifact", "source_contract_id": "old-1"},
+    )
+    assert res.status_code == 200
+    payload = res.json()
+    new_contract_id = payload["new_contract"]["id"]
+    new_row = next(x for x in fake_db.generated_contracts.docs if x["id"] == new_contract_id)
+    assert new_row["status"] == "pending_signature"
+    assert new_row["rendered_contract_pdf_url"] == "https://example.test/contracts/existing-canonical.pdf"
+    assert new_row["rendered_file_url"] == "https://example.test/contracts/existing-canonical.pdf"
+
+
 def test_legacy_pending_contract_not_signable(monkeypatch):
     fake_db = _FakeDb()
     _seed_employee_and_contract(fake_db, status="rejected")

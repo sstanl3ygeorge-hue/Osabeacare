@@ -55,7 +55,7 @@ export function getAgreementDisplay(agreement, options = {}) {
         ctaLabel: 'Review & sign contract',
       };
     }
-    if (['rejected', 'superseded', 'action_required'].includes(contractState) && !canSign) {
+    if (['rejected', 'rejected_reopen_required', 'superseded', 'action_required'].includes(contractState) && !canSign) {
       return {
         tone: 'neutral',
         badge: 'Historical',

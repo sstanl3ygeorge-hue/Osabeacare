@@ -115,10 +115,10 @@ export default function AgreementRow({
   const normalizedContractStatus = String(rawContractStatus || '').trim().toLowerCase();
   const canReissueContract =
     key === 'contract_acceptance' && (
-      ['rejected', 'action_required', 'superseded', 'pending_signature', 'signed', 'fully_executed'].includes(normalizedContractStatus) ||
+      ['rejected', 'rejected_reopen_required', 'action_required', 'superseded', 'pending_signature', 'signed', 'fully_executed'].includes(normalizedContractStatus) ||
       lifecycleStatus === 'rejected'
     );
-  const contractNeedsReissue = key === 'contract_acceptance' && ['rejected', 'action_required', 'superseded'].includes(normalizedContractStatus);
+  const contractNeedsReissue = key === 'contract_acceptance' && ['rejected', 'rejected_reopen_required', 'action_required', 'superseded'].includes(normalizedContractStatus);
   const shouldShowReissueButton =
     key === 'contract_acceptance' &&
     typeof onReissueContract === 'function' &&
@@ -300,11 +300,8 @@ export default function AgreementRow({
   };
 
   const handleRegenerate = async () => {
-    const acknowledgementId = acknowledgement_data?.id;
-    if (!acknowledgementId) {
-      toast.error('No acknowledgement record available to regenerate');
-      return;
-    }
+    const acknowledgementId = acknowledgement_data?.id || '__fallback__';
+    const submissionId = submission_data?.id || acknowledgement_data?.submission_id || null;
 
     const reason = prompt('Enter regeneration reason (min 3 characters):');
     if (!reason || reason.trim().length < 3) {
@@ -316,7 +313,11 @@ export default function AgreementRow({
     try {
       await axios.post(
         `${API}/employees/${employeeId}/agreements/${acknowledgementId}/regenerate`,
-        { reason: reason.trim() },
+        {
+          reason: reason.trim(),
+          agreement_type: key,
+          submission_id: submissionId,
+        },
         { headers: { Authorization: `Bearer ${token}` } }
       );
       toast.success('Handbook regenerated. Worker can review it again once ready.');

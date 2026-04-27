@@ -10990,6 +10990,20 @@ async def get_employee_training_matrix(
         raise HTTPException(status_code=404, detail="Employee not found")
     
     role = employee.get('role', '')
+    def _canonical_training_code(value: str) -> str:
+        normalized = normalize_training_text(value or "")
+        mapped = TRAINING_CODE_MAPPING.get(normalized)
+        if mapped:
+            normalized = mapped
+        aliases = {
+            "health_safety": "health_safety_welfare",
+            "health_and_safety": "health_safety_welfare",
+            "equality_diversity": "equality_diversity_human_rights",
+            "bls": "basic_life_support_adults",
+            "basic_life_support": "basic_life_support_adults",
+            "safeguarding": "safeguarding_adults",
+        }
+        return aliases.get(normalized, normalized)
     
     # Get canonical training evaluation
     training_eval = await evaluate_employee_training_status(employee_id, role)
@@ -10999,6 +11013,21 @@ async def get_employee_training_matrix(
         "employee_id": employee_id,
         "record_status": {"$nin": ["superseded", "deleted"]}
     }, {"_id": 0}).to_list(200)
+    proposed_items = await db.proposed_training_items.find(
+        {"employee_id": employee_id, "status": "proposed"},
+        {"_id": 0},
+    ).to_list(500)
+    certificates = await db.employee_documents.find(
+        {
+            "employee_id": employee_id,
+            "$or": [
+                {"document_type": "training_certificate"},
+                {"requirement_id": {"$regex": "training", "$options": "i"}},
+                {"category": "training"},
+            ],
+        },
+        {"_id": 0},
+    ).to_list(500)
     
     # Build alias-aware lookup — same logic as evaluator
     records_by_req = build_training_records_lookup(training_records)
@@ -11085,6 +11114,16 @@ async def get_employee_training_matrix(
     total_expiring = 0
     total_missing = 0
     total_blockers = 0
+    pending_review_total = 0
+    pending_proposed_codes = {
+        _canonical_training_code(
+            item.get("mapped_training_code")
+            or item.get("mapped_training_title")
+            or item.get("raw_course_title")
+            or ""
+        )
+        for item in proposed_items
+    }
     
     for item in training_eval.get('items', []):
         code = item.get('code', '')
@@ -11107,12 +11146,23 @@ async def get_employee_training_matrix(
         blocker_config = get_training_blocker_config(code)
         validity_days = get_training_validity_days(code)
         
+        status_value = item.get('status', 'missing')
+        canonical_code = _canonical_training_code(code or item.get('title', code))
+        has_pending_proposed = canonical_code in pending_proposed_codes
+        if status_value in ['missing', 'partial'] and has_pending_proposed:
+            status_value = 'pending'
+            pending_review_total += 1
         matrix_item = {
             "code": code,
+            "canonical_code": canonical_code,
             "id": record.get('id') or code,
             "title": item.get('title', code),
-            "status": item.get('status', 'missing'),
-            "detail": item.get('detail', ''),
+            "status": status_value,
+            "detail": (
+                "Mapped certificate evidence is pending admin review"
+                if status_value == 'pending'
+                else item.get('detail', '')
+            ),
             "blocker": item.get('blocker', False),
             "is_currently_blocking": item.get('is_currently_blocking', False),
             "evidence_required": blocker_config.get('evidence_required', True),
@@ -11139,12 +11189,12 @@ async def get_employee_training_matrix(
         matrix_items.append(matrix_item)
         
         # Count by status — only verified counts as compliant/current
-        status = item.get('status', 'missing')
+        status = status_value
         if status == 'verified':
             total_current += 1
         elif status == 'due_soon':
             total_expiring += 1
-        elif status in ['missing', 'partial', 'expired', 'rejected', 'awaiting_review', 'completed']:
+        elif status in ['missing', 'partial', 'expired', 'rejected', 'awaiting_review', 'completed', 'pending']:
             total_missing += 1
         
         if item.get('is_currently_blocking', False):
@@ -11185,6 +11235,7 @@ async def get_employee_training_matrix(
 
         additional_items.append({
             "code": record.get('requirement_id') or record.get('id', ''),
+            "canonical_code": _canonical_training_code(record.get('requirement_id') or record.get('training_name') or ''),
             "id": record.get('id', ''),
             "title": record.get('training_name', 'Unknown Training'),
             "status": status,
@@ -11212,20 +11263,52 @@ async def get_employee_training_matrix(
             "history_count": len(training_history.get(_canonical_key(record), []))
         })
     
+    all_qualifications = matrix_items + additional_items
+    required_total = len(matrix_items)
+    verified_total = len([item for item in matrix_items if item.get("status") == "verified"])
+    missing_total = len([item for item in matrix_items if item.get("status") in {"missing", "partial", "expired", "rejected"}])
+    readiness_blockers = [
+        item for item in matrix_items
+        if item.get("is_currently_blocking") or item.get("status") in {"missing", "partial", "expired", "rejected"}
+    ]
+    role_required_requirements = [
+        {
+            "code": item.get("code"),
+            "canonical_code": item.get("canonical_code"),
+            "title": item.get("title"),
+            "status": item.get("status"),
+            "is_currently_blocking": item.get("is_currently_blocking", False),
+        }
+        for item in matrix_items
+    ]
+
     return {
         "employee_id": employee_id,
         "employee_name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
         "role": role,
         "overall": training_eval.get('overall', 'missing'),
+        "role_required_requirements": role_required_requirements,
+        "all_qualifications": all_qualifications,
+        "training_records": training_records,
+        "certificates": certificates,
+        "proposed_items": proposed_items,
         "items": matrix_items,
         "additional_items": additional_items,
+        "completion_summary": {
+            "required_total": required_total,
+            "verified_total": verified_total,
+            "pending_review_total": pending_review_total,
+            "missing_total": missing_total,
+        },
+        "readiness_blockers": readiness_blockers,
         "summary": {
             "total": len(matrix_items),
             "current": total_current,
             "expiring": total_expiring,
             "missing": total_missing,
             "blockers": total_blockers,
-            "additional_count": len(additional_items)
+            "additional_count": len(additional_items),
+            "pending_review_total": pending_review_total,
         },
         "evaluated_at": training_eval.get('evaluatedAt')
     }
@@ -41212,6 +41295,26 @@ TRAINING_CODE_MAPPING.update({
     "health safety": "health_and_safety",
     "health safety and welfare": "health_and_safety",
     "cstf health safety and welfare": "health_and_safety",
+    # Canonical distinct keys used by matrix/readiness view.
+    "cstf health safety and welfare": "health_safety_welfare",
+    "cstf health and safety and welfare": "health_safety_welfare",
+    "health safety and welfare": "health_safety_welfare",
+    "health and safety and welfare": "health_safety_welfare",
+    "cstf equality diversity and human rights": "equality_diversity_human_rights",
+    "cstf equality and diversity and human rights": "equality_diversity_human_rights",
+    "equality diversity and human rights": "equality_diversity_human_rights",
+    "equality and diversity and human rights": "equality_diversity_human_rights",
+    "cstf resuscitation adults levels 1 2 and 3": "basic_life_support_adults",
+    "cstf resuscitation adults levels 1 2 and 3 practical": "basic_life_support_adults",
+    "resuscitation adults": "basic_life_support_adults",
+    "adult resuscitation": "basic_life_support_adults",
+    "adult basic life support": "basic_life_support_adults",
+    "cstf resuscitation paediatric levels 2 and 3 practical": "paediatric_basic_life_support",
+    "resuscitation paediatric": "paediatric_basic_life_support",
+    "paediatric basic life support": "paediatric_basic_life_support",
+    "cstf safeguarding adults levels 1 and 2": "safeguarding_adults",
+    "cstf safeguarding children levels 1 and 2": "safeguarding_children",
+    "cstf nhs conflict resolution practical": "conflict_resolution",
 })
 
 TRAINING_TITLES = {
@@ -41237,6 +41340,11 @@ TRAINING_TITLES = {
     "learning_disabilities": "Learning Disabilities Awareness",
     "end_of_life_care": "End of Life Care",
     "conflict_resolution": "Conflict Resolution",
+    # Canonical keys (non-collapsed distinct certifications)
+    "health_safety_welfare": "Health, Safety and Welfare",
+    "equality_diversity_human_rights": "Equality, Diversity and Human Rights",
+    "basic_life_support_adults": "Basic Life Support (Adults)",
+    "paediatric_basic_life_support": "Paediatric Basic Life Support",
 }
 
 

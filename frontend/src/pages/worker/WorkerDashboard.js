@@ -26,7 +26,7 @@ import CareCertificateInductionPanel from '../../components/worker/CareCertifica
 import WorkerDashboardPage from '../../components/worker/WorkerDashboardPage';
 import DashboardHeader from '../../components/worker/DashboardHeader';
 import NextActionCard from '../../components/worker/NextActionCard';
-import { getAgreementDisplay, getCvDisplay, getTrainingDisplay, getNextAction } from '../../components/worker/dashboardStatus';
+import { getAgreementDisplay, getCvDisplay, getTrainingDisplay } from '../../components/worker/dashboardStatus';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -711,7 +711,6 @@ function FormsSection() {
 
 export default function WorkerDashboard() {
   const [dashboard, setDashboard] = useState(null);
-  const [inductionOverview, setInductionOverview] = useState(null);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(null);
   const [showSignaturePad, setShowSignaturePad] = useState(false);
@@ -807,16 +806,6 @@ export default function WorkerDashboard() {
       });
       setDashboard(response.data);
 
-      try {
-        const inductionRes = await axios.get(`${API}/worker/induction/overview`, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        setInductionOverview(inductionRes.data || null);
-      } catch (err) {
-        console.warn('Could not fetch induction overview:', err);
-        setInductionOverview(null);
-      }
-      
       // Fetch org settings for dynamic branding
       try {
         const orgRes = await axios.get(`${API}/org-settings`, {
@@ -1726,6 +1715,7 @@ export default function WorkerDashboard() {
     supervisions: _supervisions,
     recurring_compliance_summary: _recurring_compliance_summary,
     agreements: _agreements,
+    worker_tasks: _worker_tasks,
   } = dashboard;
 
   // Safe array defaults — prevent .length / .map / .filter on undefined
@@ -1742,6 +1732,7 @@ export default function WorkerDashboard() {
   const references = _references || [];
   const supervisions = _supervisions || [];
   const agreements = _agreements || [];
+  const worker_tasks = _worker_tasks || [];
   const recurring_compliance_summary = _recurring_compliance_summary || { total: 0, overdue: 0, due: 0, upcoming: 0, scheduled: 0, preview: [] };
   const recurringItems = recurring_compliance_summary.items || recurring_compliance_summary.preview || [];
   const recurringItemsByStatus = {
@@ -1852,57 +1843,19 @@ export default function WorkerDashboard() {
   const completedSupervisionCount = (supervisions || []).filter(
     (item) => (item?.status || '').toLowerCase() === 'completed'
   ).length;
-  const inductionItems = inductionOverview?.items || [];
-  const pendingInductionItem = inductionItems.find((item) =>
-    item?.completion_type === 'hybrid' && ['start_form', 'complete_form', 'resubmit'].includes(item?.worker_action)
-  );
-  const awaitingInductionItem = !pendingInductionItem
-    ? inductionItems.find((item) =>
-      item?.completion_type === 'hybrid' && (
-        item?.worker_action === 'awaiting_review' ||
-        item?.submission_status === 'submitted'
-      )
-    )
-    : null;
-  const inductionNextAction = pendingInductionItem
-    ? {
-        state: 'worker_action_required',
-        title: `Complete induction: ${pendingInductionItem?.title || 'self-assessment'}`,
-        description: pendingInductionItem?.next_action || 'Complete and submit your induction self-assessment for manager review.',
-        primaryLabel: 'Open induction',
-      }
-    : awaitingInductionItem
-      ? {
-          state: 'awaiting_manager_signoff',
-          title: `Awaiting sign-off: ${awaitingInductionItem?.title || 'induction item'}`,
-          description: 'Your induction submission is waiting for manager sign-off.',
-          primaryLabel: 'View induction',
-        }
-      : null;
-  const nextAction = getNextAction({
-    cv: cvDisplay,
-    contract: contractDisplay,
-    handbook: handbookDisplay,
-    induction: inductionNextAction,
-    missingDocuments: visibleMissingDocuments,
-    missingTrainings: missing_trainings,
-    expiredTrainings: expired_trainings,
-    referencesNeedAction,
-    gapsNeedAction,
-  });
-  const displayedNextAction = nextAction?.key === 'missing_cv'
-    ? getNextAction({
-        cv: null,
-        contract: contractDisplay,
-        handbook: handbookDisplay,
-        induction: inductionNextAction,
-        missingDocuments: visibleMissingDocuments,
-        missingTrainings: missing_trainings,
-        expiredTrainings: expired_trainings,
-        referencesNeedAction,
-        gapsNeedAction,
-      })
-    : nextAction;
+  const pendingWorkerTasks = worker_tasks.filter((task) => String(task?.status || '').toLowerCase() === 'pending');
+  const mapWorkerTaskToNextAction = (task) => {
+    if (!task) return null;
+    return {
+      key: task.key || task.type || 'task',
+      title: task.title || 'Action required',
+      description: task.description || 'Open this task to continue your onboarding.',
+      primaryLabel: 'Open task',
+      route: task.action_route || '#training',
+      level: task.blocking_readiness ? 'critical' : 'high',
+    };
+  };
+  const displayedNextAction = mapWorkerTaskToNextAction(pendingWorkerTasks[0]);
 
   const scrollToSection = (selector) => {
     const node = document.querySelector(selector);
@@ -1914,6 +1867,15 @@ export default function WorkerDashboard() {
   };
 
   const handleNextAction = (action) => {
+    const route = action?.route || '';
+    if (route.startsWith('/worker/dashboard#')) {
+      const hashRoute = `#${route.split('#')[1] || ''}`;
+      return handleNextAction({ ...action, route: hashRoute });
+    }
+    if (route.startsWith('/')) {
+      navigate(route);
+      return;
+    }
     switch (action?.route) {
       case '#documents-cv':
         triggerCvFileInput();
@@ -2052,6 +2014,32 @@ export default function WorkerDashboard() {
       readinessChecklist={readinessChecklist}
       support={supportCard}
     >
+      {pendingWorkerTasks.length > 0 ? (
+        <Card className="border border-red-200 bg-red-50/60 shadow-sm" data-testid="worker-action-required-section">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-lg text-slate-900">Action Required</CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <div className="space-y-2">
+              {pendingWorkerTasks.map((task) => (
+                <div key={task.key || task.title} className="flex flex-col gap-2 rounded-lg border border-red-100 bg-white p-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-slate-900">{task.title}</p>
+                    <p className="text-xs text-slate-600">{task.required ? 'Required before readiness clearance' : 'Action available'}</p>
+                  </div>
+                  <Button
+                    size="sm"
+                    className="w-full sm:w-auto"
+                    onClick={() => handleNextAction(mapWorkerTaskToNextAction(task))}
+                  >
+                    Open task
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
       {showNotificationsPanel && (
         <div className="fixed inset-x-4 top-20 z-50 mx-auto max-w-sm rounded-lg border border-slate-200 bg-white shadow-lg">
                   <div className="p-3 border-b border-slate-200 flex items-center justify-between">
@@ -3584,7 +3572,7 @@ export default function WorkerDashboard() {
                   const isHistoricalRejectedContract =
                     agreement.id === 'contract_acceptance' &&
                     (
-                      ['rejected', 'superseded', 'action_required'].includes(agreementContractState) ||
+                      ['rejected', 'rejected_reopen_required', 'superseded', 'action_required'].includes(agreementContractState) ||
                       agreement.rejected
                     ) &&
                     !(agreementContractState === 'pending_signature' && contractEligibility?.can_sign);

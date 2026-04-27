@@ -63,6 +63,15 @@ REISSUE_ELIGIBLE_STATUSES = {
     "action_required",
 }
 
+REISSUE_STATUS_ALIASES = {
+    "rejected_reopen_required": "rejected_reopen_required",
+    "rejected": "rejected",
+    "signed": "signed",
+    "fully_executed": "fully_executed",
+    "pending_signature": "pending_signature",
+    "action_required": "action_required",
+}
+
 _UNRESOLVED_CONTRACT_PATTERNS = [
     r"\bTBC\b",
     r"insert amount",
@@ -76,6 +85,13 @@ _UNRESOLVED_CONTRACT_PATTERNS = [
     r"Logo \(if required\)",
 ]
 
+_REQUIRED_CONTRACT_RENDER_FIELDS = (
+    "contract_start_date",
+    "continuous_service_date",
+    "hourly_rate",
+    "company_address",
+)
+
 
 def _has_unresolved_contract_markers(text: str) -> bool:
     hay = str(text or "")
@@ -83,6 +99,20 @@ def _has_unresolved_contract_markers(text: str) -> bool:
         if re.search(pattern, hay, flags=re.IGNORECASE):
             return True
     return False
+
+
+def _extract_missing_contract_fields(render_issue: str) -> list[str]:
+    """
+    Parse known required contract field names from renderer error text.
+    Keeps API responses structured for admin UX recovery actions.
+    """
+    message = str(render_issue or "")
+    lower = message.lower()
+    missing = []
+    for field in _REQUIRED_CONTRACT_RENDER_FIELDS:
+        if field.lower() in lower:
+            missing.append(field)
+    return missing
 
 
 def _build_contract_doc_for_signature(
@@ -269,11 +299,13 @@ async def generate_employee_contract(
     try:
         render_record = await ensure_agreement_rendered(db, employee, CONTRACT_AGREEMENT_TYPE)
     except ContractRenderError as exc:
+        render_issue = str(exc)
         raise HTTPException(
             status_code=409,
             detail={
                 "status": "action_required",
-                "render_issue": str(exc),
+                "render_issue": render_issue,
+                "missing_fields": _extract_missing_contract_fields(render_issue),
             },
         ) from exc
     except Exception as exc:
@@ -719,11 +751,13 @@ async def reissue_employee_contract(
                 detail="idempotency_key already used for a different source_contract_id",
             )
 
-    current_status = current_contract.get("status")
+    raw_current_status = current_contract.get("status")
+    normalized_current_status = str(raw_current_status or "").strip().lower()
+    current_status = REISSUE_STATUS_ALIASES.get(normalized_current_status, normalized_current_status)
     if current_status not in REISSUE_ELIGIBLE_STATUSES:
         raise HTTPException(
             status_code=409,
-            detail=f"Latest contract status '{current_status}' is not eligible for reissue",
+            detail=f"Latest contract status '{raw_current_status}' is not eligible for reissue",
         )
 
     # Validate current employee data before mutating old contract state.
@@ -736,11 +770,13 @@ async def reissue_employee_contract(
     try:
         render_record = await ensure_agreement_rendered(db, employee, CONTRACT_AGREEMENT_TYPE)
     except ContractRenderError as exc:
+        render_issue = str(exc)
         raise HTTPException(
             status_code=409,
             detail={
                 "status": "action_required",
-                "render_issue": str(exc),
+                "render_issue": render_issue,
+                "missing_fields": _extract_missing_contract_fields(render_issue),
             },
         ) from exc
     except Exception as exc:

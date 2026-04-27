@@ -155,12 +155,38 @@ class _FakeCollection:
     def __init__(self):
         self._docs: list[dict] = []
 
+    def _match_condition(self, actual, expected):
+        if isinstance(expected, dict):
+            for op, value in expected.items():
+                if op == "$ne":
+                    if actual == value:
+                        return False
+                elif op == "$exists":
+                    exists = actual is not None
+                    if bool(value) != exists:
+                        return False
+                else:
+                    # Keep tests strict and explicit for unsupported operators.
+                    return False
+            return True
+        return actual == expected
+
+    def _matches(self, doc, query):
+        for key, value in (query or {}).items():
+            if key == "$or":
+                if not any(self._matches(doc, part) for part in value):
+                    return False
+                continue
+            if not self._match_condition(doc.get(key), value):
+                return False
+        return True
+
     async def find_one(self, query=None, projection=None):
         if not self._docs:
             return None
         # Return first doc that matches non-id query keys
         for doc in self._docs:
-            if all(doc.get(k) == v for k, v in (query or {}).items() if k != "_id"):
+            if self._matches(doc, query or {}):
                 return {k: v for k, v in doc.items() if k != "_id"}
         return None
 
@@ -181,7 +207,7 @@ class _FakeCollection:
         docs = [
             {k: v for k, v in doc.items() if k != "_id"}
             for doc in self._docs
-            if all(doc.get(k) == v for k, v in query.items() if k != "_id")
+            if self._matches(doc, query)
         ]
 
         class _Cursor:
@@ -203,6 +229,7 @@ class _FakeDB:
         self.org_settings = _FakeCollection().with_doc(org_settings)
         self.contract_templates = _FakeCollection()
         self.agreement_acknowledgements = _FakeCollection()
+        self.generated_contracts = _FakeCollection()
 
 
 def _stored_url_counter():
@@ -449,3 +476,56 @@ class TestHandbookArtifactConsistency:
             assert state["system_issue"] is False
             assert state["status"] == "verified"
             assert state["state_label"] == "Handbook acknowledged and verified"
+
+
+class TestContractStatePriority:
+
+    def test_pending_signature_generated_contract_overrides_stale_rejected_ack(self):
+        db = _FakeDB(_ORG_SETTINGS)
+        employee = {"id": "emp_contract_priority_1", "name": "Priority Worker"}
+        db.agreement_acknowledgements.with_doc(
+            {
+                "id": "ack-old-rejected",
+                "employee_id": employee["id"],
+                "agreement_type": "contract_acceptance",
+                "verification_status": "rejected",
+                "status": "rejected",
+                "contract_state": "rejected_reopen_required",
+                "template_version": "contract_acceptance_v_oldlegacy",
+                "rendered_file_url": "https://storage.test/old-rejected.pdf",
+                "rendered_contract_pdf_url": "https://storage.test/old-rejected.pdf",
+            }
+        )
+        db.generated_contracts.with_doc(
+            {
+                "id": "gc-new-pending",
+                "employee_id": employee["id"],
+                "status": "pending_signature",
+                "template_version": "contract_acceptance_v_canonical123",
+                "generated_at": "2026-04-27T10:00:00+00:00",
+                "created_at": "2026-04-27T10:00:00+00:00",
+                "rendered_contract_pdf_url": "https://storage.test/new-pending.pdf",
+                "file_url": "https://storage.test/new-pending.pdf",
+            }
+        )
+
+        async def _stub_ensure(*_args, **_kwargs):
+            # Return the stale rejected ack row to verify generated-contract priority.
+            return {
+                "id": "ack-old-rejected",
+                "employee_id": employee["id"],
+                "agreement_type": "contract_acceptance",
+                "verification_status": "rejected",
+                "status": "rejected",
+                "contract_state": "rejected_reopen_required",
+                "template_version": "contract_acceptance_v_oldlegacy",
+                "rendered_contract_pdf_url": "https://storage.test/old-rejected.pdf",
+            }
+
+        with patch("agreement_document_service.ensure_agreement_rendered", _stub_ensure):
+            state = asyncio.run(resolve_employee_agreement_state(db, employee, "contract_acceptance"))
+
+        assert state["contract_state"] == "pending_signature"
+        assert state["status"] == "pending_signature"
+        assert state["can_sign"] is True
+        assert state["file_url"] == "https://storage.test/new-pending.pdf"

@@ -57,6 +57,12 @@ class AgreementCompleteInput(BaseModel):
     signed_document_id: Optional[str] = None  # Optional supporting evidence
 
 
+class AgreementRegenerateInput(BaseModel):
+    reason: str
+    agreement_type: Optional[str] = None
+    submission_id: Optional[str] = None
+
+
 # ==================== LAZY SERVICE IMPORTS ====================
 # Services remain in server.py due to complex dependencies
 
@@ -234,7 +240,7 @@ async def unverify_agreement_acknowledgement(
 async def regenerate_agreement_acknowledgement(
     employee_id: str,
     acknowledgement_id: str,
-    reason: str = Body(..., embed=True),
+    data: AgreementRegenerateInput = Body(...),
     user: dict = Depends(require_manager_or_admin)
 ):
     """
@@ -249,7 +255,8 @@ async def regenerate_agreement_acknowledgement(
     For contracts this action is intentionally restricted: admins cannot
     discard a worker's executed signature; use reject/unverify instead.
     """
-    if not reason or len(reason.strip()) < 3:
+    reason = (data.reason or "").strip()
+    if not reason or len(reason) < 3:
         raise HTTPException(status_code=400, detail="Reason must be at least 3 characters")
 
     db = get_db()
@@ -257,6 +264,30 @@ async def regenerate_agreement_acknowledgement(
         {"id": acknowledgement_id, "employee_id": employee_id},
         {"_id": 0},
     )
+    # Handbook-only fallback when acknowledgement id is missing/null in payloads.
+    # Allows admin recovery by employee + type, optionally constrained by submission.
+    if not existing and acknowledgement_id in {"", "null", "none", "__fallback__", "fallback"}:
+        requested_type = (data.agreement_type or "").strip().lower()
+        if requested_type and requested_type != "handbook_acknowledgement":
+            raise HTTPException(
+                status_code=403,
+                detail="Fallback regenerate is only allowed for handbook_acknowledgement",
+            )
+        lookup_query = {
+            "employee_id": employee_id,
+            "agreement_type": "handbook_acknowledgement",
+        }
+        if data.submission_id:
+            lookup_query["submission_id"] = data.submission_id
+        existing = await db.agreement_acknowledgements.find_one(lookup_query, {"_id": 0})
+        if not existing:
+            existing = await db.agreement_acknowledgements.find_one(
+                {
+                    "employee_id": employee_id,
+                    "agreement_type": "handbook_acknowledgement",
+                },
+                {"_id": 0},
+            )
     if not existing:
         raise HTTPException(status_code=404, detail="Acknowledgement not found")
     if not employee_id:
@@ -318,9 +349,11 @@ async def regenerate_agreement_acknowledgement(
         {
             "employee_id": employee_id,
             "agreement_type": agreement_type,
-            "reason": reason.strip(),
+            "reason": reason,
             "regenerated_at": now_iso,
             "previous_row": snapshot,
+            "fallback_lookup": bool(acknowledgement_id in {"", "null", "none", "__fallback__", "fallback"}),
+            "submission_id": data.submission_id,
         },
     )
 

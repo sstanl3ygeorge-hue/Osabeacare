@@ -713,9 +713,13 @@ TRAINING_ALIASES = {
     "cstf_equality_diversity_and_human_rights": "equality_diversity",
     "equality_diversity_and_human_rights": "equality_diversity",
     "equality_diversity": "equality_diversity",
+    "equality_diversity_human_rights": "equality_diversity_human_rights",
     "cstf_nhs_conflict_resolution": "conflict_resolution",
     "nhs_conflict_resolution": "conflict_resolution",
     "conflict_resolution": "conflict_resolution",
+    "basic_life_support_adults": "basic_life_support_adults",
+    "paediatric_basic_life_support": "paediatric_basic_life_support",
+    "health_safety_welfare": "health_safety_welfare",
 }
 
 # Apply explicit canonical equivalencies (single source of truth layer).
@@ -870,9 +874,12 @@ _MANDATORY_KEYWORD_MAP = {
     "fire_safety": ["fire safety", "fire awareness", "fire marshal", "fire warden"],
     "health_and_safety": ["health and safety", "health safety", "health safety and welfare", "health and safety and welfare", "h s awareness"],
     "basic_life_support": ["basic life support", "bls", "first aid", "resuscitation", "cpr"],
+    "basic_life_support_adults": ["resuscitation adults", "adult resuscitation", "cpr adults"],
+    "paediatric_basic_life_support": ["paediatric resuscitation", "pediatric resuscitation", "paediatric basic life support", "pbls"],
     "infection_control": ["infection control", "infection prevention", "ipc"],
     "information_governance": ["information governance", "data protection", "gdpr", "confidentiality"],
     "prevent": ["prevent", "counter terrorism", "radicalisation", "prevent duty"],
+    "equality_diversity_human_rights": ["equality diversity and human rights", "equality and diversity and human rights", "equality diversity", "edi"],
     "news2_clinical_observations": ["news2", "news 2", "clinical observations", "vital signs"],
     "sepsis_awareness": ["sepsis"],
     "pressure_ulcer_prevention": ["pressure ulcer", "pressure sore", "tissue viability"],

@@ -919,6 +919,79 @@ async def resolve_employee_agreement_state(db, employee: Dict[str, Any], agreeme
     rejected = verification_status == "rejected"
 
     if agreement_type == CONTRACT_AGREEMENT_TYPE:
+        # Contract priority resolver:
+        # If a newer non-superseded generated contract exists, it is the primary
+        # worker/admin truth even if a stale acknowledgement row still says rejected.
+        generated_contract_rows = await db.generated_contracts.find(
+            {
+                "employee_id": employee_id,
+                "status": {"$ne": "superseded"},
+                "$or": [
+                    {"superseded_by_contract_id": {"$exists": False}},
+                    {"superseded_by_contract_id": None},
+                    {"superseded_by_contract_id": ""},
+                ],
+            },
+            {"_id": 0},
+        ).to_list(200)
+        latest_generated_contract = None
+        if generated_contract_rows:
+            generated_contract_rows.sort(
+                key=lambda row: (
+                    str(row.get("generated_at") or ""),
+                    str(row.get("created_at") or ""),
+                    str(row.get("id") or ""),
+                ),
+                reverse=True,
+            )
+            latest_generated_contract = generated_contract_rows[0]
+
+        if latest_generated_contract:
+            latest_status = str(latest_generated_contract.get("status") or "").strip().lower()
+            generated_to_state = {
+                "pending_signature": "pending_signature",
+                "signed": "awaiting_company_countersignature",
+                "fully_executed": "fully_executed",
+                "action_required": "rejected_reopen_required",
+                "rejected": "rejected_reopen_required",
+            }
+            resolved_state = generated_to_state.get(latest_status)
+            if resolved_state:
+                agreement = dict(agreement or {})
+                agreement["id"] = agreement.get("id") or f"agr_{CONTRACT_AGREEMENT_TYPE}_{employee_id}"
+                agreement["generated_contract_id"] = latest_generated_contract.get("id")
+                agreement["active_contract_id"] = latest_generated_contract.get("id")
+                agreement["template_version"] = (
+                    latest_generated_contract.get("template_version")
+                    or agreement.get("template_version")
+                )
+                agreement["rendered_contract_pdf_url"] = (
+                    latest_generated_contract.get("rendered_contract_pdf_url")
+                    or latest_generated_contract.get("file_url")
+                    or agreement.get("rendered_contract_pdf_url")
+                    or agreement.get("rendered_file_url")
+                )
+                agreement["rendered_file_url"] = (
+                    agreement.get("rendered_contract_pdf_url")
+                    or latest_generated_contract.get("rendered_file_url")
+                    or latest_generated_contract.get("file_url")
+                    or agreement.get("rendered_file_url")
+                )
+                agreement["worker_signed_contract_pdf_url"] = (
+                    latest_generated_contract.get("worker_signed_contract_pdf_url")
+                    or agreement.get("worker_signed_contract_pdf_url")
+                )
+                agreement["executed_contract_pdf_url"] = (
+                    latest_generated_contract.get("executed_contract_pdf_url")
+                    or agreement.get("executed_contract_pdf_url")
+                )
+                agreement["status"] = latest_status
+                agreement["contract_state"] = resolved_state
+                if resolved_state == "pending_signature":
+                    agreement["verification_status"] = "pending"
+                elif resolved_state == "fully_executed":
+                    agreement["verification_status"] = "verified"
+
         contract_state = agreement.get("contract_state") or "awaiting_worker_signature"
         canonical_contract = _is_canonical_contract_template_version(agreement.get("template_version"))
         contract_file_url = current_contract_artifact(agreement)
@@ -928,7 +1001,8 @@ async def resolve_employee_agreement_state(db, employee: Dict[str, Any], agreeme
             or agreement.get("worker_signed_at")
         )
         fully_executed = bool(contract_state == "fully_executed" or verification_status == "verified")
-        if rejected:
+        effective_rejected = bool(rejected and contract_state in ("rejected_reopen_required", "action_required"))
+        if effective_rejected:
             state_label = "Action required: please re-sign the updated contract"
         elif fully_executed:
             state_label = "Contract fully executed"
@@ -940,7 +1014,7 @@ async def resolve_employee_agreement_state(db, employee: Dict[str, Any], agreeme
             "agreement_type": agreement_type,
             "acknowledgement": agreement or {},
             "render_issue": render_error_detail,
-            "rejected": rejected,
+            "rejected": effective_rejected,
             "rejection_reason": agreement.get("rejection_reason"),
             "rejected_at": agreement.get("rejected_at"),
             "rejected_by_name": agreement.get("rejected_by_name"),
@@ -949,8 +1023,8 @@ async def resolve_employee_agreement_state(db, employee: Dict[str, Any], agreeme
             "verified": fully_executed,
             "fully_executed": fully_executed,
             "state_label": state_label,
-            "can_sign": bool(canonical_contract and contract_file_url and (bool(rejected) or contract_state in (None, "", "draft_rendered", "awaiting_worker_signature", "rejected_reopen_required"))),
-            "status": "rejected" if rejected else contract_state,
+            "can_sign": bool(canonical_contract and contract_file_url and (bool(effective_rejected) or contract_state in (None, "", "draft_rendered", "awaiting_worker_signature", "pending_signature", "rejected_reopen_required"))),
+            "status": "rejected" if effective_rejected else contract_state,
             "contract_state": contract_state,
             "file_url": contract_file_url,
             "download_url": contract_file_url,

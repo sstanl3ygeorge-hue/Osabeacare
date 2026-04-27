@@ -128,6 +128,48 @@ _EMPLOYMENT_READINESS_LABELS = {
     "system_issue_preventing_completion": "System issue preventing completion",
 }
 
+_WORKER_TASK_TRAINING_CODES = {"equality_diversity", "equality_and_diversity"}
+_WORKER_TASK_COMPLETED_STATUSES = {"verified", "completed", "due_soon"}
+
+
+def build_worker_tasks(training_eval: dict) -> list:
+    """
+    Build worker-facing actionable tasks from canonical backend data.
+    """
+    tasks: list = []
+    items = (training_eval or {}).get("items", []) or []
+
+    equality_item = next(
+        (
+            item
+            for item in items
+            if str(item.get("code") or "").strip().lower() in _WORKER_TASK_TRAINING_CODES
+            or (
+                "equality" in str(item.get("title") or "").lower()
+                and "diversity" in str(item.get("title") or "").lower()
+            )
+        ),
+        None,
+    )
+
+    if equality_item:
+        status = str(equality_item.get("status") or "").strip().lower()
+        if status not in _WORKER_TASK_COMPLETED_STATUSES:
+            tasks.append(
+                {
+                    "type": "training",
+                    "key": "equality_and_diversity",
+                    "title": "Complete Equality & Diversity Training",
+                    "required": True,
+                    "status": "pending",
+                    "action_route": "/worker/dashboard#training",
+                    "blocking_readiness": True,
+                    "source": "training_matrix",
+                }
+            )
+
+    return tasks
+
 
 def compute_employment_readiness(
     *,
@@ -1056,6 +1098,8 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
                 "verified": item.get("verified", False),
                 "source_document_id": item.get("source_document_id"),
             })
+
+    worker_tasks = build_worker_tasks(training_eval)
     
     # Get expiry alerts
     alerts = []
@@ -1337,6 +1381,22 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             handbook_rejected=bool(handbook_status.get("rejected")),
             handbook_system_issue=bool(handbook_status.get("system_issue")),
         )
+
+    has_blocking_worker_tasks = any(
+        task.get("status") == "pending" and task.get("blocking_readiness") is True
+        for task in worker_tasks
+    )
+    if has_blocking_worker_tasks and employment_readiness == "ready_for_work":
+        employment_readiness = "action_required_from_you"
+        employment_readiness_label = _EMPLOYMENT_READINESS_LABELS[employment_readiness]
+        employment_readiness_blockers = [
+            {
+                "type": "training_equality_and_diversity_pending",
+                "classification": "worker_action",
+                "label": "Complete Equality & Diversity training",
+                "actor": "worker",
+            }
+        ]
     # ─────────────────────────────────────────────────────────────────────────
 
     
@@ -1866,6 +1926,8 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
         "appraisals": appraisals_status,
         "recurring_compliance_summary": recurring_summary,
         "agreements": agreements_status
+        ,
+        "worker_tasks": worker_tasks,
     }
 
 

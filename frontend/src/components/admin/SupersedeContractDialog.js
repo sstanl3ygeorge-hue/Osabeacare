@@ -25,12 +25,15 @@ export default function SupersedeContractDialog({
   employeeId,
   employeeName,
   currentContract,
-  onSuccess
+  onSuccess,
+  onEditEmployeeContractDetails,
+  onEditOrganisationSettings,
 }) {
   const { token } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
   const [reason, setReason] = useState('');
   const [error, setError] = useState('');
+  const [missingFields, setMissingFields] = useState([]);
 
   const buildIdempotencyKey = () => {
     const sourceId = currentContract?.id || 'unknown-source';
@@ -48,6 +51,7 @@ export default function SupersedeContractDialog({
 
     setIsLoading(true);
     try {
+      setMissingFields([]);
       const payload = {
         reason: reason.trim(),
         idempotency_key: buildIdempotencyKey(),
@@ -62,10 +66,20 @@ export default function SupersedeContractDialog({
       );
 
       toast.success('New contract issued. Worker can now sign it.');
-      if (onSuccess) onSuccess();
+      if (onSuccess) {
+        await Promise.resolve(onSuccess());
+      }
       handleClose();
     } catch (err) {
-      toast.error(err.response?.data?.detail || 'Failed to reissue contract');
+      const detail = err.response?.data?.detail;
+      const message =
+        (typeof detail === 'string' && detail) ||
+        detail?.render_issue ||
+        detail?.detail ||
+        'Failed to reissue contract';
+      const fields = Array.isArray(detail?.missing_fields) ? detail.missing_fields : [];
+      setMissingFields(fields);
+      toast.error(message);
     } finally {
       setIsLoading(false);
     }
@@ -74,7 +88,20 @@ export default function SupersedeContractDialog({
   const handleClose = () => {
     setReason('');
     setError('');
+    setMissingFields([]);
     onClose();
+  };
+
+  const openEmployeeDetails = () => {
+    if (typeof onEditEmployeeContractDetails === 'function') {
+      onEditEmployeeContractDetails();
+    }
+  };
+
+  const openOrgSettings = () => {
+    if (typeof onEditOrganisationSettings === 'function') {
+      onEditOrganisationSettings();
+    }
   };
 
   return (
@@ -141,13 +168,35 @@ export default function SupersedeContractDialog({
               Minimum 20 characters. This will be logged in the audit trail.
             </p>
           </div>
+
+          {missingFields.length > 0 && (
+            <div className="p-4 bg-red-50 border border-red-200 rounded-lg space-y-2">
+              <p className="text-sm font-medium text-red-700">
+                Cannot reissue yet. Complete these required contract fields first.
+              </p>
+              <ul className="text-xs text-red-700 list-disc pl-5">
+                {missingFields.map((field) => (
+                  <li key={field}>{field}</li>
+                ))}
+              </ul>
+              <div className="flex flex-wrap gap-2 pt-1">
+                <Button type="button" size="sm" variant="outline" onClick={openEmployeeDetails}>
+                  Edit employee contract details
+                </Button>
+                <Button type="button" size="sm" variant="outline" onClick={openOrgSettings}>
+                  Edit organisation settings
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={handleClose} disabled={isLoading}>
+          <Button type="button" variant="outline" onClick={handleClose} disabled={isLoading}>
             Cancel
           </Button>
           <Button 
+            type="button"
             onClick={handleSupersede} 
             disabled={isLoading || !reason.trim()}
             className="bg-amber-600 hover:bg-amber-700 text-white"

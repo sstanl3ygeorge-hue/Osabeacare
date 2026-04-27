@@ -861,11 +861,22 @@ export default function AuditReadyTrainingMatrix({
     proposedItems,
     proposedItemsErrored: sourceErrors.proposedItems,
   });
-  const trainingDecisionState = sourceErrors.matrix || loadError
-    ? 'Cannot assess'
-    : mandatoryBlockers.length > 0
-      ? 'Blocked'
-      : 'Training ready';
+  let trainingDecisionState = 'Training ready';
+  if (loadError) {
+    trainingDecisionState = 'Cannot assess';
+  } else if (sourceErrors.matrix) {
+    trainingDecisionState = 'Matrix error';
+  }
+  const getDisplayStatus = (item) => {
+    const pendingExtractedMatch = !isMandatoryTrainingSatisfied(item)
+      ? getPendingExtractedMatch(item)
+      : null;
+    if (item?.status === 'missing' && pendingExtractedMatch) {
+      return 'pending';
+    }
+    return item?.status;
+  };
+
   const trainingDecisionClasses = trainingDecisionState === 'Training ready'
     ? {
         panel: 'border-emerald-200 bg-emerald-50',
@@ -879,33 +890,13 @@ export default function AuditReadyTrainingMatrix({
           icon: 'text-red-600',
           text: 'text-red-800',
           subtext: 'text-red-700',
-          const pendingExtractedMatch = !isMandatoryTrainingSatisfied(item)
-            ? getPendingExtractedMatch(item)
-            : null;
         }
-          if (item?.status === 'missing' && pendingExtractedMatch) {
-            return 'pending';
-          }
       : {
-          return item?.status;
+          panel: 'border-amber-200 bg-amber-50',
+          icon: 'text-amber-600',
+          text: 'text-amber-800',
+          subtext: 'text-amber-700',
         };
-                                <TableCell>{renderStatusBadge(getDisplayStatus(item))}</TableCell>
-                                  {item.verified || item.is_verified || getDisplayStatus(item) === 'verified' ? (
-                                  ) : getDisplayStatus(item) !== 'missing' ? (
-                                    <span className={cn(
-                                      "text-sm",
-                                      getDisplayStatus(item) === 'expired' ? 'text-red-600 font-medium' :
-                                      getDisplayStatus(item) === 'expiring_soon' ? 'text-amber-600' :
-                                      'text-gray-600'
-                                    )}>
-                                      {formatBackendDate(item.expires_at, { format: 'short' })}
-                                    </span>
-          <span className="ml-2 text-gray-500">Loading training records...</span>
-        </CardContent>
-      </Card>
-    );
-  }
-
   if (loadError) {
     return (
       <Card className="border-red-200" data-testid="training-matrix-error">
@@ -1622,8 +1613,8 @@ export default function AuditReadyTrainingMatrix({
                         {item.expires_at ? (
                             <span className={cn(
                               "text-sm",
-                              displayStatus === 'expired' ? 'text-red-600 font-medium' :
-                              displayStatus === 'expiring_soon' ? 'text-amber-600' :
+                              getDisplayStatus(item) === 'expired' ? 'text-red-600 font-medium' :
+                              getDisplayStatus(item) === 'expiring_soon' ? 'text-amber-600' :
                               'text-gray-600'
                             )}>
                               {formatBackendDate(item.expires_at, { format: 'short' })}
@@ -1639,7 +1630,7 @@ export default function AuditReadyTrainingMatrix({
                           <Badge variant="outline" className="text-gray-500">Optional</Badge>
                         )}
                       </TableCell>
-                      <TableCell>{renderStatusBadge(item.status)}</TableCell>
+                      <TableCell>{renderStatusBadge(getDisplayStatus(item))}</TableCell>
                       <TableCell>
                         {item.verified_by ? (
                           <div className="text-xs">
@@ -2142,3 +2133,4 @@ export default function AuditReadyTrainingMatrix({
     </div>
   );
 }
+

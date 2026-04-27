@@ -44,7 +44,23 @@ export function getAgreementDisplay(agreement, options = {}) {
 
   if (agreement.id === 'contract_acceptance') {
     const contractState = String(agreement.contract_state || agreement.status || '').trim().toLowerCase();
-    const canSign = contractEligibility?.can_sign ?? agreement.can_sign;
+    const hasWorkerSigned =
+      agreement.worker_signed ||
+      agreement.signed ||
+      Boolean(agreement.worker_signed_at || agreement.signed_at);
+    const canSign = contractState === 'pending_signature'
+      ? (agreement.can_sign ?? contractEligibility?.can_sign)
+      : (contractEligibility?.can_sign ?? agreement.can_sign);
+    if (hasWorkerSigned && contractState !== 'fully_executed') {
+      return {
+        tone: 'info',
+        badge: 'With Osabea',
+        title: 'Signed by you',
+        description: 'Your contract is with Osabea for the final countersignature.',
+        workerActionable: false,
+        ctaLabel: agreement.file_url || agreement.download_url ? 'View PDF' : null,
+      };
+    }
     if (canSign && contractState === 'pending_signature') {
       return {
         tone: 'critical',

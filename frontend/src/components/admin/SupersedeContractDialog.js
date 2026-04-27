@@ -91,6 +91,16 @@ export default function SupersedeContractDialog({
         detail?.detail ||
         'Failed to reissue contract';
       const fields = Array.isArray(detail?.missing_fields) ? detail.missing_fields : [];
+      const resolved = (detail && typeof detail === 'object' && detail.resolved_fields) ? detail.resolved_fields : {};
+      if (resolved && typeof resolved === 'object') {
+        setRenderFieldValues((prev) => ({
+          ...prev,
+          hourly_rate: resolved.hourly_rate || prev.hourly_rate,
+          company_address: resolved.company_address || prev.company_address,
+          contract_start_date: resolved.contract_start_date || prev.contract_start_date,
+          continuous_service_date: resolved.continuous_service_date || prev.continuous_service_date,
+        }));
+      }
       setMissingFields(fields);
       toast.error(message);
     } finally {
@@ -141,8 +151,18 @@ export default function SupersedeContractDialog({
         detail?.detail ||
         'Failed to save fields and reissue contract';
       const fields = Array.isArray(detail?.missing_fields) ? detail.missing_fields : [];
+      const resolved = (detail && typeof detail === 'object' && detail.resolved_fields) ? detail.resolved_fields : {};
       if (fields.length > 0) {
         setMissingFields(fields);
+      }
+      if (resolved && typeof resolved === 'object') {
+        setRenderFieldValues((prev) => ({
+          ...prev,
+          hourly_rate: resolved.hourly_rate || prev.hourly_rate,
+          company_address: resolved.company_address || prev.company_address,
+          contract_start_date: resolved.contract_start_date || prev.contract_start_date,
+          continuous_service_date: resolved.continuous_service_date || prev.continuous_service_date,
+        }));
       }
       toast.error(message);
     } finally {

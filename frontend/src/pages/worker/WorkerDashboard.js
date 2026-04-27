@@ -1806,7 +1806,10 @@ export default function WorkerDashboard() {
     contractAgreement?.state ||
     ''
   ).trim().toLowerCase();
-  const hasPendingSignableContract = contractLifecycleStatus === 'pending_signature' && Boolean(contractEligibility?.can_sign);
+  const effectiveContractCanSign = contractLifecycleStatus === 'pending_signature'
+    ? Boolean(contractAgreement?.can_sign ?? contractEligibility?.can_sign)
+    : Boolean(contractEligibility?.can_sign ?? contractAgreement?.can_sign);
+  const hasPendingSignableContract = contractLifecycleStatus === 'pending_signature' && effectiveContractCanSign;
   const contractNeedsReissueMessage = !hasPendingSignableContract && (
     ['rejected', 'superseded', 'action_required'].includes(contractLifecycleStatus) ||
     contractLifecycleStatus !== 'pending_signature'
@@ -1881,11 +1884,14 @@ export default function WorkerDashboard() {
         triggerCvFileInput();
         return;
       case '#agreements-contract':
-        if (contractDisplay.workerActionable && contractEligibility?.can_sign) {
+        if (contractDisplay.workerActionable && effectiveContractCanSign) {
           setShowSignaturePad(true);
           return;
         }
         scrollToSection('[data-testid="agreements-section"]');
+        return;
+      case '#forms':
+        scrollToSection('[data-testid="forms-section"]') || scrollToSection('[data-testid="employment-readiness-checklist"]');
         return;
       case '#agreements-handbook':
         if (handbookAgreement && handbookDisplay.workerActionable && (handbookAgreement.file_url || handbookAgreement.download_url)) {
@@ -2483,8 +2489,8 @@ export default function WorkerDashboard() {
         </Card>
         )}
 
-        {/* Forms Section - Only for onboarding */}
-        {!isActiveEmployee && <FormsSection />}
+        {/* Forms Section */}
+        <FormsSection />
 
         {/* Employment History & Gaps — visible during onboarding and for active employees */}
         <EmploymentGapsSection />
@@ -3408,11 +3414,9 @@ export default function WorkerDashboard() {
         )}
 
         {/* ========== INDUCTION CHECKLIST (P1: Worker Dashboard Sync) ========== */}
-        {!isActiveEmployee && (
-          <div data-testid="induction-section">
-            <CareCertificateInductionPanel />
-          </div>
-        )}
+        <div data-testid="induction-section">
+          <CareCertificateInductionPanel />
+        </div>
 
         {/* ========== COMPETENCY ASSESSMENTS (P1: Worker Dashboard) ========== */}
         {isActiveEmployee && competency_assessments && competency_assessments.length > 0 && (
@@ -3575,7 +3579,7 @@ export default function WorkerDashboard() {
                       ['rejected', 'rejected_reopen_required', 'superseded', 'action_required'].includes(agreementContractState) ||
                       agreement.rejected
                     ) &&
-                    !(agreementContractState === 'pending_signature' && contractEligibility?.can_sign);
+                    !(agreementContractState === 'pending_signature' && effectiveContractCanSign);
                   const compactDescription = truncateAgreementCardText(agreementDisplay.description, 160);
                   const compactTitle = agreement.id === 'handbook_acknowledgement'
                     ? 'Employee Handbook'
@@ -3679,7 +3683,7 @@ export default function WorkerDashboard() {
                             </Button>
                           </>
                         )}
-                        {agreement.id === 'contract_acceptance' && agreementDisplay.workerActionable && contractEligibility?.can_sign && (
+                        {agreement.id === 'contract_acceptance' && agreementDisplay.workerActionable && effectiveContractCanSign && (
                           <Button
                             size="sm"
                             className="gap-1 whitespace-nowrap"

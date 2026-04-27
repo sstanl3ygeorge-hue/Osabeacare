@@ -190,6 +190,22 @@ class TestNoUnreplacedPlaceholders:
         assert "12.50" in all_text, "Hourly rate not found in rendered contract"
         assert "(insert amount)" not in all_text, "Legacy pay-rate placeholder survived"
 
+    def test_contract_contains_expected_live_address_and_rate(self):
+        """Regression: address/rate must render exactly from canonical values."""
+        employee = {**_COMPLETE_EMPLOYEE, "hourly_rate": "12.98"}
+        org = {
+            "organisation_name": "Osabea Healthcare Solutions Ltd",
+            "company_address": "Suite FA4D\n1 St Faith's Street, Maidstone Kent\nME14 1LH",
+        }
+        pdf_bytes = _render_contract_pdf(employee, org)
+        from PyPDF2 import PdfReader
+        reader = PdfReader(io.BytesIO(pdf_bytes))
+        all_text = "\n".join(page.extract_text() or "" for page in reader.pages)
+        assert "Suite FA4D" in all_text
+        assert "1 St Faith's Street, Maidstone Kent" in all_text
+        assert "ME14 1LH" in all_text
+        assert "12.98" in all_text
+
     def test_pdf_template_path_not_used(self):
         """Rendering must use the DOCX template; the PDF-overlay path is dead."""
         import asyncio
@@ -420,6 +436,19 @@ class TestContractQualityGuards:
         fields = _resolve_contract_fields(_COMPLETE_EMPLOYEE, _ORG_SETTINGS_NO_ADDRESS)
         with pytest.raises(ContractRenderError, match="company_address"):
             _validate_contract_fields(fields)
+
+    def test_org_settings_address_precedence_over_employee_override(self):
+        """Org settings address must win over stale employee override values."""
+        employee = {
+            **_COMPLETE_EMPLOYEE,
+            "contract_render_overrides": {"company_address": "Stale Address B"},
+        }
+        org = {
+            "organisation_name": "Osabea Healthcare Solutions Ltd",
+            "company_address": "Address A",
+        }
+        fields = _resolve_contract_fields(employee, org)
+        assert fields.get("company_address") == "Address A"
 
     def test_missing_organisation_name_raises_on_render(self):
         """Org settings without a legal/company name must block rendering."""

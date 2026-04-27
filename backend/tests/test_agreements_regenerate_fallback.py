@@ -29,12 +29,32 @@ class _FakeCollection:
                 return out
         return None
 
+    def find(self, query=None, projection=None):
+        rows = []
+        for doc in self.docs:
+            if self._matches(doc, query or {}):
+                out = dict(doc)
+                if projection and projection.get("_id") == 0:
+                    out.pop("_id", None)
+                rows.append(out)
+
+        class _Cursor:
+            def __init__(self, docs):
+                self.docs = docs
+
+            async def to_list(self, _length=None):
+                return list(self.docs)
+
+        return _Cursor(rows)
+
     async def update_one(self, query, update):
         for idx, doc in enumerate(self.docs):
             if self._matches(doc, query or {}):
                 merged = dict(doc)
                 for k, v in (update.get("$set") or {}).items():
                     merged[k] = v
+                for k in (update.get("$unset") or {}).keys():
+                    merged.pop(k, None)
                 self.docs[idx] = merged
                 return SimpleNamespace(modified_count=1)
         return SimpleNamespace(modified_count=0)
@@ -119,3 +139,71 @@ def test_contract_reset_blocked_on_fallback_path(monkeypatch):
         },
     )
     assert res.status_code == 403
+
+
+def test_agreement_recover_contract_reuses_reissue(monkeypatch):
+    db = _FakeDb()
+    db.employees.docs.append({"id": "emp-1", "first_name": "A", "last_name": "B"})
+    client = _build_client(monkeypatch, db)
+
+    called = {"patch": False, "reissue": False}
+
+    async def _fake_patch_contract_render_fields(*, employee_id, request, user):
+        called["patch"] = True
+        assert employee_id == "emp-1"
+        body = await request.json()
+        assert body["hourly_rate"] == "12.50"
+        return {"ok": True}
+
+    async def _fake_reissue_employee_contract(*, employee_id, request, user):
+        called["reissue"] = True
+        assert employee_id == "emp-1"
+        body = await request.json()
+        assert body["reason"] == "Recover stuck contract"
+        return {"new_contract": {"id": "new-1", "status": "pending_signature"}}
+
+    import routes.contracts as contracts
+    monkeypatch.setattr(contracts, "update_contract_render_fields", _fake_patch_contract_render_fields)
+    monkeypatch.setattr(contracts, "reissue_employee_contract", _fake_reissue_employee_contract)
+
+    res = client.post(
+        "/api/employees/emp-1/agreements/recover",
+        json={
+            "agreement_type": "contract_acceptance",
+            "reason": "Recover stuck contract",
+            "render_fields": {"hourly_rate": "12.50"},
+        },
+    )
+    assert res.status_code == 200
+    assert called["patch"] is True
+    assert called["reissue"] is True
+    assert res.json()["result"]["new_contract"]["id"] == "new-1"
+
+
+def test_agreement_recover_handbook_resets_pending(monkeypatch):
+    db = _FakeDb()
+    db.employees.docs.append({"id": "emp-1", "first_name": "A", "last_name": "B"})
+    db.agreement_acknowledgements.docs.append(
+        {
+            "id": "ack-hb-1",
+            "employee_id": "emp-1",
+            "agreement_type": "handbook_acknowledgement",
+            "status": "rejected",
+            "verification_status": "rejected",
+            "rejection_reason": "bad state",
+        }
+    )
+    client = _build_client(monkeypatch, db)
+
+    res = client.post(
+        "/api/employees/emp-1/agreements/recover",
+        json={
+            "agreement_type": "handbook_acknowledgement",
+            "reason": "Recover handbook row",
+        },
+    )
+    assert res.status_code == 200
+    row = db.agreement_acknowledgements.docs[0]
+    assert row["status"] == "pending"
+    assert row["verification_status"] == "pending"
+    assert row.get("acknowledged") is False

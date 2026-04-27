@@ -329,6 +329,43 @@ export default function AgreementRow({
     }
   };
 
+  const handleRecoverAgreement = async () => {
+    const reason = prompt('Enter recovery reason (min 3 characters):');
+    if (!reason || reason.trim().length < 3) {
+      if (reason) toast.error('Reason must be at least 3 characters');
+      return;
+    }
+
+    setIsProcessing(true);
+    try {
+      const payload = {
+        agreement_type: key,
+        reason: reason.trim(),
+      };
+      await axios.post(
+        `${API}/employees/${employeeId}/agreements/recover`,
+        payload,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success(
+        key === 'contract_acceptance'
+          ? 'Agreement recovered. Worker can sign the latest contract.'
+          : 'Agreement recovered. Worker can review and acknowledge handbook.'
+      );
+      if (onRefresh) onRefresh();
+    } catch (err) {
+      const detail = err.response?.data?.detail;
+      const message =
+        (typeof detail === 'string' && detail) ||
+        detail?.render_issue ||
+        detail?.detail ||
+        'Failed to recover agreement';
+      toast.error(message);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   // Handle PDF export
   const handleExportPDF = async () => {
     if (key === 'contract_acceptance' && contractArtifactUrl) {
@@ -462,6 +499,23 @@ export default function AgreementRow({
                 >
                   <RotateCcw className="h-3.5 w-3.5 mr-1" />
                   Reissue contract
+                </Button>
+              )}
+
+              {((key === 'contract_acceptance' && contractNeedsReissue) ||
+                (key === 'handbook_acknowledgement' && ['rejected', 'submitted', 'not_sent'].includes(lifecycleStatus))) && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleRecoverAgreement();
+                  }}
+                  disabled={isProcessing}
+                  className="h-8 text-xs rounded-lg"
+                >
+                  <RotateCcw className="h-3.5 w-3.5 mr-1" />
+                  Recover / rebuild agreement
                 </Button>
               )}
 

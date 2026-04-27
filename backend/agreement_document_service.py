@@ -127,6 +127,17 @@ class HandbookRenderError(Exception):
 
 
 def _resolve_contract_fields(employee: Dict[str, Any], org_settings: Optional[Dict[str, Any]]) -> Dict[str, str]:
+    def _first_non_empty(*values):
+        for value in values:
+            if value is None:
+                continue
+            if isinstance(value, str):
+                if value.strip():
+                    return value.strip()
+                continue
+            return value
+        return None
+
     issue_date = _format_date(_utcnow())
     contract_start = (
         employee.get("contract_start_date")
@@ -148,6 +159,11 @@ def _resolve_contract_fields(employee: Dict[str, Any], org_settings: Optional[Di
         or None
     )
     settings = org_settings or {}
+    render_overrides = dict(employee.get("contract_render_overrides") or {})
+    employment_details = dict(employee.get("employment_details") or {})
+    pay = dict(employee.get("pay") or {})
+    payroll = dict(employee.get("payroll") or {})
+    compensation = dict(employee.get("compensation") or {})
     org_name = (
         settings.get("organisation_name")
         or settings.get("company_name")
@@ -156,19 +172,33 @@ def _resolve_contract_fields(employee: Dict[str, Any], org_settings: Optional[Di
     )
     # Address must be a real street address, not the company name.
     # Sources in priority order; company name is explicitly excluded as a fallback.
-    org_address = (
-        settings.get("organisation_address")
-        or settings.get("business_address")
-        or settings.get("registered_address")
-        or settings.get("address")
+    org_address = _first_non_empty(
+        settings.get("company_address"),
+        settings.get("organisation_address"),
+        settings.get("business_address"),
+        settings.get("registered_address"),
+        settings.get("address"),
+        settings.get("companyAddress"),
+        settings.get("registeredOfficeAddress"),
+        render_overrides.get("company_address"),
     ) or None  # None signals that address has not been configured
     # Hourly rate: try multiple field names used across different data models
-    hourly_rate_raw = (
-        employee.get("hourly_rate")
-        or employee.get("pay_rate")
-        or employee.get("rate")
-        or employee.get("base_rate")
-        or employee.get("wage_rate")
+    hourly_rate_raw = _first_non_empty(
+        employee.get("hourly_rate"),
+        employee.get("pay_rate"),
+        employee.get("rate"),
+        employee.get("base_rate"),
+        employee.get("wage_rate"),
+        render_overrides.get("hourly_rate"),
+        employment_details.get("hourly_rate"),
+        employment_details.get("pay_rate"),
+        employment_details.get("rate"),
+        pay.get("hourly_rate"),
+        pay.get("rate"),
+        payroll.get("hourly_rate"),
+        payroll.get("rate"),
+        compensation.get("hourly_rate"),
+        compensation.get("rate"),
     )
     commencement_wording = "will commence"
     if contract_start:
@@ -853,7 +883,16 @@ async def resolve_employee_agreement_state(db, employee: Dict[str, Any], agreeme
         ) or {}
 
     rows = await db.agreement_acknowledgements.find(
-        {"employee_id": employee_id, "agreement_type": agreement_type},
+        {
+            "employee_id": employee_id,
+            "agreement_type": agreement_type,
+            "status": {"$ne": "superseded"},
+            "$or": [
+                {"superseded_by_acknowledgement_id": {"$exists": False}},
+                {"superseded_by_acknowledgement_id": None},
+                {"superseded_by_acknowledgement_id": ""},
+            ],
+        },
         {"_id": 0},
     ).to_list(20)
     if rows:

@@ -460,6 +460,99 @@ def test_reissue_blocks_when_canonical_render_fails(monkeypatch):
     assert "company_address" in body["detail"].get("missing_fields", [])
 
 
+def test_reissue_hydrates_company_address_from_org_company_address(monkeypatch):
+    fake_db = _FakeDb()
+    _seed_employee_and_contract(fake_db, status="rejected")
+    fake_db.org_settings.docs = [{"id": "default", "company_address": "Suite FA4D, 1 St Faith's Street, Maidstone Kent"}]
+    client, _ = _build_client(monkeypatch, fake_db)
+
+    captured = {}
+
+    async def _ensure_with_capture(_db, employee, agreement_type):
+        captured["employee"] = dict(employee)
+        return {
+            "template_version": "contract_acceptance_v_testcanon123",
+            "template_source_name": "zero_hour_contract_template.docx",
+            "rendered_at": "2026-04-27T00:00:00+00:00",
+            "rendered_file_url": f"https://example.test/contracts/{employee['id']}.pdf",
+            "rendered_contract_pdf_url": f"https://example.test/contracts/{employee['id']}.pdf",
+        }
+
+    monkeypatch.setattr(contracts, "ensure_agreement_rendered", _ensure_with_capture)
+
+    res = client.post(
+        "/api/employees/emp-1/contract/reissue",
+        json={"reason": "Contract rejected, recover from company address source", "source_contract_id": "old-1"},
+    )
+    assert res.status_code == 200
+
+    # Reissue succeeds without manual modal typing when company_address exists in org settings.
+    assert res.json()["new_contract"]["status"] == "pending_signature"
+
+
+def test_reissue_hydrates_hourly_rate_from_nested_pay_record(monkeypatch):
+    fake_db = _FakeDb()
+    _seed_employee_and_contract(fake_db, status="rejected")
+    fake_db.employees.docs[0].pop("hourly_rate", None)
+    fake_db.employees.docs[0]["employment_details"] = {"hourly_rate": "12.98"}
+    client, _ = _build_client(monkeypatch, fake_db)
+
+    async def _ensure_with_hourly(_db, employee, agreement_type):
+        assert employee.get("hourly_rate") == "12.98"
+        return {
+            "template_version": "contract_acceptance_v_testcanon123",
+            "template_source_name": "zero_hour_contract_template.docx",
+            "rendered_at": "2026-04-27T00:00:00+00:00",
+            "rendered_file_url": f"https://example.test/contracts/{employee['id']}.pdf",
+            "rendered_contract_pdf_url": f"https://example.test/contracts/{employee['id']}.pdf",
+        }
+
+    monkeypatch.setattr(contracts, "ensure_agreement_rendered", _ensure_with_hourly)
+
+    res = client.post(
+        "/api/employees/emp-1/contract/reissue",
+        json={"reason": "Contract rejected, recover from pay record source", "source_contract_id": "old-1"},
+    )
+    assert res.status_code == 200
+    assert fake_db.employees.docs[0]["hourly_rate"] == "12.98"
+
+
+def test_reissue_prefers_org_address_over_stale_employee_override(monkeypatch):
+    fake_db = _FakeDb()
+    _seed_employee_and_contract(fake_db, status="rejected")
+    fake_db.org_settings.docs = [{"id": "default", "company_address": "Address A"}]
+    fake_db.employees.docs[0]["contract_render_overrides"] = {"company_address": "Stale Address B"}
+    client, _ = _build_client(monkeypatch, fake_db)
+
+    res = client.post(
+        "/api/employees/emp-1/contract/reissue",
+        json={"reason": "Recover using canonical org address", "source_contract_id": "old-1"},
+    )
+    assert res.status_code == 200
+    assert fake_db.org_settings.docs[0]["company_address"] == "Address A"
+    assert fake_db.employees.docs[0]["contract_render_overrides"]["company_address"] == "Stale Address B"
+
+
+def test_explicit_render_field_override_updates_org_address_for_reissue(monkeypatch):
+    fake_db = _FakeDb()
+    _seed_employee_and_contract(fake_db, status="rejected")
+    fake_db.org_settings.docs = [{"id": "default", "company_address": "Address A"}]
+    client, _ = _build_client(monkeypatch, fake_db)
+
+    patch_res = client.patch(
+        "/api/employees/emp-1/contract/render-fields",
+        json={"company_address": "Address B"},
+    )
+    assert patch_res.status_code == 200
+    assert fake_db.org_settings.docs[0]["company_address"] == "Address B"
+
+    reissue_res = client.post(
+        "/api/employees/emp-1/contract/reissue",
+        json={"reason": "Recover after explicit override", "source_contract_id": "old-1"},
+    )
+    assert reissue_res.status_code == 200
+
+
 def test_patch_render_fields_saves_employee_and_org_values(monkeypatch):
     fake_db = _FakeDb()
     _seed_employee_and_contract(fake_db, status="rejected")

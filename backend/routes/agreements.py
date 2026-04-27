@@ -63,6 +63,12 @@ class AgreementRegenerateInput(BaseModel):
     submission_id: Optional[str] = None
 
 
+class AgreementRecoverInput(BaseModel):
+    agreement_type: str
+    reason: str
+    render_fields: Optional[dict] = None
+
+
 # ==================== LAZY SERVICE IMPORTS ====================
 # Services remain in server.py due to complex dependencies
 
@@ -360,6 +366,192 @@ async def regenerate_agreement_acknowledgement(
     return {
         "success": True,
         "message": "Acknowledgement regenerated. Worker can now re-acknowledge.",
+        "agreement": fresh,
+    }
+
+
+@router.post("/employees/{employee_id}/agreements/recover")
+async def recover_agreement(
+    employee_id: str,
+    data: AgreementRecoverInput = Body(...),
+    user: dict = Depends(require_manager_or_admin),
+):
+    """
+    Unified admin recovery endpoint for stuck agreements.
+
+    - contract_acceptance: apply optional render_fields, then reissue
+    - handbook_acknowledgement: supersede stale rows and rebuild a fresh pending row
+    """
+    agreement_type = (data.agreement_type or "").strip().lower()
+    reason = (data.reason or "").strip()
+    if agreement_type not in {"contract_acceptance", "handbook_acknowledgement"}:
+        raise HTTPException(status_code=400, detail="agreement_type must be contract_acceptance or handbook_acknowledgement")
+    if len(reason) < 3:
+        raise HTTPException(status_code=400, detail="Reason must be at least 3 characters")
+
+    db = get_db()
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    if agreement_type == "contract_acceptance":
+        # Optional inline render-fields save to break dead-end recovery loops.
+        render_fields = data.render_fields or {}
+        if render_fields:
+            from .contracts import update_contract_render_fields
+
+            class _InlineRequest:
+                def __init__(self, payload: dict):
+                    self._payload = payload
+
+                async def json(self):
+                    return self._payload
+
+            await update_contract_render_fields(
+                employee_id=employee_id,
+                request=_InlineRequest(
+                    {
+                        "hourly_rate": render_fields.get("hourly_rate"),
+                        "contract_start_date": render_fields.get("contract_start_date"),
+                        "continuous_service_date": render_fields.get("continuous_service_date"),
+                        "company_address": render_fields.get("company_address"),
+                    }
+                ),
+                user=user,
+            )
+
+        from .contracts import reissue_employee_contract
+        # Reuse hardened reissue flow (idempotency, race-guard, compensation).
+
+        class _InlineRequest:
+            def __init__(self, payload: dict):
+                self._payload = payload
+
+            async def json(self):
+                return self._payload
+
+        reissue_result = await reissue_employee_contract(
+            employee_id=employee_id,
+            request=_InlineRequest(
+                {
+                    "reason": reason,
+                    "source_contract_id": (data.render_fields or {}).get("source_contract_id"),
+                    "idempotency_key": (data.render_fields or {}).get("idempotency_key"),
+                }
+            ),
+            user=user,
+        )
+        return {
+            "success": True,
+            "agreement_type": agreement_type,
+            "message": "Contract recovered and reissued.",
+            "result": reissue_result,
+        }
+
+    # handbook_acknowledgement recovery
+    rows = await db.agreement_acknowledgements.find(
+        {"employee_id": employee_id, "agreement_type": "handbook_acknowledgement"},
+        {"_id": 0},
+    ).to_list(200)
+    if not rows:
+        rows = []
+
+    def _is_not_superseded(row):
+        if str(row.get("status") or "").strip().lower() == "superseded":
+            return False
+        if row.get("superseded_by_acknowledgement_id"):
+            return False
+        return True
+
+    active_rows = [r for r in rows if _is_not_superseded(r)]
+    sort_rows = active_rows or rows
+    sort_rows = sorted(
+        sort_rows,
+        key=lambda r: (
+            str(r.get("updated_at") or ""),
+            str(r.get("created_at") or ""),
+            str(r.get("id") or ""),
+        ),
+        reverse=True,
+    )
+    target = sort_rows[0] if sort_rows else None
+
+    if target:
+        # Archive all non-target handbook rows for clean active-state resolution.
+        for row in rows:
+            if row.get("id") == target.get("id"):
+                continue
+            await db.agreement_acknowledgements.update_one(
+                {"id": row.get("id"), "employee_id": employee_id},
+                {
+                    "$set": {
+                        "status": "superseded",
+                        "verification_status": "superseded",
+                        "superseded_at": now_iso,
+                        "superseded_by": user.get("user_id"),
+                        "supersede_reason": reason,
+                        "updated_at": now_iso,
+                    }
+                },
+            )
+
+        # Reset target to fresh worker-actionable pending state.
+        await db.agreement_acknowledgements.update_one(
+            {"id": target.get("id"), "employee_id": employee_id},
+            {
+                "$set": {
+                    "status": "pending",
+                    "verification_status": "pending",
+                    "acknowledged": False,
+                    "acknowledged_at": None,
+                    "recovered_at": now_iso,
+                    "recovered_by": user.get("user_id"),
+                    "recover_reason": reason,
+                    "updated_at": now_iso,
+                },
+                "$unset": {
+                    "rejection_reason": "",
+                    "rejected_at": "",
+                    "rejected_by": "",
+                    "rejected_by_name": "",
+                    "system_issue": "",
+                },
+            },
+        )
+
+    from agreement_document_service import ensure_agreement_rendered
+    try:
+        fresh = await ensure_agreement_rendered(db, employee, "handbook_acknowledgement")
+    except Exception as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "status": "action_required",
+                "render_issue": str(exc),
+                "missing_fields": [],
+            },
+        ) from exc
+
+    await log_audit_action(
+        user["user_id"],
+        "recover_agreement",
+        "agreement_acknowledgements",
+        target.get("id") if target else f"agr_handbook_acknowledgement_{employee_id}",
+        {
+            "employee_id": employee_id,
+            "agreement_type": "handbook_acknowledgement",
+            "reason": reason,
+            "route": f"POST /employees/{employee_id}/agreements/recover",
+            "timestamp": now_iso,
+        },
+    )
+
+    return {
+        "success": True,
+        "agreement_type": agreement_type,
+        "message": "Handbook acknowledgement recovered.",
         "agreement": fresh,
     }
 

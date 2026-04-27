@@ -153,6 +153,135 @@ def _validate_hourly_rate(value) -> str:
     return f"{numeric:.2f}"
 
 
+def _first_non_empty(*values):
+    for value in values:
+        if value is None:
+            continue
+        if isinstance(value, str):
+            if value.strip():
+                return value.strip()
+            continue
+        return value
+    return None
+
+
+def _resolve_inline_contract_fields(employee: dict, org_settings: dict) -> dict:
+    employee = employee or {}
+    org_settings = org_settings or {}
+    overrides = dict(employee.get("contract_render_overrides") or {})
+    employment_details = dict(employee.get("employment_details") or {})
+    pay = dict(employee.get("pay") or {})
+    payroll = dict(employee.get("payroll") or {})
+    compensation = dict(employee.get("compensation") or {})
+    resolved = {
+        "hourly_rate": _first_non_empty(
+            employee.get("hourly_rate"),
+            employee.get("pay_rate"),
+            employee.get("rate"),
+            employee.get("base_rate"),
+            employee.get("wage_rate"),
+            overrides.get("hourly_rate"),
+            employment_details.get("hourly_rate"),
+            employment_details.get("pay_rate"),
+            employment_details.get("rate"),
+            pay.get("hourly_rate"),
+            pay.get("rate"),
+            payroll.get("hourly_rate"),
+            payroll.get("rate"),
+            compensation.get("hourly_rate"),
+            compensation.get("rate"),
+        ),
+        "contract_start_date": _first_non_empty(
+            employee.get("contract_start_date"),
+            employee.get("start_date"),
+            employee.get("employment_start_date"),
+            employee.get("job_start_date"),
+            employee.get("onboarding_start_date"),
+            overrides.get("contract_start_date"),
+        ),
+        "continuous_service_date": _first_non_empty(
+            employee.get("continuous_service_date"),
+            employee.get("service_start_date"),
+            overrides.get("continuous_service_date"),
+        ),
+        "company_address": _first_non_empty(
+            org_settings.get("company_address"),
+            org_settings.get("organisation_address"),
+            org_settings.get("business_address"),
+            org_settings.get("registered_address"),
+            org_settings.get("address"),
+            org_settings.get("companyAddress"),
+            org_settings.get("registeredOfficeAddress"),
+            overrides.get("company_address"),
+        ),
+    }
+    return resolved
+
+
+async def _auto_hydrate_contract_render_fields(db, employee_id: str, user: dict) -> dict:
+    """
+    Fill canonical render fields from existing source-of-truth aliases so reissue
+    does not dead-end on data that already exists elsewhere.
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0}) or {}
+    org_settings = await db.org_settings.find_one({}, {"_id": 0}) or {}
+    resolved = _resolve_inline_contract_fields(employee, org_settings)
+
+    employee_updates = {}
+    overrides = dict(employee.get("contract_render_overrides") or {})
+    org_updates = {}
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    if resolved.get("hourly_rate") and not employee.get("hourly_rate"):
+        hourly_rate = _validate_hourly_rate(resolved["hourly_rate"])
+        employee_updates["hourly_rate"] = hourly_rate
+        overrides["hourly_rate"] = hourly_rate
+        resolved["hourly_rate"] = hourly_rate
+
+    if resolved.get("contract_start_date") and not employee.get("contract_start_date"):
+        try:
+            c_start = _validate_iso_date_like(str(resolved["contract_start_date"]), "contract_start_date")
+            employee_updates["contract_start_date"] = c_start
+            overrides["contract_start_date"] = c_start
+            resolved["contract_start_date"] = c_start
+        except HTTPException:
+            pass
+
+    if resolved.get("continuous_service_date") and not employee.get("continuous_service_date"):
+        try:
+            service_date = _validate_iso_date_like(str(resolved["continuous_service_date"]), "continuous_service_date")
+            employee_updates["continuous_service_date"] = service_date
+            overrides["continuous_service_date"] = service_date
+            resolved["continuous_service_date"] = service_date
+        except HTTPException:
+            pass
+
+    if resolved.get("company_address") and not _first_non_empty(
+        org_settings.get("company_address"),
+        org_settings.get("organisation_address"),
+    ):
+        org_updates["company_address"] = str(resolved["company_address"]).strip()
+        org_updates["organisation_address"] = str(resolved["company_address"]).strip()
+        overrides["company_address"] = str(resolved["company_address"]).strip()
+
+    if employee_updates or overrides:
+        employee_updates["contract_render_overrides"] = overrides
+        employee_updates["updated_at"] = now_iso
+        employee_updates["updated_by"] = user.get("user_id")
+        await db.employees.update_one({"id": employee_id}, {"$set": employee_updates})
+
+    if org_updates:
+        org_updates["updated_at"] = now_iso
+        org_updates["updated_by"] = user.get("user_id")
+        await db.org_settings.update_one(
+            {"id": "default"},
+            {"$set": org_updates, "$setOnInsert": {"id": "default", "created_at": now_iso}},
+            upsert=True,
+        )
+
+    return resolved
+
+
 def _build_contract_doc_for_signature(
     *,
     employee: dict,
@@ -1054,6 +1183,10 @@ async def reissue_employee_contract(
             status_code=400,
             detail=f"Employee data incomplete: {', '.join(validation['missing_fields'])}",
         )
+
+    resolved_render_fields = await _auto_hydrate_contract_render_fields(db, employee_id, user)
+    # Reload employee after hydration so renderer sees normalized values.
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0}) or employee
     try:
         render_record = await ensure_agreement_rendered(db, employee, CONTRACT_AGREEMENT_TYPE)
     except ContractRenderError as exc:
@@ -1086,6 +1219,7 @@ async def reissue_employee_contract(
                     "status": "action_required",
                     "render_issue": render_issue,
                     "missing_fields": _extract_missing_contract_fields(render_issue),
+                    "resolved_fields": resolved_render_fields,
                 },
             ) from exc
     except Exception as exc:
@@ -1094,6 +1228,7 @@ async def reissue_employee_contract(
             detail={
                 "status": "action_required",
                 "render_issue": f"Failed to render canonical contract: {exc}",
+                "resolved_fields": resolved_render_fields,
             },
         ) from exc
     if not str(render_record.get("template_version") or "").startswith(CANONICAL_CONTRACT_TEMPLATE_PREFIX):

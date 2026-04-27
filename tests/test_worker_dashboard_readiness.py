@@ -23,6 +23,7 @@ if _BACKEND not in sys.path:
 
 from routes.worker_dashboard import (  # noqa: E402
     EMPLOYMENT_READINESS_STATES,
+    build_worker_tasks,
     compute_employment_readiness,
 )
 
@@ -61,11 +62,12 @@ def test_states_tuple_is_canonical():
     )
 
 
-def test_active_employee_is_always_ready():
+def test_active_employee_still_surfaces_missing_required_actions():
     state, label, blockers = _call(is_active_employee=True)
-    assert state == "ready_for_work"
-    assert label == "Ready for Work"
-    assert blockers == []
+    assert state == "action_required_from_you"
+    assert label == "Action required from you"
+    assert "contract_unsigned" in _types(blockers)
+    assert "handbook_unacknowledged" in _types(blockers)
 
 
 def test_fully_cleared_worker_is_ready():
@@ -190,3 +192,21 @@ def test_each_blocker_has_required_keys():
     for b in blockers:
         assert required.issubset(b.keys()), b
         assert b["classification"] in valid_classifications, b
+
+
+def test_worker_tasks_include_equality_training_when_pending():
+    tasks = build_worker_tasks(
+        {"items": [{"code": "equality_diversity", "title": "Equality and Diversity", "status": "missing"}]},
+        readiness_blockers=[],
+        contract_status={},
+    )
+    assert any(task.get("key") == "equality_and_diversity" for task in tasks)
+
+
+def test_worker_tasks_include_sign_new_contract_when_pending_signature():
+    tasks = build_worker_tasks(
+        {"items": []},
+        readiness_blockers=[],
+        contract_status={"contract_state": "pending_signature", "can_sign": True},
+    )
+    assert any(task.get("key") == "sign_new_contract" for task in tasks)

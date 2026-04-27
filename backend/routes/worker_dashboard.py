@@ -132,11 +132,23 @@ _WORKER_TASK_TRAINING_CODES = {"equality_diversity", "equality_and_diversity"}
 _WORKER_TASK_COMPLETED_STATUSES = {"verified", "completed", "due_soon"}
 
 
-def build_worker_tasks(training_eval: dict) -> list:
+def build_worker_tasks(
+    training_eval: dict,
+    readiness_blockers: Optional[list] = None,
+    contract_status: Optional[dict] = None,
+) -> list:
     """
     Build worker-facing actionable tasks from canonical backend data.
     """
     tasks: list = []
+    seen_keys = set()
+
+    def _add_task(task: dict) -> None:
+        key = str(task.get("key") or task.get("type") or task.get("title") or "").strip().lower()
+        if not key or key in seen_keys:
+            return
+        seen_keys.add(key)
+        tasks.append(task)
     items = (training_eval or {}).get("items", []) or []
 
     equality_item = next(
@@ -155,7 +167,7 @@ def build_worker_tasks(training_eval: dict) -> list:
     if equality_item:
         status = str(equality_item.get("status") or "").strip().lower()
         if status not in _WORKER_TASK_COMPLETED_STATUSES:
-            tasks.append(
+            _add_task(
                 {
                     "type": "training",
                     "key": "equality_and_diversity",
@@ -167,6 +179,63 @@ def build_worker_tasks(training_eval: dict) -> list:
                     "source": "training_matrix",
                 }
             )
+
+    for blocker in readiness_blockers or []:
+        classification = str(blocker.get("classification") or "").strip().lower()
+        if classification != "worker_action":
+            continue
+        blocker_id = str(blocker.get("type") or "").strip().lower()
+        label = str(blocker.get("label") or "Complete required item").strip()
+        route = "/worker/dashboard#checks"
+        task_type = "readiness"
+        task_key = blocker_id or f"readiness_{len(seen_keys)+1}"
+
+        if "contract" in blocker_id:
+            route = "/worker/dashboard#agreements-contract"
+            task_type = "contract"
+        elif "handbook" in blocker_id:
+            route = "/worker/dashboard#agreements-handbook"
+            task_type = "handbook"
+        elif "training" in blocker_id or "equality" in blocker_id:
+            route = "/worker/dashboard#training"
+            task_type = "training"
+        elif "induction" in blocker_id or "care_certificate" in blocker_id:
+            route = "/worker/dashboard#induction"
+            task_type = "induction"
+        elif blocker_id in {"staff_health_questionnaire", "staff_personal_info", "hmrc_starter_checklist", "emergency_contacts"}:
+            route = "/worker/dashboard#forms"
+            task_type = "form"
+        elif blocker_id.startswith("reference_") or "employment_gap" in blocker_id:
+            route = "/worker/dashboard#checks"
+
+        _add_task(
+            {
+                "type": task_type,
+                "key": task_key,
+                "title": label,
+                "required": True,
+                "status": "pending",
+                "action_route": route,
+                "blocking_readiness": True,
+                "source": "readiness_blockers",
+            }
+        )
+
+    contract_state = str((contract_status or {}).get("contract_state") or (contract_status or {}).get("status") or "").strip().lower()
+    contract_can_sign = bool((contract_status or {}).get("can_sign"))
+    if contract_state == "pending_signature" and contract_can_sign:
+        _add_task(
+            {
+                "type": "contract",
+                "key": "sign_new_contract",
+                "title": "Sign new contract",
+                "required": True,
+                "status": "pending",
+                "action_route": "/worker/dashboard#agreements-contract",
+                "blocking_readiness": True,
+                "source": "contract_state",
+            }
+        )
 
     return tasks
 
@@ -259,10 +328,7 @@ def compute_employment_readiness(
 
     classifications = {b["classification"] for b in blockers}
 
-    if is_active_employee:
-        state = "ready_for_work"
-        blockers = []
-    elif contract_fully_executed and handbook_acknowledged and not classifications:
+    if contract_fully_executed and handbook_acknowledged and not classifications:
         state = "ready_for_work"
         blockers = []
     elif "system_issue" in classifications:
@@ -1099,7 +1165,7 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
                 "source_document_id": item.get("source_document_id"),
             })
 
-    worker_tasks = build_worker_tasks(training_eval)
+    worker_tasks = []
     
     # Get expiry alerts
     alerts = []
@@ -1333,17 +1399,13 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
                 "action": "upload"
             })
 
-    status = "READY" if is_active_employee else ("NOT_READY" if has_blockers else "READY")
+    status = "NOT_READY" if has_blockers else "READY"
 
     # ── Employment Readiness (5-state truth model) ───────────────────────────
     # Full state machine lives in `compute_employment_readiness()` at module
     # scope so it can be unit-tested without the DB.  See that helper for the
     # per-blocker classification / actor rules.
-    if is_active_employee:
-        employment_readiness = "ready_for_work"
-        employment_readiness_label = _EMPLOYMENT_READINESS_LABELS["ready_for_work"]
-        employment_readiness_blockers = []
-    elif 'unified_status' in locals() and isinstance(unified_status, dict):
+    if 'unified_status' in locals() and isinstance(unified_status, dict):
         if unified_blockers:
             if any(blocker.get("blocker_class") == "internal" and blocker.get("gate") == "handbook_render" for blocker in unified_blockers):
                 employment_readiness = "system_issue_preventing_completion"
@@ -1382,6 +1444,12 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             handbook_system_issue=bool(handbook_status.get("system_issue")),
         )
 
+    worker_tasks = build_worker_tasks(
+        training_eval,
+        readiness_blockers=employment_readiness_blockers,
+        contract_status=contract_status,
+    )
+
     has_blocking_worker_tasks = any(
         task.get("status") == "pending" and task.get("blocking_readiness") is True
         for task in worker_tasks
@@ -1400,58 +1468,57 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
     # ─────────────────────────────────────────────────────────────────────────
 
     
-    # Get form status for onboarding employees
+    # Get form status (state-driven from canonical requirements + completion rows)
     forms_status = []
-    if not is_active_employee:
-        _emp_role_for_forms = (employee.get("job_role") or employee.get("role") or "").lower()
+    _emp_role_for_forms = (employee.get("job_role") or employee.get("role") or "").lower()
         # Canonical truth for forms (matches admin's UCE rules, including the
         # CQC tightening that staff_health_questionnaire requires a reviewed
         # health declaration with fit/conditional outcome — not just a
         # signed-off submission). Worker must NOT show "Verified" while admin
         # still sees a pending health declaration review.
-        try:
-            _canonical_forms_items = (
-                (unified_status or {}).get("category_details", {}).get("forms", {}).get("items", []) or []
+    try:
+        _canonical_forms_items = (
+            (unified_status or {}).get("category_details", {}).get("forms", {}).get("items", []) or []
+        )
+    except NameError:
+        _canonical_forms_items = []
+    _canonical_form_by_id = {item.get("id"): item for item in _canonical_forms_items if item.get("id")}
+    for form_id, form_def in WORKER_FORM_DEFINITIONS.items():
+        # Skip role-aware forms if this worker's role is not in the required list
+        if form_def.get("role_aware") and form_def.get("roles_required"):
+            if not any(r in _emp_role_for_forms for r in form_def["roles_required"]):
+                continue
+        progress = await db.form_progress.find_one({
+            "employee_id": employee_id,
+            "form_id": form_id
+        }, {"_id": 0})
+            
+        submission = await db.form_submissions.find_one({
+            "employee_id": employee_id,
+            "form_type": form_id,
+            "status": {"$in": FORM_LOCKED_STATUSES}
+        }, {"_id": 0})
+            
+        form_status = "not_started"
+        saved_at = None
+        submitted_at = None
+        form_progress_pct = 0
+            
+        if submission:
+            raw_submission_status = submission.get("status", "submitted")
+            normalized_submission_status = await _canonicalize_health_form_worker_status(
+                db, employee_id, form_id, raw_submission_status
             )
-        except NameError:
-            _canonical_forms_items = []
-        _canonical_form_by_id = {item.get("id"): item for item in _canonical_forms_items if item.get("id")}
-        for form_id, form_def in WORKER_FORM_DEFINITIONS.items():
-            # Skip role-aware forms if this worker's role is not in the required list
-            if form_def.get("role_aware") and form_def.get("roles_required"):
-                if not any(r in _emp_role_for_forms for r in form_def["roles_required"]):
-                    continue
-            progress = await db.form_progress.find_one({
-                "employee_id": employee_id,
-                "form_id": form_id
-            }, {"_id": 0})
-            
-            submission = await db.form_submissions.find_one({
-                "employee_id": employee_id,
-                "form_type": form_id,
-                "status": {"$in": FORM_LOCKED_STATUSES}
-            }, {"_id": 0})
-            
-            form_status = "not_started"
-            saved_at = None
-            submitted_at = None
-            form_progress_pct = 0
-            
-            if submission:
-                raw_submission_status = submission.get("status", "submitted")
-                normalized_submission_status = await _canonicalize_health_form_worker_status(
-                    db, employee_id, form_id, raw_submission_status
-                )
-                form_status = "submitted" if normalized_submission_status == "submitted" else "verified"
-                submitted_at = submission.get("submitted_at")
-            elif progress:
-                form_status = "in_progress"
-                saved_at = progress.get("last_saved")
-                form_data = progress.get("data", {})
-                if form_data:
-                    filled_fields = sum(1 for v in form_data.values() if v)
-                    total_fields = len(form_data) or 1
-                    form_progress_pct = int((filled_fields / total_fields) * 100)
+            form_status = "submitted" if normalized_submission_status == "submitted" else "verified"
+            submitted_at = submission.get("submitted_at")
+        elif progress:
+            form_status = "in_progress"
+            saved_at = progress.get("last_saved")
+            form_data = progress.get("data", {})
+            if form_data:
+                filled_fields = sum(1 for v in form_data.values() if v)
+                total_fields = len(form_data) or 1
+                form_progress_pct = int((filled_fields / total_fields) * 100)
             
             # Canonical override: align with admin truth.
             # If the canonical engine says this form is NOT verified (e.g. health
@@ -1459,28 +1526,28 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             # worker must not see "Verified". Downgrade to "submitted" when a
             # locked submission exists, otherwise leave the in-progress/not_started
             # state alone.
-            canonical_item = _canonical_form_by_id.get(form_id)
-            if canonical_item is not None:
-                canonical_verified = bool(canonical_item.get("verified") or canonical_item.get("completed"))
-                canonical_submitted = bool(canonical_item.get("submitted"))
-                if form_status == "verified" and not canonical_verified:
-                    form_status = "submitted" if canonical_submitted else form_status
-                elif form_status == "submitted" and canonical_verified:
-                    # Inverse alignment: if admin has reviewed but the local
-                    # submission row is still tagged "submitted", trust the
-                    # canonical truth.
-                    form_status = "verified"
+        canonical_item = _canonical_form_by_id.get(form_id)
+        if canonical_item is not None:
+            canonical_verified = bool(canonical_item.get("verified") or canonical_item.get("completed"))
+            canonical_submitted = bool(canonical_item.get("submitted"))
+            if form_status == "verified" and not canonical_verified:
+                form_status = "submitted" if canonical_submitted else form_status
+            elif form_status == "submitted" and canonical_verified:
+                # Inverse alignment: if admin has reviewed but the local
+                # submission row is still tagged "submitted", trust the
+                # canonical truth.
+                form_status = "verified"
             
-            forms_status.append({
-                "id": form_id,
-                "name": form_def["name"],
-                "description": form_def.get("description", ""),
-                "required": form_def.get("required", True),
-                "status": form_status,
-                "saved_at": saved_at,
-                "submitted_at": submitted_at,
-                "progress_percentage": form_progress_pct
-            })
+        forms_status.append({
+            "id": form_id,
+            "name": form_def["name"],
+            "description": form_def.get("description", ""),
+            "required": form_def.get("required", True),
+            "status": form_status,
+            "saved_at": saved_at,
+            "submitted_at": submitted_at,
+            "progress_percentage": form_progress_pct
+        })
     
     # Professional registration
     professional_registrations = employee.get("professional_registrations", [])

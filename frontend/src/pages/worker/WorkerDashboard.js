@@ -3589,6 +3589,9 @@ export default function WorkerDashboard() {
                     ) &&
                     !(agreementContractState === 'pending_signature' && contractEligibility?.can_sign);
                   const compactDescription = truncateAgreementCardText(agreementDisplay.description, 160);
+                  const compactTitle = agreement.id === 'handbook_acknowledgement'
+                    ? 'Employee Handbook'
+                    : agreement.name;
                   const toneClasses =
                     agreementDisplay.tone === 'critical'
                       ? 'bg-red-50 border-red-200'
@@ -3628,7 +3631,7 @@ export default function WorkerDashboard() {
                                 onClick={() => openDocumentViewer({ ...agreement, name: agreement.name })}
                               >
                                 <Eye className="h-3.5 w-3.5" />
-                                View PDF
+                                {agreement.id === 'handbook_acknowledgement' ? 'View handbook' : 'View PDF'}
                               </Button>
                               <Button
                                 size="sm"
@@ -3661,7 +3664,7 @@ export default function WorkerDashboard() {
                           )}
                         </div>
                         <div className="min-w-0 flex-1 w-full whitespace-normal break-normal [overflow-wrap:normal] [word-break:normal]">
-                          <span className="font-medium text-slate-700">{agreement.name}</span>
+                          <span className="font-medium text-slate-700">{compactTitle}</span>
                           <p className="text-xs text-slate-500 mt-0.5">{compactDescription}</p>
                         </div>
                         </div>
@@ -3675,7 +3678,7 @@ export default function WorkerDashboard() {
                               onClick={() => openDocumentViewer({ ...agreement, name: agreement.name })}
                             >
                               <Eye className="h-3.5 w-3.5" />
-                              View PDF
+                              {agreement.id === 'handbook_acknowledgement' ? 'View handbook' : 'View PDF'}
                             </Button>
                             <Button
                               size="sm"

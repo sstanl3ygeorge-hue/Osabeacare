@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import io
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -262,7 +263,8 @@ _HANDBOOK_ARTIFACT_PHRASES = [
     "(add duration of probation)",
     "(insert Registered Manager name)",
     "(insert grievance contact name)",
-    "(insert mileage rate)",
+    # Mileage placeholder is intentionally handled as a replacement below.
+    # Do not strip it here or we lose the value in rendered output.
     "iCubeDALPro",
     "Unit 12, Harrods Road, Harlow, CM19 5BJ",
 ]
@@ -361,6 +363,27 @@ def _replace_handbook_text(text: str, fields: Dict[str, Any]) -> str:
     }
     for token, val in token_map.items():
         updated = updated.replace(token, val)
+
+    # Replace known legacy inline placeholders (non-tokenized text) that
+    # still exist in older handbook DOCX content.
+    inline_map = {
+        "(insert mileage rate)": str(fields.get("mileage_rate") or "0.45"),
+    }
+    for old, new in inline_map.items():
+        updated = updated.replace(old, new)
+
+    # Some handbook templates contain a plain-language mileage sentence with no
+    # explicit token, e.g. "paid at a rate of" followed by an empty run. Ensure
+    # the configured rate is injected once so the rendered PDF always carries a
+    # concrete mileage value.
+    mileage_rate = str(fields.get("mileage_rate") or "0.45")
+    if mileage_rate not in updated and "paid at a rate of" in updated.lower():
+        updated = re.sub(
+            r"(?i)paid at a rate of\s*",
+            f"paid at a rate of {mileage_rate} ",
+            updated,
+            count=1,
+        )
 
     # Legacy phrase replacements for old embedded names that may still be in
     # older template versions. The company name is intentionally kept in the
@@ -916,8 +939,10 @@ async def ensure_agreement_rendered(db, employee: Dict[str, Any], agreement_type
         existing
         and existing.get("template_version") == rendering["template_version"]
         and existing.get("rendered_file_url")
-        and not existing_is_rejected
     ):
+        # Handbook artifact stability: keep the same rendered handbook URL for
+        # the same template version, even if the row was rejected. Re-rendering
+        # on rejection is only expected when explicit regenerate is requested.
         return existing
 
     timestamp = _utcnow().strftime("%Y%m%d_%H%M%S")

@@ -93,28 +93,28 @@ export function getAgreementDisplay(agreement, options = {}) {
       return {
         tone: 'info',
         badge: 'With Osabea',
-        title: 'Handbook update in progress',
+        title: 'Employee Handbook',
         description: 'Your handbook is being prepared.',
         workerActionable: false,
         ctaLabel: null,
       };
     }
 
-    if (agreement.signed) {
+    if (agreement.signed || agreement.verified) {
       return {
-        tone: 'info',
-        badge: 'With Osabea',
-        title: 'Handbook acknowledged',
-        description: 'Your acknowledgement is on file and waiting for admin verification.',
+        tone: 'success',
+        badge: 'Completed',
+        title: 'Employee Handbook',
+        description: 'Completed',
         workerActionable: false,
-        ctaLabel: agreement.file_url || agreement.download_url ? 'View PDF' : null,
+        ctaLabel: agreement.file_url || agreement.download_url ? 'View handbook' : null,
       };
     }
 
     return {
       tone: 'critical',
       badge: 'Action required',
-      title: 'Read and acknowledge the handbook',
+      title: 'Employee Handbook',
       description: 'Review and acknowledge your handbook.',
       workerActionable: true,
       ctaLabel: 'Acknowledge handbook',

@@ -448,6 +448,12 @@ async def acknowledge_worker_agreement(
         raise HTTPException(status_code=404, detail="Employee not found")
 
     agreement_record = await ensure_agreement_rendered(db, employee, agreement_type)
+    rendered_file_url = agreement_record.get("rendered_file_url")
+    if not rendered_file_url:
+        raise HTTPException(
+            status_code=409,
+            detail="Handbook is still being prepared. Please try again shortly.",
+        )
     now = datetime.now(timezone.utc).isoformat()
     signer_name = payload.signer_name or _employee_name(employee)
 
@@ -457,15 +463,15 @@ async def acknowledge_worker_agreement(
             "$set": {
                 "acknowledged": True,
                 "acknowledged_at": now,
-                "status": "signed",
+                "status": "acknowledged",
                 "completion_mode": "worker_acknowledgement",
                 "signer_name": signer_name,
-                "verification_status": "verified",
-                "verified_at": now,
-                "verified_by": employee_id,
-                "verified_by_name": "Osabea worker portal",
+                "verification_status": "pending",
+                "verified_at": None,
+                "verified_by": None,
+                "verified_by_name": None,
                 "template_version": agreement_record.get("template_version"),
-                "rendered_file_url": agreement_record.get("rendered_file_url"),
+                "rendered_file_url": rendered_file_url,
                 "employee_name": agreement_record.get("employee_name") or signer_name,
                 "updated_at": now,
             },

@@ -570,6 +570,7 @@ export default function DualRowComplianceSection({
                       });
                     }}
                     onViewHistory={handleViewHistory}
+                    onReissueContract={onReissueContract}
                     isAuditor={isAuditor}
                   />
                 );

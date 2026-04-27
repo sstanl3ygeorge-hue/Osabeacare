@@ -2434,6 +2434,18 @@ async def worker_upload_document(
     
     # CV uploads
     if requirement_id in ["cv", "resume", "curriculum_vitae"] or "cv" in requirement_id.lower():
+        previous_cv_doc_ids = []
+        previous_cv_docs = await db.employee_documents.find(
+            {
+                "employee_id": employee_id,
+                "id": {"$ne": doc_id},
+                "requirement_id": {"$in": ["cv", "resume", "curriculum_vitae"]},
+                "status": {"$nin": ["superseded", "archived", "deleted"]},
+            },
+            {"_id": 0, "id": 1},
+        ).to_list(length=200)
+        previous_cv_doc_ids = [d.get("id") for d in previous_cv_docs if d.get("id")]
+
         await db.employee_documents.update_many(
             {
                 "employee_id": employee_id,
@@ -2475,6 +2487,21 @@ async def worker_upload_document(
                 "updated_at": now
             }}
         )
+
+        if previous_cv_doc_ids:
+            await log_audit_action(
+                f"worker_{employee_id}",
+                "cv_replaced",
+                "employee",
+                employee_id,
+                {
+                    "employee_id": employee_id,
+                    "old_document_ids": previous_cv_doc_ids,
+                    "new_document_id": doc_id,
+                    "file_name": file.filename,
+                    "source": "worker_dashboard.upload_document.cv",
+                },
+            )
         
         logger.info(f"CV uploaded by worker {employee_id} - pending admin review for AI extraction")
         

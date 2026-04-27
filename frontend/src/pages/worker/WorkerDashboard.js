@@ -1315,11 +1315,8 @@ export default function WorkerDashboard() {
       );
       
       toast.success('CV uploaded! AI is extracting your employment history...');
-      // Wait a moment for AI extraction to complete
-      setTimeout(() => {
-        fetchCvStatus();
-        fetchDashboard();
-      }, 2000);
+      await fetchCvStatus();
+      await fetchDashboard();
     } catch (error) {
       const message = typeof error.response?.data?.detail === 'string' ? error.response.data.detail : 'Failed to upload CV';
       toast.error(message);
@@ -2601,12 +2598,14 @@ export default function WorkerDashboard() {
                           <Eye className="mr-2 h-4 w-4" />
                           View CV
                         </Button>
-                        {cvStatus?.replacement_required ? (
-                          <Button className="w-full sm:w-auto" onClick={triggerCvFileInput} disabled={uploading === 'cv'}>
-                            {uploading === 'cv' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
-                            Replace CV
-                          </Button>
-                        ) : null}
+                        <Button
+                          className="w-full sm:w-auto"
+                          onClick={triggerCvFileInput}
+                          disabled={uploading === 'cv'}
+                        >
+                          {uploading === 'cv' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
+                          Update CV
+                        </Button>
                       </>
                     ) : cvDisplay.canUpload ? (
                       <Button className="w-full sm:w-auto" onClick={triggerCvFileInput} disabled={uploading === 'cv'}>

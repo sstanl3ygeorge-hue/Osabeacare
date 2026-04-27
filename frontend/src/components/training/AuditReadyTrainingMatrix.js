@@ -1800,7 +1800,7 @@ export default function AuditReadyTrainingMatrix({
                   <div>
                     <h4 className="font-semibold text-amber-900 mt-6 mb-2">Unmapped Items</h4>
                     <ul className="space-y-2">
-                      {(matrixData.unmapped_items || []).map(item => (
+                      {unmappedItems.map(item => (
                         <li key={item.id} className="border border-amber-200 rounded-lg p-3 flex items-center gap-3">
                           <AlertTriangle className="h-4 w-4 text-amber-600" />
                           <span className="font-medium">{item.raw_course_title}</span>

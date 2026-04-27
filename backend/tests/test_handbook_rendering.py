@@ -45,6 +45,13 @@ for _stub_name in [
 ]:
     _make_stub(_stub_name)
 
+# Keep motor stub import-compatible with backend dependencies imported by
+# other test modules in the same pytest session.
+class _FakeAsyncIOMotorClient:  # pragma: no cover - import stub only
+    pass
+
+sys.modules["motor.motor_asyncio"].AsyncIOMotorClient = _FakeAsyncIOMotorClient  # type: ignore[attr-defined]
+
 sys.modules["services.pdf_service"].get_logo_image = lambda **_kw: None  # type: ignore
 _ss = sys.modules["supabase_storage"]
 _ss.download_file_from_storage = MagicMock()  # type: ignore

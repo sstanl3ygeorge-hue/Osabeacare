@@ -1129,21 +1129,10 @@ export default function AuditReadyTrainingMatrix({
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {(mandatoryTraining.length > 0 ? mandatoryTraining : (matrixData.items || [])).map((item) => {
+                  {(Array.isArray(mandatoryTraining) ? mandatoryTraining : []).map((item) => {
                     const pendingExtractedMatch = !isMandatoryTrainingSatisfied(item)
                       ? getPendingExtractedMatch(item)
                       : null;
-
-                  let displayStatus = item.status;
-                  // If a mapped proposed item exists, override status to 'proposed' for badge
-                  if (pendingExtractedMatch && (pendingExtractedMatch.mapped_training_code || pendingExtractedMatch.mapped_training_title)) {
-                    displayStatus = 'proposed';
-                  }
-                  // If status is missing and there is a pending extracted match, show as pending
-                  if (item.status === 'missing' && pendingExtractedMatch) {
-                    displayStatus = 'pending';
-                  }
-
                     return (
                       <TableRow
                         key={item.code || item.id}
@@ -1167,7 +1156,7 @@ export default function AuditReadyTrainingMatrix({
                             </div>
                           </div>
                         </TableCell>
-                        <TableCell>{renderStatusBadge(displayStatus)}</TableCell>
+                        <TableCell>{renderStatusBadge(getDisplayStatus(item))}</TableCell>
                         <TableCell>
                           {(item.record_id || item.id) && (item.source_document_id || item.certificate_url || item.evidence_files?.length) ? (
                             <Button
@@ -1209,8 +1198,8 @@ export default function AuditReadyTrainingMatrix({
                           {item.expires_at ? (
                             <span className={cn(
                               "text-sm",
-                              item.status === 'expired' ? 'text-red-600 font-medium' :
-                              item.status === 'expiring_soon' ? 'text-amber-600' :
+                              getDisplayStatus(item) === 'expired' ? 'text-red-600 font-medium' :
+                              getDisplayStatus(item) === 'expiring_soon' ? 'text-amber-600' :
                               'text-gray-600'
                             )}>
                               {formatBackendDate(item.expires_at, { format: 'short' })}
@@ -1220,7 +1209,7 @@ export default function AuditReadyTrainingMatrix({
                           )}
                         </TableCell>
                         <TableCell>
-                          {item.verified || item.is_verified || displayStatus === 'verified' ? (
+                          {item.verified || item.is_verified || getDisplayStatus(item) === 'verified' ? (
                             <div className="flex flex-col">
                               <Badge className="bg-green-100 text-green-700 border-green-200 w-fit">
                                 <CheckCircle className="h-3 w-3 mr-1" />
@@ -1230,7 +1219,7 @@ export default function AuditReadyTrainingMatrix({
                                 <span className="text-xs text-gray-500 mt-1">{item.verified_by}</span>
                               )}
                             </div>
-                          ) : displayStatus !== 'missing' ? (
+                          ) : getDisplayStatus(item) !== 'missing' ? (
                             <Badge className="bg-amber-100 text-amber-700 border-amber-200">
                               Submitted, not reviewed
                             </Badge>
@@ -1560,7 +1549,7 @@ export default function AuditReadyTrainingMatrix({
                 </TableHeader>
                 <TableBody>
                   {(() => {
-                    const records = canonicalTrainingRecords.length > 0 ? canonicalTrainingRecords : (matrixData.all_qualifications || []);
+                    const records = Array.isArray(canonicalTrainingRecords) ? canonicalTrainingRecords : [];
                     return records
                       .filter(item => {
                         if (!searchQuery) return true;
@@ -1790,7 +1779,7 @@ export default function AuditReadyTrainingMatrix({
                   <div>
                     <h4 className="font-semibold text-purple-900 mt-6 mb-2">Extracted/Proposed Items</h4>
                     <ul className="space-y-2">
-                      {(proposedItems && proposedItems.length > 0 ? proposedItems : (matrixData.proposed_items || [])).map(item => (
+                      {(Array.isArray(proposedItems) ? proposedItems : []).map(item => (
                         <li key={item.id} className="border border-purple-200 rounded-lg p-3 flex items-center gap-3">
                           <Wand2 className="h-4 w-4 text-purple-600" />
                           <span className="font-medium">{item.mapped_training_title || item.raw_course_title}</span>
@@ -1799,26 +1788,32 @@ export default function AuditReadyTrainingMatrix({
                       ))}
                     </ul>
                   </div>
-                  <div>
-                    <h4 className="font-semibold text-amber-900 mt-6 mb-2">Unmapped Items</h4>
-                    <ul className="space-y-2">
-                      {unmappedItems.map(item => (
-                        <li key={item.id} className="border border-amber-200 rounded-lg p-3 flex items-center gap-3">
-                          <AlertTriangle className="h-4 w-4 text-amber-600" />
-                          <span className="font-medium">{item.raw_course_title}</span>
-                          <span className="text-xs text-amber-700">Unmapped</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
+                  {Array.isArray(unmappedItems) && unmappedItems.length > 0 && (
+                    <div className="mt-6">
+                      <h4 className="font-semibold text-amber-900 mb-2">Unmapped Items</h4>
+                      <ul className="space-y-2">
+                        {unmappedItems.map((item) => (
+                          <li
+                            key={item.id || item.raw_course_title}
+                            className="border border-amber-200 rounded-lg p-3 flex items-center gap-3"
+                          >
+                            <AlertTriangle className="h-4 w-4 text-amber-600" />
+                            <span className="font-medium">
+                              {item.raw_course_title || item.title || 'Unmapped training item'}
+                            </span>
+                            <span className="text-xs text-amber-700">Unmapped</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                 </div>
               )}
+
             </CardContent>
           </Card>
         </TabsContent>
       </Tabs>
-
-      {/* ========== EDIT TRAINING DIALOG ========== */}
       <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>

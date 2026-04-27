@@ -205,6 +205,7 @@ export default function AuditReadyTrainingMatrix({
   const [canonicalTrainingRecords, setCanonicalTrainingRecords] = useState([]);
   const [certificates, setCertificates] = useState([]);
   const [proposedItems, setProposedItems] = useState([]);
+      const [unmappedItems, setUnmappedItems] = useState([]);
     const [dependencyWarnings, setDependencyWarnings] = useState([]);
   const [summary, setSummary] = useState({
     totalRequired: 0,
@@ -298,6 +299,8 @@ export default function AuditReadyTrainingMatrix({
       const allQualifications = matrixData.all_qualifications || [];
       const matrixDependencyWarnings = matrixData.dependency_warnings || [];
       setDependencyWarnings(matrixDependencyWarnings);
+
+      setUnmappedItems(matrixData.unmapped_items || []);
       const completionSummary = matrixData.completion_summary || {};
 
       // ✅ SET STATE CORRECTLY

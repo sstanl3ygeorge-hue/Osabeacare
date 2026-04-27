@@ -205,6 +205,7 @@ export default function AuditReadyTrainingMatrix({
   const [canonicalTrainingRecords, setCanonicalTrainingRecords] = useState([]);
   const [certificates, setCertificates] = useState([]);
   const [proposedItems, setProposedItems] = useState([]);
+    const [dependencyWarnings, setDependencyWarnings] = useState([]);
   const [summary, setSummary] = useState({
     totalRequired: 0,
     current: 0,
@@ -215,7 +216,6 @@ export default function AuditReadyTrainingMatrix({
     certificatesUploaded: 0,
     needsReview: 0
   });
-  const [dependencyWarnings, setDependencyWarnings] = useState([]);
   
   // UI states
   const [searchQuery, setSearchQuery] = useState('');
@@ -296,7 +296,8 @@ export default function AuditReadyTrainingMatrix({
       // ✅ NEW BACKEND STRUCTURE
       const requiredItems = matrixData.role_required_requirements || [];
       const allQualifications = matrixData.all_qualifications || [];
-      const dependencyWarnings = matrixData.dependency_warnings || [];
+      const matrixDependencyWarnings = matrixData.dependency_warnings || [];
+      setDependencyWarnings(matrixDependencyWarnings);
       const completionSummary = matrixData.completion_summary || {};
 
       // ✅ SET STATE CORRECTLY
@@ -912,11 +913,11 @@ export default function AuditReadyTrainingMatrix({
 
   return (
     <div className="space-y-6" data-testid="audit-ready-training-matrix">
-      {matrixData.dependency_warnings?.length > 0 && (
+      {dependencyWarnings.length > 0 && (
         <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
           <p className="font-medium">Training dependency issues</p>
           <ul className="list-disc pl-5 mt-1">
-            {matrixData.dependency_warnings.map((w, i) => (
+            {dependencyWarnings.map((w, i) => (
               <li key={i}>{w.message}</li>
             ))}
           </ul>

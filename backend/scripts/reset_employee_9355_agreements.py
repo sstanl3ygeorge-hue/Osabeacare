@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import os
 import sys
 import uuid
@@ -378,7 +379,114 @@ async def _log_repair_audit(
     )
 
 
-async def run(admin_user_id: str, admin_role: str, employee_id: str) -> Dict[str, Any]:
+async def _fetch_agreement_snapshot(db, employee_id: str) -> Dict[str, Any]:
+    contract_rows = await db.agreement_acknowledgements.find(
+        {"employee_id": employee_id, "agreement_type": CONTRACT_AGREEMENT_TYPE},
+        {"_id": 0},
+    ).to_list(200)
+    handbook_rows = await db.agreement_acknowledgements.find(
+        {"employee_id": employee_id, "agreement_type": HANDBOOK_AGREEMENT_TYPE},
+        {"_id": 0},
+    ).to_list(200)
+    generated_contracts = await db.generated_contracts.find(
+        {"employee_id": employee_id},
+        {"_id": 0},
+    ).to_list(300)
+    employee = await db.employees.find_one(
+        {"id": employee_id},
+        {
+            "_id": 0,
+            "id": 1,
+            "pending_contract_id": 1,
+            "pending_contract_generated_at": 1,
+            "contract_signed": 1,
+            "contract_signed_at": 1,
+            "contract_id": 1,
+            "cv_document_id": 1,
+            "cv_status": 1,
+        },
+    ) or {}
+
+    def _sort(rows: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
+        return sorted(
+            rows,
+            key=lambda r: (
+                str(r.get("updated_at") or ""),
+                str(r.get("created_at") or ""),
+                str(r.get("id") or ""),
+            ),
+            reverse=True,
+        )
+
+    def _active_contract_rows(rows: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
+        out = []
+        for row in rows:
+            status = str(row.get("status") or "").strip().lower()
+            if status == "superseded":
+                continue
+            if row.get("superseded_by_contract_id"):
+                continue
+            out.append(row)
+        return out
+
+    def _active_handbook_rows(rows: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
+        out = []
+        for row in rows:
+            status = str(row.get("status") or "").strip().lower()
+            if status == "superseded":
+                continue
+            if row.get("superseded_by_acknowledgement_id"):
+                continue
+            out.append(row)
+        return out
+
+    contract_rows = _sort(contract_rows)
+    handbook_rows = _sort(handbook_rows)
+    generated_contracts = _sort(generated_contracts)
+
+    active_contract_rows = _active_contract_rows(contract_rows)
+    active_handbook_rows = _active_handbook_rows(handbook_rows)
+    active_generated_contracts = _active_contract_rows(generated_contracts)
+
+    return {
+        "employee": employee,
+        "contract_rows": contract_rows,
+        "handbook_rows": handbook_rows,
+        "generated_contracts": generated_contracts,
+        "active_contract_rows": active_contract_rows,
+        "active_handbook_rows": active_handbook_rows,
+        "active_generated_contracts": active_generated_contracts,
+    }
+
+
+def _min_row(row: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "id": row.get("id"),
+        "status": row.get("status"),
+        "contract_state": row.get("contract_state"),
+        "verification_status": row.get("verification_status"),
+        "acknowledged": row.get("acknowledged"),
+        "updated_at": row.get("updated_at"),
+        "created_at": row.get("created_at"),
+        "template_version": row.get("template_version"),
+        "superseded_by_contract_id": row.get("superseded_by_contract_id"),
+        "superseded_by_acknowledgement_id": row.get("superseded_by_acknowledgement_id"),
+    }
+
+
+def _print_snapshot(label: str, snapshot: Dict[str, Any]) -> None:
+    print(f"\n=== {label} ===")
+    print("Employee pointers:")
+    print(json.dumps(snapshot.get("employee") or {}, indent=2, default=str))
+    print("Active contract agreement rows:")
+    print(json.dumps([_min_row(r) for r in snapshot.get("active_contract_rows", [])], indent=2, default=str))
+    print("Active handbook agreement rows:")
+    print(json.dumps([_min_row(r) for r in snapshot.get("active_handbook_rows", [])], indent=2, default=str))
+    print("Active generated contracts:")
+    print(json.dumps([_min_row(r) for r in snapshot.get("active_generated_contracts", [])], indent=2, default=str))
+
+
+async def run(admin_user_id: str, admin_role: str, employee_id: str, dry_run: bool = False) -> Dict[str, Any]:
     if employee_id != TARGET_EMPLOYEE_ID:
         raise RuntimeError(
             f"This one-off script is locked to employee {TARGET_EMPLOYEE_ID}. Received: {employee_id}"
@@ -393,6 +501,17 @@ async def run(admin_user_id: str, admin_role: str, employee_id: str) -> Dict[str
         if not employee:
             raise RuntimeError(f"Employee not found: {employee_id}")
 
+        before = await _fetch_agreement_snapshot(db, employee_id)
+        _print_snapshot("CURRENT AGREEMENT STATE", before)
+        if dry_run:
+            return {
+                "dry_run": True,
+                "employee_id": employee_id,
+                "active_contract_rows": len(before.get("active_contract_rows", [])),
+                "active_handbook_rows": len(before.get("active_handbook_rows", [])),
+                "active_generated_contracts": len(before.get("active_generated_contracts", [])),
+            }
+
         now_iso = _now_iso()
         contract_result = await _reset_contract_agreement(db, employee, admin_user_id, now_iso)
         handbook_result = await _reset_handbook_agreement(db, employee, admin_user_id, now_iso)
@@ -405,6 +524,13 @@ async def run(admin_user_id: str, admin_role: str, employee_id: str) -> Dict[str
             "script": os.path.basename(__file__),
         }
         await _log_repair_audit(db, employee_id, admin_user_id, admin_role, summary, now_iso)
+        after = await _fetch_agreement_snapshot(db, employee_id)
+        _print_snapshot("FINAL AGREEMENT STATE", after)
+        summary["final_state"] = {
+            "active_contract_rows": len(after.get("active_contract_rows", [])),
+            "active_handbook_rows": len(after.get("active_handbook_rows", [])),
+            "active_generated_contracts": len(after.get("active_generated_contracts", [])),
+        }
         return summary
     finally:
         client.close()
@@ -415,6 +541,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--employee-id", default=TARGET_EMPLOYEE_ID)
     parser.add_argument("--admin-user-id", required=True)
     parser.add_argument("--admin-role", required=True, help="admin or superadmin")
+    parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
 
 
@@ -425,7 +552,8 @@ if __name__ == "__main__":
             admin_user_id=args.admin_user_id.strip(),
             admin_role=args.admin_role.strip().lower(),
             employee_id=args.employee_id.strip(),
+            dry_run=bool(args.dry_run),
         )
     )
-    print("Agreement reset completed:")
-    print(result)
+    print("Agreement reset result:")
+    print(json.dumps(result, indent=2, default=str))

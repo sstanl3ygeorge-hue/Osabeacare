@@ -1,11 +1,21 @@
 import os
 import sys
 from types import SimpleNamespace
+import types
+import base64
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+# Ensure motor import remains available even when other tests stub modules.
+sys.modules.setdefault("motor", types.ModuleType("motor"))
+motor_asyncio_mod = sys.modules.setdefault("motor.motor_asyncio", types.ModuleType("motor.motor_asyncio"))
+if not hasattr(motor_asyncio_mod, "AsyncIOMotorClient"):
+    class _FakeAsyncIOMotorClient:  # pragma: no cover - import compatibility stub
+        pass
+    motor_asyncio_mod.AsyncIOMotorClient = _FakeAsyncIOMotorClient
 
 import routes.contracts as contracts
 
@@ -21,7 +31,7 @@ class _FakeCursor:
             sort_spec = [(spec, direction if direction is not None else 1)]
         for field, dirn in reversed(sort_spec):
             reverse = int(dirn) == -1
-            self._docs.sort(key=lambda d: d.get(field), reverse=reverse)
+            self._docs.sort(key=lambda d: (d.get(field) is None, d.get(field)), reverse=reverse)
         return self
 
     def limit(self, count):
@@ -91,7 +101,9 @@ class _FakeCollection:
     async def insert_one(self, document):
         if self.fail_insert:
             raise RuntimeError("simulated insert failure")
-        self.docs.append(dict(document))
+        to_store = dict(document)
+        to_store.setdefault("_id", f"mongo-{to_store.get('id') or len(self.docs)}")
+        self.docs.append(to_store)
         return SimpleNamespace(inserted_id=document.get("id"))
 
     async def update_one(self, query, update, upsert=False):
@@ -156,10 +168,45 @@ def _build_client(monkeypatch, fake_db):
 
     monkeypatch.setattr(contracts, "can_sign_contract", _can_sign)
     monkeypatch.setattr(contracts, "log_audit_action", _log_audit_action)
+    async def _download_file(_url):
+        pdf_b64 = (
+            "JVBERi0xLjMKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5k"
+            "b2JqCjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9Db3VudCAxIC9LaWRzIFszIDAgUl0gPj4K"
+            "ZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3gg"
+            "WzAgMCA2MTIgNzkyXSAvQ29udGVudHMgNCAwIFIgL1Jlc291cmNlcyA8PCA+PiA+PgplbmRv"
+            "YmoKNCAwIG9iago8PCAvTGVuZ3RoIDQ0ID4+CnN0cmVhbQpCVCAvRjEgMTIgVGYgNzIgNzIw"
+            "IFRkIChDbGVhbiBDb250cmFjdCBURVhUKSBUaiBFVAplbmRzdHJlYW0KZW5kb2JqCnhyZWYK"
+            "MCA1CjAwMDAwMDAwMDAgNjU1MzUgZiAKMDAwMDAwMDAxMCAwMDAwMCBuIAowMDAwMDAwMDYx"
+            "IDAwMDAwIG4gCjAwMDAwMDAxMTYgMDAwMDAgbiAKMDAwMDAwMDIyMCAwMDAwMCBuIAp0cmFp"
+            "bGVyCjw8IC9TaXplIDUgL1Jvb3QgMSAwIFIgPj4Kc3RhcnR4cmVmCjMxMwolJUVPRgo="
+        )
+        return base64.b64decode(pdf_b64)
+    monkeypatch.setattr(contracts, "download_file_from_storage", _download_file)
+    async def _ensure_agreement_rendered(_db, employee, agreement_type):
+        assert agreement_type == "contract_acceptance"
+        return {
+            "template_version": "contract_acceptance_v_testcanon123",
+            "template_source_name": "zero_hour_contract_template.docx",
+            "rendered_at": "2026-04-27T00:00:00+00:00",
+            "rendered_file_url": f"https://example.test/contracts/{employee['id']}.pdf",
+            "rendered_contract_pdf_url": f"https://example.test/contracts/{employee['id']}.pdf",
+            "employee_name": f"{employee.get('first_name','')} {employee.get('last_name','')}".strip(),
+        }
+    monkeypatch.setattr(contracts, "ensure_agreement_rendered", _ensure_agreement_rendered)
 
     app = FastAPI()
     app.include_router(contracts.router, prefix="/api")
     app.dependency_overrides[contracts.require_manager_or_admin] = lambda: {
+        "user_id": "admin-1",
+        "role": "admin",
+        "name": "Admin User",
+    }
+    app.dependency_overrides[contracts.get_current_user] = lambda: {
+        "user_id": "admin-1",
+        "role": "admin",
+        "name": "Admin User",
+    }
+    app.dependency_overrides[contracts.get_current_user_or_worker] = lambda: {
         "user_id": "admin-1",
         "role": "admin",
         "name": "Admin User",
@@ -228,6 +275,7 @@ def test_reissue_success_links_and_employee_pointer(monkeypatch):
     ack = next(x for x in fake_db.agreement_acknowledgements.docs if x["agreement_type"] == "contract_acceptance")
 
     assert new["status"] == "pending_signature"
+    assert str(new["template_version"]).startswith("contract_acceptance_v_")
     assert old["superseded_by_contract_id"] == new_id
     assert new["reissued_from_contract_id"] == "old-1"
     assert emp["pending_contract_id"] == new_id
@@ -333,3 +381,101 @@ def test_audit_failure_rolls_back_employee_pointers(monkeypatch):
     assert emp.get("contract_signed") == original.get("contract_signed")
     assert emp.get("contract_signed_at") == original.get("contract_signed_at")
     assert emp.get("contract_id") == original.get("contract_id")
+
+
+def test_generate_uses_canonical_template_family(monkeypatch):
+    fake_db = _FakeDb()
+    _seed_employee_and_contract(fake_db, status="rejected")
+    client, _ = _build_client(monkeypatch, fake_db)
+
+    res = client.post("/api/employees/emp-1/contract/generate", json={})
+    assert res.status_code == 200
+    payload = res.json()
+    created = next(x for x in fake_db.generated_contracts.docs if x["id"] == payload["contract_id"])
+    assert str(created.get("template_version", "")).startswith("contract_acceptance_v_")
+    assert created.get("canonical_contract_render") is True
+    assert created.get("rendered_file_url")
+
+
+def test_generate_and_reissue_use_same_template_family(monkeypatch):
+    fake_db = _FakeDb()
+    _seed_employee_and_contract(fake_db, status="rejected")
+    client, _ = _build_client(monkeypatch, fake_db)
+
+    gen = client.post("/api/employees/emp-1/contract/generate", json={})
+    assert gen.status_code == 200
+    generated = next(x for x in fake_db.generated_contracts.docs if x["id"] == gen.json()["contract_id"])
+
+    rei = client.post(
+        "/api/employees/emp-1/contract/reissue",
+        json={"reason": "Need regenerate after mismatch", "source_contract_id": generated["id"]},
+    )
+    assert rei.status_code == 200
+    reissued = next(x for x in fake_db.generated_contracts.docs if x["id"] == rei.json()["new_contract"]["id"])
+
+    assert str(generated.get("template_version", "")).startswith("contract_acceptance_v_")
+    assert str(reissued.get("template_version", "")).startswith("contract_acceptance_v_")
+
+
+def test_reissue_blocks_when_canonical_render_fails(monkeypatch):
+    fake_db = _FakeDb()
+    _seed_employee_and_contract(fake_db, status="rejected")
+    client, _ = _build_client(monkeypatch, fake_db)
+
+    async def _bad_render(_db, _employee, _type):
+        raise contracts.ContractRenderError("missing company_address")
+    monkeypatch.setattr(contracts, "ensure_agreement_rendered", _bad_render)
+
+    res = client.post(
+        "/api/employees/emp-1/contract/reissue",
+        json={"reason": "Need reissue after mismatch", "source_contract_id": "old-1"},
+    )
+    assert res.status_code == 409
+    body = res.json()
+    assert body["detail"]["status"] == "action_required"
+    assert "render_issue" in body["detail"]
+
+
+def test_legacy_pending_contract_not_signable(monkeypatch):
+    fake_db = _FakeDb()
+    _seed_employee_and_contract(fake_db, status="rejected")
+    fake_db.generated_contracts.docs.append(
+        {
+            "id": "legacy-1",
+            "employee_id": "emp-1",
+            "status": "pending_signature",
+            "template_version": "zero_hour_contract_v1",
+            "rendered_file_url": None,
+        }
+    )
+    client, _ = _build_client(monkeypatch, fake_db)
+
+    res = client.post(
+        "/api/employees/emp-1/contracts/legacy-1/sign",
+        json={"acknowledgement": True},
+    )
+    assert res.status_code == 409
+    assert res.json()["detail"]["status"] == "action_required"
+
+
+def test_pending_contract_with_unresolved_placeholders_not_signable(monkeypatch):
+    fake_db = _FakeDb()
+    _seed_employee_and_contract(fake_db, status="rejected")
+    fake_db.generated_contracts.docs.append(
+        {
+            "id": "legacy-unresolved-1",
+            "employee_id": "emp-1",
+            "status": "pending_signature",
+            "template_version": "contract_acceptance_v_testcanon123",
+            "rendered_file_url": "https://example.test/contracts/legacy-unresolved.pdf",
+            "filled_sections": [{"content": "This Statement dated (insert date of issue)"}],
+        }
+    )
+    client, _ = _build_client(monkeypatch, fake_db)
+    res = client.post(
+        "/api/employees/emp-1/contracts/legacy-unresolved-1/sign",
+        json={"acknowledgement": True},
+    )
+    assert res.status_code == 409
+    assert res.json()["detail"]["status"] == "action_required"
+    assert "unresolved placeholders" in res.json()["detail"]["render_issue"].lower()

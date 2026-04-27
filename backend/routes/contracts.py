@@ -13,11 +13,15 @@ CQC Requirement: Workers must sign their own contracts.
 Extracted from server.py for modularity.
 """
 
+import io
+import json
+import re
 import uuid
 import logging
 from datetime import datetime, timezone
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Depends, Request, Query
+from PyPDF2 import PdfReader
 
 from .dependencies import (
     get_db,
@@ -35,9 +39,16 @@ from contract_templates import (
     validate_contract_data,
     fill_contract_template,
 )
+from agreement_document_service import (
+    CONTRACT_AGREEMENT_TYPE,
+    CANONICAL_CONTRACT_TEMPLATE_PREFIX,
+    ensure_agreement_rendered,
+    ContractRenderError,
+)
 
 # Import work readiness check
 from work_readiness_engine import can_sign_contract
+from supabase_storage import download_file_from_storage
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +63,27 @@ REISSUE_ELIGIBLE_STATUSES = {
     "action_required",
 }
 
+_UNRESOLVED_CONTRACT_PATTERNS = [
+    r"\bTBC\b",
+    r"insert amount",
+    r"£\s*\(insert amount\)",
+    r"Ł\s*\(insert amount\)",
+    r"June\s*2023",
+    r"Page\s*3\s*of\s*5",
+    r"Company ConfidentialSMT1",
+    r"\(insert[^)]*\)",
+    r"\{\{[^{}]+\}\}",
+    r"Logo \(if required\)",
+]
+
+
+def _has_unresolved_contract_markers(text: str) -> bool:
+    hay = str(text or "")
+    for pattern in _UNRESOLVED_CONTRACT_PATTERNS:
+        if re.search(pattern, hay, flags=re.IGNORECASE):
+            return True
+    return False
+
 
 def _build_contract_doc_for_signature(
     *,
@@ -61,18 +93,25 @@ def _build_contract_doc_for_signature(
     actor_user_id: Optional[str],
     now_iso: str,
     extra_fields: Optional[dict] = None,
+    render_record: Optional[dict] = None,
 ) -> dict:
     """
     Build a generated contract record in the same shape as the existing
     /contract/generate flow, with optional extra metadata fields.
     """
     filled_contract = fill_contract_template(employee)
+    render_record = render_record or {}
+    rendered_file_url = (
+        render_record.get("rendered_contract_pdf_url")
+        or render_record.get("rendered_file_url")
+    )
+    canonical_ok = str(render_record.get("template_version") or "").startswith(CANONICAL_CONTRACT_TEMPLATE_PREFIX)
     contract_doc = {
         "id": str(uuid.uuid4()),
         "employee_id": employee_id,
         "template_id": template_id,
         "template_name": filled_contract["name"],
-        "template_version": filled_contract["version"],
+        "template_version": render_record.get("template_version") or filled_contract["version"],
         "filled_sections": filled_contract["sections"],
         "employee_data_snapshot": {
             "first_name": employee.get("first_name"),
@@ -88,6 +127,12 @@ def _build_contract_doc_for_signature(
         "generated_by": actor_user_id,
         "signed_at": None,
         "signed_by": None,
+        "rendered_file_url": rendered_file_url,
+        "rendered_contract_pdf_url": rendered_file_url,
+        "rendered_at": render_record.get("rendered_at") or now_iso,
+        "render_issue": None if canonical_ok else "non_canonical_contract_template",
+        "canonical_contract_render": bool(canonical_ok),
+        "canonical_template_source": render_record.get("template_source_name"),
     }
     if extra_fields:
         contract_doc.update(extra_fields)
@@ -220,6 +265,34 @@ async def generate_employee_contract(
             status_code=400, 
             detail=f"Employee data incomplete: {', '.join(validation['missing_fields'])}"
         )
+
+    try:
+        render_record = await ensure_agreement_rendered(db, employee, CONTRACT_AGREEMENT_TYPE)
+    except ContractRenderError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "status": "action_required",
+                "render_issue": str(exc),
+            },
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "status": "action_required",
+                "render_issue": f"Failed to render canonical contract: {exc}",
+            },
+        ) from exc
+
+    if not str(render_record.get("template_version") or "").startswith(CANONICAL_CONTRACT_TEMPLATE_PREFIX):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "status": "action_required",
+                "render_issue": "Non-canonical contract template/version detected",
+            },
+        )
     
     now_iso = datetime.now(timezone.utc).isoformat()
     contract_doc = _build_contract_doc_for_signature(
@@ -228,6 +301,7 @@ async def generate_employee_contract(
         template_id=template_id,
         actor_user_id=user.get("user_id"),
         now_iso=now_iso,
+        render_record=render_record,
     )
     contract_id = contract_doc["id"]
     
@@ -367,6 +441,52 @@ async def sign_employee_contract(
     
     if not contract:
         raise HTTPException(status_code=404, detail="Contract not found or already signed")
+
+    template_version = str(contract.get("template_version") or "")
+    is_canonical = template_version.startswith(CANONICAL_CONTRACT_TEMPLATE_PREFIX)
+    if (not is_canonical) or contract.get("render_issue") or not (
+        contract.get("rendered_contract_pdf_url") or contract.get("rendered_file_url")
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "status": "action_required",
+                "render_issue": contract.get("render_issue") or "Contract is not canonical/signable. Regenerate using canonical renderer.",
+            },
+        )
+
+    # Guard against stale/badly-rendered historical contracts that still carry
+    # unresolved placeholders/TBC markers in their stored content.
+    if _has_unresolved_contract_markers(json.dumps(contract.get("filled_sections") or [])):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "status": "action_required",
+                "render_issue": "Contract contains unresolved placeholders. Regenerate before signing.",
+            },
+        )
+
+    # Defense in depth: inspect the rendered PDF text when retrievable.
+    contract_pdf_url = contract.get("rendered_contract_pdf_url") or contract.get("rendered_file_url")
+    if contract_pdf_url:
+        try:
+            pdf_bytes = await download_file_from_storage(contract_pdf_url)
+            if pdf_bytes:
+                text = "\n".join((pg.extract_text() or "") for pg in PdfReader(io.BytesIO(pdf_bytes)).pages)
+                if _has_unresolved_contract_markers(text):
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "status": "action_required",
+                            "render_issue": "Contract PDF contains unresolved placeholders. Regenerate before signing.",
+                        },
+                    )
+        except HTTPException:
+            raise
+        except Exception:
+            # Non-fatal for signing flow if PDF cannot be fetched/parsed in this
+            # preflight check; canonical/template checks above remain enforced.
+            pass
     
     try:
         body = await request.json()
@@ -613,6 +733,32 @@ async def reissue_employee_contract(
             status_code=400,
             detail=f"Employee data incomplete: {', '.join(validation['missing_fields'])}",
         )
+    try:
+        render_record = await ensure_agreement_rendered(db, employee, CONTRACT_AGREEMENT_TYPE)
+    except ContractRenderError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "status": "action_required",
+                "render_issue": str(exc),
+            },
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "status": "action_required",
+                "render_issue": f"Failed to render canonical contract: {exc}",
+            },
+        ) from exc
+    if not str(render_record.get("template_version") or "").startswith(CANONICAL_CONTRACT_TEMPLATE_PREFIX):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "status": "action_required",
+                "render_issue": "Non-canonical contract template/version detected",
+            },
+        )
 
     now_iso = datetime.now(timezone.utc).isoformat()
     reissue_attempt_id = str(uuid.uuid4())
@@ -635,6 +781,7 @@ async def reissue_employee_contract(
         template_id=template_id,
         actor_user_id=user.get("user_id"),
         now_iso=now_iso,
+        render_record=render_record,
         extra_fields={
             "reissued_from_contract_id": current_contract["id"],
             "reissue_reason": reason,

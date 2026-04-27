@@ -7026,6 +7026,7 @@ from services.training_evaluator import (
 from services.training_taxonomy import (
     map_training_title_to_canonical as map_training_title_to_canonical_shared,
     TRAINING_TITLES_CANONICAL as TRAINING_TITLES_CANONICAL_SHARED,
+    resolve_training_to_canonical as resolve_training_to_canonical_shared,
 )
 # Keep module-level EXPIRY_WARNING_DAYS aligned (used in a few other places)
 EXPIRY_WARNING_DAYS = _TE_EXPIRY_WARNING_DAYS
@@ -10995,6 +10996,9 @@ async def get_employee_training_matrix(
     
     role = employee.get('role', '')
     def _canonical_training_code(value: str) -> str:
+        shared = resolve_training_to_canonical_shared(value or "")
+        if shared:
+            return shared
         normalized = normalize_training_text(value or "")
         mapped = TRAINING_CODE_MAPPING.get(normalized)
         if mapped:
@@ -11003,9 +11007,9 @@ async def get_employee_training_matrix(
             "health_safety": "health_safety_welfare",
             "health_and_safety": "health_safety_welfare",
             "equality_diversity": "equality_diversity_human_rights",
-            "bls": "basic_life_support_adults",
-            "basic_life_support": "basic_life_support_adults",
-            "safeguarding": "safeguarding_adults",
+            # Keep legacy compatibility keys for existing rows/reads.
+            "bls": "basic_life_support",
+            "safeguarding": "safeguarding",
         }
         return aliases.get(normalized, normalized)
     
@@ -11119,15 +11123,29 @@ async def get_employee_training_matrix(
     total_missing = 0
     total_blockers = 0
     pending_review_total = 0
-    pending_proposed_codes = {
-        _canonical_training_code(
-            item.get("mapped_training_code")
-            or item.get("mapped_training_title")
-            or item.get("raw_course_title")
+    pending_proposed_codes = set()
+    unmapped_items = []
+    for proposed in proposed_items:
+        mapped_value = (
+            proposed.get("mapped_training_code")
+            or proposed.get("mapped_training_title")
             or ""
         )
-        for item in proposed_items
-    }
+        canonical_mapped = _canonical_training_code(mapped_value)
+        if canonical_mapped:
+            pending_proposed_codes.add(canonical_mapped)
+            continue
+        # Raw extraction title is evidence-only; keep as unmapped and do not
+        # allow it to masquerade as mapped pending evidence.
+        raw_value = proposed.get("raw_course_title") or proposed.get("training_name") or ""
+        if raw_value:
+            unmapped_items.append({
+                "id": proposed.get("id"),
+                "title": raw_value,
+                "status": "unmapped",
+                "mapped_training_code": proposed.get("mapped_training_code"),
+                "source_document_id": proposed.get("source_document_id") or proposed.get("certificate_document_id"),
+            })
     
     for item in training_eval.get('items', []):
         code = item.get('code', '')
@@ -11154,7 +11172,7 @@ async def get_employee_training_matrix(
         canonical_code = _canonical_training_code(code or item.get('title', code))
         has_pending_proposed = canonical_code in pending_proposed_codes
         if status_value in ['missing', 'partial'] and has_pending_proposed:
-            status_value = 'pending'
+            status_value = 'pending_review'
             pending_review_total += 1
         matrix_item = {
             "code": code,
@@ -11164,7 +11182,7 @@ async def get_employee_training_matrix(
             "status": status_value,
             "detail": (
                 "Mapped certificate evidence is pending admin review"
-                if status_value == 'pending'
+                if status_value == 'pending_review'
                 else item.get('detail', '')
             ),
             "blocker": item.get('blocker', False),
@@ -11198,7 +11216,7 @@ async def get_employee_training_matrix(
             total_current += 1
         elif status == 'due_soon':
             total_expiring += 1
-        elif status in ['missing', 'partial', 'expired', 'rejected', 'awaiting_review', 'completed', 'pending']:
+        elif status in ['missing', 'partial', 'expired', 'rejected', 'awaiting_review', 'pending_review', 'completed']:
             total_missing += 1
         
         if item.get('is_currently_blocking', False):
@@ -11268,6 +11286,26 @@ async def get_employee_training_matrix(
         })
     
     all_qualifications = matrix_items + additional_items
+
+    # Dependency warnings model (Batch 2):
+    # DoLS requires MCA evidence when DoLS is verified/current.
+    status_by_code = {}
+    for item in matrix_items:
+        code = str(item.get("canonical_code") or item.get("code") or "").strip()
+        if code:
+            status_by_code[code] = item.get("status")
+    dols_status = status_by_code.get("deprivation_of_liberty_safeguards")
+    mca_status = status_by_code.get("mental_capacity_act")
+    dependency_warnings = []
+    if dols_status == "verified" and mca_status not in {"verified", "due_soon"}:
+        dependency_warnings.append({
+            "code": "dols_requires_mca",
+            "message": "DoLS requires MCA evidence.",
+            "requires": "mental_capacity_act",
+            "dependent": "deprivation_of_liberty_safeguards",
+            "severity": "blocking",
+        })
+
     required_total = len(matrix_items)
     verified_total = len([item for item in matrix_items if item.get("status") == "verified"])
     missing_total = len([item for item in matrix_items if item.get("status") in {"missing", "partial", "expired", "rejected"}])
@@ -11275,6 +11313,17 @@ async def get_employee_training_matrix(
         item for item in matrix_items
         if item.get("is_currently_blocking") or item.get("status") in {"missing", "partial", "expired", "rejected"}
     ]
+    for warning in dependency_warnings:
+        readiness_blockers.append({
+            "code": warning.get("code"),
+            "title": warning.get("message"),
+            "status": "dependency_warning",
+            "is_currently_blocking": True,
+            "dependency": {
+                "requires": warning.get("requires"),
+                "dependent": warning.get("dependent"),
+            },
+        })
     role_required_requirements = [
         {
             "code": item.get("code"),
@@ -11296,6 +11345,8 @@ async def get_employee_training_matrix(
         "training_records": training_records,
         "certificates": certificates,
         "proposed_items": proposed_items,
+        "unmapped_items": unmapped_items,
+        "dependency_warnings": dependency_warnings,
         "items": matrix_items,
         "additional_items": additional_items,
         "completion_summary": {
@@ -11303,6 +11354,7 @@ async def get_employee_training_matrix(
             "verified_total": verified_total,
             "pending_review_total": pending_review_total,
             "missing_total": missing_total,
+            "dependency_warning_total": len(dependency_warnings),
         },
         "readiness_blockers": readiness_blockers,
         "summary": {

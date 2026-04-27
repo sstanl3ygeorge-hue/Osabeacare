@@ -215,6 +215,7 @@ export default function AuditReadyTrainingMatrix({
     certificatesUploaded: 0,
     needsReview: 0
   });
+  const [dependencyWarnings, setDependencyWarnings] = useState([]);
   
   // UI states
   const [searchQuery, setSearchQuery] = useState('');
@@ -291,12 +292,17 @@ export default function AuditReadyTrainingMatrix({
       
       // Process matrix data
       const matrixData = matrixResult.value?.data || {};
-      const allItems = matrixData.items || [];
-      
-      // All items from the main matrix endpoint are mandatory (8 mandatory items)
-      // They may have blocker=true/false but are all required
-      setMandatoryTraining(allItems);
-      
+
+      // ✅ NEW BACKEND STRUCTURE
+      const requiredItems = matrixData.role_required_requirements || [];
+      const allQualifications = matrixData.all_qualifications || [];
+      const dependencyWarnings = matrixData.dependency_warnings || [];
+      const completionSummary = matrixData.completion_summary || {};
+
+      // ✅ SET STATE CORRECTLY
+      setMandatoryTraining(requiredItems);
+      setCanonicalTrainingRecords(allQualifications);
+
       // Handle proposed items - ensure it's an array
       const proposedFailed = proposedResult.status !== 'fulfilled';
       const proposedData = proposedFailed ? null : proposedResult.value?.data;
@@ -323,20 +329,23 @@ export default function AuditReadyTrainingMatrix({
         trainingRecords: recordsFailed,
       });
       
-      // Use the summary from API which already has correct calculations
-      const apiSummary = matrixData.summary || {};
+      // Use completion_summary only
+      const apiSummary = matrixData.completion_summary || {};
       const pendingReview = proposedFailed ? null : proposedArray.filter(p => p.status === 'proposed').length;
-      
+
       setSummary({
-        totalRequired: apiSummary.total || allItems.length,
-        current: allItems.filter(isMandatoryTrainingSatisfied).length,
-        needsRenewal: allItems.filter(isTrainingDueSoon).length,
-        missing: allItems.filter(item => item.status === 'missing').length,
+        totalRequired: apiSummary.required_total || requiredItems.length,
+        current: apiSummary.current || requiredItems.filter(isMandatoryTrainingSatisfied).length,
+        needsRenewal: apiSummary.needsRenewal || requiredItems.filter(isTrainingDueSoon).length,
+        missing: apiSummary.missing || requiredItems.filter(item => item.status === 'missing').length,
         blockers: apiSummary.blockers || 0,
-        additionalQualifications: recordsFailed ? null : canonicalRecords.length,
+        additionalQualifications: recordsFailed ? null : allQualifications.length,
         certificatesUploaded: certificatesFailed ? null : trainingCerts.length,
         needsReview: pendingReview
       });
+
+      // Store dependency warnings for later use
+      setDependencyWarnings(dependencyWarnings);
 
     } catch (err) {
       console.error('Error fetching training data:', err);
@@ -903,6 +912,27 @@ export default function AuditReadyTrainingMatrix({
 
   return (
     <div className="space-y-6" data-testid="audit-ready-training-matrix">
+      {matrixData.dependency_warnings?.length > 0 && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+          <p className="font-medium">Training dependency issues</p>
+          <ul className="list-disc pl-5 mt-1">
+            {matrixData.dependency_warnings.map((w, i) => (
+              <li key={i}>{w.message}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {/* Dependency Warnings */}
+      {dependencyWarnings && dependencyWarnings.length > 0 && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+          <strong>Dependency Warnings:</strong>
+          <ul className="list-disc pl-5 mt-1">
+            {dependencyWarnings.map((w, i) => (
+              <li key={i}>{w}</li>
+            ))}
+          </ul>
+        </div>
+      )}
       <div className={`rounded-lg border p-4 ${trainingDecisionClasses.panel}`}>
         <div className="flex items-start gap-3">
           <div className={`mt-0.5 ${trainingDecisionClasses.icon}`}>
@@ -1096,10 +1126,20 @@ export default function AuditReadyTrainingMatrix({
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {mandatoryTraining.map((item) => {
+                  {(mandatoryTraining.length > 0 ? mandatoryTraining : (matrixData.items || [])).map((item) => {
                     const pendingExtractedMatch = !isMandatoryTrainingSatisfied(item)
                       ? getPendingExtractedMatch(item)
                       : null;
+
+                  let displayStatus = item.status;
+                  // If a mapped proposed item exists, override status to 'proposed' for badge
+                  if (pendingExtractedMatch && (pendingExtractedMatch.mapped_training_code || pendingExtractedMatch.mapped_training_title)) {
+                    displayStatus = 'proposed';
+                  }
+                  // If status is missing and there is a pending extracted match, show as pending
+                  if (item.status === 'missing' && pendingExtractedMatch) {
+                    displayStatus = 'pending';
+                  }
 
                     return (
                       <TableRow
@@ -1124,7 +1164,7 @@ export default function AuditReadyTrainingMatrix({
                             </div>
                           </div>
                         </TableCell>
-                        <TableCell>{renderStatusBadge(item.status)}</TableCell>
+                        <TableCell>{renderStatusBadge(displayStatus)}</TableCell>
                         <TableCell>
                           {(item.record_id || item.id) && (item.source_document_id || item.certificate_url || item.evidence_files?.length) ? (
                             <Button
@@ -1517,13 +1557,9 @@ export default function AuditReadyTrainingMatrix({
                 </TableHeader>
                 <TableBody>
                   {(() => {
-                    // Deduplicate: one row per canonical training code/title
-                    const seen = new Set();
-                    return canonicalTrainingRecords
+                    const records = canonicalTrainingRecords.length > 0 ? canonicalTrainingRecords : (matrixData.all_qualifications || []);
+                    return records
                       .filter(item => {
-                        const key = (item.code || item.title || item.id || '').toLowerCase().replace(/[\s&_-]+/g, ' ').trim();
-                        if (seen.has(key)) return false;
-                        seen.add(key);
                         if (!searchQuery) return true;
                         const q = searchQuery.toLowerCase();
                         return item.title?.toLowerCase().includes(q) ||
@@ -1735,162 +1771,43 @@ export default function AuditReadyTrainingMatrix({
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {sourceErrors.proposedItems && (
-                    <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-                      <span className="font-medium">Cannot assess extracted training links.</span> Pending-review data did not load, so certificate extraction status may be incomplete.
-                    </div>
-                  )}
-                  {certificates.map((cert) => {
-                    // Find proposed items linked to this certificate
-                    const linkedItems = proposedItems.filter(p => p.source_document_id === cert.id);
-                    const approvedItems = linkedItems.filter(p => p.status === 'approved' || p.status === 'merged');
-                    const pendingItems = linkedItems.filter(p => p.status === 'proposed');
-                    
-                    return (
-                      <div 
-                        key={cert.id}
-                        className="border border-gray-200 rounded-lg overflow-hidden"
-                      >
-                        {/* Certificate Header */}
-                        <div className="p-4 bg-gray-50 flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
-                              <FileText className="h-5 w-5 text-blue-600" />
-                            </div>
-                            <div>
-                              <p className="font-medium text-gray-900">
-                                {cert.original_filename || cert.file_name || 'Training Certificate'}
-                              </p>
-                              <p className="text-xs text-gray-500">
-                                Uploaded {formatBackendDate(cert.uploaded_at, { format: 'medium' })}
-                                {cert.uploaded_by && ` by ${cert.uploaded_by}`}
-                              </p>
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            {renderExtractionStatusBadge(cert)}
-                            {pendingItems.length > 0 && (
-                              <Badge className="bg-purple-100 text-purple-700">
-                                {pendingItems.length} pending review
-                              </Badge>
-                            )}
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 w-8 p-0"
-                              onClick={() => onViewCertificate?.(cert.id)}
-                              title="View certificate"
-                            >
-                              <Eye className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 w-8 p-0"
-                              title="Download"
-                            >
-                              <Download className="h-4 w-4" />
-                            </Button>
-                            {isAdmin && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-8 px-2"
-                                onClick={() => handleReExtract(cert.id)}
-                                title="Re-run extraction"
-                              >
-                                <Wand2 className="h-4 w-4 mr-1" />
-                                Re-extract
-                              </Button>
-                            )}
-                            {isAdmin && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-8 px-2 text-red-500 hover:text-red-700 hover:bg-red-50"
-                                onClick={() => setRemoveCertDialogCert(cert)}
-                                title="Remove certificate"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            )}
-                          </div>
-                        </div>
-                        {cert.extraction_status === 'extraction_failed' && cert.extraction_error && (
-                          <div className="border-t border-red-100 bg-red-50 px-4 py-2 text-sm text-red-700">
-                            <span className="font-medium">Extraction error:</span> {cert.extraction_error}
-                          </div>
-                        )}
-                        
-                        {/* Extracted Items */}
-                        {linkedItems.length > 0 && (
-                          <div className="p-4 border-t border-gray-200">
-                            <p className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-2">
-                              Extracted Training Items
-                            </p>
-                            <div className="space-y-2">
-                              {linkedItems.map((item) => (
-                                <div 
-                                  key={item.id}
-                                  className={cn(
-                                    "p-2 rounded-lg flex items-center justify-between",
-                                    item.status === 'proposed' ? 'bg-purple-50 border border-purple-200' :
-                                    item.status === 'approved' || item.status === 'merged' ? 'bg-green-50 border border-green-200' :
-                                    'bg-gray-50 border border-gray-200'
-                                  )}
-                                >
-                                  <div className="flex items-center gap-2">
-                                    {item.status === 'approved' || item.status === 'merged' ? (
-                                      <CheckCircle className="h-4 w-4 text-green-600" />
-                                    ) : item.status === 'proposed' ? (
-                                      <Clock className="h-4 w-4 text-purple-600" />
-                                    ) : (
-                                      <XCircle className="h-4 w-4 text-gray-400" />
-                                    )}
-                                    <div>
-                                      <p className="text-sm font-medium">
-                                        {item.mapped_training_title || item.raw_course_title}
-                                      </p>
-                                      <p className="text-xs text-gray-500">
-                                        {item.is_unmapped
-                                          ? 'Unmapped - admin mapping needed'
-                                          : (item.mapped_training_title && item.raw_course_title !== item.mapped_training_title
-                                              ? `Mapped from: ${item.raw_course_title} • `
-                                              : '')}
-                                        {item.completed_at && `Completed: ${formatBackendDate(item.completed_at, { format: 'short' })}`}
-                                        {item.expires_at && ` • Expires: ${formatBackendDate(item.expires_at, { format: 'short' })}`}
-                                      </p>
-                                    </div>
-                                  </div>
-                                  <div className="flex items-center gap-2">
-                                    <Badge variant="outline" className={item.is_mandatory ? 'bg-red-50 text-red-700 border-red-200 text-xs' : 'text-gray-600 text-xs'}>
-                                      {item.is_mandatory ? 'Required' : 'Additional'}
-                                    </Badge>
-                                    {item.is_unmapped && (
-                                      <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 text-xs">
-                                        Unmapped
-                                      </Badge>
-                                    )}
-                                    {typeof item.confidence === 'number' && (
-                                      <span className="text-xs text-gray-500">
-                                        {Math.round(item.confidence * 100)}% confidence
-                                      </span>
-                                    )}
-                                    {item.mapped_training_code && (
-                                      <Badge variant="outline" className="text-xs">
-                                        → {item.mapped_training_code}
-                                      </Badge>
-                                    )}
-                                    {renderStatusBadge(item.status)}
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
+                  {/* Separate: certificates, proposed_items, unmapped_items */}
+                  <div>
+                    <h4 className="font-semibold text-blue-900 mb-2">Uploaded Certificates</h4>
+                    <ul className="space-y-2">
+                      {certificates.map(cert => (
+                        <li key={cert.id} className="border border-gray-200 rounded-lg p-3 flex items-center gap-3">
+                          <FileText className="h-5 w-5 text-blue-600" />
+                          <span className="font-medium">{cert.original_filename || cert.file_name || 'Training Certificate'}</span>
+                          <span className="text-xs text-gray-500">Uploaded {formatBackendDate(cert.uploaded_at, { format: 'medium' })}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                  <div>
+                    <h4 className="font-semibold text-purple-900 mt-6 mb-2">Extracted/Proposed Items</h4>
+                    <ul className="space-y-2">
+                      {(proposedItems && proposedItems.length > 0 ? proposedItems : (matrixData.proposed_items || [])).map(item => (
+                        <li key={item.id} className="border border-purple-200 rounded-lg p-3 flex items-center gap-3">
+                          <Wand2 className="h-4 w-4 text-purple-600" />
+                          <span className="font-medium">{item.mapped_training_title || item.raw_course_title}</span>
+                          <span className="text-xs text-gray-500">Status: {item.status}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                  <div>
+                    <h4 className="font-semibold text-amber-900 mt-6 mb-2">Unmapped Items</h4>
+                    <ul className="space-y-2">
+                      {(matrixData.unmapped_items || []).map(item => (
+                        <li key={item.id} className="border border-amber-200 rounded-lg p-3 flex items-center gap-3">
+                          <AlertTriangle className="h-4 w-4 text-amber-600" />
+                          <span className="font-medium">{item.raw_course_title}</span>
+                          <span className="text-xs text-amber-700">Unmapped</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
                 </div>
               )}
             </CardContent>

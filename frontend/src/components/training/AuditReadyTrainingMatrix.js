@@ -1221,7 +1221,7 @@ export default function AuditReadyTrainingMatrix({
                           )}
                         </TableCell>
                         <TableCell>
-                          {isTrainingVerified({ ...item, status: displayStatus }) || displayStatus === 'verified' ? (
+                          {item.verified || item.is_verified || displayStatus === 'verified' ? (
                             <div className="flex flex-col">
                               <Badge className="bg-green-100 text-green-700 border-green-200 w-fit">
                                 <CheckCircle className="h-3 w-3 mr-1" />

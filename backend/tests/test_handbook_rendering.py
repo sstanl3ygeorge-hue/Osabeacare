@@ -141,6 +141,22 @@ def _render_handbook_pdf(org_settings: dict) -> bytes:
     )
 
 
+def test_handbook_company_address_prefers_org_settings_over_employee_override():
+    org = {
+        "organisation_name": "Osabea Healthcare Solutions Ltd",
+        "company_address": "Suite FA4D\n1 St Faith's Street, Maidstone Kent\nME14 1LH",
+    }
+    employee = {
+        "id": "emp-1",
+        "contract_render_overrides": {
+            "company_address": "STALE OVERRIDE ADDRESS",
+        },
+    }
+    fields = _resolve_handbook_fields(org, employee)
+    assert "Suite FA4D" in (fields.get("company_address") or "")
+    assert "STALE OVERRIDE ADDRESS" not in (fields.get("company_address") or "")
+
+
 def _extract_pdf_text(pdf_bytes: bytes) -> str:
     from PyPDF2 import PdfReader
     reader = PdfReader(io.BytesIO(pdf_bytes))

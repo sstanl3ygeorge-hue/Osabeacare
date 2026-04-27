@@ -60,6 +60,7 @@ REISSUE_ELIGIBLE_STATUSES = {
     "signed",
     "fully_executed",
     "pending_signature",
+    "awaiting_worker_signature",
     "action_required",
 }
 
@@ -69,6 +70,7 @@ REISSUE_STATUS_ALIASES = {
     "signed": "signed",
     "fully_executed": "fully_executed",
     "pending_signature": "pending_signature",
+    "awaiting_worker_signature": "awaiting_worker_signature",
     "action_required": "action_required",
 }
 
@@ -1114,6 +1116,17 @@ async def reissue_employee_contract(
                 code="ineligible_latest_status",
                 message=f"Latest contract status '{raw_current_status}' is not eligible for reissue",
                 latest_contract_status=raw_current_status,
+            ),
+        )
+
+    if current_status == "awaiting_worker_signature":
+        raise HTTPException(
+            status_code=409,
+            detail=_reissue_error_payload(
+                code="already_has_active_contract",
+                message="Latest contract is already awaiting worker signature",
+                status="awaiting_worker_signature",
+                latest_contract_id=current_contract.get("id"),
             ),
         )
 

@@ -469,26 +469,45 @@ async def can_sign_contract(db, employee_id: str) -> dict:
     
     # ========== HANDBOOK / AGREEMENTS ==========
     # Contract signing itself is excluded from this pre-sign check. Handbook
-    # follows the same UCE/compliance-file agreement readiness where present.
-    has_unified_handbook = "handbook" in unified_checks
-    handbook_ok = bool(unified_checks.get("handbook")) if has_unified_handbook else False
-    if not has_unified_handbook:
-        # Direct DB read — legacy ack first, then template submission
-        _hb_ack = await db.agreement_acknowledgements.find_one({
-            "employee_id": employee_id,
-            "agreement_type": {"$regex": "handbook", "$options": "i"},
-            "status": {"$in": ["acknowledged", "signed", "submitted"]},
-        })
-        if not _hb_ack:
-            _hb_ack = await db.agreement_submissions.find_one({
+    # must use the same latest-state resolver as admin/worker agreement cards.
+    handbook_ok = False
+    handbook_system_issue = False
+    handbook_source = "agreement_resolver"
+    try:
+        from agreement_document_service import (
+            HANDBOOK_AGREEMENT_TYPE,
+            resolve_employee_agreement_state,
+        )
+        handbook_state = await resolve_employee_agreement_state(
+            db,
+            employee,
+            HANDBOOK_AGREEMENT_TYPE,
+        )
+        handbook_ok = bool(handbook_state.get("verified") or handbook_state.get("worker_acknowledged"))
+        handbook_system_issue = bool(handbook_state.get("system_issue"))
+    except Exception:
+        has_unified_handbook = "handbook" in unified_checks
+        handbook_ok = bool(unified_checks.get("handbook")) if has_unified_handbook else False
+        handbook_source = "uce_checks" if has_unified_handbook else "legacy_agreement_lookup"
+        if not has_unified_handbook:
+            _hb_ack = await db.agreement_acknowledgements.find_one({
                 "employee_id": employee_id,
-                "template_id": "EMPLOYEE_HANDBOOK_ACKNOWLEDGEMENT_V1",
+                "agreement_type": {"$regex": "handbook", "$options": "i"},
+                "status": {"$in": ["acknowledged", "signed", "submitted"]},
             })
-        handbook_ok = bool(_hb_ack)
+            if not _hb_ack:
+                _hb_ack = await db.agreement_submissions.find_one({
+                    "employee_id": employee_id,
+                    "template_id": "EMPLOYEE_HANDBOOK_ACKNOWLEDGEMENT_V1",
+                })
+            handbook_ok = bool(_hb_ack)
     if handbook_ok:
         completed.append("Employee Handbook acknowledged")
     else:
-        blockers.append("Employee Handbook not acknowledged")
+        if handbook_system_issue:
+            blockers.append("Employee Handbook unavailable due to system render issue")
+        else:
+            blockers.append("Employee Handbook not acknowledged")
 
     # ========== INDUCTION ==========
     induction_category = unified_category_details.get("induction") or unified_categories.get("induction") or {}
@@ -543,8 +562,12 @@ async def can_sign_contract(db, employee_id: str) -> dict:
             "agreements": {
                 "handbook_satisfied": handbook_ok,
                 "contract_excluded_from_pre_sign_gate": True,
-                "blocking": [] if handbook_ok else ["Employee Handbook not acknowledged"],
-                "source": "uce_checks" if has_unified_handbook else "legacy_agreement_lookup",
+                "blocking": [] if handbook_ok else (
+                    ["Employee Handbook unavailable due to system render issue"]
+                    if handbook_system_issue
+                    else ["Employee Handbook not acknowledged"]
+                ),
+                "source": handbook_source,
             },
             "final_contract_lock_reasons": blockers,
         }
@@ -564,31 +587,43 @@ async def can_promote_to_active(db, employee_id: str) -> dict:
             "reason": "Pre-contract requirements incomplete",
             "blockers": contract_check["blockers"]
         }
-    
-    # Check contract signed — mirrors UCE CHECK 6 logic
-    _CONTRACT_TEMPLATE_IDS = {
-        "ZERO_HOUR_CONTRACT_V1",
-        "EMPLOYMENT_CONTRACT_V1",
-        "CASUAL_WORKER_CONTRACT_V1",
-    }
-    contract_ack = await db.agreement_acknowledgements.find_one({
-        "employee_id": employee_id,
-        "agreement_type": {"$regex": "contract", "$options": "i"},
-        "status": {"$in": ["signed", "submitted", "verified"]},
-    })
-    if not contract_ack:
-        contract_ack = await db.agreement_submissions.find_one({
+
+    contract_signed = False
+    try:
+        from agreement_document_service import (
+            CONTRACT_AGREEMENT_TYPE,
+            resolve_employee_agreement_state,
+        )
+        employee = await db.employees.find_one({"id": employee_id}, {"_id": 0}) or {"id": employee_id}
+        contract_state = await resolve_employee_agreement_state(
+            db,
+            employee,
+            CONTRACT_AGREEMENT_TYPE,
+        )
+        contract_signed = bool(contract_state.get("fully_executed"))
+    except Exception:
+        _CONTRACT_TEMPLATE_IDS = {
+            "ZERO_HOUR_CONTRACT_V1",
+            "EMPLOYMENT_CONTRACT_V1",
+            "CASUAL_WORKER_CONTRACT_V1",
+        }
+        contract_ack = await db.agreement_acknowledgements.find_one({
             "employee_id": employee_id,
-            "template_id": {"$in": list(_CONTRACT_TEMPLATE_IDS)},
+            "agreement_type": {"$regex": "contract", "$options": "i"},
+            "status": {"$in": ["signed", "submitted", "verified"]},
         })
+        if not contract_ack:
+            contract_ack = await db.agreement_submissions.find_one({
+                "employee_id": employee_id,
+                "template_id": {"$in": list(_CONTRACT_TEMPLATE_IDS)},
+            })
+        if not contract_ack:
+            emp_record = await db.employees.find_one({"id": employee_id}, {"contract_signed": 1})
+            if emp_record and emp_record.get("contract_signed"):
+                contract_ack = {"source": "legacy_flat"}
+        contract_signed = bool(contract_ack)
 
-    # Also accept legacy flat field on employee record
-    if not contract_ack:
-        emp_record = await db.employees.find_one({"id": employee_id}, {"contract_signed": 1})
-        if emp_record and emp_record.get("contract_signed"):
-            contract_ack = {"source": "legacy_flat"}
-
-    if not contract_ack:
+    if not contract_signed:
         return {
             "can_promote": False,
             "reason": "Contract not signed",

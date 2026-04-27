@@ -126,6 +126,39 @@ class HandbookRenderError(Exception):
     """Required handbook/org fields are missing or unresolved."""
 
 
+def _resolve_company_address(
+    org_settings: Optional[Dict[str, Any]],
+    *,
+    employee_overrides: Optional[Dict[str, Any]] = None,
+) -> Optional[str]:
+    settings = org_settings or {}
+    overrides = employee_overrides or {}
+
+    def _first_non_empty(*values):
+        for value in values:
+            if value is None:
+                continue
+            if isinstance(value, str):
+                if value.strip():
+                    return value.strip()
+                continue
+            return value
+        return None
+
+    # Canonical source: org/company settings. Employee overrides are fallback-only
+    # for explicit recovery where org settings are not populated yet.
+    return _first_non_empty(
+        settings.get("company_address"),
+        settings.get("organisation_address"),
+        settings.get("business_address"),
+        settings.get("registered_address"),
+        settings.get("address"),
+        settings.get("companyAddress"),
+        settings.get("registeredOfficeAddress"),
+        overrides.get("company_address"),
+    )
+
+
 def _resolve_contract_fields(employee: Dict[str, Any], org_settings: Optional[Dict[str, Any]]) -> Dict[str, str]:
     def _first_non_empty(*values):
         for value in values:
@@ -170,18 +203,7 @@ def _resolve_contract_fields(employee: Dict[str, Any], org_settings: Optional[Di
         or settings.get("legal_name")
         or None
     )
-    # Address must be a real street address, not the company name.
-    # Sources in priority order; company name is explicitly excluded as a fallback.
-    org_address = _first_non_empty(
-        settings.get("company_address"),
-        settings.get("organisation_address"),
-        settings.get("business_address"),
-        settings.get("registered_address"),
-        settings.get("address"),
-        settings.get("companyAddress"),
-        settings.get("registeredOfficeAddress"),
-        render_overrides.get("company_address"),
-    ) or None  # None signals that address has not been configured
+    org_address = _resolve_company_address(settings, employee_overrides=render_overrides) or None
     # Hourly rate: try multiple field names used across different data models
     hourly_rate_raw = _first_non_empty(
         employee.get("hourly_rate"),
@@ -440,7 +462,7 @@ def _assert_no_unresolved_handbook_placeholders(blocks: List[Dict[str, Any]]) ->
         )
 
 
-def _resolve_handbook_fields(org_settings: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+def _resolve_handbook_fields(org_settings: Optional[Dict[str, Any]], employee: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Map org_settings → canonical handbook field dict."""
     s = org_settings or {}
     org_name = (
@@ -448,13 +470,8 @@ def _resolve_handbook_fields(org_settings: Optional[Dict[str, Any]]) -> Dict[str
         or s.get("company_name")
         or None
     )
-    org_address = (
-        s.get("company_address")
-        or s.get("organisation_address")
-        or s.get("business_address")
-        or s.get("registered_address")
-        or s.get("address")
-    ) or None
+    render_overrides = dict((employee or {}).get("contract_render_overrides") or {})
+    org_address = _resolve_company_address(s, employee_overrides=render_overrides) or None
     registered_manager = (
         s.get("registered_manager_name") or s.get("registered_manager") or "The Registered Manager"
     )
@@ -989,10 +1006,12 @@ async def resolve_employee_agreement_state(db, employee: Dict[str, Any], agreeme
             latest_status = str(latest_generated_contract.get("status") or "").strip().lower()
             generated_to_state = {
                 "pending_signature": "pending_signature",
+                "awaiting_worker_signature": "awaiting_worker_signature",
                 "signed": "awaiting_company_countersignature",
                 "fully_executed": "fully_executed",
                 "action_required": "rejected_reopen_required",
                 "rejected": "rejected_reopen_required",
+                "rejected_reopen_required": "rejected_reopen_required",
             }
             resolved_state = generated_to_state.get(latest_status)
             if resolved_state:
@@ -1026,12 +1045,13 @@ async def resolve_employee_agreement_state(db, employee: Dict[str, Any], agreeme
                 )
                 agreement["status"] = latest_status
                 agreement["contract_state"] = resolved_state
-                if resolved_state == "pending_signature":
+                if resolved_state in {"pending_signature", "awaiting_worker_signature"}:
                     agreement["verification_status"] = "pending"
                 elif resolved_state == "fully_executed":
                     agreement["verification_status"] = "verified"
 
         contract_state = agreement.get("contract_state") or "awaiting_worker_signature"
+        verification_status = str((agreement or {}).get("verification_status") or "").strip().lower()
         canonical_contract = _is_canonical_contract_template_version(agreement.get("template_version"))
         contract_file_url = current_contract_artifact(agreement)
         render_issue_contract = render_error_detail if not canonical_contract else None
@@ -1040,7 +1060,7 @@ async def resolve_employee_agreement_state(db, employee: Dict[str, Any], agreeme
             or agreement.get("worker_signed_at")
         )
         fully_executed = bool(contract_state == "fully_executed" or verification_status == "verified")
-        effective_rejected = bool(rejected and contract_state in ("rejected_reopen_required", "action_required"))
+        effective_rejected = bool(contract_state in ("rejected_reopen_required", "action_required"))
         if effective_rejected:
             state_label = "Action required: please re-sign the updated contract"
         elif fully_executed:
@@ -1156,7 +1176,7 @@ async def build_agreement_rendering(db, employee: Dict[str, Any], agreement_type
             add_generated_footer=False,
         )
     else:
-        handbook_fields = _resolve_handbook_fields(org_settings)
+        handbook_fields = _resolve_handbook_fields(org_settings, employee)
         _validate_handbook_fields(handbook_fields)
         doc = Document(io.BytesIO(template_bytes))
         blocks = _docx_to_blocks(doc, lambda text: _replace_handbook_text(text, handbook_fields))

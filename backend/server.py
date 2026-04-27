@@ -31447,11 +31447,61 @@ class AgreementAcknowledgementService:
     
     @staticmethod
     async def get_employee_agreements(employee_id: str) -> dict:
-        """Get all agreement acknowledgements for an employee."""
+        """Get agreement rows for an employee with canonical latest-state precedence."""
+        from agreement_document_service import (
+            CONTRACT_AGREEMENT_TYPE,
+            HANDBOOK_AGREEMENT_TYPE,
+            resolve_employee_agreement_state,
+        )
+
         acknowledgements = await db.agreement_acknowledgements.find(
             {"employee_id": employee_id},
             {"_id": 0}
         ).sort("created_at", -1).to_list(50)
+
+        employee = await db.employees.find_one({"id": employee_id}, {"_id": 0}) or {"id": employee_id}
+        contract_state = await resolve_employee_agreement_state(db, employee, CONTRACT_AGREEMENT_TYPE)
+        handbook_state = await resolve_employee_agreement_state(db, employee, HANDBOOK_AGREEMENT_TYPE)
+
+        canonical_rows = []
+        for state in (contract_state, handbook_state):
+            row = dict(state.get("acknowledgement") or {})
+            if not row:
+                row = {
+                    "employee_id": employee_id,
+                    "agreement_type": state.get("agreement_type"),
+                }
+            row.setdefault("agreement_type", state.get("agreement_type"))
+            row["status"] = state.get("status")
+            row["verification_status"] = state.get("verification_status")
+            row["contract_state"] = state.get("contract_state") or row.get("contract_state")
+            row["is_canonical_latest_state"] = True
+            row["state_label"] = state.get("state_label")
+            row["can_sign"] = state.get("can_sign")
+            row["system_issue"] = state.get("system_issue")
+            row["render_issue"] = state.get("render_issue")
+            row["rendered_file_url"] = (
+                state.get("rendered_file_url")
+                or row.get("rendered_file_url")
+            )
+            row["active_contract_id"] = (
+                (state.get("acknowledgement") or {}).get("active_contract_id")
+                or row.get("active_contract_id")
+            )
+            canonical_rows.append(row)
+
+        canonical_keys = {
+            (str(r.get("agreement_type") or "").strip(), str(r.get("id") or "").strip())
+            for r in canonical_rows
+        }
+        historical_rows = []
+        for row in acknowledgements:
+            key = (str(row.get("agreement_type") or "").strip(), str(row.get("id") or "").strip())
+            if key in canonical_keys:
+                continue
+            row = dict(row)
+            row["is_canonical_latest_state"] = False
+            historical_rows.append(row)
         
         # Get pending requests
         pending_requests = await db.agreement_requests.find(
@@ -31460,7 +31510,7 @@ class AgreementAcknowledgementService:
         ).to_list(10)
         
         return {
-            "acknowledgements": acknowledgements,
+            "acknowledgements": canonical_rows + historical_rows,
             "pending_requests": pending_requests
         }
 

@@ -94,7 +94,7 @@ class _FakeCollection:
         self.docs.append(dict(document))
         return SimpleNamespace(inserted_id=document.get("id"))
 
-    async def update_one(self, query, update):
+    async def update_one(self, query, update, upsert=False):
         # Simulate race conflict specifically for mark-in-progress lock update.
         if self.force_mark_in_progress_conflict and "$set" in update and update["$set"].get("reissue_in_progress") is True:
             return SimpleNamespace(modified_count=0)
@@ -107,6 +107,16 @@ class _FakeCollection:
                     merged.pop(k, None)
                 self.docs[i] = merged
                 return SimpleNamespace(modified_count=1)
+        if upsert:
+            new_doc = dict(query or {})
+            for k, v in (update.get("$setOnInsert") or {}).items():
+                new_doc[k] = v
+            for k, v in (update.get("$set") or {}).items():
+                new_doc[k] = v
+            for k in (update.get("$unset") or {}).keys():
+                new_doc.pop(k, None)
+            self.docs.append(new_doc)
+            return SimpleNamespace(modified_count=1)
         return SimpleNamespace(modified_count=0)
 
     async def delete_one(self, query):
@@ -121,6 +131,7 @@ class _FakeDb:
     def __init__(self):
         self.employees = _FakeCollection([])
         self.generated_contracts = _FakeCollection([])
+        self.agreement_acknowledgements = _FakeCollection([])
         self.audit_logs = _FakeCollection([])
 
 
@@ -183,6 +194,19 @@ def _seed_employee_and_contract(fake_db, *, contract_id="old-1", status="rejecte
             "created_at": "2026-04-01T10:00:00+00:00",
         }
     ]
+    fake_db.agreement_acknowledgements.docs = [
+        {
+            "id": "agr_contract_acceptance_emp-1",
+            "employee_id": "emp-1",
+            "agreement_type": "contract_acceptance",
+            "status": "rejected",
+            "contract_state": "rejected_reopen_required",
+            "verification_status": "rejected",
+            "rendered_file_url": "https://example.test/old-contract.pdf",
+            "rendered_contract_pdf_url": "https://example.test/old-contract.pdf",
+            "rejection_reason": "Old version rejected",
+        }
+    ]
 
 
 def test_reissue_success_links_and_employee_pointer(monkeypatch):
@@ -201,11 +225,15 @@ def test_reissue_success_links_and_employee_pointer(monkeypatch):
     old = next(x for x in fake_db.generated_contracts.docs if x["id"] == "old-1")
     new = next(x for x in fake_db.generated_contracts.docs if x["id"] == new_id)
     emp = fake_db.employees.docs[0]
+    ack = next(x for x in fake_db.agreement_acknowledgements.docs if x["agreement_type"] == "contract_acceptance")
 
     assert new["status"] == "pending_signature"
     assert old["superseded_by_contract_id"] == new_id
     assert new["reissued_from_contract_id"] == "old-1"
     assert emp["pending_contract_id"] == new_id
+    assert ack["contract_state"] == "awaiting_worker_signature"
+    assert ack["verification_status"] == "pending"
+    assert ack.get("active_contract_id") == new_id
 
 
 def test_source_contract_stale_returns_409(monkeypatch):

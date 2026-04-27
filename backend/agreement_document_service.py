@@ -269,6 +269,51 @@ _HANDBOOK_ARTIFACT_PHRASES = [
     "Unit 12, Harrods Road, Harlow, CM19 5BJ",
 ]
 
+_HANDBOOK_UNRESOLVED_PATTERNS = [
+    r"\bxxxxxx\b",
+    r"\bxxxx\b",
+    r"\[Add",
+    r"\[Adjust",
+    r"\[Delete",
+    r"\{\{[^{}]+\}\}",
+]
+
+
+def _normalize_role_profile(employee: Dict[str, Any]) -> str:
+    raw = (
+        employee.get("role_profile")
+        or employee.get("role")
+        or employee.get("job_title")
+        or "care_worker"
+    )
+    normalized = re.sub(r"[^a-z0-9]+", "_", str(raw).strip().lower()).strip("_")
+    return normalized or "care_worker"
+
+
+def _assert_no_unresolved_handbook_placeholders(blocks: List[Dict[str, Any]]) -> None:
+    """
+    Prevent publishing handbook PDFs that still contain template/editor tokens.
+    """
+    text_parts: List[str] = []
+    for block in blocks:
+        if block.get("type") == "paragraph":
+            text_parts.append(str(block.get("text") or ""))
+        elif block.get("type") == "table":
+            for row in block.get("rows") or []:
+                for cell in row:
+                    text_parts.append(str(cell or ""))
+    rendered_text = "\n".join(text_parts)
+
+    hits: List[str] = []
+    for pattern in _HANDBOOK_UNRESOLVED_PATTERNS:
+        if re.search(pattern, rendered_text, flags=re.IGNORECASE):
+            hits.append(pattern)
+    if hits:
+        raise HandbookRenderError(
+            "Cannot render handbook: unresolved placeholders remain in output "
+            f"(matched patterns: {', '.join(hits)})"
+        )
+
 
 def _resolve_handbook_fields(org_settings: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """Map org_settings → canonical handbook field dict."""
@@ -400,6 +445,12 @@ def _replace_handbook_text(text: str, fields: Dict[str, Any]) -> str:
     # Strip any remaining artifact phrases that should never reach production
     for artifact in _HANDBOOK_ARTIFACT_PHRASES:
         updated = updated.replace(artifact, "")
+
+    # Remove generic template-editor directives that appear in legacy handbook
+    # docs and must never survive to rendered output.
+    updated = re.sub(r"\[(?:Add|Adjust|Delete)[^\]]*\]", "", updated, flags=re.IGNORECASE)
+    updated = re.sub(r"\bxxxxxx\b", "", updated, flags=re.IGNORECASE)
+    updated = re.sub(r"\bxxxx\b", "", updated, flags=re.IGNORECASE)
 
     return updated
 
@@ -891,6 +942,7 @@ async def build_agreement_rendering(db, employee: Dict[str, Any], agreement_type
         _validate_handbook_fields(handbook_fields)
         doc = Document(io.BytesIO(template_bytes))
         blocks = _docx_to_blocks(doc, lambda text: _replace_handbook_text(text, handbook_fields))
+        _assert_no_unresolved_handbook_placeholders(blocks)
         title = "Employee Handbook"
         subtitle = f"{handbook_fields['company_name']} | Version {version}"
         pdf_bytes = _render_pdf(blocks, title, subtitle, employee_name)
@@ -899,6 +951,7 @@ async def build_agreement_rendering(db, employee: Dict[str, Any], agreement_type
         "template_source_name": source_name,
         "template_source_path": str(source_path),
         "employee_name": employee_name,
+        "role_profile": _normalize_role_profile(employee),
         "pdf_bytes": pdf_bytes,
     }
 
@@ -943,6 +996,21 @@ async def ensure_agreement_rendered(db, employee: Dict[str, Any], agreement_type
         # Handbook artifact stability: keep the same rendered handbook URL for
         # the same template version, even if the row was rejected. Re-rendering
         # on rejection is only expected when explicit regenerate is requested.
+        metadata_backfill = {}
+        if not existing.get("role_profile"):
+            metadata_backfill["role_profile"] = rendering.get("role_profile")
+        if not existing.get("rendered_at"):
+            metadata_backfill["rendered_at"] = existing.get("updated_at") or _utcnow().isoformat()
+        if metadata_backfill:
+            metadata_backfill["updated_at"] = _utcnow().isoformat()
+            await db.agreement_acknowledgements.update_one(
+                {"employee_id": employee["id"], "agreement_type": agreement_type},
+                {"$set": metadata_backfill},
+            )
+            existing = await db.agreement_acknowledgements.find_one(
+                {"employee_id": employee["id"], "agreement_type": agreement_type},
+                {"_id": 0},
+            ) or existing
         return existing
 
     timestamp = _utcnow().strftime("%Y%m%d_%H%M%S")
@@ -964,6 +1032,7 @@ async def ensure_agreement_rendered(db, employee: Dict[str, Any], agreement_type
         "template_source_name": rendering["template_source_name"],
         "rendered_file_url": rendered_file_url,
         "rendered_at": now_iso,
+        "role_profile": rendering.get("role_profile"),
         "updated_at": now_iso,
         "status": (existing or {}).get("status") or "pending",
         "verification_status": (existing or {}).get("verification_status") or "pending",

@@ -55,6 +55,7 @@ from agreement_document_service import (  # noqa: E402
     HANDBOOK_TEMPLATE_PATH,
     REQUIRED_HANDBOOK_FIELDS,
     HandbookRenderError,
+    _assert_no_unresolved_handbook_placeholders,
     _docx_to_blocks,
     _render_pdf,
     _replace_handbook_text,
@@ -340,6 +341,16 @@ class TestHandbookFieldValidation:
             db = _FakeDB(_ORG_SETTINGS_NO_ADDRESS)
             with pytest.raises(HandbookRenderError):
                 asyncio.run(build_agreement_rendering(db, _EMPLOYEE, HANDBOOK_AGREEMENT_TYPE))
+
+    def test_unresolved_placeholder_patterns_are_blocked(self):
+        """Any unresolved template markers must block handbook rendering."""
+        blocks = [
+            {"type": "paragraph", "text": "Company xxxxxx"},
+            {"type": "paragraph", "text": "Please [Add policy owner]"},
+            {"type": "paragraph", "text": "Token {{company.name}}"},
+        ]
+        with pytest.raises(HandbookRenderError, match="unresolved placeholders"):
+            _assert_no_unresolved_handbook_placeholders(blocks)
 
 
 # ---------------------------------------------------------------------------

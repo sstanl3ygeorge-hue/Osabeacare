@@ -624,6 +624,10 @@ async def reissue_employee_contract(
         "contract_id": employee.get("contract_id"),
         "updated_at": employee.get("updated_at"),
     }
+    contract_ack_snapshot = await db.agreement_acknowledgements.find_one(
+        {"employee_id": employee_id, "agreement_type": "contract_acceptance"},
+        {"_id": 0},
+    )
     template_id = current_contract.get("template_id") or "zero_hour_contract_v1"
     new_contract_doc = _build_contract_doc_for_signature(
         employee=employee,
@@ -762,6 +766,55 @@ async def reissue_employee_contract(
         if employee_pointer_result.modified_count == 0:
             raise RuntimeError("Failed to update employee contract pointers")
 
+        # Keep worker dashboard in sync with the new pending contract. The
+        # dashboard contract card is sourced from agreement_acknowledgements.
+        await db.agreement_acknowledgements.update_one(
+            {"employee_id": employee_id, "agreement_type": "contract_acceptance"},
+            {
+                "$set": {
+                    "employee_id": employee_id,
+                    "employee_name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
+                    "agreement_type": "contract_acceptance",
+                    "status": "pending_signature",
+                    "contract_state": "awaiting_worker_signature",
+                    "verification_status": "pending",
+                    "acknowledged": False,
+                    "acknowledged_at": None,
+                    "signed_at": None,
+                    "worker_signed_at": None,
+                    "worker_signer_name": None,
+                    "signed_document_url": None,
+                    "worker_signed_contract_pdf_url": None,
+                    "executed_contract_pdf_url": None,
+                    "template_version": new_contract_doc.get("template_version"),
+                    "rendered_contract_pdf_url": (
+                        new_contract_doc.get("rendered_file_url")
+                        or current_contract.get("rendered_contract_pdf_url")
+                        or current_contract.get("rendered_file_url")
+                    ),
+                    "rendered_file_url": (
+                        new_contract_doc.get("rendered_file_url")
+                        or current_contract.get("rendered_contract_pdf_url")
+                        or current_contract.get("rendered_file_url")
+                    ),
+                    "reissued_from_contract_id": current_contract.get("id"),
+                    "active_contract_id": new_contract_id,
+                    "updated_at": now_iso,
+                },
+                "$unset": {
+                    "rejection_reason": "",
+                    "rejected_at": "",
+                    "rejected_by": "",
+                    "rejected_by_name": "",
+                },
+                "$setOnInsert": {
+                    "id": f"agr_contract_acceptance_{employee_id}",
+                    "created_at": now_iso,
+                },
+            },
+            upsert=True,
+        )
+
         await log_audit_action(
             user["user_id"],
             "contract_reissued",
@@ -823,6 +876,16 @@ async def reissue_employee_contract(
                     }
                 },
             )
+            if contract_ack_snapshot:
+                await db.agreement_acknowledgements.update_one(
+                    {"employee_id": employee_id, "agreement_type": "contract_acceptance"},
+                    {"$set": contract_ack_snapshot},
+                    upsert=True,
+                )
+            else:
+                await db.agreement_acknowledgements.delete_one(
+                    {"employee_id": employee_id, "agreement_type": "contract_acceptance"}
+                )
         except Exception as rollback_exc:
             logger.exception(
                 "Contract reissue rollback failed employee_id=%s old_contract_id=%s new_contract_id=%s err=%s",

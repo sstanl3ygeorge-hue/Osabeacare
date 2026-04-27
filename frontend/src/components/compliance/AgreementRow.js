@@ -31,6 +31,7 @@ import {
   Download, Send, Loader2, FileText, User, UserCheck, RotateCcw
 } from 'lucide-react';
 import { formatBackendDate } from '../../lib/dateUtils';
+import { resolveLatestContractState } from '../../lib/contractState';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -107,30 +108,32 @@ export default function AgreementRow({
   };
 
   const lifecycleStatus = getLifecycleStatus();
-  const rawContractStatus =
-    acknowledgement_data?.status ||
-    acknowledgement_data?.contract_status ||
-    acknowledgement_data?.contract_state ||
-    status;
-  const normalizedContractStatus = String(rawContractStatus || '').trim().toLowerCase();
-  const canReissueContract =
-    key === 'contract_acceptance' && (
-      ['rejected', 'rejected_reopen_required', 'action_required', 'superseded', 'pending_signature', 'signed', 'fully_executed'].includes(normalizedContractStatus) ||
-      lifecycleStatus === 'rejected'
-    );
-  const contractNeedsReissue = key === 'contract_acceptance' && ['rejected', 'rejected_reopen_required', 'action_required', 'superseded'].includes(normalizedContractStatus);
+  const contractResolution = resolveLatestContractState(acknowledgement_data, {});
+  const normalizedContractStatus = contractResolution.status;
+  const isAwaitingWorkerSignature = contractResolution.isAwaitingWorkerSignature;
+  const contractNeedsReissue =
+    key === 'contract_acceptance' &&
+    !isAwaitingWorkerSignature &&
+    ['rejected', 'rejected_reopen_required', 'action_required', 'superseded'].includes(normalizedContractStatus);
   const shouldShowReissueButton =
     key === 'contract_acceptance' &&
     typeof onReissueContract === 'function' &&
-    (contractNeedsReissue || canReissueContract || lifecycleStatus === 'rejected');
+    contractNeedsReissue;
   const contractArtifactUrl =
     acknowledgement_data?.executed_contract_pdf_url ||
     acknowledgement_data?.worker_signed_contract_pdf_url ||
     acknowledgement_data?.rendered_contract_pdf_url ||
     acknowledgement_data?.rendered_file_url;
+  const effectiveLifecycleStatus =
+    key === 'contract_acceptance' && isAwaitingWorkerSignature
+      ? 'submitted'
+      : lifecycleStatus;
 
   // Status colors and icons
   const getStatusConfig = () => {
+    if (key === 'contract_acceptance' && isAwaitingWorkerSignature) {
+      return { color: 'blue', bgColor: 'bg-blue-100', textColor: 'text-blue-700', icon: Clock, label: 'Awaiting worker signature' };
+    }
     if (contractNeedsReissue) {
       return { color: 'amber', bgColor: 'bg-amber-100', textColor: 'text-amber-700', icon: AlertTriangle, label: 'Contract needs reissue' };
     }
@@ -154,7 +157,9 @@ export default function AgreementRow({
   const StatusIcon = statusConfig.icon;
   const displaySummary = contractNeedsReissue
     ? 'Worker cannot sign this version.'
-    : status_summary;
+    : (key === 'contract_acceptance' && isAwaitingWorkerSignature
+      ? 'Worker can now sign this contract.'
+      : status_summary);
 
   // Completion mode display
   const getCompletionModeDisplay = (mode) => {
@@ -402,10 +407,10 @@ export default function AgreementRow({
   return (
     <div 
       className={`border rounded-xl overflow-hidden ${
-        lifecycleStatus === 'verified' ? 'border-green-200 bg-green-50/30' : 
-        lifecycleStatus === 'rejected' ? 'border-red-200 bg-red-50/30' :
-        lifecycleStatus === 'submitted' ? 'border-amber-200 bg-amber-50/30' : 
-        lifecycleStatus === 'sent' ? 'border-blue-200 bg-blue-50/30' : 
+        effectiveLifecycleStatus === 'verified' ? 'border-green-200 bg-green-50/30' : 
+        effectiveLifecycleStatus === 'rejected' ? 'border-red-200 bg-red-50/30' :
+        effectiveLifecycleStatus === 'submitted' ? 'border-amber-200 bg-amber-50/30' : 
+        effectiveLifecycleStatus === 'sent' ? 'border-blue-200 bg-blue-50/30' : 
         'border-gray-200 bg-gray-50/30'
       }`}
       data-testid={`agreement-row-${key}`}
@@ -460,7 +465,7 @@ export default function AgreementRow({
                   'Awaiting worker' status badge and no action button. */}
 
               {/* View Submission - for submitted/verified */}
-              {(lifecycleStatus === 'submitted' || lifecycleStatus === 'verified' || lifecycleStatus === 'rejected') && (
+              {(effectiveLifecycleStatus === 'submitted' || effectiveLifecycleStatus === 'verified' || effectiveLifecycleStatus === 'rejected') && (
                 <Button
                   size="sm"
                   variant="outline"
@@ -520,7 +525,7 @@ export default function AgreementRow({
               )}
 
               {/* Verify / Reject for awaiting review */}
-              {lifecycleStatus === 'submitted' && (
+              {effectiveLifecycleStatus === 'submitted' && (
                 <>
                   <Button
                     size="sm"
@@ -548,7 +553,7 @@ export default function AgreementRow({
               )}
               
               {/* Export PDF for completed */}
-              {(lifecycleStatus === 'submitted' || lifecycleStatus === 'verified') && (submission_data?.id || acknowledgement_data?.submission_id) && (
+              {(effectiveLifecycleStatus === 'submitted' || effectiveLifecycleStatus === 'verified') && (submission_data?.id || acknowledgement_data?.submission_id) && (
                 <Button
                   size="sm"
                   variant="ghost"
@@ -561,7 +566,7 @@ export default function AgreementRow({
               )}
               
               {/* Unverify button for verified agreements (error correction) */}
-              {lifecycleStatus === 'verified' && (
+              {effectiveLifecycleStatus === 'verified' && (
                 <Button
                   size="sm"
                   variant="ghost"
@@ -575,7 +580,7 @@ export default function AgreementRow({
                 </Button>
               )}
 
-              {lifecycleStatus === 'rejected' && key === 'handbook_acknowledgement' && acknowledgement_data?.id && (
+              {effectiveLifecycleStatus === 'rejected' && key === 'handbook_acknowledgement' && acknowledgement_data?.id && (
                 <Button
                   size="sm"
                   variant="outline"
@@ -652,7 +657,7 @@ export default function AgreementRow({
             )}
             
             {/* Verification Details */}
-            {lifecycleStatus === 'verified' && (
+            {effectiveLifecycleStatus === 'verified' && (
               <div className="col-span-2 p-3 bg-green-50 rounded-lg border border-green-200">
                 <div className="flex items-center gap-2">
                   <CheckCircle className="h-4 w-4 text-green-600" />
@@ -667,7 +672,7 @@ export default function AgreementRow({
             )}
             
             {/* Rejection Details */}
-            {(lifecycleStatus === 'rejected' || contractNeedsReissue) && (
+            {((effectiveLifecycleStatus === 'rejected' && !(key === 'contract_acceptance' && isAwaitingWorkerSignature)) || contractNeedsReissue) && (
               <div className="col-span-2 p-3 bg-red-50 rounded-lg border border-red-200">
                 <div className="flex items-center gap-2">
                   <XCircle className="h-4 w-4 text-red-600" />
@@ -684,7 +689,7 @@ export default function AgreementRow({
             )}
             
             {/* No submission yet */}
-            {lifecycleStatus === 'not_sent' && (
+            {effectiveLifecycleStatus === 'not_sent' && (
               <div className="col-span-2 p-3 bg-gray-50 rounded-lg border border-gray-200">
                 <div className="flex items-center gap-2">
                   <AlertTriangle className="h-4 w-4 text-gray-500" />

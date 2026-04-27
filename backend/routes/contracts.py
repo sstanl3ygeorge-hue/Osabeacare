@@ -115,6 +115,17 @@ def _extract_missing_contract_fields(render_issue: str) -> list[str]:
     return missing
 
 
+def _reissue_error_payload(*, code: str, message: str, **extra) -> dict:
+    payload = {
+        "status": "action_required",
+        "code": code,
+        "message": message,
+    }
+    if extra:
+        payload.update(extra)
+    return payload
+
+
 def _clean_optional_string(value) -> Optional[str]:
     if value is None:
         return None
@@ -997,7 +1008,10 @@ async def reissue_employee_contract(
         if conflicting_reissue_for_source:
             raise HTTPException(
                 status_code=409,
-                detail="idempotency_key already used for a different source_contract_id",
+                detail=_reissue_error_payload(
+                    code="idempotency_scope_conflict",
+                    message="idempotency_key already used for a different source_contract_id",
+                ),
             )
 
     latest_contract = await db.generated_contracts.find(
@@ -1019,7 +1033,11 @@ async def reissue_employee_contract(
     if source_contract_id and source_contract_id != current_contract.get("id"):
         raise HTTPException(
             status_code=409,
-            detail="source_contract_id does not match latest contract",
+            detail=_reissue_error_payload(
+                code="stale_source_contract",
+                message="source_contract_id does not match latest contract",
+                latest_contract_id=current_contract.get("id"),
+            ),
         )
     effective_source_contract_id = current_contract.get("id")
 
@@ -1080,7 +1098,10 @@ async def reissue_employee_contract(
         if conflicting_reissue:
             raise HTTPException(
                 status_code=409,
-                detail="idempotency_key already used for a different source_contract_id",
+                detail=_reissue_error_payload(
+                    code="idempotency_scope_conflict",
+                    message="idempotency_key already used for a different source_contract_id",
+                ),
             )
 
     raw_current_status = current_contract.get("status")
@@ -1089,7 +1110,11 @@ async def reissue_employee_contract(
     if current_status not in REISSUE_ELIGIBLE_STATUSES:
         raise HTTPException(
             status_code=409,
-            detail=f"Latest contract status '{raw_current_status}' is not eligible for reissue",
+            detail=_reissue_error_payload(
+                code="ineligible_latest_status",
+                message=f"Latest contract status '{raw_current_status}' is not eligible for reissue",
+                latest_contract_status=raw_current_status,
+            ),
         )
 
     # If an active pending-signature contract already exists, do not attempt a
@@ -1156,25 +1181,17 @@ async def reissue_employee_contract(
             },
             upsert=True,
         )
-        can_sign_result = await can_sign_contract(db, employee_id)
-        return {
-            "message": "Contract already pending signature",
-            "employee_id": employee_id,
-            "old_contract": None,
-            "new_contract": {
-                "id": current_contract.get("id"),
-                "status": current_contract.get("status"),
-                "template_id": current_contract.get("template_id"),
-                "template_version": current_contract.get("template_version"),
-                "generated_at": current_contract.get("generated_at"),
-                "reissued_from_contract_id": current_contract.get("reissued_from_contract_id"),
-            },
-            "worker_action": {
-                "can_sign": can_sign_result.get("can_sign", False),
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "already_has_active_contract",
+                "status": "awaiting_worker_signature",
+                "message": "Latest contract is already awaiting worker signature",
+                "employee_id": employee_id,
+                "contract_id": current_contract.get("id"),
                 "contract_status": current_contract.get("status"),
-                "sign_route": f"/employees/{employee_id}/contract/sign",
             },
-        }
+        )
 
     # Validate current employee data before mutating old contract state.
     validation = validate_contract_data(employee)
@@ -1340,7 +1357,14 @@ async def reissue_employee_contract(
                         "sign_route": f"/employees/{employee_id}/contract/sign",
                     },
                 }
-        raise HTTPException(status_code=409, detail="Contract already superseded or reissued")
+        raise HTTPException(
+            status_code=409,
+            detail=_reissue_error_payload(
+                code="race_conflict",
+                message="Contract already superseded or reissued",
+                source_contract_id=effective_source_contract_id,
+            ),
+        )
 
     inserted_new_contract = False
     try:

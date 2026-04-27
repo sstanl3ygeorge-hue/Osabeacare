@@ -1,3 +1,5 @@
+import { resolveLatestContractState } from '../../lib/contractState';
+
 export function getAgreementDisplay(agreement, options = {}) {
   const contractEligibility = options.contractEligibility || null;
   const truncateMessage = (value, max = 160) => {
@@ -43,14 +45,13 @@ export function getAgreementDisplay(agreement, options = {}) {
   }
 
   if (agreement.id === 'contract_acceptance') {
-    const contractState = String(agreement.contract_state || agreement.status || '').trim().toLowerCase();
+    const contractResolution = resolveLatestContractState(agreement, options);
+    const contractState = contractResolution.status;
     const hasWorkerSigned =
       agreement.worker_signed ||
       agreement.signed ||
       Boolean(agreement.worker_signed_at || agreement.signed_at);
-    const canSign = contractState === 'pending_signature'
-      ? (agreement.can_sign ?? contractEligibility?.can_sign)
-      : (contractEligibility?.can_sign ?? agreement.can_sign);
+    const canSign = contractResolution.canSign;
     if (hasWorkerSigned && contractState !== 'fully_executed') {
       return {
         tone: 'info',
@@ -61,7 +62,8 @@ export function getAgreementDisplay(agreement, options = {}) {
         ctaLabel: agreement.file_url || agreement.download_url ? 'View PDF' : null,
       };
     }
-    if (canSign && contractState === 'pending_signature') {
+    const hasPendingSignableContract = contractResolution.hasPendingSignableContract;
+    if (canSign && hasPendingSignableContract) {
       return {
         tone: 'critical',
         badge: 'Ready to sign',

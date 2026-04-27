@@ -27,6 +27,7 @@ import WorkerDashboardPage from '../../components/worker/WorkerDashboardPage';
 import DashboardHeader from '../../components/worker/DashboardHeader';
 import NextActionCard from '../../components/worker/NextActionCard';
 import { getAgreementDisplay, getCvDisplay, getTrainingDisplay } from '../../components/worker/dashboardStatus';
+import { getLatestActiveContract, resolveLatestContractState } from '../../lib/contractState';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -1771,7 +1772,8 @@ export default function WorkerDashboard() {
 
   const gapsNeedAction = hasCanonicalBlockerMatch(BLOCKER_KEYS_EMPLOYMENT_GAPS, 'other');
   const referencesNeedActionFromBlockers = hasCanonicalBlockerMatch(BLOCKER_KEYS_REFERENCES, 'references');
-  const contractAgreement = agreements.find((agreement) => agreement.id === 'contract_acceptance');
+  const latestContractAgreement = getLatestActiveContract(agreements, { contractEligibility });
+  const contractAgreement = latestContractAgreement || agreements.find((agreement) => agreement.id === 'contract_acceptance');
   
   const isActiveEmployee =
     typeof dashboard?.is_active_employee === 'boolean'
@@ -1800,16 +1802,10 @@ export default function WorkerDashboard() {
   const showOnboardingContractSection = false;
   const handbookAgreement = agreements.find((agreement) => agreement.id === 'handbook_acknowledgement');
   const contractDisplay = getAgreementDisplay(contractAgreement, { contractEligibility });
-  const contractLifecycleStatus = String(
-    contractAgreement?.contract_state ||
-    contractAgreement?.status ||
-    contractAgreement?.state ||
-    ''
-  ).trim().toLowerCase();
-  const effectiveContractCanSign = contractLifecycleStatus === 'pending_signature'
-    ? Boolean(contractAgreement?.can_sign ?? contractEligibility?.can_sign)
-    : Boolean(contractEligibility?.can_sign ?? contractAgreement?.can_sign);
-  const hasPendingSignableContract = contractLifecycleStatus === 'pending_signature' && effectiveContractCanSign;
+  const latestContractState = resolveLatestContractState(contractAgreement, { contractEligibility });
+  const contractLifecycleStatus = latestContractState.status;
+  const effectiveContractCanSign = latestContractState.canSign;
+  const hasPendingSignableContract = latestContractState.hasPendingSignableContract;
   const contractNeedsReissueMessage = !hasPendingSignableContract && (
     ['rejected', 'superseded', 'action_required'].includes(contractLifecycleStatus) ||
     contractLifecycleStatus !== 'pending_signature'
@@ -1829,7 +1825,11 @@ export default function WorkerDashboard() {
   });
   const completedReferencesCount = references.filter((reference) => isReferenceComplete(reference?.status)).length;
   const referencesNeedAction = referencesNeedActionFromBlockers || references.some((reference) => !isReferenceComplete(reference?.status));
-  const agreementDisplays = agreements.map((agreement) => ({
+  const normalizedAgreements = [
+    ...agreements.filter((agreement) => agreement.id !== 'contract_acceptance'),
+    ...(contractAgreement ? [contractAgreement] : []),
+  ];
+  const agreementDisplays = normalizedAgreements.map((agreement) => ({
     agreement,
     display: getAgreementDisplay(agreement, { contractEligibility }),
   }));
@@ -3570,9 +3570,7 @@ export default function WorkerDashboard() {
             <CardContent>
               <div className="space-y-3">
                 {agreementDisplays.map(({ agreement, display: agreementDisplay }) => {
-                  const agreementContractState = String(
-                    agreement?.contract_state || agreement?.status || agreement?.state || ''
-                  ).trim().toLowerCase();
+                  const agreementContractState = resolveLatestContractState(agreement, { contractEligibility }).status;
                   const isHistoricalRejectedContract =
                     agreement.id === 'contract_acceptance' &&
                     (

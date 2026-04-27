@@ -433,11 +433,13 @@ def test_generate_and_reissue_use_same_template_family(monkeypatch):
         "/api/employees/emp-1/contract/reissue",
         json={"reason": "Need regenerate after mismatch", "source_contract_id": generated["id"]},
     )
-    assert rei.status_code == 200
-    reissued = next(x for x in fake_db.generated_contracts.docs if x["id"] == rei.json()["new_contract"]["id"])
+    assert rei.status_code == 409
+    detail = rei.json()["detail"]
+    assert detail["code"] == "already_has_active_contract"
+    assert detail["status"] == "awaiting_worker_signature"
+    assert detail["contract_id"] == generated["id"]
 
     assert str(generated.get("template_version", "")).startswith("contract_acceptance_v_")
-    assert str(reissued.get("template_version", "")).startswith("contract_acceptance_v_")
 
 
 def test_reissue_blocks_when_canonical_render_fails(monkeypatch):
@@ -701,7 +703,7 @@ def test_pending_contract_with_unresolved_placeholders_not_signable(monkeypatch)
     assert "unresolved placeholders" in res.json()["detail"]["render_issue"].lower()
 
 
-def test_reissue_pending_signature_repairs_ack_without_new_generation(monkeypatch):
+def test_reissue_pending_signature_blocks_with_structured_active_contract_error(monkeypatch):
     fake_db = _FakeDb()
     _seed_employee_and_contract(fake_db, contract_id="pending-1", status="pending_signature")
     fake_db.agreement_acknowledgements.docs = [
@@ -722,10 +724,39 @@ def test_reissue_pending_signature_repairs_ack_without_new_generation(monkeypatc
         "/api/employees/emp-1/contract/reissue",
         json={"reason": "repair pending state", "source_contract_id": "pending-1"},
     )
-    assert res.status_code == 200
-    assert res.json()["message"] == "Contract already pending signature"
-    assert res.json()["new_contract"]["id"] == "pending-1"
+    assert res.status_code == 409
+    detail = res.json()["detail"]
+    assert detail["code"] == "already_has_active_contract"
+    assert detail["status"] == "awaiting_worker_signature"
+    assert detail["contract_id"] == "pending-1"
     ack = fake_db.agreement_acknowledgements.docs[0]
     assert ack["status"] == "pending_signature"
     assert ack["contract_state"] == "awaiting_worker_signature"
     assert ack["verification_status"] == "pending"
+
+
+def test_latest_pending_signature_overrides_historical_rejected_for_reissue_decision(monkeypatch):
+    fake_db = _FakeDb()
+    _seed_employee_and_contract(fake_db, contract_id="old-rejected", status="rejected")
+    fake_db.generated_contracts.docs.append(
+        {
+            "_id": "mongo-new-pending",
+            "id": "new-pending",
+            "employee_id": "emp-1",
+            "status": "pending_signature",
+            "template_id": "zero_hour_contract_v1",
+            "generated_at": "2026-05-01T10:00:00+00:00",
+            "created_at": "2026-05-01T10:00:00+00:00",
+        }
+    )
+    client, _ = _build_client(monkeypatch, fake_db)
+
+    res = client.post(
+        "/api/employees/emp-1/contract/reissue",
+        json={"reason": "should be blocked by latest pending", "source_contract_id": "new-pending"},
+    )
+    assert res.status_code == 409
+    detail = res.json()["detail"]
+    assert detail["code"] == "already_has_active_contract"
+    assert detail["status"] == "awaiting_worker_signature"
+    assert detail["contract_id"] == "new-pending"

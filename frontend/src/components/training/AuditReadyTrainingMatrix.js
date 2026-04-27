@@ -879,19 +879,27 @@ export default function AuditReadyTrainingMatrix({
           icon: 'text-red-600',
           text: 'text-red-800',
           subtext: 'text-red-700',
+          const pendingExtractedMatch = !isMandatoryTrainingSatisfied(item)
+            ? getPendingExtractedMatch(item)
+            : null;
         }
+          if (item?.status === 'missing' && pendingExtractedMatch) {
+            return 'pending';
+          }
       : {
-          panel: 'border-amber-200 bg-amber-50',
-          icon: 'text-amber-600',
-          text: 'text-amber-800',
-          subtext: 'text-amber-700',
+          return item?.status;
         };
-
-  if (loading) {
-    return (
-      <Card className="border-dashed" data-testid="training-matrix-loading">
-        <CardContent className="flex items-center justify-center py-12">
-          <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                                <TableCell>{renderStatusBadge(getDisplayStatus(item))}</TableCell>
+                                  {item.verified || item.is_verified || getDisplayStatus(item) === 'verified' ? (
+                                  ) : getDisplayStatus(item) !== 'missing' ? (
+                                    <span className={cn(
+                                      "text-sm",
+                                      getDisplayStatus(item) === 'expired' ? 'text-red-600 font-medium' :
+                                      getDisplayStatus(item) === 'expiring_soon' ? 'text-amber-600' :
+                                      'text-gray-600'
+                                    )}>
+                                      {formatBackendDate(item.expires_at, { format: 'short' })}
+                                    </span>
           <span className="ml-2 text-gray-500">Loading training records...</span>
         </CardContent>
       </Card>

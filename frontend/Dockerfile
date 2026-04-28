@@ -2,12 +2,12 @@ FROM node:18-alpine
 
 WORKDIR /app
 
-COPY package*.json ./
-RUN npm install
+COPY package.json yarn.lock ./
+RUN yarn install
 
 COPY . .
-RUN npm run build
+RUN yarn build
 
-RUN npm install -g serve
+RUN yarn global add serve
 
 CMD sh -c "serve -s build -l ${PORT:-3000}"

@@ -14,7 +14,8 @@ sys.modules.setdefault("motor", types.ModuleType("motor"))
 motor_asyncio_mod = sys.modules.setdefault("motor.motor_asyncio", types.ModuleType("motor.motor_asyncio"))
 if not hasattr(motor_asyncio_mod, "AsyncIOMotorClient"):
     class _FakeAsyncIOMotorClient:  # pragma: no cover - import compatibility stub
-        pass
+        def __init__(self, *_args, **_kwargs):
+            pass
     motor_asyncio_mod.AsyncIOMotorClient = _FakeAsyncIOMotorClient
 
 import routes.contracts as contracts
@@ -174,6 +175,21 @@ def _build_client(monkeypatch, fake_db):
 
     monkeypatch.setattr(contracts, "can_sign_contract", _can_sign)
     monkeypatch.setattr(contracts, "log_audit_action", _log_audit_action)
+    async def _resolve_contract_state(_db, _employee, _agreement_type):
+        rows = [r for r in fake_db.generated_contracts.docs if r.get("employee_id") == _employee["id"] and r.get("status") != "superseded"]
+        rows.sort(key=lambda d: (str(d.get("generated_at") or ""), str(d.get("created_at") or ""), str(d.get("id") or "")), reverse=True)
+        latest = rows[0] if rows else {}
+        raw = str(latest.get("status") or "")
+        canonical = "pending_signature" if raw in {"pending_signature", "awaiting_worker_signature"} else raw
+        return {
+            "status": canonical,
+            "raw_status": raw,
+            "source_record_id": latest.get("id"),
+            "template_version": latest.get("template_version"),
+            "rendered_file_url": latest.get("rendered_contract_pdf_url") or latest.get("rendered_file_url") or latest.get("file_url"),
+            "can_sign": canonical == "pending_signature",
+        }
+    monkeypatch.setattr(contracts, "resolve_employee_agreement_state", _resolve_contract_state)
     async def _ensure_agreement_rendered(_db, employee, agreement_type):
         assert agreement_type == "contract_acceptance"
         return {
@@ -524,6 +540,25 @@ def test_reissue_blocks_when_canonical_render_fails(monkeypatch):
     assert body["detail"]["status"] == "action_required"
     assert "render_issue" in body["detail"]
     assert "company_address" in body["detail"].get("missing_fields", [])
+    # Validation-first: no mutation should occur.
+    old = next(x for x in fake_db.generated_contracts.docs if x["id"] == "old-1")
+    assert old["status"] == "rejected"
+    assert len([x for x in fake_db.generated_contracts.docs if x.get("reissued_from_contract_id") == "old-1"]) == 0
+
+
+def test_reissue_blocks_when_latest_active_is_pending_signature(monkeypatch):
+    fake_db = _FakeDb()
+    _seed_employee_and_contract(fake_db, status="pending_signature")
+    client, _ = _build_client(monkeypatch, fake_db)
+
+    res = client.post(
+        "/api/employees/emp-1/contract/reissue",
+        json={"reason": "attempt reissue while active pending exists", "source_contract_id": "old-1"},
+    )
+    assert res.status_code == 409
+    detail = res.json()["detail"]
+    assert detail["code"] == "already_has_active_contract"
+    assert detail["status"] == "awaiting_worker_signature"
 
 
 def test_reissue_hydrates_company_address_from_org_company_address(monkeypatch):
@@ -794,9 +829,10 @@ def test_reissue_pending_signature_blocks_with_structured_active_contract_error(
     assert detail["status"] == "awaiting_worker_signature"
     assert detail["contract_id"] == "pending-1"
     ack = fake_db.agreement_acknowledgements.docs[0]
-    assert ack["status"] == "pending_signature"
-    assert ack["contract_state"] == "awaiting_worker_signature"
-    assert ack["verification_status"] == "pending"
+    # Validation-first block: no write mutation when active pending exists.
+    assert ack["status"] == "rejected"
+    assert ack["contract_state"] == "rejected_reopen_required"
+    assert ack["verification_status"] == "rejected"
 
 
 def test_latest_pending_signature_overrides_historical_rejected_for_reissue_decision(monkeypatch):

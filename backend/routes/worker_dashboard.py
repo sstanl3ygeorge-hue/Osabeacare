@@ -34,6 +34,7 @@ from agreement_document_service import (
     CONTRACT_AGREEMENT_TYPE,
     HANDBOOK_AGREEMENT_TYPE,
     _employee_name,
+    ensure_agreement_rendered,
     resolve_employee_agreement_state,
 )
 from .recurring_compliance import compute_recurring_status
@@ -546,7 +547,12 @@ async def acknowledge_worker_agreement(
     worker: dict = Depends(get_current_worker),
 ):
     """Worker-side acknowledgement for full rendered agreement PDFs."""
-    if agreement_type != HANDBOOK_AGREEMENT_TYPE:
+    normalized_agreement_type = (
+        HANDBOOK_AGREEMENT_TYPE
+        if agreement_type in {HANDBOOK_AGREEMENT_TYPE, "employee_handbook_acknowledgement"}
+        else agreement_type
+    )
+    if normalized_agreement_type != HANDBOOK_AGREEMENT_TYPE:
         raise HTTPException(status_code=400, detail="Only handbook acknowledgement is supported on this route")
 
     db = get_db()
@@ -555,18 +561,48 @@ async def acknowledge_worker_agreement(
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
 
-    agreement_record = await ensure_agreement_rendered(db, employee, agreement_type)
-    rendered_file_url = agreement_record.get("rendered_file_url")
+    # Canonical, validation-first resolution before any writes.
+    resolved = await resolve_employee_agreement_state(db, employee, normalized_agreement_type)
+    resolved_status = str(resolved.get("status") or "").strip().lower()
+    if resolved_status in {"signed", "acknowledged", "verified", "fully_executed"}:
+        return {
+            "success": True,
+            "agreement": resolved,
+            "message": "Agreement already acknowledged",
+        }
+    if resolved_status not in {"pending", "pending_acknowledgement"}:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "not_actionable",
+                "agreement_type": normalized_agreement_type,
+                "status": resolved_status or "unknown",
+            },
+        )
+    if not resolved.get("source_record_id"):
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "no_active_agreement", "agreement_type": normalized_agreement_type},
+        )
+    if not resolved.get("template_version"):
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "missing_template_version", "agreement_type": normalized_agreement_type},
+        )
+    rendered_file_url = resolved.get("rendered_file_url")
     if not rendered_file_url:
         raise HTTPException(
             status_code=409,
             detail="Handbook is still being prepared. Please try again shortly.",
         )
+    agreement_record = await ensure_agreement_rendered(db, employee, normalized_agreement_type)
     now = datetime.now(timezone.utc).isoformat()
     signer_name = payload.signer_name or _employee_name(employee)
 
+    target_filter = {"id": resolved.get("source_record_id"), "employee_id": employee_id}
+
     await db.agreement_acknowledgements.update_one(
-        {"employee_id": employee_id, "agreement_type": agreement_type},
+        target_filter,
         {
             "$set": {
                 "acknowledged": True,
@@ -578,7 +614,7 @@ async def acknowledge_worker_agreement(
                 "verified_at": None,
                 "verified_by": None,
                 "verified_by_name": None,
-                "template_version": agreement_record.get("template_version"),
+                "template_version": agreement_record.get("template_version") or resolved.get("template_version"),
                 "rendered_file_url": rendered_file_url,
                 "employee_name": agreement_record.get("employee_name") or signer_name,
                 "updated_at": now,
@@ -592,6 +628,7 @@ async def acknowledge_worker_agreement(
                 "rejected_by_name": "",
             },
         },
+        upsert=True,
     )
 
     await log_audit_action(
@@ -601,7 +638,7 @@ async def acknowledge_worker_agreement(
         agreement_record.get("id") or f"agr_{agreement_type}_{employee_id}",
         {
             "employee_id": employee_id,
-            "agreement_type": agreement_type,
+            "agreement_type": normalized_agreement_type,
             "template_version": agreement_record.get("template_version"),
             "rendered_file_url": agreement_record.get("rendered_file_url"),
         },
@@ -610,10 +647,7 @@ async def acknowledge_worker_agreement(
     try_auto_promote_worker = get_try_auto_promote_worker_func()
     await try_auto_promote_worker(employee_id)
 
-    refreshed = await db.agreement_acknowledgements.find_one(
-        {"employee_id": employee_id, "agreement_type": agreement_type},
-        {"_id": 0},
-    )
+    refreshed = await resolve_employee_agreement_state(db, employee, normalized_agreement_type)
     return {
         "success": True,
         "agreement": refreshed,

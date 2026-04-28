@@ -1508,8 +1508,13 @@ async def create_worker_signed_contract(
         {"id": agreement["id"]},
         {"$set": update},
     )
+    generated_contract_filter = (
+        {"id": agreement.get("source_record_id")}
+        if agreement.get("source_record_id")
+        else {"employee_id": employee["id"], "template_version": agreement.get("template_version")}
+    )
     await db.generated_contracts.update_one(
-        {"employee_id": employee["id"], "template_version": agreement.get("template_version")},
+        generated_contract_filter,
         {
             "$set": {
                 "status": "awaiting_company_countersignature",

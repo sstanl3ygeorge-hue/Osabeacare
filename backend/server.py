@@ -8871,6 +8871,7 @@ async def sign_contract(
         ContractRenderError,
         create_worker_signed_contract,
         ensure_agreement_rendered,
+        resolve_employee_agreement_state,
     )
     from supabase_storage import upload_file_to_storage
 
@@ -8884,6 +8885,44 @@ async def sign_contract(
     if not signature_url:
         raise HTTPException(status_code=500, detail="Failed to persist signature image")
 
+    resolved_contract = await resolve_employee_agreement_state(db, employee, CONTRACT_AGREEMENT_TYPE)
+    resolved_status = (resolved_contract.get("status") or "").lower()
+    if resolved_status == "awaiting_worker_signature":
+        resolved_status = "pending_signature"
+    if resolved_status in {"awaiting_company_countersignature", "fully_executed"}:
+        return {
+            "success": True,
+            "message": "Contract already signed",
+            "contract_state": resolved_status,
+            "contract_url": resolved_contract.get("rendered_file_url"),
+            "rendered_file_url": resolved_contract.get("rendered_file_url"),
+            "signed_at": resolved_contract.get("signed_at"),
+        }
+    if resolved_status != "pending_signature":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "already_has_active_contract",
+                "status": resolved_status or "unknown",
+            },
+        )
+
+    if not resolved_contract.get("source_record_id"):
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "missing_source_record_id", "status": resolved_status},
+        )
+    if not resolved_contract.get("template_version"):
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "missing_template_version", "status": resolved_status},
+        )
+    if not resolved_contract.get("rendered_file_url"):
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "missing_render", "status": resolved_status},
+        )
+
     try:
         contract_record = await ensure_agreement_rendered(db, employee, CONTRACT_AGREEMENT_TYPE)
     except ContractRenderError as e:
@@ -8891,6 +8930,10 @@ async def sign_contract(
             status_code=422,
             detail=str(e),
         )
+    # Ensure the signing path always tracks the latest canonical generated contract
+    # even when stale/null acknowledgement rows still exist.
+    if resolved_contract.get("source_record_id"):
+        contract_record["source_record_id"] = resolved_contract.get("source_record_id")
     contract_record = await create_worker_signed_contract(
         db,
         employee,

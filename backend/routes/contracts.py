@@ -43,6 +43,7 @@ from agreement_document_service import (
     CONTRACT_AGREEMENT_TYPE,
     CANONICAL_CONTRACT_TEMPLATE_PREFIX,
     ensure_agreement_rendered,
+    resolve_employee_agreement_state,
     ContractRenderError,
 )
 
@@ -1016,6 +1017,24 @@ async def reissue_employee_contract(
     if not reason:
         raise HTTPException(status_code=400, detail="reason is required")
 
+    # Canonical validation-first precheck (no writes before this).
+    # Keep idempotent replay reachable when a scoped key/source is provided.
+    if not (idempotency_key and source_contract_id):
+        resolved_contract = await resolve_employee_agreement_state(db, employee, CONTRACT_AGREEMENT_TYPE)
+        canonical_status = str(resolved_contract.get("status") or "").strip().lower()
+        raw_status = str(resolved_contract.get("raw_status") or "").strip().lower()
+        if canonical_status == "pending_signature" or raw_status in {"awaiting_worker_signature", "pending_signature"}:
+            raise HTTPException(
+                status_code=409,
+                detail=_reissue_error_payload(
+                    code="already_has_active_contract",
+                    message="Latest contract is already awaiting worker signature",
+                    status="awaiting_worker_signature",
+                    latest_contract_id=resolved_contract.get("source_record_id"),
+                    contract_id=resolved_contract.get("source_record_id"),
+                ),
+            )
+
     # Early idempotency replay when caller supplies a source contract id.
     # This guarantees stable replay even after latest contract changes due to
     # a successful first reissue.
@@ -1623,6 +1642,7 @@ async def reissue_employee_contract(
         ) from reissue_exc
 
     can_sign_result = await can_sign_contract(db, employee_id)
+    refreshed = await resolve_employee_agreement_state(db, employee, CONTRACT_AGREEMENT_TYPE)
     return {
         "message": "Contract reissued",
         "employee_id": employee_id,
@@ -1645,6 +1665,7 @@ async def reissue_employee_contract(
             "contract_status": new_contract_doc["status"],
             "sign_route": f"/employees/{employee_id}/contract/sign",
         },
+        "canonical_contract": refreshed,
     }
 
 @router.post("/employees/{employee_id}/contract/supersede")

@@ -198,6 +198,15 @@ const quickViewToneClasses = {
   }
 };
 
+const asArray = (value, keys = []) => {
+  if (Array.isArray(value)) return value;
+  if (!value || typeof value !== 'object') return [];
+  for (const key of keys) {
+    if (Array.isArray(value[key])) return value[key];
+  }
+  return [];
+};
+
 export default function EmployeeProfilePage() {
   const { employeeId } = useParams();
   const navigate = useNavigate();
@@ -1056,7 +1065,7 @@ export default function EmployeeProfilePage() {
       const response = await axios.get(`${API}/employees/${employeeId}/reference-status`, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      setReferenceStatus(response.data.references || []);
+      setReferenceStatus(asArray(response.data, ['references', 'items', 'records']));
     } catch (err) {
       console.error('Failed to fetch reference status:', err);
     } finally {
@@ -1350,18 +1359,30 @@ export default function EmployeeProfilePage() {
     }
     
     // Other data can fail gracefully with defaults
-    setDocuments(docsRes.status === 'fulfilled' ? docsRes.value.data : []);
-    setDocumentTypes(typesRes.status === 'fulfilled' ? typesRes.value.data : []);
-    setPolicies(policiesRes.status === 'fulfilled' ? policiesRes.value.data : []);
-    setTraining(trainingRes.status === 'fulfilled' ? trainingRes.value.data : []);
-    setAuditLogs(logsRes.status === 'fulfilled' ? logsRes.value.data : []);
-    setGeneratedForms(formsRes.status === 'fulfilled' ? formsRes.value.data : []);
-    setTemplates(templatesRes.status === 'fulfilled' ? templatesRes.value.data : []);
-    setComplianceRequirements(compReqRes.status === 'fulfilled' ? compReqRes.value.data : {});
+    const documentsData = docsRes.status === 'fulfilled' ? asArray(docsRes.value.data, ['items', 'records', 'documents']) : [];
+    const documentTypesData = typesRes.status === 'fulfilled' ? asArray(typesRes.value.data, ['items', 'records']) : [];
+    const policiesData = policiesRes.status === 'fulfilled' ? asArray(policiesRes.value.data, ['items', 'records']) : [];
+    const trainingData = trainingRes.status === 'fulfilled' ? asArray(trainingRes.value.data, ['items', 'records']) : [];
+    const auditLogsData = logsRes.status === 'fulfilled' ? asArray(logsRes.value.data, ['items', 'records']) : [];
+    const generatedFormsData = formsRes.status === 'fulfilled' ? asArray(formsRes.value.data, ['forms', 'items', 'records']) : [];
+    const templatesData = templatesRes.status === 'fulfilled' ? asArray(templatesRes.value.data, ['items', 'records']) : [];
+    const complianceRequirementsData = compReqRes.status === 'fulfilled'
+      ? (compReqRes.value.data && typeof compReqRes.value.data === 'object' ? compReqRes.value.data : { requirements: [] })
+      : { requirements: [] };
+    complianceRequirementsData.requirements = asArray(complianceRequirementsData.requirements, ['items', 'records', 'requirements']);
+
+    setDocuments(documentsData);
+    setDocumentTypes(documentTypesData);
+    setPolicies(policiesData);
+    setTraining(trainingData);
+    setAuditLogs(auditLogsData);
+    setGeneratedForms(generatedFormsData);
+    setTemplates(templatesData);
+    setComplianceRequirements(complianceRequirementsData);
     setUnifiedProgress(unifiedProgressRes.status === 'fulfilled' ? unifiedProgressRes.value.data : null);
     if (empRes.status === 'fulfilled' && docsRes.status === 'fulfilled') {
       const refreshedEmployee = empRes.value.data || {};
-      const refreshedDocuments = docsRes.value.data || [];
+      const refreshedDocuments = documentsData;
       const cvLikeDocuments = refreshedDocuments.filter((document) => {
         const label = [
           document?.requirement_name,
@@ -1521,7 +1542,7 @@ export default function EmployeeProfilePage() {
           params: { employee_id: employeeId }
         }
       );
-      setFormSubmissions(response.data.forms || response.data || []);
+      setFormSubmissions(asArray(response.data, ['forms', 'items', 'records']));
     } catch {
       setFormSubmissions([]);
       setFormSubmissionsError(true);
@@ -3532,13 +3553,13 @@ export default function EmployeeProfilePage() {
     setInlineViewerOpen(true);
   };
 
-  const groupedTemplates = templates.reduce((acc, template) => {
+  const groupedTemplates = asArray(templates).reduce((acc, template) => {
     if (!acc[template.category]) acc[template.category] = [];
     acc[template.category].push(template);
     return acc;
   }, {});
 
-  const groupedDocs = documentTypes.reduce((acc, type) => {
+  const groupedDocs = asArray(documentTypes).reduce((acc, type) => {
     if (!acc[type.category]) acc[type.category] = [];
     const doc = documents.find(d => d.document_type_id === type.id);
     acc[type.category].push({ ...type, document: doc });

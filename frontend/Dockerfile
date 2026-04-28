@@ -1,4 +1,4 @@
-FROM node:18-alpine
+FROM node:20-alpine
 
 WORKDIR /app
 
@@ -10,4 +10,4 @@ RUN yarn build
 
 RUN yarn global add serve
 
-CMD sh -c "serve -s build -l ${PORT:-3000}"
+CMD ["sh", "-c", "serve -s build -l ${PORT:-3000}"]

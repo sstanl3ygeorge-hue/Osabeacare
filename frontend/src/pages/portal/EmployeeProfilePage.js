@@ -4311,8 +4311,14 @@ export default function EmployeeProfilePage() {
               : (trainingExpired > 0 ? 'red' : (trainingCompleted < trainingRequired || trainingExpiring > 0 ? 'amber' : 'green'));
 
             const agreementItems = asArray(agreementsCategory?.items);
-            const contractStatus = agreementItems.find((i) => String(i?.id || '').includes('contract'))?.status || 'Unavailable';
-            const handbookStatus = agreementItems.find((i) => String(i?.id || '').includes('handbook'))?.status || 'Unavailable';
+            const selectLatestAgreement = (matcher) => {
+              const scoped = agreementItems.filter((item) => matcher(String(item?.id || '')));
+              if (!scoped.length) return null;
+              const preferred = scoped.find((item) => item?.latest_active === true);
+              return preferred || scoped[0];
+            };
+            const contractStatus = selectLatestAgreement((id) => id.includes('contract'))?.status || 'Unavailable';
+            const handbookStatus = selectLatestAgreement((id) => id.includes('handbook'))?.status || 'Unavailable';
             const inductionCompleted = Number.isFinite(inductionCategory?.completed) ? inductionCategory.completed : null;
             const inductionRequired = Number.isFinite(inductionCategory?.total) ? inductionCategory.total : null;
             const agreementsTone = tone(`${contractStatus} ${handbookStatus}`, null);

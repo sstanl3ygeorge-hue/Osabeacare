@@ -19,6 +19,7 @@ Usage:
 """
 
 from datetime import datetime, timezone
+from stage_identity import get_stage_identity, normalize_lifecycle_status
 
 # =============================================================================
 # APPLICATION SECTION DEFINITIONS
@@ -348,6 +349,8 @@ async def resolve_application(db, employee_id: str) -> dict:
     required_complete = sum(1 for s in required_sections if s["complete"])
 
     application_data_complete = len(missing_sections) == 0
+    normalized_status = normalize_lifecycle_status(employee.get("status"))
+    stage_identity = get_stage_identity({"status": normalized_status})
 
     return {
         "employee_id": employee_id,
@@ -364,6 +367,12 @@ async def resolve_application(db, employee_id: str) -> dict:
         "backfilled_sections": backfilled_sections,
         "missing_sections": missing_sections,
         "application_data_complete": application_data_complete,
+        "lifecycle": {
+            "status": normalized_status,
+            "person_stage": "employee" if stage_identity == "employee" else "applicant",
+            "is_applicant": stage_identity == "applicant",
+            "is_employee": stage_identity == "employee",
+        },
         "completion_summary": {
             "total_sections": total_sections,
             "present_sections": present_sections,

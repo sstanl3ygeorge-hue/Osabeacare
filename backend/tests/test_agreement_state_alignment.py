@@ -143,6 +143,109 @@ def test_latest_generated_contract_overrides_stale_rejected_ack(monkeypatch):
 
 
 def test_handbook_pending_row_has_source_record_id_and_acknowledgeability(monkeypatch):
+    def test_no_active_canonical_row_contract(monkeypatch):
+        db = _FakeDb()
+        employee = {"id": "emp-2", "name": "No Contract"}
+        # No agreement_acknowledgements or generated_contracts
+        async def _ensure(_db, _employee, _agreement_type):
+            return None
+        monkeypatch.setattr("agreement_document_service.ensure_agreement_rendered", _ensure)
+        state = asyncio.run(resolve_employee_agreement_state(db, employee, CONTRACT_AGREEMENT_TYPE))
+        assert state["latest_active"] is False
+        assert state["agreement_type"] == CONTRACT_AGREEMENT_TYPE
+        assert state["acknowledgement"]["employee_id"] == "emp-2"
+        assert state["signed"] is False
+        assert state["can_sign"] is False
+        assert state["status"] is None
+        assert state["file_url"] is None
+
+    def test_no_active_canonical_row_handbook(monkeypatch):
+        db = _FakeDb()
+        employee = {"id": "emp-3", "name": "No Handbook"}
+        # No agreement_acknowledgements or submissions
+        async def _ensure(_db, _employee, _agreement_type):
+            return None
+        monkeypatch.setattr("agreement_document_service.ensure_agreement_rendered", _ensure)
+        state = asyncio.run(resolve_employee_agreement_state(db, employee, HANDBOOK_AGREEMENT_TYPE))
+        assert state["latest_active"] is False
+        assert state["agreement_type"] == HANDBOOK_AGREEMENT_TYPE
+        assert state["acknowledgement"]["employee_id"] == "emp-3"
+        assert state["signed"] is False
+        assert state["can_acknowledge"] is False
+        assert state["status"] is None
+        assert state["file_url"] is None
+
+    def test_status_normalization_pending_signature(monkeypatch):
+        db = _FakeDb()
+        employee = {"id": "emp-4", "name": "Norm Pending"}
+        db.agreement_acknowledgements.docs = [
+            {
+                "id": "ack-ps",
+                "employee_id": "emp-4",
+                "agreement_type": "contract_acceptance",
+                "status": "awaiting_worker_signature",
+                "verification_status": "pending",
+                "contract_state": "awaiting_worker_signature",
+                "template_version": "contract_acceptance_v_x",
+            }
+        ]
+        db.generated_contracts.docs = [
+            {
+                "id": "contract-x",
+                "employee_id": "emp-4",
+                "status": "awaiting_worker_signature",
+                "generated_at": "2026-04-28T10:00:00+00:00",
+                "template_version": "contract_acceptance_v_x",
+            }
+        ]
+        async def _ensure(_db, _employee, _agreement_type):
+            return dict(db.agreement_acknowledgements.docs[0])
+        monkeypatch.setattr("agreement_document_service.ensure_agreement_rendered", _ensure)
+        state = asyncio.run(resolve_employee_agreement_state(db, employee, CONTRACT_AGREEMENT_TYPE))
+        assert state["contract_state"] == "pending_signature"
+        assert state["status"] == "pending_signature"
+        assert state["raw_status"] == "awaiting_worker_signature"
+        assert state["latest_active"] is True
+
+    def test_metadata_fields_present_if_active(monkeypatch):
+        db = _FakeDb()
+        employee = {"id": "emp-5", "name": "Meta Fields"}
+        db.agreement_acknowledgements.docs = [
+            {
+                "id": "ack-meta",
+                "employee_id": "emp-5",
+                "agreement_type": "contract_acceptance",
+                "status": "signed",
+                "verification_status": "verified",
+                "contract_state": "fully_executed",
+                "template_version": "contract_acceptance_v_meta",
+                "rendered_file_url": "https://example.test/meta.pdf",
+                "worker_signed_at": "2026-04-28T12:00:00+00:00",
+            }
+        ]
+        async def _ensure(_db, _employee, _agreement_type):
+            return dict(db.agreement_acknowledgements.docs[0])
+        monkeypatch.setattr("agreement_document_service.ensure_agreement_rendered", _ensure)
+        state = asyncio.run(resolve_employee_agreement_state(db, employee, CONTRACT_AGREEMENT_TYPE))
+        ack = state["acknowledgement"]
+        # All key metadata fields should be present and not None
+        for field in [
+            "id", "employee_id", "agreement_type", "status", "verification_status", "contract_state",
+            "template_version", "rendered_file_url", "worker_signed_at"
+        ]:
+            assert field in ack
+
+    def test_system_issue_sets_latest_active_false(monkeypatch):
+        db = _FakeDb()
+        employee = {"id": "emp-6", "name": "Sys Issue"}
+        # Simulate ensure_agreement_rendered raising exception
+        async def _ensure(_db, _employee, _agreement_type):
+            raise Exception("Simulated system error")
+        monkeypatch.setattr("agreement_document_service.ensure_agreement_rendered", _ensure)
+        state = asyncio.run(resolve_employee_agreement_state(db, employee, HANDBOOK_AGREEMENT_TYPE))
+        assert state["latest_active"] is False
+        assert state["system_issue"] is True
+        assert state["agreement_type"] == HANDBOOK_AGREEMENT_TYPE
     db = _FakeDb()
     employee = {"id": "emp-1", "name": "Test User"}
     db.agreement_acknowledgements.docs = [

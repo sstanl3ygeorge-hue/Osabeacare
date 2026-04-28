@@ -80,25 +80,62 @@ async def get_employee_agreements_data(employee_id: str) -> dict:
     """
     db = get_db()
 
-    agreement_acknowledgements = await db.agreement_acknowledgements.find(
-        {"employee_id": employee_id},
-        {"_id": 0}
-    ).sort("created_at", -1).to_list(100)
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0}) or {"id": employee_id}
+    try:
+        from agreement_document_service import (
+            CONTRACT_AGREEMENT_TYPE,
+            HANDBOOK_AGREEMENT_TYPE,
+            resolve_employee_agreement_state,
+        )
 
-    if agreement_acknowledgements:
+        contract_state = await resolve_employee_agreement_state(db, employee, CONTRACT_AGREEMENT_TYPE)
+        handbook_state = await resolve_employee_agreement_state(db, employee, HANDBOOK_AGREEMENT_TYPE)
+
+        acknowledgements = []
+        for state in (contract_state, handbook_state):
+            if not state:
+                continue
+            acknowledgements.append({
+                "agreement_type": state.get("agreement_type"),
+                "status": state.get("status"),
+                "raw_status": state.get("raw_status"),
+                "latest_active": bool(state.get("latest_active")),
+                "source_record_id": state.get("source_record_id"),
+                "template_version": state.get("template_version"),
+                "can_sign": state.get("can_sign"),
+                "can_acknowledge": state.get("can_acknowledge"),
+                "current_lifecycle": state.get("current_lifecycle"),
+            })
+
+        return {"acknowledgements": acknowledgements}
+    except Exception:
+        # Typed incomplete fallback: preserve route shape while avoiding raw legacy rows.
         return {
-            "acknowledgements": agreement_acknowledgements
+            "acknowledgements": [
+                {
+                    "agreement_type": "contract_acceptance",
+                    "status": "incomplete",
+                    "raw_status": None,
+                    "latest_active": False,
+                    "source_record_id": None,
+                    "template_version": None,
+                    "can_sign": False,
+                    "can_acknowledge": None,
+                    "current_lifecycle": "unavailable",
+                },
+                {
+                    "agreement_type": "handbook_acknowledgement",
+                    "status": "incomplete",
+                    "raw_status": None,
+                    "latest_active": False,
+                    "source_record_id": None,
+                    "template_version": None,
+                    "can_sign": None,
+                    "can_acknowledge": False,
+                    "current_lifecycle": "unavailable",
+                },
+            ]
         }
-
-    # Legacy fallback: preserve readiness compatibility for records not yet migrated.
-    agreement_submissions = await db.agreement_submissions.find(
-        {"employee_id": employee_id},
-        {"_id": 0}
-    ).sort("created_at", -1).to_list(100)
-
-    return {
-        "acknowledgements": agreement_submissions
-    }
 
 
 def get_evaluate_work_readiness_func():

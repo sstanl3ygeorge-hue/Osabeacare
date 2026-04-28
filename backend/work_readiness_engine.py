@@ -484,24 +484,12 @@ async def can_sign_contract(db, employee_id: str) -> dict:
             employee,
             HANDBOOK_AGREEMENT_TYPE,
         )
-        handbook_ok = bool(handbook_state.get("verified") or handbook_state.get("worker_acknowledged"))
+        handbook_status = (handbook_state.get("status") or "").lower()
+        handbook_ok = handbook_status in {"verified", "acknowledged", "signed", "completed"}
         handbook_system_issue = bool(handbook_state.get("system_issue"))
     except Exception:
-        has_unified_handbook = "handbook" in unified_checks
-        handbook_ok = bool(unified_checks.get("handbook")) if has_unified_handbook else False
-        handbook_source = "uce_checks" if has_unified_handbook else "legacy_agreement_lookup"
-        if not has_unified_handbook:
-            _hb_ack = await db.agreement_acknowledgements.find_one({
-                "employee_id": employee_id,
-                "agreement_type": {"$regex": "handbook", "$options": "i"},
-                "status": {"$in": ["acknowledged", "signed", "submitted"]},
-            })
-            if not _hb_ack:
-                _hb_ack = await db.agreement_submissions.find_one({
-                    "employee_id": employee_id,
-                    "template_id": "EMPLOYEE_HANDBOOK_ACKNOWLEDGEMENT_V1",
-                })
-            handbook_ok = bool(_hb_ack)
+        handbook_source = "agreement_resolver_unavailable"
+        handbook_ok = False
     if handbook_ok:
         completed.append("Employee Handbook acknowledged")
     else:
@@ -601,28 +589,10 @@ async def can_promote_to_active(db, employee_id: str) -> dict:
             employee,
             CONTRACT_AGREEMENT_TYPE,
         )
-        contract_signed = bool(contract_state.get("fully_executed"))
+        contract_status = (contract_state.get("status") or "").lower()
+        contract_signed = contract_status in {"fully_executed", "signed", "verified", "completed"}
     except Exception:
-        _CONTRACT_TEMPLATE_IDS = {
-            "ZERO_HOUR_CONTRACT_V1",
-            "EMPLOYMENT_CONTRACT_V1",
-            "CASUAL_WORKER_CONTRACT_V1",
-        }
-        contract_ack = await db.agreement_acknowledgements.find_one({
-            "employee_id": employee_id,
-            "agreement_type": {"$regex": "contract", "$options": "i"},
-            "status": {"$in": ["signed", "submitted", "verified"]},
-        })
-        if not contract_ack:
-            contract_ack = await db.agreement_submissions.find_one({
-                "employee_id": employee_id,
-                "template_id": {"$in": list(_CONTRACT_TEMPLATE_IDS)},
-            })
-        if not contract_ack:
-            emp_record = await db.employees.find_one({"id": employee_id}, {"contract_signed": 1})
-            if emp_record and emp_record.get("contract_signed"):
-                contract_ack = {"source": "legacy_flat"}
-        contract_signed = bool(contract_ack)
+        contract_signed = False
 
     if not contract_signed:
         return {

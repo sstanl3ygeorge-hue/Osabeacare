@@ -81,3 +81,25 @@ export function getLatestActiveContract(agreements, options = {}) {
   };
 }
 
+export function getLatestActiveAgreementById(agreements, agreementId) {
+  const rows = Array.isArray(agreements)
+    ? agreements.filter((agreement) => agreement?.id === agreementId)
+    : [];
+  if (!rows.length) return null;
+
+  const activeRows = rows.filter((row) => row?.latest_active === true);
+  const source = activeRows.length ? activeRows : rows;
+  return [...source].sort((a, b) => {
+    const aTs = Math.max(
+      toMs(a?.updated_at),
+      toMs(a?.created_at),
+      toMs(a?.rendered_at),
+    );
+    const bTs = Math.max(
+      toMs(b?.updated_at),
+      toMs(b?.created_at),
+      toMs(b?.rendered_at),
+    );
+    return bTs - aTs;
+  })[0];
+}

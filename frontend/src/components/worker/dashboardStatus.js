@@ -2,6 +2,11 @@ import { resolveLatestContractState } from '../../lib/contractState';
 
 export function getAgreementDisplay(agreement, options = {}) {
   const contractEligibility = options.contractEligibility || null;
+  const canonicalStatus = String(agreement?.status || '').toLowerCase();
+  const rawStatus = String(agreement?.raw_status || '').toLowerCase();
+  const latestActive = agreement?.latest_active !== false;
+  const canonicalCanSign = agreement?.can_sign;
+  const canonicalCanAcknowledge = agreement?.can_acknowledge;
   const truncateMessage = (value, max = 160) => {
     const text = String(value || '').trim();
     if (!text) return '';
@@ -19,7 +24,13 @@ export function getAgreementDisplay(agreement, options = {}) {
     };
   }
 
-  if (agreement.verified) {
+  if (
+    canonicalStatus === 'fully_executed' ||
+    canonicalStatus === 'verified' ||
+    canonicalStatus === 'completed' ||
+    canonicalStatus === 'signed' ||
+    agreement.verified
+  ) {
     return {
       tone: 'success',
       badge: agreement.id === 'contract_acceptance' ? 'Fully executed' : 'Verified',
@@ -33,7 +44,14 @@ export function getAgreementDisplay(agreement, options = {}) {
     };
   }
 
-  if (agreement.id === 'contract_acceptance' && agreement.contract_state === 'awaiting_company_countersignature') {
+  if (
+    agreement.id === 'contract_acceptance' &&
+    (
+      canonicalStatus === 'awaiting_company_countersignature' ||
+      rawStatus === 'awaiting_company_countersignature' ||
+      agreement.contract_state === 'awaiting_company_countersignature'
+    )
+  ) {
     return {
       tone: 'info',
       badge: 'With Osabea',
@@ -51,7 +69,7 @@ export function getAgreementDisplay(agreement, options = {}) {
       agreement.worker_signed ||
       agreement.signed ||
       Boolean(agreement.worker_signed_at || agreement.signed_at);
-    const canSign = contractResolution.canSign;
+    const canSign = typeof canonicalCanSign === 'boolean' ? canonicalCanSign : contractResolution.canSign;
     if (hasWorkerSigned && contractState !== 'fully_executed') {
       return {
         tone: 'info',
@@ -73,7 +91,7 @@ export function getAgreementDisplay(agreement, options = {}) {
         ctaLabel: 'Review & sign contract',
       };
     }
-    if (['rejected', 'rejected_reopen_required', 'superseded', 'action_required'].includes(contractState) && !canSign) {
+    if (latestActive && ['rejected', 'rejected_reopen_required', 'superseded', 'action_required'].includes(contractState) && !canSign) {
       return {
         tone: 'neutral',
         badge: 'Historical',
@@ -118,7 +136,14 @@ export function getAgreementDisplay(agreement, options = {}) {
       };
     }
 
-    if (agreement.signed || agreement.verified) {
+    if (
+      canonicalStatus === 'acknowledged' ||
+      canonicalStatus === 'verified' ||
+      canonicalStatus === 'completed' ||
+      canonicalStatus === 'signed' ||
+      agreement.signed ||
+      agreement.verified
+    ) {
       return {
         tone: 'success',
         badge: 'Completed',
@@ -134,7 +159,7 @@ export function getAgreementDisplay(agreement, options = {}) {
       badge: 'Action required',
       title: 'Employee Handbook',
       description: 'Review and acknowledge your handbook.',
-      workerActionable: true,
+      workerActionable: typeof canonicalCanAcknowledge === 'boolean' ? canonicalCanAcknowledge : true,
       ctaLabel: 'Acknowledge handbook',
     };
   }

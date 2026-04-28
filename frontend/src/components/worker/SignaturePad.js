@@ -10,7 +10,7 @@ import API_BASE from '../../utils/apiBase';
 
 const API = API_BASE;
 
-export default function SignaturePad({ employeeId, employeeName, onSigned, onCancel }) {
+export default function SignaturePad({ employeeId, employeeName, sourceRecordId = null, onSigned, onCancel }) {
   const canvasRef = useRef(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [hasDrawn, setHasDrawn] = useState(false);
@@ -108,7 +108,8 @@ export default function SignaturePad({ employeeId, employeeName, onSigned, onCan
         `${API}/worker/contract/sign`,
         { 
           signature_base64: signatureData, 
-          full_name: fullName.trim() 
+          full_name: fullName.trim(),
+          ...(sourceRecordId ? { source_record_id: sourceRecordId } : {})
         },
         { headers: { Authorization: `Bearer ${token}` } }
       );

@@ -28,7 +28,7 @@ import DashboardHeader from '../../components/worker/DashboardHeader';
 import NextActionCard from '../../components/worker/NextActionCard';
 import { getAgreementDisplay, getCvDisplay, getTrainingDisplay } from '../../components/worker/dashboardStatus';
 import { getCanonicalPersonStage, isActiveLifecycleStatus, normalizeLifecycleStatus } from '../../lib/lifecycle';
-import { getLatestActiveContract, resolveLatestContractState } from '../../lib/contractState';
+import { getLatestActiveAgreementById, getLatestActiveContract, resolveLatestContractState } from '../../lib/contractState';
 import API_BASE from '../../utils/apiBase';
 
 const API = API_BASE;
@@ -1444,7 +1444,10 @@ export default function WorkerDashboard() {
       const token = localStorage.getItem('workerToken');
       const response = await axios.post(
         `${API}/worker/agreements/${agreement.id}/acknowledge`,
-        { signer_name: employee?.name },
+        {
+          signer_name: employee?.name,
+          ...(agreement?.source_record_id ? { source_record_id: agreement.source_record_id } : {}),
+        },
         { headers: { Authorization: `Bearer ${token}` } }
       );
       const idempotent = Boolean(response?.data?.idempotent);
@@ -1815,7 +1818,8 @@ export default function WorkerDashboard() {
       ? 'pre_employment'
       : 'recruitment';
   const showOnboardingContractSection = false;
-  const handbookAgreement = agreements.find((agreement) => agreement.id === 'handbook_acknowledgement');
+  const handbookAgreement = getLatestActiveAgreementById(agreements, 'handbook_acknowledgement')
+    || agreements.find((agreement) => agreement.id === 'handbook_acknowledgement');
   const contractDisplay = getAgreementDisplay(contractAgreement, { contractEligibility });
   const latestContractState = resolveLatestContractState(contractAgreement, { contractEligibility });
   const contractLifecycleStatus = latestContractState.status;
@@ -1841,7 +1845,8 @@ export default function WorkerDashboard() {
   const completedReferencesCount = references.filter((reference) => isReferenceComplete(reference?.status)).length;
   const referencesNeedAction = referencesNeedActionFromBlockers || references.some((reference) => !isReferenceComplete(reference?.status));
   const normalizedAgreements = [
-    ...agreements.filter((agreement) => agreement.id !== 'contract_acceptance'),
+    ...agreements.filter((agreement) => agreement.id !== 'contract_acceptance' && agreement.id !== 'handbook_acknowledgement'),
+    ...(handbookAgreement ? [handbookAgreement] : []),
     ...(contractAgreement ? [contractAgreement] : []),
   ];
   const agreementDisplays = normalizedAgreements.map((agreement) => ({
@@ -4184,6 +4189,7 @@ export default function WorkerDashboard() {
             <SignaturePad
               employeeId={employee.id}
               employeeName={employee.name}
+              sourceRecordId={contractAgreement?.source_record_id || null}
               onSigned={() => {
                 setShowSignaturePad(false);
                 fetchDashboard(); // Refresh dashboard

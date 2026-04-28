@@ -524,7 +524,13 @@ export function normalizeAgreementItemSurface(agreementData) {
     signed_record_url,
     verified,
     verified_at,
-    resent_count = 0
+    resent_count = 0,
+    raw_status,
+    can_sign,
+    can_acknowledge,
+    latest_active,
+    source_record_id,
+    current_lifecycle,
   } = agreementData;
   
   // Derive send state
@@ -573,6 +579,15 @@ export function normalizeAgreementItemSurface(agreementData) {
       status: verified ? 'verified' : (completed_at ? 'pending' : 'unknown'),
       verifiedAt: verified_at || null,
       notes: null
+    },
+    canonical: {
+      status: status || null,
+      rawStatus: raw_status || null,
+      canSign: typeof can_sign === 'boolean' ? can_sign : null,
+      canAcknowledge: typeof can_acknowledge === 'boolean' ? can_acknowledge : null,
+      latestActive: typeof latest_active === 'boolean' ? latest_active : null,
+      sourceRecordId: source_record_id || null,
+      currentLifecycle: current_lifecycle || null,
     },
     summary,
     blocking: !verified

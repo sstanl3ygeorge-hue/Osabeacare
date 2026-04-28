@@ -78,6 +78,7 @@ from stage_identity import (
     get_stage_identity, 
     is_applicant, 
     is_employee, 
+    normalize_lifecycle_status,
     enrich_person_with_stage_identity,
     build_stage_filter,
     APPLICANT_STATUSES as STAGE_APPLICANT_STATUSES,
@@ -977,16 +978,14 @@ async def get_compliance_requirements_for_employee(employee_id: str, role: str =
     }, {"_id": 0}).to_list(100)
     
     requirements = []
-    
+    from agreement_document_service import resolve_employee_agreement_state, CONTRACT_AGREEMENT_TYPE, HANDBOOK_AGREEMENT_TYPE
+    db_employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
     for item in mandatory_items:
         req_id = item['id']
         req_type = item.get('type', 'document')
-        
         # Skip archived requirements
         if item.get('archived', False):
             continue
-        
-        # Build requirement result
         result = {
             "id": req_id,
             "name": item.get('name', req_id),
@@ -999,8 +998,26 @@ async def get_compliance_requirements_for_employee(employee_id: str, role: str =
             "document_count": 0,
             "expiry_date": None
         }
-        
-        # Check documents for this requirement
+        # Canonical agreement resolver for contract/handbook
+        if req_id in (CONTRACT_AGREEMENT_TYPE, HANDBOOK_AGREEMENT_TYPE) and db_employee:
+            resolver = await resolve_employee_agreement_state(db, db_employee, req_id)
+            ack = resolver.get("acknowledgement", {})
+            if resolver.get("latest_active"):
+                result["status"] = resolver.get("status") or "not_started"
+                result["has_evidence"] = bool(ack.get("rendered_file_url") or ack.get("signed_document_url"))
+                result["verified"] = resolver.get("verified", False)
+                result["document_count"] = 1 if ack.get("rendered_file_url") or ack.get("signed_document_url") else 0
+                result["expiry_date"] = ack.get("expiry_date")
+            else:
+                # No active canonical row
+                result["status"] = "not_started"
+                result["has_evidence"] = False
+                result["verified"] = False
+                result["document_count"] = 0
+                result["expiry_date"] = None
+            requirements.append(result)
+            continue
+        # ...existing code for other requirement types...
         def matches_requirement(document: dict, requirement_id: str) -> bool:
             doc_req_id = (document.get('requirement_id') or '').lower()
             doc_type = (document.get('document_type') or '').lower()
@@ -1011,25 +1028,18 @@ async def get_compliance_requirements_for_employee(employee_id: str, role: str =
             if requirement_id == 'identity_documents' and doc_req_id == 'identity_rtw':
                 return any(keyword in doc_type for keyword in ['passport', 'licence', 'license', 'id'])
             return doc_req_id == requirement_id or doc_type == requirement_id
-
         matching_docs = [d for d in all_docs if matches_requirement(d, req_id)]
-        
         if matching_docs:
             active_count = sum(1 for d in matching_docs if d.get('file_url') or d.get('evidence_files'))
             result["document_count"] = active_count
-            
             if active_count > 0:
                 result["status"] = "complete"
                 result["has_evidence"] = True
                 result["verified"] = all(d.get('verified') or d.get('status') == 'approved' for d in matching_docs if d.get('file_url'))
-                
-                # Check expiry
                 for doc in matching_docs:
                     if doc.get('expiry_date'):
                         result["expiry_date"] = doc['expiry_date']
                         break
-        
-        # Check forms for this requirement
         if req_type == 'form':
             matching_forms = [f for f in all_forms if f.get('form_type') == req_id]
             if matching_forms:
@@ -1038,9 +1048,7 @@ async def get_compliance_requirements_for_employee(employee_id: str, role: str =
                     result["status"] = "complete"
                     result["has_evidence"] = bool(form.get('pdf_url'))
                     result["verified"] = form.get('status') == 'signed_off'
-        
         requirements.append(result)
-    
     return requirements
 
 
@@ -2601,24 +2609,23 @@ async def calculate_work_readiness_3tier(
         })
     
     # =========================================================================
-    # HARD BLOCK E: AGREEMENT BLOCKS (Step 11 - Agreements as Forms)
+    # HARD BLOCK E: AGREEMENT BLOCKS (Step 11 - canonical agreement resolver)
     # =========================================================================
-    
-    agreements = await AgreementAcknowledgementService.get_employee_agreements(employee_id)
-    
-    # Check contract acceptance
-    contract_acks = [a for a in agreements.get('acknowledgements', []) 
-                    if a.get('agreement_type') == 'contract_acceptance']
-    contract_verified = any(a.get('verification_status') == 'verified' for a in contract_acks)
-    
-    if not contract_verified:
-        if contract_acks:
-            latest = contract_acks[0]  # Already sorted by created_at desc
-            status = latest.get('verification_status', 'unknown')
+    from agreement_document_service import (
+        CONTRACT_AGREEMENT_TYPE,
+        HANDBOOK_AGREEMENT_TYPE,
+        resolve_employee_agreement_state,
+    )
+
+    contract_state = await resolve_employee_agreement_state(db, employee_data, CONTRACT_AGREEMENT_TYPE)
+    contract_status = (contract_state.get("status") or "").lower()
+    contract_signed = contract_status in {"fully_executed", "signed", "verified", "completed"}
+    if not contract_signed:
+        if contract_state.get("latest_active"):
             hard_block_reasons.append({
                 "type": "hard_block",
                 "code": "contract_acceptance_not_verified",
-                "message": f"Contract Acceptance: {status.replace('_', ' ')}"
+                "message": f"Contract Acceptance: {(contract_status or 'incomplete').replace('_', ' ')}"
             })
         else:
             hard_block_reasons.append({
@@ -2626,20 +2633,16 @@ async def calculate_work_readiness_3tier(
                 "code": "contract_acceptance_missing",
                 "message": "Contract Acceptance required"
             })
-    
-    # Check handbook acknowledgement
-    handbook_acks = [a for a in agreements.get('acknowledgements', [])
-                    if a.get('agreement_type') == 'handbook_acknowledgement']
-    handbook_verified = any(a.get('verification_status') == 'verified' for a in handbook_acks)
-    
-    if not handbook_verified:
-        if handbook_acks:
-            latest = handbook_acks[0]
-            status = latest.get('verification_status', 'unknown')
+
+    handbook_state = await resolve_employee_agreement_state(db, employee_data, HANDBOOK_AGREEMENT_TYPE)
+    handbook_status = (handbook_state.get("status") or "").lower()
+    handbook_done = handbook_status in {"verified", "acknowledged", "signed", "completed"}
+    if not handbook_done:
+        if handbook_state.get("latest_active"):
             hard_block_reasons.append({
                 "type": "hard_block",
                 "code": "handbook_acknowledgement_not_verified",
-                "message": f"Handbook Acknowledgement: {status.replace('_', ' ')}"
+                "message": f"Handbook Acknowledgement: {(handbook_status or 'incomplete').replace('_', ' ')}"
             })
         else:
             hard_block_reasons.append({
@@ -9932,8 +9935,10 @@ async def update_employee(employee_id: str, update: EmployeeUpdate, user: dict =
     update_data = {k: v for k, v in payload.items() if v is not None}
     update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
 
-    current_status = existing.get("status")
-    requested_status = update_data.get("status")
+    current_status = normalize_lifecycle_status(existing.get("status"))
+    requested_status = normalize_lifecycle_status(update_data.get("status")) if update_data.get("status") else None
+    if requested_status:
+        update_data["status"] = requested_status
     if requested_status and requested_status != current_status:
         lifecycle_statuses = {"onboarding", "active", "inactive"}
         if current_status in lifecycle_statuses and requested_status in lifecycle_statuses:
@@ -18543,35 +18548,32 @@ async def get_requirement_unified_history(
                 "source": "check_record"
             })
     
-    # 5. Get agreement acknowledgements (for agreement-type requirements)
+    # 5. Get agreement acknowledgements (for agreement-type requirements) via canonical resolver
+    from agreement_document_service import resolve_employee_agreement_state, CONTRACT_AGREEMENT_TYPE, HANDBOOK_AGREEMENT_TYPE
     agreement_types = {
-        'contract_acceptance': 'contract_acceptance',
-        'handbook_acknowledgement': 'handbook_acknowledgement'
+        'contract_acceptance': CONTRACT_AGREEMENT_TYPE,
+        'handbook_acknowledgement': HANDBOOK_AGREEMENT_TYPE
     }
-    
     if requirement_key in agreement_types:
-        agreements = await db.agreement_acknowledgements.find({
-            "employee_id": employee_id,
-            "agreement_type": agreement_types[requirement_key]
-        }, {"_id": 0}).sort("completed_at", -1).to_list(50)
-        
-        for agr in agreements:
-            timeline.append({
-                "event_type": "agreement_completed",
-                "timestamp": agr.get('completed_at'),
-                "user_id": agr.get('completed_by'),
-                "user_name": agr.get('completed_by_name'),
-                "details": {
-                    "acknowledgement_id": agr.get('id'),
-                    "version_acknowledged": agr.get('version_acknowledged'),
-                    "completion_mode": agr.get('completion_mode')
-                },
-                "source": "agreement"
-            })
-    
+        db_employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+        if db_employee:
+            resolver = await resolve_employee_agreement_state(db, db_employee, agreement_types[requirement_key])
+            ack = resolver.get("acknowledgement", {})
+            if resolver.get("latest_active"):
+                timeline.append({
+                    "event_type": "agreement_completed",
+                    "timestamp": ack.get('signed_at') or ack.get('acknowledged_at') or ack.get('verified_at'),
+                    "user_id": ack.get('worker_signer_name') or ack.get('verified_by_name'),
+                    "user_name": ack.get('worker_signer_name') or ack.get('verified_by_name'),
+                    "details": {
+                        "acknowledgement_id": ack.get('id'),
+                        "version_acknowledged": ack.get('template_version'),
+                        "completion_mode": ack.get('contract_state') or ack.get('status')
+                    },
+                    "source": "agreement"
+                })
     # Sort timeline by timestamp (newest first)
     timeline.sort(key=lambda x: x.get('timestamp') or '', reverse=True)
-    
     return {
         "requirement_key": requirement_key,
         "employee_id": employee_id,

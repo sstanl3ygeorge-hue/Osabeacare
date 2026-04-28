@@ -999,12 +999,13 @@ def _agreement_rank(row: Dict[str, Any]) -> tuple:
 
 
 async def resolve_employee_agreement_state(db, employee: Dict[str, Any], agreement_type: str) -> Dict[str, Any]:
-    # Normalize legacy alias to canonical handbook agreement type so admin and
-    # worker surfaces always resolve the same latest row.
+
+    # Normalize legacy alias to canonical handbook agreement type so admin and worker surfaces always resolve the same latest row.
     if agreement_type == "employee_handbook_acknowledgement":
         agreement_type = HANDBOOK_AGREEMENT_TYPE
     employee_id = employee["id"]
     render_error_detail = None
+    agreement = None
     try:
         agreement = await ensure_agreement_rendered(db, employee, agreement_type)
     except HandbookRenderError as exc:
@@ -1052,6 +1053,114 @@ async def resolve_employee_agreement_state(db, employee: Dict[str, Any], agreeme
                         canonical[field_name] = sibling[field_name]
                         break
         agreement = canonical
+
+    # If no agreement found, ensure all required fields are present and set latest_active: False
+    if not agreement:
+        # Safe defaults for all required fields
+        empty = {
+            "id": None,
+            "employee_id": employee_id,
+            "agreement_type": agreement_type,
+            "status": None,
+            "verification_status": None,
+            "contract_state": None,
+            "template_version": None,
+            "rendered_file_url": None,
+            "rendered_contract_pdf_url": None,
+            "worker_signed_contract_pdf_url": None,
+            "executed_contract_pdf_url": None,
+            "signed_document_url": None,
+            "rendered_at": None,
+            "employee_name": _employee_name(employee),
+            "signed_at": None,
+            "worker_signed_at": None,
+            "worker_signer_name": None,
+            "company_signed_at": None,
+            "company_signer_name": None,
+            "verified_at": None,
+            "verified_by_name": None,
+            "rejection_reason": None,
+            "rejected_at": None,
+            "rejected_by_name": None,
+        }
+        # Return a fully explicit no-active-row result
+        if agreement_type == CONTRACT_AGREEMENT_TYPE:
+            return {
+                "agreement_type": agreement_type,
+                "acknowledgement": empty,
+                "source_record_id": None,
+                "latest_active": False,
+                "render_issue": render_error_detail,
+                "rejected": False,
+                "rejection_reason": None,
+                "rejected_at": None,
+                "rejected_by_name": None,
+                "signed": False,
+                "worker_signed": False,
+                "verified": False,
+                "fully_executed": False,
+                "state_label": "No contract record found",
+                "can_sign": False,
+                "status": None,
+                "raw_status": None,
+                "contract_state": None,
+                "file_url": None,
+                "download_url": None,
+                "rendered_file_url": None,
+                "worker_signed_contract_pdf_url": None,
+                "executed_contract_pdf_url": None,
+                "signed_document_url": None,
+                "template_version": None,
+                "rendered_at": None,
+                "employee_name": _employee_name(employee),
+                "signed_at": None,
+                "worker_signed_at": None,
+                "worker_signer_name": None,
+                "company_signed_at": None,
+                "company_signer_name": None,
+                "verified_at": None,
+                "verified_by_name": None,
+                "verification_status": None,
+                "canonical_contract": False,
+                "render_issue": render_error_detail,
+                "has_acknowledgement": False,
+            }
+        else:
+            # Handbook or other agreement
+            org_settings = await db.org_settings.find_one({}, {"_id": 0}) or {}
+            handbook_fields = _resolve_handbook_fields(org_settings, employee)
+            content_needed = _handbook_content_needed(handbook_fields)
+            return {
+                "agreement_type": agreement_type,
+                "acknowledgement": empty,
+                "source_record_id": None,
+                "latest_active": False,
+                "render_issue": render_error_detail,
+                "content_needed": content_needed,
+                "rejected": False,
+                "rejection_reason": None,
+                "rejected_at": None,
+                "rejected_by_name": None,
+                "signed": False,
+                "worker_acknowledged": False,
+                "verified": False,
+                "system_issue": bool(render_error_detail),
+                "state_label": "No handbook record found",
+                "can_sign": False,
+                "can_acknowledge": False,
+                "status": None,
+                "file_url": None,
+                "download_url": None,
+                "rendered_file_url": None,
+                "template_version": None,
+                "rendered_at": None,
+                "employee_name": _employee_name(employee),
+                "signed_at": None,
+                "verified_at": None,
+                "verified_by_name": None,
+                "verification_status": None,
+                "has_acknowledgement": False,
+            }
 
     # Cross-check new-style agreement submissions (handbook only).
     # Admin verification for the handbook template lands in

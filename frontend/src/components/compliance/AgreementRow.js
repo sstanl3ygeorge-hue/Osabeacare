@@ -112,8 +112,12 @@ export default function AgreementRow({
   const contractResolution = resolveLatestContractState(acknowledgement_data, {});
   const normalizedContractStatus = contractResolution.status;
   const isAwaitingWorkerSignature = contractResolution.isAwaitingWorkerSignature;
+  const canonicalLifecycleStatus = String(acknowledgement_data?.current_lifecycle || '').trim().toLowerCase();
+  const canonicalLatestActive = acknowledgement_data?.latest_active === true;
+  const canonicalStatus = String(acknowledgement_data?.status || '').trim().toLowerCase();
   const contractNeedsReissue =
     key === 'contract_acceptance' &&
+    canonicalLatestActive &&
     !isAwaitingWorkerSignature &&
     ['rejected', 'rejected_reopen_required', 'action_required', 'superseded'].includes(normalizedContractStatus);
   const shouldShowReissueButton =
@@ -128,7 +132,7 @@ export default function AgreementRow({
   const effectiveLifecycleStatus =
     key === 'contract_acceptance' && isAwaitingWorkerSignature
       ? 'submitted'
-      : lifecycleStatus;
+      : (canonicalLifecycleStatus || lifecycleStatus);
 
   // Status colors and icons
   const getStatusConfig = () => {
@@ -137,6 +141,9 @@ export default function AgreementRow({
     }
     if (contractNeedsReissue) {
       return { color: 'amber', bgColor: 'bg-amber-100', textColor: 'text-amber-700', icon: AlertTriangle, label: 'Contract needs reissue' };
+    }
+    if (key === 'contract_acceptance' && canonicalStatus === 'pending_signature') {
+      return { color: 'blue', bgColor: 'bg-blue-100', textColor: 'text-blue-700', icon: Clock, label: 'Awaiting worker signature' };
     }
     switch (lifecycleStatus) {
       case 'verified':
@@ -493,7 +500,7 @@ export default function AgreementRow({
                   variant="default"
                   onClick={(e) => {
                     e.stopPropagation();
-                    const sourceContractId = getReissueSourceContractId(acknowledgement_data);
+                    const sourceContractId = acknowledgement_data?.source_record_id || getReissueSourceContractId(acknowledgement_data);
                     onReissueContract({
                       id: sourceContractId,
                       status: normalizedContractStatus || null,

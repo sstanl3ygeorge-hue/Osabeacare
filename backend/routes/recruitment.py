@@ -36,6 +36,7 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from role_normalization import get_role_label, normalize_role
+from stage_identity import get_stage_identity, normalize_lifecycle_status
 from stageGates import StageGateService
 from employment_review_persistence import sign_off_current_employment_review
 
@@ -80,6 +81,14 @@ APPLICANT_STATUSES = [
     EmployeeStatus.INTERVIEW,
     EmployeeStatus.COMPLIANCE_REVIEW
 ]
+
+
+def _derive_person_stage_from_status(raw_status: Optional[str]) -> str:
+    normalized = normalize_lifecycle_status(raw_status or EmployeeStatus.NEW)
+    identity = get_stage_identity({"status": normalized})
+    if normalized in {EmployeeStatus.ARCHIVED, EmployeeStatus.WITHDRAWN, EmployeeStatus.SUPERSEDED}:
+        return PersonStage.ARCHIVED
+    return PersonStage.EMPLOYEE if identity == "employee" else PersonStage.APPLICANT
 
 EMPLOYEE_STATUSES = [
     EmployeeStatus.ONBOARDING,
@@ -356,11 +365,7 @@ async def get_applicant(
     if not applicant:
         raise HTTPException(status_code=404, detail="Applicant not found")
     
-    applicant["person_stage"] = (
-        PersonStage.APPLICANT
-        if applicant.get("status") in APPLICANT_STATUSES
-        else PersonStage.EMPLOYEE
-    )
+    applicant["person_stage"] = _derive_person_stage_from_status(applicant.get("status"))
     applicant["source_type"] = resolved["source_type"]
     applicant["profile_resolved_from"] = applicant_id
     _ap = await calculate_completion_percentage_simple(applicant_id, db=db)
@@ -388,11 +393,7 @@ async def resolve_recruitment_profile(
     if not person:
         raise HTTPException(status_code=404, detail="Person not found")
 
-    person["person_stage"] = (
-        PersonStage.APPLICANT
-        if person.get("status") in APPLICANT_STATUSES
-        else PersonStage.EMPLOYEE
-    )
+    person["person_stage"] = _derive_person_stage_from_status(person.get("status"))
     person["source_type"] = resolved["source_type"]
     person["profile_resolved_from"] = person_id
     _ap = await calculate_completion_percentage_simple(person["id"], db=db)
@@ -1028,21 +1029,15 @@ async def get_recruitment_status(
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
     
-    current_status = employee.get("status", EmployeeStatus.NEW)
-    
-    if current_status in APPLICANT_STATUSES:
-        person_stage = PersonStage.APPLICANT
-    elif current_status in EMPLOYEE_STATUSES:
-        person_stage = PersonStage.EMPLOYEE
-    else:
-        person_stage = PersonStage.ARCHIVED
+    current_status = normalize_lifecycle_status(employee.get("status", EmployeeStatus.NEW))
+    person_stage = _derive_person_stage_from_status(current_status)
     
     return {
         "employee_id": employee_id,
         "status": current_status,
         "person_stage": person_stage,
-        "is_applicant": current_status in APPLICANT_STATUSES,
-        "is_employee": current_status in EMPLOYEE_STATUSES,
+        "is_applicant": person_stage == PersonStage.APPLICANT,
+        "is_employee": person_stage == PersonStage.EMPLOYEE,
         "recruitment_approved": employee.get("recruitment_approved", False),
         "recruitment_approved_at": employee.get("recruitment_approved_at"),
         "employee_code": employee.get("employee_code")

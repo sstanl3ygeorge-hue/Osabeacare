@@ -9,8 +9,9 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatBackendDate } from '../../lib/dateUtils';
+import { API_BASE_URL, API_ROOT_URL } from './';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 async function openAuthenticatedBlob(route, fallbackName = 'evidence.pdf') {
   const token = localStorage.getItem('token');
@@ -977,3 +978,4 @@ export default function InductionChecklistPanel({ employeeId, employeeName, isAu
     </>
   );
 }
+

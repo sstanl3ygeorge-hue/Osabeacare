@@ -6,8 +6,9 @@ import { Label } from '../ui/label';
 import { Textarea } from '../ui/textarea';
 import { Checkbox } from '../ui/checkbox';
 import { toast } from 'sonner';
+import { API_BASE_URL, API_ROOT_URL } from './';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 /**
  * EditDeclarationsDialog - Edit declarations with reason logging
@@ -288,3 +289,4 @@ export default function EditDeclarationsDialog({
     </EditReasonDialog>
   );
 }
+

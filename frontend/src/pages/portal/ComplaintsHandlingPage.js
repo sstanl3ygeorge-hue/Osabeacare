@@ -38,8 +38,9 @@ import {
 } from "../../components/ui/select";
 import { Label } from "../../components/ui/label";
 import { Progress } from '../../components/ui/progress';
+import { API_BASE_URL, API_ROOT_URL } from './';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 const COMPLAINT_STATUSES = [
   { value: 'received', label: 'Received', color: 'bg-gray-100 text-gray-800', icon: Clock },
@@ -655,3 +656,4 @@ const ComplaintsHandlingPage = () => {
 };
 
 export default ComplaintsHandlingPage;
+

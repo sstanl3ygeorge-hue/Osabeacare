@@ -6,8 +6,9 @@ import { Label } from '../ui/label';
 import { toast } from 'sonner';
 import axios from 'axios';
 import { Loader2, Eraser, Check, FileText, AlertCircle } from 'lucide-react';
+import { API_BASE_URL, API_ROOT_URL } from './';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 export default function SignaturePad({ employeeId, employeeName, onSigned, onCancel }) {
   const canvasRef = useRef(null);
@@ -245,3 +246,4 @@ export default function SignaturePad({ employeeId, employeeName, onSigned, onCan
     </Card>
   );
 }
+

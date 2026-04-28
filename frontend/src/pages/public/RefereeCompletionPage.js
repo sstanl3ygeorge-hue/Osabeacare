@@ -13,8 +13,9 @@ import {
   Send, Home, Clock, Shield, FileText, Info
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { API_BASE_URL, API_ROOT_URL } from './';
 
-const API = process.env.REACT_APP_BACKEND_URL;
+const API = API_ROOT_URL;
 
 export default function RefereeCompletionPage() {
   const { token } = useParams();
@@ -406,3 +407,4 @@ export default function RefereeCompletionPage() {
     </div>
   );
 }
+

@@ -6,8 +6,9 @@ import {
   Send, Eye, FileText, CheckCircle, Clock, AlertTriangle, XCircle
 } from 'lucide-react';
 import { formatBackendDate } from '../../lib/dateUtils';
+import { API_BASE_URL, API_ROOT_URL } from './';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 /**
  * RequestStatusBadge - Inline request lifecycle status for requirement rows
@@ -203,3 +204,4 @@ export function RequestStatusInline({
     </span>
   );
 }
+

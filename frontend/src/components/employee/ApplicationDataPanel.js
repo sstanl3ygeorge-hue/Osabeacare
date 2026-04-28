@@ -9,8 +9,9 @@ import {
   GraduationCap, Loader2, AlertCircle, Edit
 } from 'lucide-react';
 import { formatBackendDate } from '../../lib/dateUtils';
+import { API_BASE_URL, API_ROOT_URL } from './';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 /**
  * ApplicationDataPanel - Displays application form data in compliance tab
@@ -525,3 +526,4 @@ export default function ApplicationDataPanel({ employeeId, onRefresh, onEditDecl
     </div>
   );
 }
+

@@ -17,8 +17,9 @@ import {
   AlertTriangle, Shield, Eye, ExternalLink
 } from 'lucide-react';
 import { formatBackendDate, formatBackendDateTime } from '../../lib/dateUtils';
+import { API_BASE_URL, API_ROOT_URL } from './';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 export default function FormEditorPage() {
   const { formId } = useParams();
@@ -770,3 +771,4 @@ export default function FormEditorPage() {
     </div>
   );
 }
+

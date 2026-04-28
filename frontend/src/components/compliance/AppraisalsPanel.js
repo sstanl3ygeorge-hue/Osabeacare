@@ -10,8 +10,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog';
 import { Badge } from '../ui/badge';
 import { Plus, CalendarClock } from 'lucide-react';
 import { toast } from 'sonner';
+import { API_BASE_URL, API_ROOT_URL } from './';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 function getBadgeVariant(nextDueAt) {
   if (!nextDueAt) return 'secondary';
@@ -203,3 +204,4 @@ export default function AppraisalsPanel({ employeeId, employeeName = '' }) {
     </Card>
   );
 }
+

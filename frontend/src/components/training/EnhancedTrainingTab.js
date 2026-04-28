@@ -15,8 +15,9 @@ import {
 import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
 import { format, differenceInDays, parseISO } from 'date-fns';
+import { API_BASE_URL, API_ROOT_URL } from './';
 
-const API = process.env.REACT_APP_BACKEND_URL;
+const API = API_ROOT_URL;
 
 /**
  * MandatoryTrainingSection - Shows the 6 mandatory trainings that block promotion
@@ -560,3 +561,4 @@ export default function EnhancedTrainingTab({ employeeId, employeeRole, initialT
     </div>
   );
 }
+

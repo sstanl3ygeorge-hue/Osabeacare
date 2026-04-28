@@ -12,8 +12,9 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../ui/dialog';
 import { toast } from 'sonner';
 import { formatBackendDate } from '../../lib/dateUtils';
+import { API_BASE_URL, API_ROOT_URL } from './';
 
-const API = process.env.REACT_APP_BACKEND_URL;
+const API = API_ROOT_URL;
 
 // Section component for consistent styling
 const Section = ({ title, icon: Icon, children, className = "" }) => (
@@ -660,3 +661,4 @@ export default function ApplicationFormViewer({
     </>
   );
 }
+

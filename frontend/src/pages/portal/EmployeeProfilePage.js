@@ -65,12 +65,13 @@ import {
 import { FileUploaderInline } from '../../components/ui/file-uploader';
 import { formatBackendDate, formatBackendDateTime, parseBackendDate } from '../../lib/dateUtils';
 import {
+import { API_BASE_URL, API_ROOT_URL } from './';
   fetchProtectedFileBlob,
   openBlobUrlInNewTab,
   revokeBlobUrlLater,
 } from '../../lib/protectedFiles';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 // Form-based requirements (open modal instead of file upload)
 const FORM_BASED_REQUIREMENTS = [
@@ -10128,3 +10129,4 @@ export default function EmployeeProfilePage() {
     </div>
   );
 }
+

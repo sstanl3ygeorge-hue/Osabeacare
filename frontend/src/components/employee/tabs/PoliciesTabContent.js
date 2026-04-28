@@ -8,8 +8,9 @@ import {
   RotateCcw, FileCheck, Download 
 } from 'lucide-react';
 import { formatBackendDate, formatBackendDateTime } from '../../../lib/dateUtils';
+import { API_BASE_URL, API_ROOT_URL } from './';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 /**
  * PoliciesTabContent - Displays employee policy assignments
@@ -408,3 +409,4 @@ export default function PoliciesTabContent({
     </Card>
   );
 }
+

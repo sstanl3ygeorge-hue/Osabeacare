@@ -8,11 +8,12 @@ import { Label } from '../../components/ui/label';
 import { Badge } from '../../components/ui/badge';
 import { toast } from 'sonner';
 import { 
+import { API_BASE_URL, API_ROOT_URL } from './';
   FileSearch, Loader2, CheckCircle, AlertTriangle, AlertCircle, 
   Edit, X, RefreshCw, Eye, FileText
 } from 'lucide-react';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 /**
  * DocumentExtractionReview - Component for reviewing AI-extracted document data
@@ -499,3 +500,4 @@ export default function DocumentExtractionReview({
     </Dialog>
   );
 }
+

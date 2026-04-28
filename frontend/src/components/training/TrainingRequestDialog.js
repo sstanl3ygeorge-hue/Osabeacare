@@ -9,10 +9,11 @@ import { Checkbox } from '../../components/ui/checkbox';
 import { Input } from '../../components/ui/input';
 import { toast } from 'sonner';
 import { 
+import { API_BASE_URL, API_ROOT_URL } from './';
   Mail, Loader2, GraduationCap, Send, Clock, Calendar
 } from 'lucide-react';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 // Standard training types — ids MUST match canonical training requirement_ids
 // (see MANDATORY_TRAINING_HCA in backend/unified_compliance_engine.py and
@@ -300,3 +301,4 @@ export default function TrainingRequestDialog({
     </Dialog>
   );
 }
+

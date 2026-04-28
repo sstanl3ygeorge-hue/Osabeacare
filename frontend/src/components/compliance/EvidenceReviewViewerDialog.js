@@ -51,10 +51,11 @@ import {
 } from 'lucide-react';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
+import { API_BASE_URL, API_ROOT_URL } from './';
 
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 const MIN_VIEW_SECONDS = 5;
 
@@ -1136,3 +1137,4 @@ function DetailRow({ label, value }) {
     </div>
   );
 }
+

@@ -39,8 +39,9 @@ import {
   SelectValue,
 } from "../../components/ui/select";
 import { Label } from "../../components/ui/label";
+import { API_BASE_URL, API_ROOT_URL } from './';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 const FEEDBACK_TYPES = [
   { value: 'compliment', label: 'Compliment', color: 'bg-green-100 text-green-800' },
@@ -501,3 +502,4 @@ const ServiceUserFeedbackPage = () => {
 };
 
 export default ServiceUserFeedbackPage;
+

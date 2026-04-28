@@ -10,8 +10,9 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatBackendDate } from '../../lib/dateUtils';
+import { API_BASE_URL, API_ROOT_URL } from './';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 const GATE_CONFIG = {
   interview_completed: {
@@ -209,3 +210,4 @@ export default function PreEmploymentGatesPanel({ employeeId, onNavigate, onRefr
     </Card>
   );
 }
+

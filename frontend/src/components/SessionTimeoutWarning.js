@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { AlertTriangle, Clock, LogOut, RefreshCw } from 'lucide-react';
+import { API_BASE_URL, API_ROOT_URL } from '';
 
-const API = process.env.REACT_APP_BACKEND_URL;
+const API = API_ROOT_URL;
 
 /**
  * SessionTimeoutWarning Component
@@ -183,3 +184,4 @@ const SessionTimeoutWarning = ({ onLogout }) => {
 };
 
 export default SessionTimeoutWarning;
+

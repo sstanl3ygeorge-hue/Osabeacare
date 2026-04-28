@@ -27,8 +27,9 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../../
 import { Info } from 'lucide-react';
 import EmployeeAvatar from '../../components/portal/EmployeeAvatar';
 import { cn } from '../../lib/utils';
+import { API_BASE_URL, API_ROOT_URL } from './';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 // Recruitment stage labels
 const STAGE_LABELS = {
@@ -676,3 +677,4 @@ export default function RecruitmentPage() {
     </div>
   );
 }
+

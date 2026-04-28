@@ -9,8 +9,9 @@ import { Textarea } from '../ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { toast } from 'sonner';
 import { Loader2, Shield, Upload, FileText, X, CheckCircle, AlertTriangle, Info, ExternalLink, RefreshCw, ChevronDown } from 'lucide-react';
+import { API_BASE_URL, API_ROOT_URL } from './';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 // ==================== AUDIT-READY CHECK METHODS ====================
 // These verification methods reflect QA/inspection expectations
@@ -1883,3 +1884,4 @@ export default function RecordCheckDialog({
     </Dialog>
   );
 }
+

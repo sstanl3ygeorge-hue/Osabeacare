@@ -23,13 +23,14 @@ import {
 import { formatBackendDate } from '../../lib/dateUtils';
 import { cn } from '../../lib/utils';
 import {
+import { API_BASE_URL, API_ROOT_URL } from './';
   fetchProtectedFileBlob,
   downloadBlobUrl,
   openBlobUrlInNewTab,
   revokeBlobUrl,
 } from '../../lib/protectedFiles';
 
-const API = process.env.REACT_APP_BACKEND_URL;
+const API = API_ROOT_URL;
 
 const STAMP_LABELS = {
   'original_seen': { label: 'Original Seen', icon: Eye, color: 'bg-blue-100 text-blue-700' },
@@ -275,3 +276,4 @@ export default function DocumentViewerModal({
     </Dialog>
   );
 }
+

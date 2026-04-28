@@ -26,8 +26,9 @@ import {
   ExternalLink, Database, TestTube
 } from 'lucide-react';
 import { formatBackendDate } from '../../lib/dateUtils';
+import { API_BASE_URL, API_ROOT_URL } from './';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 /**
  * Section component for organizing content
@@ -1511,3 +1512,4 @@ export default function ReferenceResponseDrawer({
     </div>
   );
 }
+

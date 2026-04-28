@@ -12,8 +12,9 @@ import {
   SelectValue,
 } from '../../components/ui/select';
 import { Loader2, ClipboardList } from 'lucide-react';
+import { API_BASE_URL, API_ROOT_URL } from './';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 const RESOURCE_TYPE_OPTIONS = [
   'shift',
@@ -225,3 +226,4 @@ export default function GlobalAuditLogPage() {
     </div>
   );
 }
+

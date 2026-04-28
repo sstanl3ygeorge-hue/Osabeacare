@@ -3,8 +3,9 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import { Loader2, CheckCircle, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
+import { API_BASE_URL, API_ROOT_URL } from './';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 export default function WorkerVerifyPage() {
   const [searchParams] = useSearchParams();
@@ -93,3 +94,4 @@ export default function WorkerVerifyPage() {
     </div>
   );
 }
+

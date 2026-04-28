@@ -23,8 +23,9 @@ import { FinalStatusSection } from './FinalStatusSection';
 import RecordCheckDialog from '../RecordCheckDialog';
 import EvidenceReviewDialog from '../EvidenceReviewDialog';
 import EvidenceReviewViewerDialog from '../EvidenceReviewViewerDialog';
+import { API_BASE_URL, API_ROOT_URL } from './';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 // Map requirement key → check type string used by RecordCheckDialog
 const REQUIREMENT_TO_CHECK_TYPE = {
@@ -552,3 +553,4 @@ export default function RequirementWorkflowCard({
     </Card>
   );
 }
+

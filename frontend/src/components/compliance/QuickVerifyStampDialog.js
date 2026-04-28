@@ -29,6 +29,7 @@ import { RadioGroup, RadioGroupItem } from '../ui/radio-group';
 import { Checkbox } from '../ui/checkbox';
 import { toast } from 'sonner';
 import {
+import { API_BASE_URL, API_ROOT_URL } from './';
   Eye,
   FileCheck,
   Stamp,
@@ -41,7 +42,7 @@ import {
   MapPin
 } from 'lucide-react';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 // Verification methods for Identity
 const IDENTITY_METHODS = [
@@ -607,3 +608,4 @@ export default function QuickVerifyStampDialog({
     </Dialog>
   );
 }
+

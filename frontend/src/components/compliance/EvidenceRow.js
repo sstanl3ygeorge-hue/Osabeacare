@@ -19,8 +19,9 @@ import {
 import { formatBackendDate } from '../../lib/dateUtils';
 import RequestLifecycleInline, { RequestLifecycleSummary } from './RequestLifecycleInline';
 import DigitalStampDialog from './DigitalStampDialog';
+import { API_BASE_URL, API_ROOT_URL } from './';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 /**
  * EvidenceRow - Renders an evidence row in the dual-row compliance model
@@ -479,3 +480,4 @@ export default function EvidenceRow({
     </div>
   );
 }
+

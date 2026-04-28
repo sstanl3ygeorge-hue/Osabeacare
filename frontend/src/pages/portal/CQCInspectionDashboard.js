@@ -6,6 +6,7 @@ import { Badge } from '../../components/ui/badge';
 import { Progress } from '../../components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/ui/tabs';
 import { 
+import { API_BASE_URL, API_ROOT_URL } from './';
   FileText, 
   AlertTriangle, 
   CheckCircle2, 
@@ -19,7 +20,7 @@ import {
   XCircle
 } from 'lucide-react';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 // Risk level colors
 const RISK_COLORS = {
@@ -363,3 +364,4 @@ const CQCInspectionDashboard = () => {
 };
 
 export default CQCInspectionDashboard;
+

@@ -62,11 +62,12 @@ import TrainingDetailDrawer from './TrainingDetailDrawer';
 import TrainingCertificateExtractor from './TrainingCertificateExtractor';
 import EvidenceReviewViewerDialog from '../compliance/EvidenceReviewViewerDialog';
 import {
+import { API_BASE_URL, API_ROOT_URL } from './';
   getPendingProposedTrainingItems,
   getTrainingLibraryBannerState,
 } from './trainingLibraryBanner';
 
-const API = process.env.REACT_APP_BACKEND_URL;
+const API = API_ROOT_URL;
 
 // Status styling for training items
 const STATUS_STYLES = {
@@ -2101,4 +2102,5 @@ export default function AuditReadyTrainingMatrix({
     </div>
   );
 }
+
 

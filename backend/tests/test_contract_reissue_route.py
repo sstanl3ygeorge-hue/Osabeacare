@@ -82,8 +82,13 @@ class _FakeCollection:
                 return False
         return True
 
-    async def find_one(self, query=None, projection=None):
-        for d in self.docs:
+    async def find_one(self, query=None, projection=None, sort=None):
+        docs = list(self.docs)
+        if sort:
+            for field, direction in reversed(list(sort)):
+                reverse = int(direction) == -1
+                docs.sort(key=lambda d: (d.get(field) is None, d.get(field)), reverse=reverse)
+        for d in docs:
             if self._matches(d, query or {}):
                 out = dict(d)
                 if projection and projection.get("_id") == 0:
@@ -418,6 +423,65 @@ def test_generate_uses_canonical_template_family(monkeypatch):
     assert str(created.get("template_version", "")).startswith("contract_acceptance_v_")
     assert created.get("canonical_contract_render") is True
     assert created.get("rendered_file_url")
+    assert payload["status"] == "awaiting_worker_signature"
+    assert payload["signable"] is True
+
+
+def test_generate_succeeds_without_existing_contract(monkeypatch):
+    fake_db = _FakeDb()
+    fake_db.employees.docs = [
+        {
+            "id": "emp-1",
+            "first_name": "Test",
+            "last_name": "User",
+            "email": "test@example.com",
+            "address_line_1": "1 Main St",
+            "postcode": "SW1A 1AA",
+            "ni_number": "QQ123456C",
+            "role": "HCA",
+        }
+    ]
+    client, _ = _build_client(monkeypatch, fake_db)
+
+    res = client.post("/api/employees/emp-1/contract/generate", json={})
+    assert res.status_code == 200
+    payload = res.json()
+    created = next(x for x in fake_db.generated_contracts.docs if x["id"] == payload["contract_id"])
+    assert str(created.get("template_version", "")).startswith("contract_acceptance_v_")
+    assert created["status"] == "pending_signature"
+    assert payload["status"] == "awaiting_worker_signature"
+    assert payload["signable"] is True
+
+
+def test_generate_normalization_supersedes_older_active_contract(monkeypatch):
+    fake_db = _FakeDb()
+    _seed_employee_and_contract(fake_db, status="pending_signature")
+    fake_db.generated_contracts.docs[0]["template_version"] = "contract_acceptance_v_oldlegacy"
+    client, _ = _build_client(monkeypatch, fake_db)
+
+    res = client.post("/api/employees/emp-1/contract/generate", json={"normalization_mode": True})
+    assert res.status_code == 200
+
+    payload = res.json()
+    new_doc = next(x for x in fake_db.generated_contracts.docs if x["id"] == payload["contract_id"])
+    old_doc = next(x for x in fake_db.generated_contracts.docs if x["id"] == "old-1")
+
+    assert old_doc["status"] == "superseded"
+    assert old_doc["superseded_by_contract_id"] == new_doc["id"]
+    assert str(new_doc.get("template_version", "")).startswith("contract_acceptance_v_")
+    assert payload["signable"] is True
+
+
+def test_generate_with_active_contract_requires_normalization_mode(monkeypatch):
+    fake_db = _FakeDb()
+    _seed_employee_and_contract(fake_db, status="awaiting_worker_signature")
+    client, _ = _build_client(monkeypatch, fake_db)
+
+    res = client.post("/api/employees/emp-1/contract/generate", json={})
+    assert res.status_code == 409
+    detail = res.json()["detail"]
+    assert detail["code"] == "already_has_active_contract"
+    assert detail["contract_id"] == "old-1"
 
 
 def test_generate_and_reissue_use_same_template_family(monkeypatch):

@@ -28,8 +28,9 @@ import DashboardHeader from '../../components/worker/DashboardHeader';
 import NextActionCard from '../../components/worker/NextActionCard';
 import { getAgreementDisplay, getCvDisplay, getTrainingDisplay } from '../../components/worker/dashboardStatus';
 import { getLatestActiveContract, resolveLatestContractState } from '../../lib/contractState';
+import { API_BASE_URL, API_ROOT_URL } from './';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 // Canonical training status display config — single vocabulary across admin and worker
 const TRAINING_STATUS_CONFIG = {
@@ -5194,3 +5195,4 @@ export default function WorkerDashboard() {
     </WorkerDashboardPage>
   );
 }
+

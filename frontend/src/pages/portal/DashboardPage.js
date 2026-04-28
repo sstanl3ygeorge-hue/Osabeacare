@@ -11,12 +11,13 @@ import ActionableTaskQueue from '../../components/admin/ActionableTaskQueue';
 import TrainingExpiryAlerts from '../../components/admin/TrainingExpiryAlerts';
 import DocumentExpiryAlerts from '../../components/admin/DocumentExpiryAlerts';
 import {
+import { API_BASE_URL, API_ROOT_URL } from './';
   Users, UserPlus, AlertTriangle, FileX, Shield, ShieldCheck,
   FileCheck, CalendarClock, ArrowRight, Loader2, Upload, FileText,
   Clock, AlertCircle, CheckCircle, ExternalLink, ClipboardList, GraduationCap
 } from 'lucide-react';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 export default function DashboardPage() {
   const navigate = useNavigate();
@@ -852,3 +853,4 @@ export default function DashboardPage() {
     </div>
   );
 }
+

@@ -6,8 +6,9 @@ import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { toast } from 'sonner';
+import { API_BASE_URL, API_ROOT_URL } from './';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 // Referee types per NHS/CQC requirements
 const REFEREE_TYPES = [
@@ -237,3 +238,4 @@ export default function EditReferenceDialog({
     </EditReasonDialog>
   );
 }
+

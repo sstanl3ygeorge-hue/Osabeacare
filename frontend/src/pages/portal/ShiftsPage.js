@@ -32,6 +32,7 @@ import { Badge } from '../../components/ui/badge';
 import { Textarea } from '../../components/ui/textarea';
 import { toast } from 'sonner';
 import {
+import { API_BASE_URL, API_ROOT_URL } from './';
   CalendarClock,
   Loader2,
   Plus,
@@ -44,7 +45,7 @@ import {
   Printer,
 } from 'lucide-react';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 const STATUS_OPTIONS = ['open', 'assigned', 'completed', 'cancelled'];
 
@@ -1514,3 +1515,4 @@ export default function ShiftsPage() {
     </div>
   );
 }
+

@@ -10,8 +10,9 @@ import {
   FileText, History, Loader2, AlertCircle
 } from 'lucide-react';
 import { formatBackendDate } from '../../lib/dateUtils';
+import { API_BASE_URL, API_ROOT_URL } from './';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 /**
  * ReferenceRow - Displays a reference requirement with full lifecycle
@@ -441,3 +442,4 @@ export default function ReferenceRow({
     </div>
   );
 }
+

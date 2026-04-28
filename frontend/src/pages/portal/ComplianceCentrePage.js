@@ -21,8 +21,9 @@ import {
   Trash2, Package
 } from 'lucide-react';
 import { formatBackendDate, formatBackendDateTime, parseBackendDate } from '../../lib/dateUtils';
+import { API_BASE_URL, API_ROOT_URL } from './';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 export default function ComplianceCentrePage() {
   const { token, isAdmin } = useAuth();
@@ -4818,3 +4819,4 @@ export default function ComplianceCentrePage() {
     </div>
   );
 }
+

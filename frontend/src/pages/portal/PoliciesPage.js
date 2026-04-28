@@ -10,11 +10,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { toast } from 'sonner';
 import { FileUploaderInline } from '../../components/ui/file-uploader';
 import { 
+import { API_BASE_URL, API_ROOT_URL } from './';
   FileCheck, Plus, Users, CheckCircle, Clock, Loader2, 
   Upload, Eye, Shield, AlertTriangle, FileText
 } from 'lucide-react';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 export default function PoliciesPage() {
   const [policies, setPolicies] = useState([]);
@@ -522,3 +523,4 @@ export default function PoliciesPage() {
     </div>
   );
 }
+

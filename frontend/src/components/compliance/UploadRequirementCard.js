@@ -27,13 +27,14 @@ import {
 import { formatBackendDate } from '../../lib/dateUtils';
 import { getEvidenceRules } from './evidenceRules';
 import {
+import { API_BASE_URL, API_ROOT_URL } from './';
   fetchProtectedFileBlob,
   downloadBlobUrl,
   revokeBlobUrlLater,
 } from '../../lib/protectedFiles';
 
 // eslint-disable-next-line no-unused-vars
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 // Map requirement keys to check types for verification proof storage (used by RecordCheckDialog)
 // eslint-disable-next-line no-unused-vars
@@ -2157,3 +2158,4 @@ export default function UploadRequirementCard({
     </RequirementSectionShell>
   );
 }
+

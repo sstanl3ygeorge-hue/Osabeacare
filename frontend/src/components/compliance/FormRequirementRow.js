@@ -26,8 +26,9 @@ import {
   DELIVERY_MODES 
 } from '../../config/requirementCapabilityMap';
 import { useAuth } from '../../context/AuthContext';
+import { API_BASE_URL, API_ROOT_URL } from './';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 /**
  * FormRequirementRow - Displays a single form-type requirement
@@ -615,3 +616,4 @@ export default function FormRequirementRow({
     </div>
   );
 }
+

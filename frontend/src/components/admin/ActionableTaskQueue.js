@@ -26,8 +26,9 @@ import {
 import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
 import { useAuth } from '../../context/AuthContext';
+import { API_BASE_URL, API_ROOT_URL } from './';
 
-const API = process.env.REACT_APP_BACKEND_URL;
+const API = API_ROOT_URL;
 
 export default function ActionableTaskQueue() {
   const { token } = useAuth();
@@ -542,3 +543,4 @@ export default function ActionableTaskQueue() {
     </div>
   );
 }
+

@@ -35,12 +35,13 @@ import FileUploader from '../../components/ui/file-uploader';
 import { formatBackendDate, parseBackendDate } from '../../lib/dateUtils';
 import { useAuth } from '../../context/AuthContext';
 import {
+import { API_BASE_URL, API_ROOT_URL } from './';
   fetchProtectedFileBlob,
   openBlobUrlInNewTab,
   revokeBlobUrlLater,
 } from '../../lib/protectedFiles';
 
-const API_URL = process.env.REACT_APP_BACKEND_URL;
+const API_URL = API_ROOT_URL;
 const CARE_PLAN_REQUIRED_SECTIONS = [
   'Personal information / This is me',
   'Consent and capacity',
@@ -1992,3 +1993,4 @@ function SectionTab({ section, sectionId, onUpload, onVerify, onDelete }) {
     </div>
   );
 }
+

@@ -8,8 +8,9 @@ import { Button } from '../ui/button';
 import { Textarea } from '../ui/textarea';
 import { toast } from 'sonner';
 import { Plus, Trash2, GripVertical } from 'lucide-react';
+import { API_BASE_URL, API_ROOT_URL } from './';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 /**
  * EditEmploymentHistoryDialog - Edit employment history with reason logging
@@ -232,3 +233,4 @@ export default function EditEmploymentHistoryDialog({
     </EditReasonDialog>
   );
 }
+

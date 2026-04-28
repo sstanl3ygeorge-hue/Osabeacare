@@ -22,8 +22,9 @@ import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
 import { SendReminderButton, RequestRenewalButton } from './AdminActionButtons';
 import { ComplianceBreakdownCard, PROGRESS_METRICS } from '../compliance/LabeledProgressMetrics';
+import { API_BASE_URL, API_ROOT_URL } from './';
 
-const API = process.env.REACT_APP_BACKEND_URL;
+const API = API_ROOT_URL;
 
 /**
  * UnifiedProgressSection - Displays the single source of truth progress
@@ -263,3 +264,4 @@ export default function UnifiedProgressSection({
     </Card>
   );
 }
+

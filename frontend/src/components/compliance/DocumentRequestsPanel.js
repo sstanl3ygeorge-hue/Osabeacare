@@ -9,8 +9,9 @@ import {
   Loader2, RefreshCw, FileText, Calendar, XCircle
 } from 'lucide-react';
 import { formatBackendDate } from '../../lib/dateUtils';
+import { API_BASE_URL, API_ROOT_URL } from './';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 const STATUS_CONFIG = {
   pending_send: { label: 'Pending', color: 'bg-gray-100 text-gray-600', icon: Clock },
@@ -220,3 +221,4 @@ export default function DocumentRequestsPanel({ employeeId, onRefresh }) {
     </Card>
   );
 }
+

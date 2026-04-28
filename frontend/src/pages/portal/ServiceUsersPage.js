@@ -23,8 +23,9 @@ import {
 import { Label } from '../../components/ui/label';
 import { toast } from 'sonner';
 import { parseBackendDate } from '../../lib/dateUtils';
+import { API_BASE_URL, API_ROOT_URL } from './';
 
-const API_URL = process.env.REACT_APP_BACKEND_URL;
+const API_URL = API_ROOT_URL;
 
 export default function ServiceUsersPage() {
   const navigate = useNavigate();
@@ -479,3 +480,4 @@ export default function ServiceUsersPage() {
     </div>
   );
 }
+

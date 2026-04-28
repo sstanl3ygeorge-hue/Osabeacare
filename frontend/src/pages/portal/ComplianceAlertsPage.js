@@ -6,8 +6,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/ca
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
 import { Button } from '../../components/ui/button';
 import { Loader2, Bell } from 'lucide-react';
+import { API_BASE_URL, API_ROOT_URL } from './';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 const FILTER_OPTIONS = [
   { value: 'all', label: 'All' },
@@ -178,3 +179,4 @@ export default function ComplianceAlertsPage() {
     </div>
   );
 }
+

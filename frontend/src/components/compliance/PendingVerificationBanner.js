@@ -13,8 +13,9 @@ import {
   ChevronUp
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { API_BASE_URL, API_ROOT_URL } from './';
 
-const API = process.env.REACT_APP_BACKEND_URL;
+const API = API_ROOT_URL;
 
 /**
  * PendingVerificationBanner - Shows items awaiting admin verification
@@ -161,3 +162,4 @@ export default function PendingVerificationBanner({
     </Card>
   );
 }
+

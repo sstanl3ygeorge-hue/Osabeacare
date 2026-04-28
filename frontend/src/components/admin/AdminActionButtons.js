@@ -5,8 +5,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Textarea } from '../ui/textarea';
 import { toast } from 'sonner';
 import { Loader2, Mail, RefreshCw, Send } from 'lucide-react';
+import { API_BASE_URL, API_ROOT_URL } from './';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 /**
  * Send Reminder Button
@@ -172,3 +173,4 @@ export function EmployeeActionButtons({ employee, onRefresh }) {
 }
 
 export default SendReminderButton;
+

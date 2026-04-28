@@ -15,8 +15,9 @@ import {
   CheckCircle, XCircle, Calendar, Eye, User, Download
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { API_BASE_URL, API_ROOT_URL } from './';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 const SPOT_CHECK_TYPES = [
   { value: 'observation', label: 'Direct Observation' },
@@ -458,3 +459,4 @@ export default function SpotCheckPanel({ employeeId, employeeName, isAuditor = f
     </>
   );
 }
+

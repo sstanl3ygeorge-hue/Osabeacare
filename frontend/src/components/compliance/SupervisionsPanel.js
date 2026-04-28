@@ -32,8 +32,9 @@ import {
   Plus, CheckCircle, XCircle, Clock, AlertTriangle, Loader2, Calendar, RefreshCw,
 } from 'lucide-react';
 import { formatBackendDate } from '../../lib/dateUtils';
+import { API_BASE_URL, API_ROOT_URL } from './';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 const SUPERVISION_TYPES = [
   { value: 'probation',             label: 'Probation' },
@@ -476,3 +477,4 @@ function CancelDialog({ target, onClose, authHeaders, saving, setSaving, onDone 
     </Dialog>
   );
 }
+

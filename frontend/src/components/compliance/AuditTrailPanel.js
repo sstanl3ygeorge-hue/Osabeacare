@@ -9,8 +9,9 @@ import {
   Loader2, RefreshCw, Clock, AlertTriangle, ChevronRight, Shield, ArrowRight
 } from 'lucide-react';
 import { formatBackendDate } from '../../lib/dateUtils';
+import { API_BASE_URL, API_ROOT_URL } from './';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 /* ─── Strict CQC-safe action labels ──────────────────────────── */
 const ACTION_CONFIG = {
@@ -539,3 +540,4 @@ export default function AuditTrailPanel({ employeeId }) {
     </Card>
   );
 }
+

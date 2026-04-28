@@ -10,11 +10,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { RadioGroup, RadioGroupItem } from '../../components/ui/radio-group';
 import { toast } from 'sonner';
 import { 
+import { API_BASE_URL, API_ROOT_URL } from './';
   ArrowLeft, Save, Send, Loader2, CheckCircle, Clock,
   FileText, Heart, User, Briefcase, Info, AlertCircle
 } from 'lucide-react';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 // Icon lookup for form types — purely cosmetic
 const FORM_ICONS = {
@@ -409,3 +410,4 @@ export default function WorkerFormPage() {
     </div>
   );
 }
+

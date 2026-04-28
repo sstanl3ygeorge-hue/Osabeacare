@@ -9,8 +9,9 @@ import {
 } from 'lucide-react';
 import { formatBackendDate } from '../../lib/dateUtils';
 import { toast } from 'sonner';
+import { API_BASE_URL, API_ROOT_URL } from './';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 /**
  * RequestLifecycleInline - Inline request status display for Evidence rows
@@ -356,3 +357,4 @@ export function RequestLifecycleSummary({ requestLifecycle, requirementKey }) {
     </span>
   );
 }
+

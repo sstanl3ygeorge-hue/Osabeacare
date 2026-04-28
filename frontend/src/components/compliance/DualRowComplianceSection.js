@@ -26,8 +26,9 @@ import RejectFormDialog from './RejectFormDialog';
 import { normalizeUploadRequirementSurface } from './surfaceNormalizers';
 import { UPLOAD_REQUIREMENT_KEYS } from './complianceRequirementMap';
 import { RequirementWorkflowCard } from './workflow';
+import { API_BASE_URL, API_ROOT_URL } from './';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 /**
  * DualRowComplianceSection - Displays the dual-row compliance file structure
@@ -1056,3 +1057,4 @@ export default function DualRowComplianceSection({
     </div>
   );
 }
+

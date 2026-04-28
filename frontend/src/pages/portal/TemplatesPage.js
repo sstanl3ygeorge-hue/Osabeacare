@@ -10,12 +10,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Label } from '../../components/ui/label';
 import { toast } from 'sonner';
 import {
+import { API_BASE_URL, API_ROOT_URL } from './';
   ClipboardList, Search, Plus, FileText, CheckCircle, User, 
   AlertTriangle, Loader2, Eye, Settings, RefreshCw, Shield,
   Lock, FileCheck, ChevronRight
 } from 'lucide-react';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 export default function TemplatesPage() {
   const navigate = useNavigate();
@@ -462,3 +463,4 @@ export default function TemplatesPage() {
     </div>
   );
 }
+

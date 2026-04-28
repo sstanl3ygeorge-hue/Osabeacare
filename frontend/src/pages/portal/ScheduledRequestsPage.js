@@ -12,12 +12,13 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Badge } from '../../components/ui/badge';
 import { toast } from 'sonner';
 import { 
+import { API_BASE_URL, API_ROOT_URL } from './';
   Calendar, Clock, Play, Pause, Plus, Loader2, 
   AlertTriangle, CheckCircle, FileText, GraduationCap,
   History, Edit, Trash2, RefreshCw, Mail
 } from 'lucide-react';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 export default function ScheduledRequestsPage() {
   const [schedules, setSchedules] = useState([]);
@@ -700,3 +701,4 @@ export default function ScheduledRequestsPage() {
     </div>
   );
 }
+

@@ -18,8 +18,9 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { formatBackendDate } from '../../lib/dateUtils';
 import InlineDocumentViewer from '../shared/InlineDocumentViewer';
+import { API_BASE_URL, API_ROOT_URL } from './';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 const DECISION_CONFIG = {
   'Approve': { color: 'bg-green-100 text-green-700', icon: CheckCircle },
@@ -1113,3 +1114,4 @@ export default function InterviewFormPanel({ employeeId, employeeName, employeeR
     </>
   );
 }
+

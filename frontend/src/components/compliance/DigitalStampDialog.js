@@ -10,8 +10,9 @@ import {
   Loader2, FileText, Download
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { API_BASE_URL, API_ROOT_URL } from './';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 const STAMP_TYPES = [
   { 
@@ -235,3 +236,4 @@ export default function DigitalStampDialog({
     </Dialog>
   );
 }
+

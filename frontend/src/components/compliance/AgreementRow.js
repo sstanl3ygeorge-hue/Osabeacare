@@ -32,8 +32,9 @@ import {
 } from 'lucide-react';
 import { formatBackendDate } from '../../lib/dateUtils';
 import { resolveLatestContractState } from '../../lib/contractState';
+import { API_BASE_URL, API_ROOT_URL } from './';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 // Map agreement keys to template IDs
 const AGREEMENT_TEMPLATE_MAP = {
@@ -706,3 +707,4 @@ export default function AgreementRow({
     </div>
   );
 }
+

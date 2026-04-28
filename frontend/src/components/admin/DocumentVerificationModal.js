@@ -23,11 +23,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { toast } from 'sonner';
 import { useAuth } from '../../context/AuthContext';
 import { 
+import { API_BASE_URL, API_ROOT_URL } from './';
   Loader2, CheckCircle, XCircle, AlertTriangle, Upload, 
   FileCheck, Eye, Globe, Shield
 } from 'lucide-react';
 
-const API = process.env.REACT_APP_BACKEND_URL;
+const API = API_ROOT_URL;
 
 const STAMP_TYPES = [
   {
@@ -311,3 +312,4 @@ export default function DocumentVerificationModal({
     </Dialog>
   );
 }
+

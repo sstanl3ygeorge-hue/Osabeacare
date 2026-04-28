@@ -8,8 +8,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { toast } from 'sonner';
 import { FileText, Search, Filter, Loader2, CheckCircle, Clock, XCircle } from 'lucide-react';
 import { formatBackendDate } from '../../lib/dateUtils';
+import { API_BASE_URL, API_ROOT_URL } from './';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 const statusColors = {
   not_started: 'status-neutral',
@@ -256,3 +257,4 @@ export default function DocumentsPage() {
     </div>
   );
 }
+

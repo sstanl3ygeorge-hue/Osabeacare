@@ -11,12 +11,13 @@ import { toast } from 'sonner';
 import { FileUploaderInline } from '../../components/ui/file-uploader';
 import { formatBackendDate } from '../../lib/dateUtils';
 import { 
+import { API_BASE_URL, API_ROOT_URL } from './';
   Upload, FileSearch, Loader2, CheckCircle, AlertTriangle, 
   GraduationCap, FileText, ChevronRight, ChevronLeft, 
   RefreshCw, Shield, Eye, X, Clock, Calendar
 } from 'lucide-react';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 /**
  * TrainingIntakeWizard - Multi-step wizard for training certificate intake
@@ -647,3 +648,4 @@ export default function TrainingIntakeWizard({
     </Dialog>
   );
 }
+

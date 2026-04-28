@@ -8,8 +8,9 @@ import { Textarea } from '../../components/ui/textarea';
 import { toast } from 'sonner';
 import { Phone, Mail, MapPin, Loader2, CheckCircle } from 'lucide-react';
 import axios from 'axios';
+import { API_BASE_URL, API_ROOT_URL } from './';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 export default function ContactPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -228,3 +229,4 @@ export default function ContactPage() {
     </div>
   );
 }
+

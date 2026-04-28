@@ -5,8 +5,9 @@ import EditReasonDialog from './EditReasonDialog';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { toast } from 'sonner';
+import { API_BASE_URL, API_ROOT_URL } from './';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 /**
  * EditPersonalDetailsDialog - Edit personal information with reason logging
@@ -200,3 +201,4 @@ export default function EditPersonalDetailsDialog({
     </EditReasonDialog>
   );
 }
+

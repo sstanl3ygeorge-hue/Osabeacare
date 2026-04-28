@@ -30,7 +30,7 @@ import {
   revokeBlobUrlLater,
 } from '../../lib/protectedFiles';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 /**
  * EvidenceReviewDialog - Lightweight modal for reviewing uploaded evidence files
@@ -44,6 +44,7 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
  * - AND a Record Check has been completed
  */
 import { isPreviewableFile } from './complianceRequirementMap';
+import { API_BASE_URL, API_ROOT_URL } from './';
 
 export default function EvidenceReviewDialog({
   isOpen,
@@ -374,3 +375,4 @@ export default function EvidenceReviewDialog({
     </Dialog>
   );
 }
+

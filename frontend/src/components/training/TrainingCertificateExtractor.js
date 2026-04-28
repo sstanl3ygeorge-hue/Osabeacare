@@ -44,8 +44,9 @@ import {
 import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
 import { useDropzone } from 'react-dropzone';
+import { API_BASE_URL, API_ROOT_URL } from './';
 
-const API = process.env.REACT_APP_BACKEND_URL;
+const API = API_ROOT_URL;
 
 // Common CSTF trainings for quick selection
 const COMMON_CSTF_TRAININGS = [
@@ -593,3 +594,4 @@ export default function TrainingCertificateExtractor({
     </Dialog>
   );
 }
+

@@ -11,8 +11,9 @@ import { Shield, CheckCircle, AlertCircle, Plus, ExternalLink, Loader2 } from 'l
 import { toast } from 'sonner';
 import { formatBackendDate } from '../../lib/dateUtils';
 import { useAuth } from '../../context/AuthContext';
+import { API_BASE_URL, API_ROOT_URL } from './';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 const REGISTRATION_BODIES = [
   { value: "NMC", label: "NMC (Nursing & Midwifery Council)", url: "https://www.nmc.org.uk/registration/search/" },
@@ -403,3 +404,4 @@ export default function ProfessionalRegistrationPanel({
     </Card>
   );
 }
+

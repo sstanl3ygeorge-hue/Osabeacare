@@ -491,6 +491,49 @@ async def generate_employee_contract(
         body = {}
     
     template_id = body.get("template_id", "zero_hour_contract_v1")
+    normalization_mode = bool(body.get("normalization_mode"))
+
+    current_contract = await db.generated_contracts.find_one(
+        {
+            "employee_id": employee_id,
+            "status": {
+                "$in": [
+                    "pending_signature",
+                    "awaiting_worker_signature",
+                    "awaiting_company_countersignature",
+                    "signed",
+                    "fully_executed",
+                ]
+            },
+            "$and": [
+                {"status": {"$ne": "superseded"}},
+                {
+                    "$or": [
+                        {"superseded_by_contract_id": {"$exists": False}},
+                        {"superseded_by_contract_id": None},
+                        {"superseded_by_contract_id": ""},
+                    ]
+                },
+            ],
+        },
+        {"_id": 0},
+        sort=[("generated_at", -1), ("created_at", -1), ("id", -1)],
+    )
+    if current_contract and not normalization_mode:
+        latest_status = (
+            current_contract.get("contract_state")
+            or current_contract.get("status")
+            or "pending_signature"
+        )
+        raise HTTPException(
+            status_code=409,
+            detail=_reissue_error_payload(
+                code="already_has_active_contract",
+                message=f"Latest contract status '{latest_status}' is already active",
+                status=latest_status,
+                contract_id=current_contract.get("id"),
+            ),
+        )
     
     # Validate employee data
     validation = validate_contract_data(employee)
@@ -565,7 +608,22 @@ async def generate_employee_contract(
         render_record=render_record,
     )
     contract_id = contract_doc["id"]
-    
+    if current_contract and normalization_mode:
+        now_supersede_iso = datetime.now(timezone.utc).isoformat()
+        await db.generated_contracts.update_one(
+            {"id": current_contract.get("id"), "employee_id": employee_id},
+            {
+                "$set": {
+                    "status": "superseded",
+                    "superseded_at": now_supersede_iso,
+                    "superseded_by": user.get("user_id"),
+                    "supersede_reason": "normalization_generate_replaced_active_contract",
+                    "superseded_by_contract_id": contract_id,
+                    "updated_at": now_supersede_iso,
+                }
+            },
+        )
+
     await db.generated_contracts.insert_one(contract_doc)
     
     # Update employee record
@@ -588,7 +646,8 @@ async def generate_employee_contract(
     
     return {
         "contract_id": contract_id,
-        "status": "pending_signature",
+        "status": "awaiting_worker_signature",
+        "signable": True,
         "message": "Contract generated and ready for signature"
     }
 

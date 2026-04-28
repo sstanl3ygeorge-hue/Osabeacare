@@ -26,8 +26,9 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
+import { API_BASE_URL, API_ROOT_URL } from './';
 
-const API = process.env.REACT_APP_BACKEND_URL;
+const API = API_ROOT_URL;
 
 /**
  * FormSubmissionDrawer - Universal drawer for form-type requirements
@@ -623,3 +624,4 @@ export default function FormSubmissionDrawer({
     </Sheet>
   );
 }
+

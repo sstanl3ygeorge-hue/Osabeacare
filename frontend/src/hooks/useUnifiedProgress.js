@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
+import { API_BASE_URL, API_ROOT_URL } from './';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 /**
  * Hook to fetch unified progress for an employee.
@@ -80,3 +81,4 @@ export function formatBlockers(blockers) {
 }
 
 export default useUnifiedProgress;
+

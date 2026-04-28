@@ -43,8 +43,9 @@ import {
   revokeBlobUrlLater,
 } from '../../lib/protectedFiles';
 import { isPreviewableFile } from './complianceRequirementMap';
+import { API_BASE_URL, API_ROOT_URL } from './';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 /**
  * RequirementFilesDrawer - Shows all files for a requirement with full lifecycle data
@@ -867,3 +868,4 @@ export default function RequirementFilesDrawer({
     </>
   );
 }
+

@@ -43,12 +43,13 @@ import {
   buildDrawerSummary,
 } from './complianceRequirementMap';
 import {
+import { API_BASE_URL, API_ROOT_URL } from './';
   downloadBlobUrl,
   fetchProtectedFileBlob,
   revokeBlobUrlLater,
 } from '../../lib/protectedFiles';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
 const getProtectedRequestToken = (rawUrl, authToken) => {
   if (!rawUrl || !authToken) return undefined;
@@ -815,3 +816,4 @@ export default function UploadRequirementDrawer({
     </>
   );
 }
+

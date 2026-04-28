@@ -1,12 +1,9 @@
 # Osabeacare Frontend - Railway Configuration
 
 [build]
-builder = "nixpacks"
-
-[build.nixpacks]
-buildCmd = "yarn install && yarn build"
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
 
 [deploy]
-startCommand = "npx serve -s build -l $PORT"
 healthcheckPath = "/"
 healthcheckTimeout = 100

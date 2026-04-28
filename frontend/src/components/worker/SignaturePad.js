@@ -105,7 +105,7 @@ export default function SignaturePad({ employeeId, employeeName, onSigned, onCan
     try {
       const token = localStorage.getItem('workerToken');
       const response = await axios.post(
-        `${API}/employees/${employeeId}/contract/sign`,
+        `${API}/worker/contract/sign`,
         { 
           signature_base64: signatureData, 
           full_name: fullName.trim() 
@@ -116,7 +116,16 @@ export default function SignaturePad({ employeeId, employeeName, onSigned, onCan
       toast.success('Contract signed successfully!');
       if (onSigned) onSigned(response.data);
     } catch (error) {
-      const message = error.response?.data?.detail || 'Failed to sign contract';
+      const detail = error.response?.data?.detail;
+      const code = typeof detail === 'object' ? detail?.code : null;
+      if (error.response?.status === 409 && code === 'already_has_active_contract') {
+        toast.info('Contract is already signed or moved to the next stage. Refreshing dashboard.');
+        if (onSigned) onSigned({ success: true, idempotent: true, detail });
+        return;
+      }
+      const message = typeof detail === 'string'
+        ? detail
+        : (detail?.message || 'Failed to sign contract');
       toast.error(message);
     } finally {
       setSigning(false);

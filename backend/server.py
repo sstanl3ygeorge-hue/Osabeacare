@@ -8897,6 +8897,7 @@ async def sign_contract(
             "contract_url": resolved_contract.get("rendered_file_url"),
             "rendered_file_url": resolved_contract.get("rendered_file_url"),
             "signed_at": resolved_contract.get("signed_at"),
+            "canonical_contract": resolved_contract,
         }
     if resolved_status != "pending_signature":
         raise HTTPException(
@@ -8904,23 +8905,24 @@ async def sign_contract(
             detail={
                 "code": "already_has_active_contract",
                 "status": resolved_status or "unknown",
+                "canonical_contract": resolved_contract,
             },
         )
 
     if not resolved_contract.get("source_record_id"):
         raise HTTPException(
             status_code=409,
-            detail={"code": "missing_source_record_id", "status": resolved_status},
+            detail={"code": "missing_source_record_id", "status": resolved_status, "canonical_contract": resolved_contract},
         )
     if not resolved_contract.get("template_version"):
         raise HTTPException(
             status_code=409,
-            detail={"code": "missing_template_version", "status": resolved_status},
+            detail={"code": "missing_template_version", "status": resolved_status, "canonical_contract": resolved_contract},
         )
     if not resolved_contract.get("rendered_file_url"):
         raise HTTPException(
             status_code=409,
-            detail={"code": "missing_render", "status": resolved_status},
+            detail={"code": "missing_render", "status": resolved_status, "canonical_contract": resolved_contract},
         )
 
     try:
@@ -8977,8 +8979,20 @@ async def sign_contract(
         "contract_state": contract_record.get("contract_state"),
         "contract_url": contract_record.get("worker_signed_contract_pdf_url") or contract_record.get("rendered_contract_pdf_url"),
         "rendered_file_url": contract_record.get("rendered_contract_pdf_url") or contract_record.get("rendered_file_url"),
-        "signed_at": contract_record.get("worker_signed_at") or now.isoformat()
+        "signed_at": contract_record.get("worker_signed_at") or now.isoformat(),
+        "canonical_contract": await resolve_employee_agreement_state(db, employee, CONTRACT_AGREEMENT_TYPE),
     }
+
+
+@api_router.post("/worker/contract/sign")
+async def sign_worker_contract(
+    request: ContractSignatureRequest,
+    worker: dict = Depends(get_current_worker),
+):
+    employee_id = worker.get("employee_id")
+    if not employee_id:
+        raise HTTPException(status_code=400, detail={"code": "missing_employee_link"})
+    return await sign_contract(employee_id=employee_id, request=request, worker=worker)
 
 
 @api_router.get("/employees/{employee_id}/contract/status")

@@ -5233,14 +5233,18 @@ async def get_employee_training_safety_summary(employee_id: str) -> dict:
     # Process training records
     completed_training = {}  # req_id -> {record, expiry_date, days_remaining, is_core}
     
+    missing_requirement_id_count = 0
     for record in training_records:
-        req_id = record.get("requirement_id", "")
+        req_id = str(record.get("requirement_id") or "").lower()
+        if not req_id:
+            missing_requirement_id_count += 1
+            continue
         training_name = record.get("training_name", req_id)
         
         # Skip if not verified (only count verified training)
         if not record.get("verified", False) and record.get("status") != "verified":
             # Check if this is core training that's unverified
-            if req_id in core_training_ids or any(core in req_id.lower() for core in CORE_TRAINING_REQUIREMENTS):
+            if req_id in core_training_ids or any(core in req_id for core in CORE_TRAINING_REQUIREMENTS):
                 summary["missing_core_items"].append(f"{training_name} (unverified)")
             continue
         
@@ -5251,7 +5255,7 @@ async def get_employee_training_safety_summary(employee_id: str) -> dict:
         # Get renewal interval for this training type
         renewal_days = TRAINING_RENEWAL_RULES.get("default", 365)
         for rule_key, rule_days in TRAINING_RENEWAL_RULES.items():
-            if rule_key in req_id.lower():
+            if rule_key in req_id:
                 renewal_days = rule_days
                 break
         
@@ -5285,7 +5289,7 @@ async def get_employee_training_safety_summary(employee_id: str) -> dict:
             except:
                 pass
         
-        is_core = req_id in core_training_ids or any(core in req_id.lower() for core in CORE_TRAINING_REQUIREMENTS)
+        is_core = req_id in core_training_ids or any(core in req_id for core in CORE_TRAINING_REQUIREMENTS)
         
         completed_training[req_id] = {
             "name": training_name,
@@ -5295,6 +5299,11 @@ async def get_employee_training_safety_summary(employee_id: str) -> dict:
             "verified": record.get("verified", False) or record.get("status") == "verified"
         }
     
+    if missing_requirement_id_count:
+        logger.warning(
+            f"[TRAINING_SAFETY] employee_id={employee_id} records_missing_requirement_id={missing_requirement_id_count}"
+        )
+
     # Analyze training status
     core_missing = []
     core_expired = []

@@ -20302,10 +20302,54 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
     }
     
     # Calculate Work Readiness
-    work_readiness = calculate_work_readiness(requirements, role)
+    try:
+        work_readiness = calculate_work_readiness(requirements, role)
+    except Exception as exc:
+        logger.warning(
+            "compliance_requirements_builder_failed employee_id=%s builder=calculate_work_readiness error=%s",
+            employee_id,
+            exc,
+        )
+        work_readiness = {"ready": False, "status_unavailable": True, "warnings": [f"work_readiness_unavailable:{exc}"]}
     
     # Calculate Separated Statuses (new model)
-    separated_statuses = calculate_separated_statuses(requirements, role, policies_data)
+    try:
+        separated_statuses = calculate_separated_statuses(requirements, role, policies_data)
+    except Exception as exc:
+        logger.warning(
+            "compliance_requirements_builder_failed employee_id=%s builder=calculate_separated_statuses error=%s",
+            employee_id,
+            exc,
+        )
+        separated_statuses = {"is_work_ready": False, "status_unavailable": True, "warnings": [f"separated_statuses_unavailable:{exc}"]}
+
+    try:
+        dbs_summary = await get_employee_dbs_summary(employee_id)
+    except Exception as exc:
+        logger.warning(
+            "compliance_requirements_builder_failed employee_id=%s builder=get_employee_dbs_summary error=%s",
+            employee_id,
+            exc,
+        )
+        dbs_summary = {"status_unavailable": True, "is_blocking": False, "warnings": [f"dbs_summary_unavailable:{exc}"]}
+    try:
+        rtw_summary = await get_employee_rtw_summary(employee_id)
+    except Exception as exc:
+        logger.warning(
+            "compliance_requirements_builder_failed employee_id=%s builder=get_employee_rtw_summary error=%s",
+            employee_id,
+            exc,
+        )
+        rtw_summary = {"status_unavailable": True, "is_blocking": False, "warnings": [f"rtw_summary_unavailable:{exc}"]}
+    try:
+        training_summary = await get_employee_training_safety_summary(employee_id)
+    except Exception as exc:
+        logger.warning(
+            "compliance_requirements_builder_failed employee_id=%s builder=get_employee_training_safety_summary error=%s",
+            employee_id,
+            exc,
+        )
+        training_summary = {"status_unavailable": True, "is_blocking": False, "warnings": [f"training_summary_unavailable:{exc}"]}
     
     result = {
         "employee_id": employee_id,
@@ -20332,11 +20376,11 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
             "has_alerts": len(expiring_soon_items) > 0 or len(expired_items) > 0
         },
         # DBS Summary - computed from single source (SAFETY ENGINE)
-        "dbs_summary": await get_employee_dbs_summary(employee_id),
+        "dbs_summary": dbs_summary,
         # RTW Summary - computed from single source (SAFETY ENGINE)
-        "rtw_summary": await get_employee_rtw_summary(employee_id),
+        "rtw_summary": rtw_summary,
         # Training Summary - computed from single source (SAFETY ENGINE)
-        "training_summary": await get_employee_training_safety_summary(employee_id),
+        "training_summary": training_summary,
         # Conditional requirements that were excluded
         "conditional_not_required": conditional_not_required
     }
@@ -38928,6 +38972,119 @@ async def get_compliance_file(
                 warning=f"cv_row_build_failed:{exc}",
                 extra={"affects_readiness": False, "is_verified": False, "files": [], "file_count": 0},
             )
+
+    def _safe_build_evidence_row(key: str, title: str, doc_requirement_keys: List[str], paired_check_key: str) -> dict:
+        try:
+            return build_evidence_row(
+                key=key,
+                title=title,
+                doc_requirement_keys=doc_requirement_keys,
+                paired_check_key=paired_check_key,
+            )
+        except Exception as exc:
+            logger.warning(
+                "compliance_file_row_builder_failed employee_id=%s builder=build_evidence_row row_key=%s error=%s",
+                employee_id,
+                key,
+                exc,
+            )
+            return _unavailable_row_fallback(
+                row_key=key,
+                row_title=title,
+                row_type="evidence",
+                warning=f"evidence_row_build_failed:{exc}",
+                extra={"affects_readiness": True, "is_verified": False, "files": [], "file_count": 0},
+            )
+
+    def _safe_build_check_row(
+        key: str,
+        title: str,
+        check_data: Optional[dict],
+        check_history: List[dict],
+        paired_evidence_key: str,
+        blocker_code: str,
+        blocker_message: str,
+    ) -> dict:
+        try:
+            return build_check_row(
+                key=key,
+                title=title,
+                check_data=check_data,
+                check_history=check_history,
+                paired_evidence_key=paired_evidence_key,
+                blocker_code=blocker_code,
+                blocker_message=blocker_message,
+            )
+        except Exception as exc:
+            logger.warning(
+                "compliance_file_row_builder_failed employee_id=%s builder=build_check_row row_key=%s error=%s",
+                employee_id,
+                key,
+                exc,
+            )
+            return _unavailable_row_fallback(
+                row_key=key,
+                row_title=title,
+                row_type="check",
+                warning=f"check_row_build_failed:{exc}",
+                extra={"affects_readiness": True, "is_verified": False},
+            )
+
+    def _safe_build_address_verification_row() -> dict:
+        try:
+            return build_address_verification_row()
+        except Exception as exc:
+            logger.warning(
+                "compliance_file_row_builder_failed employee_id=%s builder=build_address_verification_row row_key=address_verification error=%s",
+                employee_id,
+                exc,
+            )
+            return _unavailable_row_fallback(
+                row_key="address_verification",
+                row_title="Address Verification Check",
+                row_type="check",
+                warning=f"address_verification_row_build_failed:{exc}",
+                extra={"affects_readiness": True, "is_verified": False},
+            )
+
+    async def _safe_build_agreement_row(key: str, title: str, agreement_type: str) -> dict:
+        try:
+            return await build_agreement_row(
+                key=key,
+                title=title,
+                agreement_type=agreement_type,
+            )
+        except Exception as exc:
+            logger.warning(
+                "compliance_file_row_builder_failed employee_id=%s builder=build_agreement_row row_key=%s agreement_type=%s error=%s",
+                employee_id,
+                key,
+                agreement_type,
+                exc,
+            )
+            return _unavailable_row_fallback(
+                row_key=key,
+                row_title=title,
+                row_type="form_acknowledgement",
+                warning=f"agreement_row_build_failed:{exc}",
+                extra={"affects_readiness": True, "is_verified": False},
+            )
+
+    async def _safe_training_evaluation() -> dict:
+        try:
+            return await evaluate_employee_training_status(employee_id, employee.get("role", ""))
+        except Exception as exc:
+            logger.warning(
+                "compliance_file_section_builder_failed employee_id=%s section=training builder=evaluate_employee_training_status error=%s",
+                employee_id,
+                exc,
+            )
+            return {
+                "status_unavailable": True,
+                "status": "unavailable",
+                "warnings": [f"training_evaluation_unavailable:{exc}"],
+                "summary": {"required": 0, "verified": 0, "missing": 0},
+            }
     
     # =========================================================================
     # BUILD DUAL-ROW SECTIONS
@@ -38939,13 +39096,13 @@ async def get_compliance_file(
             "title": "Right to Work",
             "rtw_status": rtw_check.get("rtw_status") if rtw_check else CheckRecordService.compute_rtw_status(None),
             "rows": [
-                build_evidence_row(
+                _safe_build_evidence_row(
                     key="right_to_work_evidence",
                     title="Right to Work Evidence",
                     doc_requirement_keys=["right_to_work_documents", "right_to_work", "right_to_work_evidence"],
                     paired_check_key="right_to_work_check"
                 ),
-                build_check_row(
+                _safe_build_check_row(
                     key="right_to_work_check",
                     title="Right to Work Check",
                     check_data=rtw_check,
@@ -38961,13 +39118,13 @@ async def get_compliance_file(
         "dbs": {
             "title": "DBS",
             "rows": [
-                build_evidence_row(
+                _safe_build_evidence_row(
                     key="dbs_certificate_evidence",
                     title="DBS Certificate Evidence",
                     doc_requirement_keys=["dbs_certificate", "dbs_check", "dbs", "dbs_evidence", "dbs_certificate_evidence"],
                     paired_check_key="dbs_status_check"
                 ),
-                build_check_row(
+                _safe_build_check_row(
                     key="dbs_status_check",
                     title="DBS Status Check",
                     check_data=dbs_check,
@@ -38983,7 +39140,7 @@ async def get_compliance_file(
         "identity": {
             "title": "Identity",
             "rows": [
-                build_evidence_row(
+                _safe_build_evidence_row(
                     key="identity_evidence",
                     title="Identity Evidence",
                     doc_requirement_keys=["identity_documents", "id_document", "identity", "identity_evidence",
@@ -38992,7 +39149,7 @@ async def get_compliance_file(
                                           "identity_document", "identity_upload"],
                     paired_check_key="identity_verification"
                 ),
-                build_check_row(
+                _safe_build_check_row(
                     key="identity_verification",
                     title="Identity Verification",
                     check_data=identity_check,
@@ -39009,14 +39166,14 @@ async def get_compliance_file(
         "proof_of_address": {
             "title": "Proof of Address",
             "rows": [
-                build_evidence_row(
+                _safe_build_evidence_row(
                     key="proof_of_address_evidence",
                     title="Proof of Address Evidence",
                     doc_requirement_keys=["proof_of_address", "proof_of_address_evidence", "address_evidence", 
                                           "proof_of_address_2", "proof_of_address_3", "proof_of_address_4", "proof_of_address_5"],
                     paired_check_key="address_verification"
                 ),
-                build_address_verification_row()
+                _safe_build_address_verification_row()
             ]
         },
         
@@ -39024,12 +39181,12 @@ async def get_compliance_file(
         "agreements": {
             "title": "Agreements",
             "rows": [
-                await build_agreement_row(
+                await _safe_build_agreement_row(
                     key="contract_acceptance",
                     title="Contract Acceptance",
                     agreement_type="contract_acceptance"
                 ),
-                await build_agreement_row(
+                await _safe_build_agreement_row(
                     key="handbook_acknowledgement",
                     title="Employee Handbook Acknowledgement",
                     agreement_type="handbook_acknowledgement"
@@ -39054,7 +39211,7 @@ async def get_compliance_file(
         # Training - Keep existing structure
         "training": {
             "title": "Training",
-            "evaluation": await evaluate_employee_training_status(employee_id, employee.get("role", ""))
+            "evaluation": await _safe_training_evaluation()
         },
         
         # Recruitment & Application - Form-based records

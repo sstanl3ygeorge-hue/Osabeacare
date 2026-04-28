@@ -122,7 +122,7 @@ export default function ReferenceEmploymentComparison({ employeeId, onRefresh })
     );
   }
 
-  // --- safe destructure with defaults — no crash if keys missing ---
+  // --- safe destructure with defaults â€” no crash if keys missing ---
   const {
     employment_history = [],
     references = [],
@@ -158,7 +158,7 @@ export default function ReferenceEmploymentComparison({ employeeId, onRefresh })
     headerBadge = (
       <Badge className="bg-amber-100 text-amber-700">
         <Info className="h-3 w-3 mr-1" />
-        {warningCount} earlier employer � review required
+        {warningCount} earlier employer — review required
       </Badge>
     );
   } else {
@@ -253,7 +253,7 @@ export default function ReferenceEmploymentComparison({ employeeId, onRefresh })
                       <div className="flex items-center gap-2 mt-1 text-[10px] text-gray-500">
                         <Calendar className="h-3 w-3" />
                         <span>
-                          {emp.start_date || 'N/A'} – {emp.is_current ? 'Present' : (emp.end_date || 'N/A')}
+                          {emp.start_date || 'N/A'} â€“ {emp.is_current ? 'Present' : (emp.end_date || 'N/A')}
                         </span>
                       </div>
                     </div>
@@ -300,7 +300,7 @@ export default function ReferenceEmploymentComparison({ employeeId, onRefresh })
                             <ComplianceStatusBadge status={status} />
                           </div>
 
-                          {/* Match reason pill � always show matched employer for ok/warning */}
+                          {/* Match reason pill — always show matched employer for ok/warning */}
                           {ref.matches_employment_history && (
                             <div className="mt-2 flex flex-wrap gap-1">
                               <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-green-100 text-green-700">
@@ -318,7 +318,7 @@ export default function ReferenceEmploymentComparison({ employeeId, onRefresh })
                           {/* CQC investigation notice for warning / alert */}
                           {status === 'warning' && (
                             <div className="mt-2 p-1.5 bg-amber-100/60 rounded text-[10px] text-amber-800">
-                              Matches earlier employment record � not the most recent employer.
+                              Matches earlier employment record — not the most recent employer.
                               Review and record explanation if required (NHS guidance).
                             </div>
                           )}

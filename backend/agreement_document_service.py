@@ -999,6 +999,10 @@ def _agreement_rank(row: Dict[str, Any]) -> tuple:
 
 
 async def resolve_employee_agreement_state(db, employee: Dict[str, Any], agreement_type: str) -> Dict[str, Any]:
+    # Normalize legacy alias to canonical handbook agreement type so admin and
+    # worker surfaces always resolve the same latest row.
+    if agreement_type == "employee_handbook_acknowledgement":
+        agreement_type = HANDBOOK_AGREEMENT_TYPE
     employee_id = employee["id"]
     render_error_detail = None
     try:
@@ -1255,6 +1259,8 @@ async def resolve_employee_agreement_state(db, employee: Dict[str, Any], agreeme
     return {
         "agreement_type": agreement_type,
         "acknowledgement": agreement or {},
+        "source_record_id": agreement.get("id") if agreement else None,
+        "latest_active": bool(agreement),
         "render_issue": render_error_detail,
         "content_needed": content_needed,
         "rejected": rejected,
@@ -1267,6 +1273,7 @@ async def resolve_employee_agreement_state(db, employee: Dict[str, Any], agreeme
         "system_issue": system_issue,
         "state_label": state_label,
         "can_sign": False if system_issue else (rejected or not acknowledged),
+        "can_acknowledge": False if system_issue else (not rejected and not acknowledged),
         "status": "system_issue" if system_issue else ("rejected" if rejected else ("verified" if verified else ("signed" if acknowledged else "pending"))),
         "file_url": agreement.get("rendered_file_url"),
         "download_url": agreement.get("rendered_file_url"),

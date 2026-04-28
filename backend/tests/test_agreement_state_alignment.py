@@ -9,6 +9,7 @@ if BACKEND_DIR not in sys.path:
 
 from agreement_document_service import (  # noqa: E402
     CONTRACT_AGREEMENT_TYPE,
+    HANDBOOK_AGREEMENT_TYPE,
     resolve_employee_agreement_state,
 )
 
@@ -139,3 +140,32 @@ def test_latest_generated_contract_overrides_stale_rejected_ack(monkeypatch):
     assert state["can_sign"] is True
     assert state["acknowledgement"]["active_contract_id"] == "contract-v2"
     assert state["template_version"] == "contract_acceptance_v_new"
+
+
+def test_handbook_pending_row_has_source_record_id_and_acknowledgeability(monkeypatch):
+    db = _FakeDb()
+    employee = {"id": "emp-1", "name": "Test User"}
+    db.agreement_acknowledgements.docs = [
+        {
+            "id": "hb-1",
+            "employee_id": "emp-1",
+            "agreement_type": "handbook_acknowledgement",
+            "status": "pending",
+            "verification_status": "pending",
+            "rendered_file_url": "https://example.test/hb.pdf",
+            "template_version": "handbook_acknowledgement_v_00d5c51e4bd4",
+        }
+    ]
+
+    async def _ensure(_db, _employee, _agreement_type):
+        return dict(db.agreement_acknowledgements.docs[0])
+
+    monkeypatch.setattr("agreement_document_service.ensure_agreement_rendered", _ensure)
+
+    state = asyncio.run(resolve_employee_agreement_state(db, employee, "employee_handbook_acknowledgement"))
+    assert state["agreement_type"] == HANDBOOK_AGREEMENT_TYPE
+    assert state["source_record_id"] == "hb-1"
+    assert state["latest_active"] is True
+    assert state["template_version"] == "handbook_acknowledgement_v_00d5c51e4bd4"
+    assert state["rendered_file_url"] == "https://example.test/hb.pdf"
+    assert state["can_acknowledge"] is True

@@ -19107,6 +19107,10 @@ class VerifyRequirementInput(BaseModel):
     """Input for verifying a requirement"""
     notes: Optional[str] = None
 
+
+class AcknowledgeRequirementInput(BaseModel):
+    source_record_id: Optional[str] = None
+
 @api_router.post("/employees/{employee_id}/requirements/{requirement_id}/verify")
 async def verify_requirement(
     employee_id: str,
@@ -19322,6 +19326,7 @@ async def verify_requirement(
 async def acknowledge_requirement(
     employee_id: str,
     requirement_id: str,
+    body: Optional[AcknowledgeRequirementInput] = None,
     user: dict = Depends(require_manager_or_admin)
 ):
     """
@@ -19341,6 +19346,50 @@ async def acknowledge_requirement(
     
     if requirement.get('type') != 'acknowledgement':
         raise HTTPException(status_code=400, detail="This requirement does not support acknowledgement. Use upload instead.")
+
+    # Agreement-family acknowledgement parity guard (contract/handbook only).
+    agreement_types = {
+        "contract_acceptance": CONTRACT_AGREEMENT_TYPE,
+        "handbook_acknowledgement": HANDBOOK_AGREEMENT_TYPE,
+        "employee_handbook_acknowledgement": HANDBOOK_AGREEMENT_TYPE,
+    }
+    agreement_type = agreement_types.get(requirement_id)
+    if agreement_type:
+        canonical_state = await resolve_employee_agreement_state(db, employee, agreement_type)
+        requested_source = str(getattr(body, "source_record_id", "") or "").strip()
+        canonical_source = str(canonical_state.get("source_record_id") or "").strip()
+        if canonical_state.get("status_unavailable") or not canonical_state.get("latest_active"):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "stale_target",
+                    "message": "Canonical agreement state is unavailable or not active. Refresh and retry.",
+                    "canonical_latest": {
+                        "agreement_type": agreement_type,
+                        "status": canonical_state.get("status"),
+                        "raw_status": canonical_state.get("raw_status"),
+                        "template_version": canonical_state.get("template_version"),
+                        "source_record_id": canonical_state.get("source_record_id"),
+                        "latest_active": canonical_state.get("latest_active"),
+                    },
+                },
+            )
+        if requested_source and canonical_source and requested_source != canonical_source:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "stale_target",
+                    "message": "Requested acknowledgement target is stale. Refresh and retry.",
+                    "canonical_latest": {
+                        "agreement_type": agreement_type,
+                        "status": canonical_state.get("status"),
+                        "raw_status": canonical_state.get("raw_status"),
+                        "template_version": canonical_state.get("template_version"),
+                        "source_record_id": canonical_state.get("source_record_id"),
+                        "latest_active": canonical_state.get("latest_active"),
+                    },
+                },
+            )
     
     now = datetime.now(timezone.utc).isoformat()
     
@@ -21977,11 +22026,38 @@ async def verify_document_with_evidence(
     # Find the document
     doc = await db.employee_documents.find_one({"id": document_id})
     if not doc:
-        # Try finding by requirement_id for this employee
-        doc = await db.employee_documents.find_one({
+        # Try finding by requirement_id for this employee.
+        # Guard ambiguous fallback so we don't mutate stale/non-deterministic targets.
+        fallback_docs = await db.employee_documents.find({
             "employee_id": employee_id,
-            "requirement_id": document_type
-        })
+            "requirement_id": document_type,
+            "status": {"$nin": EXCLUDED_DOC_STATUSES}
+        }, {"_id": 0, "id": 1, "requirement_id": 1, "status": 1, "updated_at": 1}).to_list(20)
+        if len(fallback_docs) > 1:
+            canonical_state = await resolve_compliance_requirement_state(
+                employee_id=employee_id,
+                requirement_id=document_type,
+                context={"db": db},
+            )
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "stale_target",
+                    "message": "Ambiguous requirement fallback target. Provide explicit document_id for the latest active record.",
+                    "canonical_latest": {
+                        "requirement_id": document_type,
+                        "status": canonical_state.get("status"),
+                        "document_count": canonical_state.get("document_count"),
+                        "has_evidence": canonical_state.get("has_evidence"),
+                        "status_unavailable": canonical_state.get("status_unavailable"),
+                        "raw_refs": canonical_state.get("raw_refs") or {},
+                        "warnings": canonical_state.get("warnings") or [],
+                    },
+                },
+            )
+        doc = fallback_docs[0] if fallback_docs else None
+        if doc:
+            doc = await db.employee_documents.find_one({"id": doc.get("id")})
     
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -36607,6 +36683,7 @@ async def get_rtw_check(
 
 class InvalidateRTWCheckRequest(BaseModel):
     reason: str = Field(..., min_length=5)
+    expected_current_id: Optional[str] = None
 
 
 @api_router.post("/employees/{employee_id}/right-to-work/check/invalidate")
@@ -36620,6 +36697,22 @@ async def invalidate_rtw_check(
     current = await db.rtw_checks.find_one({"employee_id": employee_id, "is_current": True}, {"_id": 0})
     if not current:
         raise HTTPException(status_code=404, detail="No current RTW check found to invalidate")
+    expected_current_id = str(payload.expected_current_id or "").strip()
+    if expected_current_id and expected_current_id != str(current.get("id") or ""):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "stale_target",
+                "message": "Requested RTW check is stale. Refresh and retry on the latest current check.",
+                "canonical_latest": {
+                    "check_type": "right_to_work",
+                    "source_record_id": current.get("id"),
+                    "is_current": bool(current.get("is_current")),
+                    "outcome": current.get("outcome"),
+                    "checked_at": current.get("checked_at"),
+                },
+            },
+        )
 
     await db.rtw_checks.update_one(
         {"id": current["id"]},

@@ -1344,9 +1344,24 @@ export default function EmployeeProfilePage() {
       axios.get(`${API}/templates`, { headers }),
     ]);
     const results = [...criticalResults, ...optionalBatch1, ...optionalBatch2];
-    
+
     // Process results - extract data or use defaults
-    const [empRes, docsRes, typesRes, policiesRes, trainingRes, logsRes, formsRes, templatesRes, compReqRes, unifiedProgressRes] = results;
+    // Order must match:
+    // critical: employee, unified-progress, compliance-requirements
+    // optional1: employee-documents, document-types, training-records, policy-assignments
+    // optional2: audit-logs, generated-forms, templates
+    const [
+      empRes,
+      unifiedProgressRes,
+      compReqRes,
+      docsRes,
+      typesRes,
+      trainingRes,
+      policiesRes,
+      logsRes,
+      formsRes,
+      templatesRes
+    ] = results;
     
     let hasError = false;
     
@@ -1354,8 +1369,19 @@ export default function EmployeeProfilePage() {
     if (empRes.status === 'fulfilled') {
       setEmployee(empRes.value.data);
     } else {
-      console.error('Failed to fetch employee:', empRes.reason);
-      hasError = true;
+      // Recruitment route resilience: promoted/manual mixed states may not resolve on /employees/{id}
+      if (isRecruitmentView) {
+        try {
+          const fallback = await axios.get(`${API}/recruitment/resolve-profile/${employeeId}`, { headers });
+          setEmployee(fallback.data);
+        } catch (fallbackErr) {
+          console.error('Failed to fetch employee and recruitment fallback:', empRes.reason, fallbackErr);
+          hasError = true;
+        }
+      } else {
+        console.error('Failed to fetch employee:', empRes.reason);
+        hasError = true;
+      }
     }
     
     // Other data can fail gracefully with defaults

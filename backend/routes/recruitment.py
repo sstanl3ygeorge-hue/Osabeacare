@@ -191,6 +191,42 @@ async def calculate_completion_percentage_simple(employee_id: str, db=None) -> d
         }
 
 
+async def resolve_person_profile(db, person_id: str) -> dict:
+    """
+    Resolve a person profile across applicant/employee/staff mixed states.
+    Order:
+    1) direct id match
+    2) employee_code/applicant_reference
+    3) linked successor/predecessor ids
+    """
+    projection = {"_id": 0}
+    person = await db.employees.find_one({"id": person_id}, projection)
+    if person:
+        return {"person": person, "source_type": "id"}
+
+    person = await db.employees.find_one(
+        {"$or": [{"employee_code": person_id}, {"applicant_reference": person_id}]},
+        projection,
+    )
+    if person:
+        return {"person": person, "source_type": "code_or_reference"}
+
+    person = await db.employees.find_one(
+        {
+            "$or": [
+                {"previous_applicant_id": person_id},
+                {"superseded_by": person_id},
+                {"source_applicant_id": person_id},
+            ]
+        },
+        projection,
+    )
+    if person:
+        return {"person": person, "source_type": "linked_record"}
+
+    return {"person": None, "source_type": "not_found"}
+
+
 # ==================== APPLICANT ENDPOINTS ====================
 
 @router.get("/recruitment/applicants")
@@ -315,15 +351,18 @@ async def get_applicant(
     """Get a specific applicant by ID."""
     db = get_db()
     
-    applicant = await db.employees.find_one(
-        {"id": applicant_id, "status": {"$in": APPLICANT_STATUSES}},
-        {"_id": 0}
-    )
-    
+    resolved = await resolve_person_profile(db, applicant_id)
+    applicant = resolved["person"]
     if not applicant:
         raise HTTPException(status_code=404, detail="Applicant not found")
     
-    applicant["person_stage"] = PersonStage.APPLICANT
+    applicant["person_stage"] = (
+        PersonStage.APPLICANT
+        if applicant.get("status") in APPLICANT_STATUSES
+        else PersonStage.EMPLOYEE
+    )
+    applicant["source_type"] = resolved["source_type"]
+    applicant["profile_resolved_from"] = applicant_id
     _ap = await calculate_completion_percentage_simple(applicant_id, db=db)
     applicant["completion_percentage"] = _ap["overall_percentage"]
     applicant["completed_requirements"] = _ap["completed_requirements"]
@@ -332,6 +371,37 @@ async def get_applicant(
     applicant["awaiting_review_count"] = _ap["awaiting_review_count"]
     
     return applicant
+
+
+@router.get("/recruitment/resolve-profile/{person_id}")
+async def resolve_recruitment_profile(
+    person_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Fallback resolver for recruitment profile route.
+    Returns canonical person profile even if applicant was promoted.
+    """
+    db = get_db()
+    resolved = await resolve_person_profile(db, person_id)
+    person = resolved["person"]
+    if not person:
+        raise HTTPException(status_code=404, detail="Person not found")
+
+    person["person_stage"] = (
+        PersonStage.APPLICANT
+        if person.get("status") in APPLICANT_STATUSES
+        else PersonStage.EMPLOYEE
+    )
+    person["source_type"] = resolved["source_type"]
+    person["profile_resolved_from"] = person_id
+    _ap = await calculate_completion_percentage_simple(person["id"], db=db)
+    person["completion_percentage"] = _ap["overall_percentage"]
+    person["completed_requirements"] = _ap["completed_requirements"]
+    person["total_requirements"] = _ap["total_requirements"]
+    person["blockers_count"] = _ap["blockers_count"]
+    person["awaiting_review_count"] = _ap["awaiting_review_count"]
+    return person
 
 
 # ==================== STAFF EMPLOYEE ENDPOINTS ====================

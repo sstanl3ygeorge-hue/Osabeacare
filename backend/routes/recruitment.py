@@ -143,6 +143,19 @@ async def calculate_completion_percentage_simple(employee_id: str) -> dict:
     try:
         from unified_compliance_engine import get_unified_employee_status
         db = get_db()
+        if not hasattr(db, "employees"):
+            logger.warning(
+                "calculate_completion_percentage_simple invalid db handle for %s (type=%s); using fallback",
+                employee_id,
+                type(db).__name__,
+            )
+            return {
+                "overall_percentage": 0,
+                "completed_requirements": 0,
+                "total_requirements": 0,
+                "blockers_count": 0,
+                "awaiting_review_count": 0,
+            }
         progress = await get_unified_employee_status(db, employee_id)
         blockers = progress.get("blockers", []) or []
         awaiting = [b for b in blockers if b.get("severity") == "pending"]
@@ -153,8 +166,12 @@ async def calculate_completion_percentage_simple(employee_id: str) -> dict:
             "blockers_count": len(blockers),
             "awaiting_review_count": len(awaiting),
         }
-    except Exception:
-        logger.exception("calculate_completion_percentage_simple UCE call failed for %s", employee_id)
+    except Exception as exc:
+        logger.warning(
+            "calculate_completion_percentage_simple UCE call failed for %s: %s",
+            employee_id,
+            exc,
+        )
         return {
             "overall_percentage": 0,
             "completed_requirements": 0,

@@ -6,9 +6,9 @@ import {
   Send, Eye, FileText, CheckCircle, Clock, AlertTriangle, XCircle
 } from 'lucide-react';
 import { formatBackendDate } from '../../lib/dateUtils';
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
 
-const API = API_BASE_URL;
+const API = API_BASE;
 
 /**
  * RequestStatusBadge - Inline request lifecycle status for requirement rows

@@ -7,13 +7,13 @@ import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
 import { Badge } from '../../components/ui/badge';
 import { toast } from 'sonner';
-import { 
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
+import {
   FileSearch, Loader2, CheckCircle, AlertTriangle, AlertCircle, 
   Edit, X, RefreshCw, Eye, FileText
 } from 'lucide-react';
 
-const API = API_BASE_URL;
+const API = API_BASE;
 
 /**
  * DocumentExtractionReview - Component for reviewing AI-extracted document data

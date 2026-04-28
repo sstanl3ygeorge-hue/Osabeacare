@@ -8,9 +8,9 @@ import {
   RotateCcw, FileCheck, Download 
 } from 'lucide-react';
 import { formatBackendDate, formatBackendDateTime } from '../../../lib/dateUtils';
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../../utils/apiBase';
 
-const API = API_BASE_URL;
+const API = API_BASE;
 
 /**
  * PoliciesTabContent - Displays employee policy assignments

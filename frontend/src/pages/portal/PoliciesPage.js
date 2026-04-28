@@ -9,13 +9,13 @@ import { Textarea } from '../../components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../../components/ui/dialog';
 import { toast } from 'sonner';
 import { FileUploaderInline } from '../../components/ui/file-uploader';
-import { 
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
+import {
   FileCheck, Plus, Users, CheckCircle, Clock, Loader2, 
   Upload, Eye, Shield, AlertTriangle, FileText
 } from 'lucide-react';
 
-const API = API_BASE_URL;
+const API = API_BASE;
 
 export default function PoliciesPage() {
   const [policies, setPolicies] = useState([]);

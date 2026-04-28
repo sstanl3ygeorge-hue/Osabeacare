@@ -11,9 +11,9 @@ import { Shield, CheckCircle, AlertCircle, Plus, ExternalLink, Loader2 } from 'l
 import { toast } from 'sonner';
 import { formatBackendDate } from '../../lib/dateUtils';
 import { useAuth } from '../../context/AuthContext';
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
 
-const API = API_BASE_URL;
+const API = API_BASE;
 
 const REGISTRATION_BODIES = [
   { value: "NMC", label: "NMC (Nursing & Midwifery Council)", url: "https://www.nmc.org.uk/registration/search/" },

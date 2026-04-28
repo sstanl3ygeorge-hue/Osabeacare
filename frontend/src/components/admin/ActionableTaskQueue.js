@@ -40,7 +40,7 @@ export default function ActionableTaskQueue() {
 
   const fetchTasks = async () => {
     try {
-      const response = await axios.get(`${API}/api/admin/task-queue`, {
+      const response = await axios.get(`${API}/admin/task-queue`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setTasks(response.data);
@@ -63,7 +63,7 @@ export default function ActionableTaskQueue() {
     setActionLoading(`reminder-${employeeId}`);
     try {
       await axios.post(
-        `${API}/api/workers/${employeeId}/send-reminder`,
+        `${API}/workers/${employeeId}/send-reminder`,
         { reminder_type: type },
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -80,7 +80,7 @@ export default function ActionableTaskQueue() {
     setActionLoading(`ref-${employeeId}-${refNum}`);
     try {
       await axios.post(
-        `${API}/api/references/${employeeId}/${refNum}/send-request`,
+        `${API}/references/${employeeId}/${refNum}/send-request`,
         {},
         { headers: { Authorization: `Bearer ${token}` } }
       );

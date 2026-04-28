@@ -30,9 +30,9 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
 
-const API = API_ROOT_URL;
+const API = API_BASE;
 
 /**
  * ApplicationFormViewDrawer - Read-only viewer for structured application forms
@@ -80,7 +80,7 @@ export default function ApplicationFormViewDrawer({
     setLoading(true);
     try {
       const response = await axios.get(
-        `${API}/api/form-submissions/${submissionId}`,
+        `${API}/form-submissions/${submissionId}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       setSubmission(response.data);
@@ -110,7 +110,7 @@ export default function ApplicationFormViewDrawer({
     setExportingPdf(true);
     try {
       const response = await axios.get(
-        `${API}/api/form-submissions/${submissionId}/download-pdf`,
+        `${API}/form-submissions/${submissionId}/download-pdf`,
         { 
           headers: { Authorization: `Bearer ${token}` },
           responseType: 'blob'

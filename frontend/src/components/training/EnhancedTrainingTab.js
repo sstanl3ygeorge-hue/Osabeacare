@@ -15,9 +15,9 @@ import {
 import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
 import { format, differenceInDays, parseISO } from 'date-fns';
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
 
-const API = API_ROOT_URL;
+const API = API_BASE;
 
 /**
  * MandatoryTrainingSection - Shows the 6 mandatory trainings that block promotion

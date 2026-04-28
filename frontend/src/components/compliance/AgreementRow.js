@@ -32,9 +32,9 @@ import {
 } from 'lucide-react';
 import { formatBackendDate } from '../../lib/dateUtils';
 import { resolveLatestContractState } from '../../lib/contractState';
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
 
-const API = API_BASE_URL;
+const API = API_BASE;
 
 // Map agreement keys to template IDs
 const AGREEMENT_TEMPLATE_MAP = {

@@ -13,9 +13,9 @@ import { Loader2, Send, FileText, CheckSquare, Square } from 'lucide-react';
 import { toast } from 'sonner';
 import axios from 'axios';
 import { useAuth } from '../../context/AuthContext';
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
 
-const API = API_BASE_URL;
+const API = API_BASE;
 
 /**
  * BatchRequestModal - Modal for selecting and sending batch document requests

@@ -3,14 +3,14 @@ import axios from 'axios';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
+import API_BASE from '../../utils/apiBase';
 import {
-import { API_BASE_URL, API_ROOT_URL } from './';
   Users, CheckCircle, AlertTriangle, Building, Briefcase,
   Loader2, RefreshCw, Calendar, ChevronDown, ChevronUp,
   XCircle, Info,
 } from 'lucide-react';
 
-const API = API_BASE_URL;
+const API = API_BASE;
 
 // ---------------------------------------------------------------------------
 // Match-reason human labels

@@ -38,7 +38,7 @@ export default function DocumentUploadPage() {
 
   const validateToken = async () => {
     try {
-      const response = await axios.get(`${API}/api/public/validate-upload-token`, {
+      const response = await axios.get(`${API}/public/validate-upload-token`, {
         params: { 
           token, 
           request_id: requestId,
@@ -112,7 +112,7 @@ export default function DocumentUploadPage() {
         formData.append('request_id', requestId);
       }
       
-      const response = await axios.post(`${API}/api/public/upload-document`, formData, {
+      const response = await axios.post(`${API}/public/upload-document`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
       

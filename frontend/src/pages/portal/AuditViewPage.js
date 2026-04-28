@@ -5,13 +5,13 @@ import { useAuth } from '../../context/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
 import { Progress } from '../../components/ui/progress';
 import { Button } from '../../components/ui/button';
-import { 
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
+import {
   AlertTriangle, Users, FileCheck, GraduationCap, CheckCircle, 
   Loader2, Clock, Shield, FileX, CalendarClock, ShieldCheck, AlertCircle, ArrowRight, Download
 } from 'lucide-react';
 
-const API = API_BASE_URL;
+const API = API_BASE;
 
 export default function AuditViewPage() {
   const navigate = useNavigate();

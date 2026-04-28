@@ -8,9 +8,9 @@ import { Button } from '../ui/button';
 import { Textarea } from '../ui/textarea';
 import { toast } from 'sonner';
 import { Plus, Trash2, GripVertical } from 'lucide-react';
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
 
-const API = API_BASE_URL;
+const API = API_BASE;
 
 /**
  * EditEmploymentHistoryDialog - Edit employment history with reason logging

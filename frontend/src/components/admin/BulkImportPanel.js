@@ -30,7 +30,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
-const API = API_BASE_URL;
+const API = API_BASE;
 
 /**
  * BulkImportPanel - AI-powered PDF application import
@@ -565,7 +565,7 @@ export default function BulkImportPanel() {
             <CardTitle className="text-lg flex items-center gap-2 text-green-700">
               <CheckCircle className="h-5 w-5" />
               Import Complete
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
             </CardTitle>
           </CardHeader>
           <CardContent>

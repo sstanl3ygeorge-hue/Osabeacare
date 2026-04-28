@@ -13,9 +13,9 @@ import {
   Send, Home, Clock, Shield, FileText, Info
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
 
-const API = API_ROOT_URL;
+const API = API_BASE;
 
 export default function RefereeCompletionPage() {
   const { token } = useParams();
@@ -32,7 +32,7 @@ export default function RefereeCompletionPage() {
 
   const fetchRefereeForm = async () => {
     try {
-      const response = await axios.get(`${API}/api/referee/complete/${token}`);
+      const response = await axios.get(`${API}/referee/complete/${token}`);
       setFormData(response.data);
       // Pre-fill with declared details as hints
       if (response.data.declared_referee_details) {
@@ -94,7 +94,7 @@ export default function RefereeCompletionPage() {
     
     setSubmitting(true);
     try {
-      await axios.post(`${API}/api/referee/complete/${token}`, formValues);
+      await axios.post(`${API}/referee/complete/${token}`, formValues);
       setSubmitted(true);
       toast.success('Reference submitted successfully!');
     } catch (err) {

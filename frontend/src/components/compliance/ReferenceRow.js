@@ -10,9 +10,9 @@ import {
   FileText, History, Loader2, AlertCircle
 } from 'lucide-react';
 import { formatBackendDate } from '../../lib/dateUtils';
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
 
-const API = API_BASE_URL;
+const API = API_BASE;
 
 /**
  * ReferenceRow - Displays a reference requirement with full lifecycle

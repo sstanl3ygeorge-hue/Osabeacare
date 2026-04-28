@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { AlertTriangle, Clock, LogOut, RefreshCw } from 'lucide-react';
-import { API_BASE_URL, API_ROOT_URL } from '';
+import API_BASE from '../utils/apiBase';
 
-const API = API_ROOT_URL;
+const API = API_BASE;
 
 /**
  * SessionTimeoutWarning Component
@@ -26,7 +26,7 @@ const SessionTimeoutWarning = ({ onLogout }) => {
     if (!token) return;
 
     try {
-      const response = await fetch(`${API}/api/auth/session-info`, {
+      const response = await fetch(`${API}/auth/session-info`, {
         headers: {
           'Authorization': `Bearer ${token}`
         }

@@ -11,14 +11,14 @@ import { Switch } from '../../components/ui/switch';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../../components/ui/dialog';
 import { Badge } from '../../components/ui/badge';
 import { toast } from 'sonner';
-import { 
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
+import {
   Calendar, Clock, Play, Pause, Plus, Loader2, 
   AlertTriangle, CheckCircle, FileText, GraduationCap,
   History, Edit, Trash2, RefreshCw, Mail
 } from 'lucide-react';
 
-const API = API_BASE_URL;
+const API = API_BASE;
 
 export default function ScheduledRequestsPage() {
   const [schedules, setSchedules] = useState([]);

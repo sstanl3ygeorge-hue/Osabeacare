@@ -40,7 +40,7 @@ export default function TrainingUploadPage() {
 
   const fetchPageData = async () => {
     try {
-      const response = await axios.get(`${API}/api/training/respond/${token}`);
+      const response = await axios.get(`${API}/training/respond/${token}`);
       setPageData(response.data);
     } catch (err) {
       const detail = err.response?.data?.detail;
@@ -99,7 +99,7 @@ export default function TrainingUploadPage() {
         formData.append('notes', notes.trim());
       }
 
-      await axios.post(`${API}/api/training/respond/${token}/upload`, formData, {
+      await axios.post(`${API}/training/respond/${token}/upload`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
         onUploadProgress: (progressEvent) => {
           const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total);

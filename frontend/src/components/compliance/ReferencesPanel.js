@@ -15,9 +15,9 @@ import {
   MessageSquare, FileText, Plus, Edit, Shield, Eye, Download
 } from 'lucide-react';
 import { formatBackendDate, formatBackendDateTime } from '../../lib/dateUtils';
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
 
-const API = API_BASE_URL;
+const API = API_BASE;
 
 const STATUS_CONFIG = {
   not_declared: { label: 'Missing', color: 'bg-gray-100 text-gray-600', icon: XCircle },

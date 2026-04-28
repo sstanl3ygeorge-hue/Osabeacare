@@ -22,8 +22,8 @@ import { RadioGroup, RadioGroupItem } from '../ui/radio-group';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { toast } from 'sonner';
 import { useAuth } from '../../context/AuthContext';
-import { 
 import API_BASE from '../../utils/apiBase';
+import {
   Loader2, CheckCircle, XCircle, AlertTriangle, Upload, 
   FileCheck, Eye, Globe, Shield
 } from 'lucide-react';
@@ -120,7 +120,7 @@ export default function DocumentVerificationModal({
       formData.append('document_type', document.document_type || document.type || document.requirement_id);
 
       const response = await axios.post(
-        `${API}/api/employees/${employeeId}/documents/verify`,
+        `${API}/employees/${employeeId}/documents/verify`,
         formData,
         {
           headers: { 

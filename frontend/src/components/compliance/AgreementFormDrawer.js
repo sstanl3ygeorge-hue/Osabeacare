@@ -29,9 +29,9 @@ import {
   Phone, UserCheck, PenTool
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
 
-const API = API_BASE_URL;
+const API = API_BASE;
 
 /**
  * Section component for organizing content

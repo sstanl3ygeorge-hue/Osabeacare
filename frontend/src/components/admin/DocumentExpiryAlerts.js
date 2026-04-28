@@ -13,9 +13,9 @@ import {
 import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
 import { format, parseISO, differenceInDays } from 'date-fns';
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
 
-const API = API_ROOT_URL;
+const API = API_BASE;
 
 /**
  * DocumentExpiryAlerts - Dashboard component showing documents (DBS, RTW, Professional Registration) expiring soon
@@ -30,7 +30,7 @@ export default function DocumentExpiryAlerts({ compact = false }) {
   const fetchAlerts = async () => {
     try {
       const response = await axios.get(
-        `${API}/api/admin/expiring-documents?days=30`,
+        `${API}/admin/expiring-documents?days=30`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       setAlerts(response.data);
@@ -49,7 +49,7 @@ export default function DocumentExpiryAlerts({ compact = false }) {
     setSendingReminders(true);
     try {
       const response = await axios.post(
-        `${API}/api/admin/send-all-expiry-reminders`,
+        `${API}/admin/send-all-expiry-reminders`,
         {},
         { headers: { Authorization: `Bearer ${token}` } }
       );

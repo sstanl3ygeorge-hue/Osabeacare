@@ -17,9 +17,9 @@ import { Textarea } from '../../components/ui/textarea';
 import EmployeeAvatar from '../../components/portal/EmployeeAvatar';
 import LifecycleReasonDialog from '../../components/portal/LifecycleReasonDialog';
 import { StageIdentityBadge } from '../../components/compliance';
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
 
-const API = API_BASE_URL;
+const API = API_BASE;
 
 const getInitialReadinessFilter = (searchParams) => {
   if (searchParams.get('is_work_ready') === 'true') return 'READY_TO_WORK';

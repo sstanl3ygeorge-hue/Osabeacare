@@ -14,9 +14,9 @@ import { Textarea } from '../ui/textarea';
 import { RadioGroup, RadioGroupItem } from '../ui/radio-group';
 import { toast } from 'sonner';
 import { AlertTriangle, Loader2, Send } from 'lucide-react';
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
 
-const API = API_BASE_URL;
+const API = API_BASE;
 
 const AMENDMENT_REASONS = [
   // General document issues

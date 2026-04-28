@@ -22,9 +22,9 @@ import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
 import { SendReminderButton, RequestRenewalButton } from './AdminActionButtons';
 import { ComplianceBreakdownCard, PROGRESS_METRICS } from '../compliance/LabeledProgressMetrics';
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
 
-const API = API_ROOT_URL;
+const API = API_BASE;
 
 /**
  * UnifiedProgressSection - Displays the single source of truth progress
@@ -45,7 +45,7 @@ export default function UnifiedProgressSection({
     setLoading(true);
     try {
       const response = await axios.get(
-        `${API}/api/employees/${employeeId}/unified-progress`,
+        `${API}/employees/${employeeId}/unified-progress`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       setProgress(response.data);

@@ -18,9 +18,9 @@ import {
 } from 'lucide-react';
 import DocumentExtractionReview from '../../components/documents/DocumentExtractionReview';
 import { formatBackendDate, formatBackendDateTime } from '../../lib/dateUtils';
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
 
-const API = API_BASE_URL;
+const API = API_BASE;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // SINGLE SOURCE OF TRUTH: Status comes from backend ONLY

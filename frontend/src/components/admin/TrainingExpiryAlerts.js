@@ -13,9 +13,9 @@ import {
 import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
 import { format, parseISO, differenceInDays } from 'date-fns';
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
 
-const API = API_ROOT_URL;
+const API = API_BASE;
 
 /**
  * TrainingExpiryAlerts - Dashboard component showing training certificates expiring soon
@@ -30,7 +30,7 @@ export default function TrainingExpiryAlerts({ compact = false }) {
   const fetchAlerts = async () => {
     try {
       const response = await axios.get(
-        `${API}/api/admin/training-expiry-alerts?days=60`,
+        `${API}/admin/training-expiry-alerts?days=60`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       setAlerts(response.data);
@@ -49,7 +49,7 @@ export default function TrainingExpiryAlerts({ compact = false }) {
     setSendingReminders(true);
     try {
       const response = await axios.post(
-        `${API}/api/admin/training-expiry-reminders/send`,
+        `${API}/admin/training-expiry-reminders/send`,
         {},
         { headers: { Authorization: `Bearer ${token}` } }
       );

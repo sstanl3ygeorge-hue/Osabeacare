@@ -26,9 +26,9 @@ import RejectFormDialog from './RejectFormDialog';
 import { normalizeUploadRequirementSurface } from './surfaceNormalizers';
 import { UPLOAD_REQUIREMENT_KEYS } from './complianceRequirementMap';
 import { RequirementWorkflowCard } from './workflow';
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
 
-const API = API_BASE_URL;
+const API = API_BASE;
 
 /**
  * DualRowComplianceSection - Displays the dual-row compliance file structure

@@ -39,9 +39,9 @@ import {
   SelectValue,
 } from "../../components/ui/select";
 import { Label } from "../../components/ui/label";
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
 
-const API = API_BASE_URL;
+const API = API_BASE;
 
 const FEEDBACK_TYPES = [
   { value: 'compliment', label: 'Compliment', color: 'bg-green-100 text-green-800' },

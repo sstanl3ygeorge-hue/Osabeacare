@@ -32,7 +32,7 @@ export default function FormCompletionPage() {
 
   const fetchFormData = async () => {
     try {
-      const response = await axios.get(`${API}/api/forms/complete/${token}`);
+      const response = await axios.get(`${API}/forms/complete/${token}`);
       setFormData(response.data);
       // Pre-fill form with auto-fill data
       setFormValues(response.data.auto_fill_data || {});
@@ -74,7 +74,7 @@ export default function FormCompletionPage() {
     
     setSubmitting(true);
     try {
-      await axios.post(`${API}/api/forms/complete/${token}`, formValues);
+      await axios.post(`${API}/forms/complete/${token}`, formValues);
       setSubmitted(true);
       toast.success('Form submitted successfully!');
     } catch (err) {

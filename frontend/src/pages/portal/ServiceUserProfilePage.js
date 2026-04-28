@@ -34,14 +34,14 @@ import { toast } from 'sonner';
 import FileUploader from '../../components/ui/file-uploader';
 import { formatBackendDate, parseBackendDate } from '../../lib/dateUtils';
 import { useAuth } from '../../context/AuthContext';
-import {
 import API_BASE from '../../utils/apiBase';
+import {
   fetchProtectedFileBlob,
   openBlobUrlInNewTab,
   revokeBlobUrlLater,
 } from '../../lib/protectedFiles';
 
-const API_URL = API_BASE;
+const API = API_BASE;
 const CARE_PLAN_REQUIRED_SECTIONS = [
   'Personal information / This is me',
   'Consent and capacity',
@@ -218,7 +218,7 @@ export default function ServiceUserProfilePage() {
   const fetchServiceUser = async () => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`${API_URL}/api/service-users/${id}`, {
+      const response = await fetch(`${API}/service-users/${id}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       
@@ -241,7 +241,7 @@ export default function ServiceUserProfilePage() {
   const fetchSections = async () => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`${API_URL}/api/service-users/sections`, {
+      const response = await fetch(`${API}/service-users/sections`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       
@@ -258,7 +258,7 @@ export default function ServiceUserProfilePage() {
     setDailyNotesLoading(true);
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`${API_URL}/api/service-users/${id}/daily-notes`, {
+      const response = await fetch(`${API}/service-users/${id}/daily-notes`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (response.ok) {
@@ -281,7 +281,7 @@ export default function ServiceUserProfilePage() {
     setOnboardingLoading(true);
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`${API_URL}/api/service-users/${id}/onboarding-readiness`, {
+      const response = await fetch(`${API}/service-users/${id}/onboarding-readiness`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (response.ok) {
@@ -310,7 +310,7 @@ export default function ServiceUserProfilePage() {
 
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`${API_URL}/api/service-users/${id}/documents`, {
+      const response = await fetch(`${API}/service-users/${id}/documents`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -347,7 +347,7 @@ export default function ServiceUserProfilePage() {
   const handleVerifyDocument = async (documentId) => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`${API_URL}/api/service-users/${id}/documents/${documentId}/verify`, {
+      const response = await fetch(`${API}/service-users/${id}/documents/${documentId}/verify`, {
         method: 'PUT',
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -366,7 +366,7 @@ export default function ServiceUserProfilePage() {
     
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`${API_URL}/api/service-users/${id}/documents/${documentId}`, {
+      const response = await fetch(`${API}/service-users/${id}/documents/${documentId}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -385,7 +385,7 @@ export default function ServiceUserProfilePage() {
     
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`${API_URL}/api/service-users/${id}`, {
+      const response = await fetch(`${API}/service-users/${id}`, {
         method: 'PUT',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -459,7 +459,7 @@ export default function ServiceUserProfilePage() {
     setCarePlansLoading(true);
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`${API_URL}/api/service-users/${id}/care-plans?include_archived=true`, {
+      const response = await fetch(`${API}/service-users/${id}/care-plans?include_archived=true`, {
         headers: { 'Authorization': `Bearer ${token}` },
       });
       if (response.ok) {
@@ -492,7 +492,7 @@ export default function ServiceUserProfilePage() {
 
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`${API_URL}/api/service-users/${id}/care-plans`, {
+      const response = await fetch(`${API}/service-users/${id}/care-plans`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -540,7 +540,7 @@ export default function ServiceUserProfilePage() {
 
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`${API_URL}/api/service-users/${id}/care-plans/${carePlanId}`, {
+      const response = await fetch(`${API}/service-users/${id}/care-plans/${carePlanId}`, {
         method: 'PUT',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -568,7 +568,7 @@ export default function ServiceUserProfilePage() {
     }
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`${API_URL}/api/service-users/${id}/care-plans/${carePlanId}/activate`, {
+      const response = await fetch(`${API}/service-users/${id}/care-plans/${carePlanId}/activate`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` },
       });
@@ -591,7 +591,7 @@ export default function ServiceUserProfilePage() {
     }
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`${API_URL}/api/service-users/${id}/care-plans/${carePlanId}/archive`, {
+      const response = await fetch(`${API}/service-users/${id}/care-plans/${carePlanId}/archive`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -615,7 +615,7 @@ export default function ServiceUserProfilePage() {
   const handleDownloadCarePlanPdf = async (plan) => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`${API_URL}/api/service-users/${id}/care-plans/${plan.id}/download-pdf`, {
+      const response = await fetch(`${API}/service-users/${id}/care-plans/${plan.id}/download-pdf`, {
         headers: { 'Authorization': `Bearer ${token}` },
       });
       if (!response.ok) {
@@ -648,7 +648,7 @@ export default function ServiceUserProfilePage() {
   const handleUpdateCarePlanSectionStatus = async (carePlanId, sectionName, status) => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`${API_URL}/api/service-users/${id}/care-plans/${carePlanId}/section-status`, {
+      const response = await fetch(`${API}/service-users/${id}/care-plans/${carePlanId}/section-status`, {
         method: 'PATCH',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -673,7 +673,7 @@ export default function ServiceUserProfilePage() {
   const handleRecordCarePlanReview = async (carePlanId) => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`${API_URL}/api/service-users/${id}/care-plans/${carePlanId}/record-review`, {
+      const response = await fetch(`${API}/service-users/${id}/care-plans/${carePlanId}/record-review`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,

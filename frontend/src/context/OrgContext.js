@@ -1,9 +1,9 @@
 import { createContext, useContext, useState, useEffect } from 'react';
 import axios from 'axios';
 import { useAuth } from './AuthContext';
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../utils/apiBase';
 
-const API = API_ROOT_URL;
+const API = API_BASE;
 
 const OrgContext = createContext(null);
 
@@ -20,7 +20,7 @@ export function OrgProvider({ children }) {
       if (!token) return;
       
       try {
-        const response = await axios.get(`${API}/api/org-settings`, {
+        const response = await axios.get(`${API}/org-settings`, {
           headers: { Authorization: `Bearer ${token}` }
         });
         setOrgSettings({
@@ -39,7 +39,7 @@ export function OrgProvider({ children }) {
   const updateOrgSettings = async (updates) => {
     try {
       const response = await axios.put(
-        `${API}/api/org-settings`,
+        `${API}/org-settings`,
         updates,
         { headers: { Authorization: `Bearer ${token}` } }
       );

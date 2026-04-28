@@ -5,8 +5,8 @@ import { Button } from '../../components/ui/button';
 import { Badge } from '../../components/ui/badge';
 import { Progress } from '../../components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/ui/tabs';
-import { 
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
+import {
   FileText, 
   AlertTriangle, 
   CheckCircle2, 
@@ -20,7 +20,7 @@ import { API_BASE_URL, API_ROOT_URL } from './';
   XCircle
 } from 'lucide-react';
 
-const API = API_BASE_URL;
+const API = API_BASE;
 
 // Risk level colors
 const RISK_COLORS = {

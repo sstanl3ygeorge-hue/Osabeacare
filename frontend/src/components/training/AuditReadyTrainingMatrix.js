@@ -61,8 +61,8 @@ import { formatBackendDate } from '../../lib/dateUtils';
 import TrainingDetailDrawer from './TrainingDetailDrawer';
 import TrainingCertificateExtractor from './TrainingCertificateExtractor';
 import EvidenceReviewViewerDialog from '../compliance/EvidenceReviewViewerDialog';
-import {
 import API_BASE from '../../utils/apiBase';
+import {
   getPendingProposedTrainingItems,
   getTrainingLibraryBannerState,
 } from './trainingLibraryBanner';
@@ -267,14 +267,14 @@ export default function AuditReadyTrainingMatrix({
       setSourceErrors({ matrix: false, certificates: false, proposedItems: false, trainingRecords: false });
       // Fetch training matrix data
       const [matrixResult, proposedResult, docsResult] = await Promise.allSettled([
-        axios.get(`${API}/api/employees/${employeeId}/training/matrix`, {
+        axios.get(`${API}/employees/${employeeId}/training/matrix`, {
           headers: { Authorization: `Bearer ${token}` }
         }),
-        axios.get(`${API}/api/employees/${employeeId}/training/proposed-items`, {
+        axios.get(`${API}/employees/${employeeId}/training/proposed-items`, {
           headers: { Authorization: `Bearer ${token}` },
           params: { status: 'proposed' },
         }),
-        axios.get(`${API}/api/employees/${employeeId}/training/certificates`, {
+        axios.get(`${API}/employees/${employeeId}/training/certificates`, {
           headers: { Authorization: `Bearer ${token}` }
         })
       ]);
@@ -419,7 +419,7 @@ export default function AuditReadyTrainingMatrix({
     }
     try {
       await axios.post(
-        `${API}/api/employees/${employeeId}/training/proposed-items/review`,
+        `${API}/employees/${employeeId}/training/proposed-items/review`,
         {
           items: [{
             item_id: item.id,
@@ -450,7 +450,7 @@ export default function AuditReadyTrainingMatrix({
     }
     try {
       await axios.post(
-        `${API}/api/employees/${employeeId}/training/proposed-items/review`,
+        `${API}/employees/${employeeId}/training/proposed-items/review`,
         {
           items: [{
             item_id: item.id,
@@ -487,7 +487,7 @@ export default function AuditReadyTrainingMatrix({
     setQuickVerifying(prev => ({ ...prev, [item.id]: true }));
     try {
       const res = await axios.post(
-        `${API}/api/employees/${employeeId}/training/proposed-items/approve-and-verify`,
+        `${API}/employees/${employeeId}/training/proposed-items/approve-and-verify`,
         {
           items: [{
             item_id: item.id,
@@ -526,7 +526,7 @@ export default function AuditReadyTrainingMatrix({
       const itemsInBatch = proposedItems
         .filter(p => p.status === 'proposed' && selectedForBatch.has(p.id));
       const res = await axios.post(
-        `${API}/api/employees/${employeeId}/training/proposed-items/approve-and-verify`,
+        `${API}/employees/${employeeId}/training/proposed-items/approve-and-verify`,
         {
           items: itemsInBatch.map(item => ({
             item_id: item.id,
@@ -587,7 +587,7 @@ export default function AuditReadyTrainingMatrix({
     setDeleting(true);
     try {
       await axios.delete(
-        `${API}/api/training-records/${recordId}`,
+        `${API}/training-records/${recordId}`,
         { 
           headers: { Authorization: `Bearer ${token}` },
           params: { reason: deleteReason || 'Deleted by admin' }
@@ -615,7 +615,7 @@ export default function AuditReadyTrainingMatrix({
 
   const submitVerifyTraining = async (item) => {
     await axios.post(
-      `${API}/api/employees/${employeeId}/training/${item.code || item.id}/verify`,
+      `${API}/employees/${employeeId}/training/${item.code || item.id}/verify`,
       {},
       { headers: { Authorization: `Bearer ${token}` } }
     );
@@ -662,7 +662,7 @@ export default function AuditReadyTrainingMatrix({
     setUnverifying(true);
     try {
       await axios.post(
-        `${API}/api/employees/${employeeId}/training/${unverifyItem.code || unverifyItem.id}/unverify`,
+        `${API}/employees/${employeeId}/training/${unverifyItem.code || unverifyItem.id}/unverify`,
         { reason: unverifyReason.trim() },
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -687,7 +687,7 @@ export default function AuditReadyTrainingMatrix({
     }
     try {
       const response = await axios.post(
-        `${API}/api/employees/${employeeId}/training/re-extract`,
+        `${API}/employees/${employeeId}/training/re-extract`,
         { document_id: documentId },
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -704,7 +704,7 @@ export default function AuditReadyTrainingMatrix({
           .map(t => ({ ...t, document_id: documentId }));
         if (trainingsToSave.length > 0) {
           await axios.post(
-            `${API}/api/employees/${employeeId}/training/bulk-save`,
+            `${API}/employees/${employeeId}/training/bulk-save`,
             { trainings: trainingsToSave },
             { headers: { Authorization: `Bearer ${token}` } }
           );
@@ -729,7 +729,7 @@ export default function AuditReadyTrainingMatrix({
     setRemovingCert(true);
     try {
       const res = await axios.delete(
-        `${API}/api/employees/${employeeId}/training/certificates/${removeCertDialogCert.id}`,
+        `${API}/employees/${employeeId}/training/certificates/${removeCertDialogCert.id}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       const preserved = res.data?.approved_training_records_preserved || 0;
@@ -1869,7 +1869,7 @@ export default function AuditReadyTrainingMatrix({
                   const trainingCode = editingItem.code || editingItem.requirement_id || editingItem.id;
                   
                   await axios.patch(
-                    `${API}/api/employees/${employeeId}/training/${trainingCode}`,
+                    `${API}/employees/${employeeId}/training/${trainingCode}`,
                     {
                       completion_date: editingItem.completed_at,
                       expiry_date: editingItem.expires_at || editingItem.expiry_date || null,

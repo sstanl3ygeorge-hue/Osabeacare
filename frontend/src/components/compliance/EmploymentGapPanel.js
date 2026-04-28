@@ -43,9 +43,9 @@ import {
 import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
 import { formatBackendDate } from '../../lib/dateUtils';
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
 
-const API = API_ROOT_URL;
+const API = API_BASE;
 
 // Gap status styling
 const GAP_STATUS_STYLES = {
@@ -120,7 +120,7 @@ export default function EmploymentGapPanel({
     setLoading(true);
     try {
       const response = await axios.get(
-        `${API}/api/employees/${employeeId}/employment-gaps`,
+        `${API}/employees/${employeeId}/employment-gaps`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       setGapData(response.data);
@@ -158,7 +158,7 @@ export default function EmploymentGapPanel({
       const fullExplanation = `[${gapReason.replace('_', ' ').toUpperCase()}] ${explanation.trim()}`;
       
       await axios.post(
-        `${API}/api/employees/${employeeId}/employment-gaps/${getGapId(selectedGap)}/explain`,
+        `${API}/employees/${employeeId}/employment-gaps/${getGapId(selectedGap)}/explain`,
         null,
         { 
           params: { 
@@ -178,7 +178,7 @@ export default function EmploymentGapPanel({
         
         try {
           await axios.post(
-            `${API}/api/employees/${employeeId}/employment-gaps/${getGapId(selectedGap)}/upload-document`,
+            `${API}/employees/${employeeId}/employment-gaps/${getGapId(selectedGap)}/upload-document`,
             formData,
             { headers: { Authorization: `Bearer ${token}` } }
           );
@@ -210,7 +210,7 @@ export default function EmploymentGapPanel({
     setIsSubmitting(true);
     try {
       await axios.post(
-        `${API}/api/employees/${employeeId}/employment-gaps/${getGapId(selectedGap)}/verify`,
+        `${API}/employees/${employeeId}/employment-gaps/${getGapId(selectedGap)}/verify`,
         null,
         { 
           params: { approved: true, notes: verifyNotes.trim() || null },
@@ -238,7 +238,7 @@ export default function EmploymentGapPanel({
     setIsSubmitting(true);
     try {
       await axios.post(
-        `${API}/api/employees/${employeeId}/employment-gaps/${getGapId(selectedGap)}/verify`,
+        `${API}/employees/${employeeId}/employment-gaps/${getGapId(selectedGap)}/verify`,
         null,
         { 
           params: { approved: false, rejection_reason: rejectionReason.trim() },
@@ -266,7 +266,7 @@ export default function EmploymentGapPanel({
     setIsSubmitting(true);
     try {
       await axios.post(
-        `${API}/api/employees/${employeeId}/employment-gaps/${getGapId(selectedGap)}/request-info`,
+        `${API}/employees/${employeeId}/employment-gaps/${getGapId(selectedGap)}/request-info`,
         null,
         { 
           params: { request_message: infoRequest.trim() },
@@ -293,7 +293,7 @@ export default function EmploymentGapPanel({
     setIsSubmitting(true);
     try {
       await axios.post(
-        `${API}/api/employees/${employeeId}/employment-gaps/${getGapId(selectedGap)}/reopen`,
+        `${API}/employees/${employeeId}/employment-gaps/${getGapId(selectedGap)}/reopen`,
         { reason: reopenReason.trim() },
         { headers: { Authorization: `Bearer ${token}` } }
       );

@@ -31,9 +31,9 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
 
-const API = API_ROOT_URL;
+const API = API_BASE;
 
 // Category icons
 const CATEGORY_ICONS = {
@@ -75,7 +75,7 @@ export default function WorkReadinessPanel({
     setLoading(true);
     try {
       const response = await axios.get(
-        `${API}/api/employees/${employeeId}/work-readiness-check`,
+        `${API}/employees/${employeeId}/work-readiness-check`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       setEvaluation(response.data);

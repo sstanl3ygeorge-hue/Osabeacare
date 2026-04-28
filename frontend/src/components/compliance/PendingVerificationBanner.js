@@ -13,9 +13,9 @@ import {
   ChevronUp
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
 
-const API = API_ROOT_URL;
+const API = API_BASE;
 
 /**
  * PendingVerificationBanner - Shows items awaiting admin verification
@@ -42,7 +42,7 @@ export default function PendingVerificationBanner({
   const fetchPendingItems = async () => {
     try {
       const response = await axios.get(
-        `${API}/api/employees/${employeeId}/pending-verifications`,
+        `${API}/employees/${employeeId}/pending-verifications`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       setPendingItems(response.data.items || []);

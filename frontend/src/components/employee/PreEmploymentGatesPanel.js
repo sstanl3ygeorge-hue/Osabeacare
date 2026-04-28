@@ -10,9 +10,9 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatBackendDate } from '../../lib/dateUtils';
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
 
-const API = API_BASE_URL;
+const API = API_BASE;
 
 const GATE_CONFIG = {
   interview_completed: {

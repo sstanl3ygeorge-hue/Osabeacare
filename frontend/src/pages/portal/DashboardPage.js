@@ -10,14 +10,14 @@ import EmployeeAvatar from '../../components/portal/EmployeeAvatar';
 import ActionableTaskQueue from '../../components/admin/ActionableTaskQueue';
 import TrainingExpiryAlerts from '../../components/admin/TrainingExpiryAlerts';
 import DocumentExpiryAlerts from '../../components/admin/DocumentExpiryAlerts';
+import API_BASE from '../../utils/apiBase';
 import {
-import { API_BASE_URL, API_ROOT_URL } from './';
   Users, UserPlus, AlertTriangle, FileX, Shield, ShieldCheck,
   FileCheck, CalendarClock, ArrowRight, Loader2, Upload, FileText,
   Clock, AlertCircle, CheckCircle, ExternalLink, ClipboardList, GraduationCap
 } from 'lucide-react';
 
-const API = API_BASE_URL;
+const API = API_BASE;
 
 export default function DashboardPage() {
   const navigate = useNavigate();

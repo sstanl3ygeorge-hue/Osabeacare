@@ -26,9 +26,9 @@ import {
   DELIVERY_MODES 
 } from '../../config/requirementCapabilityMap';
 import { useAuth } from '../../context/AuthContext';
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
 
-const API = API_BASE_URL;
+const API = API_BASE;
 
 /**
  * FormRequirementRow - Displays a single form-type requirement

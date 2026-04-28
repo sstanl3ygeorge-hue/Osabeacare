@@ -25,14 +25,14 @@ import {
   Stamp,
   Trash2
 } from 'lucide-react';
+import API_BASE from '../../utils/apiBase';
 import {
-import { API_BASE_URL, API_ROOT_URL } from './';
   downloadBlobUrl,
   fetchProtectedFileBlob,
   revokeBlobUrlLater,
 } from '../../lib/protectedFiles';
 
-const API = API_BASE_URL;
+const API = API_BASE;
 
 /**
  * VerificationStampDialog - Apply verification stamps to evidence documents

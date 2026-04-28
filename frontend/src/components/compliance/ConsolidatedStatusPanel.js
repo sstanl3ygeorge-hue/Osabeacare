@@ -30,10 +30,10 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
 
 
-const API = API_ROOT_URL;
+const API = API_BASE;
 
 export default function ConsolidatedStatusPanel({
   employeeId,
@@ -58,10 +58,10 @@ export default function ConsolidatedStatusPanel({
     try {
       // Fetch unified progress and pre-employment gates
       const [progressRes, gatesRes] = await Promise.all([
-        axios.get(`${API}/api/employees/${employeeId}/unified-progress`, {
+        axios.get(`${API}/employees/${employeeId}/unified-progress`, {
           headers: { Authorization: `Bearer ${token}` }
         }),
-        axios.get(`${API}/api/employees/${employeeId}/pre-employment-gates`, {
+        axios.get(`${API}/employees/${employeeId}/pre-employment-gates`, {
           headers: { Authorization: `Bearer ${token}` }
         })
       ]);
@@ -84,7 +84,7 @@ export default function ConsolidatedStatusPanel({
     setGateLoading(true);
     try {
       const res = await axios.get(
-        `${API}/api/employees/${employeeId}/recruitment-gate`,
+        `${API}/employees/${employeeId}/recruitment-gate`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       setGateResult(res.data?.gate ?? null);
@@ -112,7 +112,7 @@ export default function ConsolidatedStatusPanel({
     setActionLoading('reminder');
     try {
       await axios.post(
-        `${API}/api/workers/${employeeId}/send-reminder`,
+        `${API}/workers/${employeeId}/send-reminder`,
         { reminder_type: 'general' },
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -128,7 +128,7 @@ export default function ConsolidatedStatusPanel({
     setActionLoading('approve');
     try {
       await axios.post(
-        `${API}/api/employees/${employeeId}/approve-recruitment`,
+        `${API}/employees/${employeeId}/approve-recruitment`,
         {},
         { headers: { Authorization: `Bearer ${token}` } }
       );

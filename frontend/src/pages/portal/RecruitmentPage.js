@@ -27,9 +27,9 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../../
 import { Info } from 'lucide-react';
 import EmployeeAvatar from '../../components/portal/EmployeeAvatar';
 import { cn } from '../../lib/utils';
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
 
-const API = API_BASE_URL;
+const API = API_BASE;
 
 // Recruitment stage labels
 const STAGE_LABELS = {

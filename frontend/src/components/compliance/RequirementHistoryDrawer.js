@@ -16,9 +16,9 @@ import {
   Loader2, Shield, FileCheck, Trash2, Archive
 } from 'lucide-react';
 import { formatBackendDate } from '../../lib/dateUtils';
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
 
-const API = API_BASE_URL;
+const API = API_BASE;
 
 /**
  * RequirementHistoryDrawer - Shows unified timeline history for a requirement

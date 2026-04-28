@@ -42,14 +42,14 @@ import {
   normalizeUploadDrawerData,
   buildDrawerSummary,
 } from './complianceRequirementMap';
+import API_BASE from '../../utils/apiBase';
 import {
-import { API_BASE_URL, API_ROOT_URL } from './';
   downloadBlobUrl,
   fetchProtectedFileBlob,
   revokeBlobUrlLater,
 } from '../../lib/protectedFiles';
 
-const API = API_BASE_URL;
+const API = API_BASE;
 
 const getProtectedRequestToken = (rawUrl, authToken) => {
   if (!rawUrl || !authToken) return undefined;

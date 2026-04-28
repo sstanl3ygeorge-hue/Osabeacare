@@ -28,8 +28,8 @@ import { Badge } from '../ui/badge';
 import { RadioGroup, RadioGroupItem } from '../ui/radio-group';
 import { Checkbox } from '../ui/checkbox';
 import { toast } from 'sonner';
+import API_BASE from '../../utils/apiBase';
 import {
-import { API_BASE_URL, API_ROOT_URL } from './';
   Eye,
   FileCheck,
   Stamp,
@@ -42,7 +42,7 @@ import { API_BASE_URL, API_ROOT_URL } from './';
   MapPin
 } from 'lucide-react';
 
-const API = API_BASE_URL;
+const API = API_BASE;
 
 // Verification methods for Identity
 const IDENTITY_METHODS = [

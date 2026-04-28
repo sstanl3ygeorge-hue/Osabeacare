@@ -26,8 +26,8 @@ import {
 } from '../ui/dialog';
 import { formatBackendDate } from '../../lib/dateUtils';
 import { getEvidenceRules } from './evidenceRules';
-import {
 import API_BASE from '../../utils/apiBase';
+import {
   fetchProtectedFileBlob,
   downloadBlobUrl,
   revokeBlobUrlLater,

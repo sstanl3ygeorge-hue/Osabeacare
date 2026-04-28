@@ -38,9 +38,9 @@ import {
 } from "../../components/ui/select";
 import { Label } from "../../components/ui/label";
 import { Progress } from '../../components/ui/progress';
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
 
-const API = API_BASE_URL;
+const API = API_BASE;
 
 const COMPLAINT_STATUSES = [
   { value: 'received', label: 'Received', color: 'bg-gray-100 text-gray-800', icon: Clock },

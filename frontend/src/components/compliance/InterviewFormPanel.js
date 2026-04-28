@@ -18,9 +18,9 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { formatBackendDate } from '../../lib/dateUtils';
 import InlineDocumentViewer from '../shared/InlineDocumentViewer';
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
 
-const API = API_BASE_URL;
+const API = API_BASE;
 
 const DECISION_CONFIG = {
   'Approve': { color: 'bg-green-100 text-green-700', icon: CheckCircle },

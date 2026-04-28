@@ -12,9 +12,9 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../ui/dialog';
 import { toast } from 'sonner';
 import { formatBackendDate } from '../../lib/dateUtils';
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
 
-const API = API_ROOT_URL;
+const API = API_BASE;
 
 // Section component for consistent styling
 const Section = ({ title, icon: Icon, children, className = "" }) => (
@@ -85,7 +85,7 @@ export default function ApplicationFormViewer({
       const token = localStorage.getItem('token');
       
       // Fetch form submissions for this employee
-      const response = await axios.get(`${API}/api/form-submissions`, {
+      const response = await axios.get(`${API}/form-submissions`, {
         headers: { Authorization: `Bearer ${token}` },
         params: {
           employee_id: employeeId,
@@ -102,7 +102,7 @@ export default function ApplicationFormViewer({
       }
       
       // Also check for uploaded PDF application
-      const docsResponse = await axios.get(`${API}/api/employee-documents?employee_id=${employeeId}`, {
+      const docsResponse = await axios.get(`${API}/employee-documents?employee_id=${employeeId}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       
@@ -139,7 +139,7 @@ export default function ApplicationFormViewer({
       formData.append('extract_data', 'true');
       
       const response = await axios.post(
-        `${API}/api/employees/${employeeId}/upload-document`,
+        `${API}/employees/${employeeId}/upload-document`,
         formData,
         {
           headers: {

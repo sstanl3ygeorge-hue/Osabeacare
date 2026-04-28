@@ -19,13 +19,13 @@ import { Badge } from '../ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Separator } from '../ui/separator';
 import { toast } from 'sonner';
-import { 
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
+import {
   CheckCircle, AlertTriangle, FileText, User, MapPin, Calendar,
   Shield, Loader2, Eye, Video, Building, ExternalLink, ClipboardCheck
 } from 'lucide-react';
 
-const API = API_BASE_URL;
+const API = API_BASE;
 
 const VERIFICATION_METHOD_LABELS = {
   'in_person': 'Verified Original In Person',

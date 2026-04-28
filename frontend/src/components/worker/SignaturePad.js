@@ -6,9 +6,9 @@ import { Label } from '../ui/label';
 import { toast } from 'sonner';
 import axios from 'axios';
 import { Loader2, Eraser, Check, FileText, AlertCircle } from 'lucide-react';
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
 
-const API = API_BASE_URL;
+const API = API_BASE;
 
 export default function SignaturePad({ employeeId, employeeName, onSigned, onCancel }) {
   const canvasRef = useRef(null);

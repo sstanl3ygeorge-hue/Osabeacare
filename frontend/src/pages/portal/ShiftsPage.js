@@ -31,8 +31,8 @@ import {
 import { Badge } from '../../components/ui/badge';
 import { Textarea } from '../../components/ui/textarea';
 import { toast } from 'sonner';
+import API_BASE from '../../utils/apiBase';
 import {
-import { API_BASE_URL, API_ROOT_URL } from './';
   CalendarClock,
   Loader2,
   Plus,
@@ -45,7 +45,7 @@ import { API_BASE_URL, API_ROOT_URL } from './';
   Printer,
 } from 'lucide-react';
 
-const API = API_BASE_URL;
+const API = API_BASE;
 
 const STATUS_OPTIONS = ['open', 'assigned', 'completed', 'cancelled'];
 

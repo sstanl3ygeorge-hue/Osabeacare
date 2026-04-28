@@ -37,9 +37,9 @@ import {
 import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
 import { formatBackendDate } from '../../lib/dateUtils';
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
 
-const API = API_ROOT_URL;
+const API = API_BASE;
 
 // Status styling
 const STATUS_STYLES = {
@@ -93,7 +93,7 @@ export default function TrainingDetailDrawer({
     setHistoryLoading(true);
     try {
       const response = await axios.get(
-        `${API}/api/training-records/${trainingItem.record_id}/history`,
+        `${API}/training-records/${trainingItem.record_id}/history`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       // Backend returns { training_record, history, total_corrections }
@@ -126,7 +126,7 @@ export default function TrainingDetailDrawer({
     setPreviewLoading(true);
     try {
       const response = await axios.get(
-        `${API}/api/training-records/${trainingItem.record_id}/certificate/file`,
+        `${API}/training-records/${trainingItem.record_id}/certificate/file`,
         { 
           headers: { Authorization: `Bearer ${token}` },
           responseType: 'blob'
@@ -165,7 +165,7 @@ export default function TrainingDetailDrawer({
     
     try {
       const response = await axios.get(
-        `${API}/api/training-records/${trainingItem.record_id}/certificate/download`,
+        `${API}/training-records/${trainingItem.record_id}/certificate/download`,
         { 
           headers: { Authorization: `Bearer ${token}` },
           responseType: 'blob'
@@ -202,7 +202,7 @@ export default function TrainingDetailDrawer({
     setReExtractLoading(true);
     try {
       const response = await axios.post(
-        `${API}/api/employees/${employeeId}/training/re-extract`,
+        `${API}/employees/${employeeId}/training/re-extract`,
         { 
           certificate_url: certUrl,
           document_id: docId
@@ -239,7 +239,7 @@ export default function TrainingDetailDrawer({
     setLoading(true);
     try {
       await axios.post(
-        `${API}/api/employees/${employeeId}/training/bulk-save`,
+        `${API}/employees/${employeeId}/training/bulk-save`,
         { trainings: trainingsToSave },
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -272,7 +272,7 @@ export default function TrainingDetailDrawer({
     setLoading(true);
     try {
       await axios.post(
-        `${API}/api/training-records/${trainingItem.record_id}/verify`,
+        `${API}/training-records/${trainingItem.record_id}/verify`,
         { notes: verifyNotes },
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -295,7 +295,7 @@ export default function TrainingDetailDrawer({
     setLoading(true);
     try {
       await axios.post(
-        `${API}/api/training-records/${trainingItem.record_id}/unverify`,
+        `${API}/training-records/${trainingItem.record_id}/unverify`,
         {},
         { headers: { Authorization: `Bearer ${token}` } }
       );

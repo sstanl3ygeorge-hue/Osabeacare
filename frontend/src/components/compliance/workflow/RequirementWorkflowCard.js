@@ -23,9 +23,9 @@ import { FinalStatusSection } from './FinalStatusSection';
 import RecordCheckDialog from '../RecordCheckDialog';
 import EvidenceReviewDialog from '../EvidenceReviewDialog';
 import EvidenceReviewViewerDialog from '../EvidenceReviewViewerDialog';
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../../utils/apiBase';
 
-const API = API_BASE_URL;
+const API = API_BASE;
 
 // Map requirement key → check type string used by RecordCheckDialog
 const REQUIREMENT_TO_CHECK_TYPE = {

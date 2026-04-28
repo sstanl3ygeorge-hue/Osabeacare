@@ -9,9 +9,9 @@ import {
   Loader2, RefreshCw, Clock, AlertTriangle, ChevronRight, Shield, ArrowRight
 } from 'lucide-react';
 import { formatBackendDate } from '../../lib/dateUtils';
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
 
-const API = API_BASE_URL;
+const API = API_BASE;
 
 /* ─── Strict CQC-safe action labels ──────────────────────────── */
 const ACTION_CONFIG = {

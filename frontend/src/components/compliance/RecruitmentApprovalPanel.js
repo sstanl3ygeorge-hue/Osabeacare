@@ -28,9 +28,9 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
 
-const API = API_ROOT_URL;
+const API = API_BASE;
 
 /**
  * RecruitmentApprovalPanel - Controls recruitment approval gate
@@ -64,7 +64,7 @@ export default function RecruitmentApprovalPanel({
     setLoading(true);
     try {
       const response = await axios.get(
-        `${API}/api/employees/${employeeId}/recruitment-approval-check`,
+        `${API}/employees/${employeeId}/recruitment-approval-check`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       setEvaluation(response.data);
@@ -85,7 +85,7 @@ export default function RecruitmentApprovalPanel({
     setApproving(true);
     try {
       const response = await axios.post(
-        `${API}/api/employees/${employeeId}/approve-recruitment`,
+        `${API}/employees/${employeeId}/approve-recruitment`,
         {},
         { headers: { Authorization: `Bearer ${token}` } }
       );

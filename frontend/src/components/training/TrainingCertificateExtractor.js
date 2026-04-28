@@ -44,9 +44,9 @@ import {
 import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
 import { useDropzone } from 'react-dropzone';
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
 
-const API = API_ROOT_URL;
+const API = API_BASE;
 
 // Common CSTF trainings for quick selection
 const COMMON_CSTF_TRAININGS = [
@@ -132,7 +132,7 @@ export default function TrainingCertificateExtractor({
       formData.append('file', uploadedFile);
 
       const response = await axios.post(
-        `${API}/api/employees/${employeeId}/training/extract-certificate`,
+        `${API}/employees/${employeeId}/training/extract-certificate`,
         formData,
         {
           headers: {
@@ -235,7 +235,7 @@ export default function TrainingCertificateExtractor({
 
     try {
       const response = await axios.post(
-        `${API}/api/employees/${employeeId}/training/bulk-save`,
+        `${API}/employees/${employeeId}/training/bulk-save`,
         {
           trainings: itemsToSave.map(t => ({
             training_name: t.training_name,

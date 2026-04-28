@@ -41,8 +41,8 @@ import {
   normalizeUploadDrawerData,
 } from './complianceRequirementMap';
 import { getEvidenceRules } from './evidenceRules';
-import {
 import API_BASE from '../../utils/apiBase';
+import {
   downloadBlobUrl,
   fetchProtectedFileBlob,
   revokeBlobUrlLater,

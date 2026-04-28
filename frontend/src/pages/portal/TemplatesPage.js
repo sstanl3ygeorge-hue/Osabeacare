@@ -9,14 +9,14 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
 import { Label } from '../../components/ui/label';
 import { toast } from 'sonner';
+import API_BASE from '../../utils/apiBase';
 import {
-import { API_BASE_URL, API_ROOT_URL } from './';
   ClipboardList, Search, Plus, FileText, CheckCircle, User, 
   AlertTriangle, Loader2, Eye, Settings, RefreshCw, Shield,
   Lock, FileCheck, ChevronRight
 } from 'lucide-react';
 
-const API = API_BASE_URL;
+const API = API_BASE;
 
 export default function TemplatesPage() {
   const navigate = useNavigate();

@@ -8,12 +8,12 @@ import { Label } from '../../components/ui/label';
 import { Checkbox } from '../../components/ui/checkbox';
 import { Input } from '../../components/ui/input';
 import { toast } from 'sonner';
-import { 
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
+import {
   Mail, Loader2, GraduationCap, Send, Clock, Calendar
 } from 'lucide-react';
 
-const API = API_BASE_URL;
+const API = API_BASE;
 
 // Standard training types — ids MUST match canonical training requirement_ids
 // (see MANDATORY_TRAINING_HCA in backend/unified_compliance_engine.py and

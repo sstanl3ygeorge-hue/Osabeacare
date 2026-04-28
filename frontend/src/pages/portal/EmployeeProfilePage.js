@@ -64,14 +64,14 @@ import {
 } from 'lucide-react';
 import { FileUploaderInline } from '../../components/ui/file-uploader';
 import { formatBackendDate, formatBackendDateTime, parseBackendDate } from '../../lib/dateUtils';
+import API_BASE from '../../utils/apiBase';
 import {
-import { API_BASE_URL, API_ROOT_URL } from './';
   fetchProtectedFileBlob,
   openBlobUrlInNewTab,
   revokeBlobUrlLater,
 } from '../../lib/protectedFiles';
 
-const API = API_BASE_URL;
+const API = API_BASE;
 
 // Form-based requirements (open modal instead of file upload)
 const FORM_BASED_REQUIREMENTS = [

@@ -45,9 +45,9 @@ import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
 import { formatBackendDate } from '../../lib/dateUtils';
 import TrainingDetailDrawer from './TrainingDetailDrawer';
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
 
-const API = API_ROOT_URL;
+const API = API_BASE;
 
 // Status styling
 const STATUS_STYLES = {
@@ -101,7 +101,7 @@ export default function TrainingMatrix({
     setLoading(true);
     try {
       const response = await axios.get(
-        `${API}/api/employees/${employeeId}/training/matrix`,
+        `${API}/employees/${employeeId}/training/matrix`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       setTrainingData(response.data);
@@ -110,7 +110,7 @@ export default function TrainingMatrix({
       // Fallback to training evaluation endpoint
       try {
         const evalResponse = await axios.get(
-          `${API}/api/employees/${employeeId}/training`,
+          `${API}/employees/${employeeId}/training`,
           { headers: { Authorization: `Bearer ${token}` } }
         );
         setTrainingData({

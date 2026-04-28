@@ -7,9 +7,9 @@ import {
   CheckCircle, AlertTriangle, Users, Shield, ChevronRight
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
 
-const API = API_BASE_URL;
+const API = API_BASE;
 
 export default function AdminTaskQueue() {
   const [tasks, setTasks] = useState(null);

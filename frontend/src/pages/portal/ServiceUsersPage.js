@@ -25,7 +25,7 @@ import { toast } from 'sonner';
 import { parseBackendDate } from '../../lib/dateUtils';
 import API_BASE from '../../utils/apiBase';
 
-const API_URL = API_BASE;
+const API = API_BASE;
 
 export default function ServiceUsersPage() {
   const navigate = useNavigate();
@@ -53,7 +53,7 @@ export default function ServiceUsersPage() {
   const fetchServiceUsers = async () => {
     try {
       const token = localStorage.getItem('token');
-      let url = `${API_URL}/api/service-users?`;
+      let url = `${API}/service-users?`;
       if (statusFilter) url += `status=${statusFilter}&`;
       if (searchQuery) url += `search=${encodeURIComponent(searchQuery)}&`;
       
@@ -83,7 +83,7 @@ export default function ServiceUsersPage() {
 
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`${API_URL}/api/service-users`, {
+      const response = await fetch(`${API}/service-users`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,

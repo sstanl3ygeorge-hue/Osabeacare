@@ -22,15 +22,15 @@ import {
 } from 'lucide-react';
 import { formatBackendDate } from '../../lib/dateUtils';
 import { cn } from '../../lib/utils';
+import API_BASE from '../../utils/apiBase';
 import {
-import { API_BASE_URL, API_ROOT_URL } from './';
   fetchProtectedFileBlob,
   downloadBlobUrl,
   openBlobUrlInNewTab,
   revokeBlobUrl,
 } from '../../lib/protectedFiles';
 
-const API = API_ROOT_URL;
+const API = API_BASE;
 
 const STAMP_LABELS = {
   'original_seen': { label: 'Original Seen', icon: Eye, color: 'bg-blue-100 text-blue-700' },

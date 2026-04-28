@@ -45,7 +45,7 @@ const API = API_BASE;
  * - AND a Record Check has been completed
  */
 import { isPreviewableFile } from './complianceRequirementMap';
-// API_BASE_URL import removed; replaced with centralized API_BASE below.
+// API_BASE import removed; replaced with centralized API_BASE below.
 
 export default function EvidenceReviewDialog({
   isOpen,

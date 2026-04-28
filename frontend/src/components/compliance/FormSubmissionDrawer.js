@@ -26,9 +26,9 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
 
-const API = API_ROOT_URL;
+const API = API_BASE;
 
 /**
  * FormSubmissionDrawer - Universal drawer for form-type requirements
@@ -79,7 +79,7 @@ export default function FormSubmissionDrawer({
     try {
       // Fetch template
       const templateRes = await axios.get(
-        `${API}/api/form-submissions/template/${formKey}`,
+        `${API}/form-submissions/template/${formKey}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       setTemplate(templateRes.data);
@@ -95,7 +95,7 @@ export default function FormSubmissionDrawer({
       // Fetch auto-fill data for create/edit
       if (mode === 'create' || mode === 'edit') {
         const autoFillRes = await axios.get(
-          `${API}/api/form-submissions/auto-fill/${formKey}/${employeeId}`,
+          `${API}/form-submissions/auto-fill/${formKey}/${employeeId}`,
           { headers: { Authorization: `Bearer ${token}` } }
         );
         setAutoFillData(autoFillRes.data);
@@ -109,7 +109,7 @@ export default function FormSubmissionDrawer({
       // Fetch existing submission for view/edit
       if ((mode === 'view' || mode === 'edit') && submissionId) {
         const subRes = await axios.get(
-          `${API}/api/form-submissions/${submissionId}`,
+          `${API}/form-submissions/${submissionId}`,
           { headers: { Authorization: `Bearer ${token}` } }
         );
         setExistingSubmission(subRes.data);
@@ -175,7 +175,7 @@ export default function FormSubmissionDrawer({
       if (mode === 'edit' && existingSubmission) {
         // Update existing submission
         await axios.put(
-          `${API}/api/form-submissions/${existingSubmission.id}`,
+          `${API}/form-submissions/${existingSubmission.id}`,
           {
             data: formData,
             status: status
@@ -186,7 +186,7 @@ export default function FormSubmissionDrawer({
       } else {
         // Create new submission
         await axios.post(
-          `${API}/api/form-submissions`,
+          `${API}/form-submissions`,
           {
             employee_id: employeeId,
             requirement_id: formKey,
@@ -216,7 +216,7 @@ export default function FormSubmissionDrawer({
     
     try {
       const response = await axios.get(
-        `${API}/api/form-submissions/${existingSubmission.id}/download-pdf`,
+        `${API}/form-submissions/${existingSubmission.id}/download-pdf`,
         { 
           headers: { Authorization: `Bearer ${token}` },
           responseType: 'blob'

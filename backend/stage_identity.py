@@ -2,7 +2,7 @@
 stage_identity.py - Applicant vs Employee Stage Identity
 
 Determines whether a person is in applicant or employee stage
-based on their status and recruitment_approved flag.
+from canonical lifecycle status only.
 """
 
 # Applicant statuses - person is still in recruitment pipeline
@@ -11,8 +11,19 @@ APPLICANT_STATUSES = ["new", "screening", "interview", "compliance_review"]
 # Employee statuses - person has been approved and is onboarding/working
 EMPLOYEE_STATUSES = ["onboarding", "active", "inactive"]
 
+# Legacy aliases normalized at read boundary only.
+LEGACY_STATUS_ALIASES = {
+    "active_employee": "active",
+}
+
 # All valid statuses
-ALL_STATUSES = APPLICANT_STATUSES + EMPLOYEE_STATUSES + ["archived"]
+ALL_STATUSES = APPLICANT_STATUSES + EMPLOYEE_STATUSES + ["archived"] + list(LEGACY_STATUS_ALIASES.keys())
+
+
+def normalize_lifecycle_status(status: str) -> str:
+    """Normalize legacy lifecycle status aliases to canonical values."""
+    normalized = (status or "new").strip().lower()
+    return LEGACY_STATUS_ALIASES.get(normalized, normalized)
 
 
 def get_stage_identity(person: dict) -> str:
@@ -28,11 +39,7 @@ def get_stage_identity(person: dict) -> str:
     if not person:
         return "applicant"
     
-    # recruitment_approved=true always means employee
-    if person.get("recruitment_approved") is True:
-        return "employee"
-    
-    status = person.get("status", "new")
+    status = normalize_lifecycle_status(person.get("status", "new"))
     
     # Check status-based identity
     if status in EMPLOYEE_STATUSES:
@@ -106,18 +113,12 @@ def build_stage_filter(stage_identity: str = None) -> dict:
     
     if stage_identity == "applicant":
         return {
-            "$and": [
-                {"recruitment_approved": {"$ne": True}},
-                {"status": {"$in": APPLICANT_STATUSES}}
-            ]
+            "status": {"$in": APPLICANT_STATUSES}
         }
     
     if stage_identity == "employee":
         return {
-            "$or": [
-                {"recruitment_approved": True},
-                {"status": {"$in": EMPLOYEE_STATUSES}}
-            ]
+            "status": {"$in": EMPLOYEE_STATUSES + ["active_employee"]}
         }
     
     return {}

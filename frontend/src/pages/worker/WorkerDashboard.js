@@ -27,6 +27,7 @@ import WorkerDashboardPage from '../../components/worker/WorkerDashboardPage';
 import DashboardHeader from '../../components/worker/DashboardHeader';
 import NextActionCard from '../../components/worker/NextActionCard';
 import { getAgreementDisplay, getCvDisplay, getTrainingDisplay } from '../../components/worker/dashboardStatus';
+import { getCanonicalPersonStage, isActiveLifecycleStatus, normalizeLifecycleStatus } from '../../lib/lifecycle';
 import { getLatestActiveContract, resolveLatestContractState } from '../../lib/contractState';
 import API_BASE from '../../utils/apiBase';
 
@@ -917,9 +918,8 @@ export default function WorkerDashboard() {
           ? dashboard.is_active_employee
           : (
               dashboardEmployee?.is_active_employee ||
-              dashboardEmployee?.employee_status === 'active_employee' ||
-              dashboardEmployee?.status === 'active_employee' ||
-              dashboardEmployee?.status === 'active'
+              isActiveLifecycleStatus(dashboardEmployee?.employee_status) ||
+              isActiveLifecycleStatus(dashboardEmployee?.status)
             );
       fetchCvStatus();
       fetchReferenceMismatches();
@@ -1795,17 +1795,17 @@ export default function WorkerDashboard() {
       ? dashboard.is_active_employee
       : (
           employee?.is_active_employee ||
-          employee?.employee_status === 'active_employee' ||
-          employee?.status === 'active_employee' ||
-          employee?.status === 'active'
+          isActiveLifecycleStatus(employee?.employee_status) ||
+          isActiveLifecycleStatus(employee?.status)
         );
+  const canonicalStage = getCanonicalPersonStage(employee);
   const isPreEmploymentEmployee =
     !isActiveEmployee && (
-      employee?.person_stage === 'employee' ||
+      canonicalStage === 'employee' ||
       employee?.is_approved ||
       employee?.recruitment_approved ||
-      employee?.employee_status === 'onboarding' ||
-      employee?.status === 'onboarding' ||
+      normalizeLifecycleStatus(employee?.employee_status) === 'onboarding' ||
+      normalizeLifecycleStatus(employee?.status) === 'onboarding' ||
       employee?.status === 'READY' ||
       contract_signed
     );

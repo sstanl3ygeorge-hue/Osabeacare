@@ -17,6 +17,7 @@ import { Textarea } from '../../components/ui/textarea';
 import EmployeeAvatar from '../../components/portal/EmployeeAvatar';
 import LifecycleReasonDialog from '../../components/portal/LifecycleReasonDialog';
 import { StageIdentityBadge } from '../../components/compliance';
+import { isActiveLifecycleStatus, normalizeLifecycleStatus } from '../../lib/lifecycle';
 import API_BASE from '../../utils/apiBase';
 
 const API = API_BASE;
@@ -302,12 +303,13 @@ export default function EmployeesPage() {
   };
 
   const getLifecycleStageLabel = (emp) => {
-    if (emp?.status === 'active' || emp?.status === 'active_employee') return 'Active Workforce';
-    if (emp?.status === 'inactive') return 'Inactive';
-    if (emp?.status === 'onboarding') {
+    const status = normalizeLifecycleStatus(emp?.status);
+    if (isActiveLifecycleStatus(status)) return 'Active Workforce';
+    if (status === 'inactive') return 'Inactive';
+    if (status === 'onboarding') {
       return canPromoteEmployee(emp) ? 'Eligible to move to Active' : 'Onboarding';
     }
-    return (emp?.status || 'Unknown').replace(/_/g, ' ');
+    return (status || 'Unknown').replace(/_/g, ' ');
   };
 
   const applyStagePreset = (preset) => {

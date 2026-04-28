@@ -64,6 +64,7 @@ import {
 } from 'lucide-react';
 import { FileUploaderInline } from '../../components/ui/file-uploader';
 import { formatBackendDate, formatBackendDateTime, parseBackendDate } from '../../lib/dateUtils';
+import { getCanonicalPersonStage, isActiveLifecycleStatus, normalizeLifecycleStatus } from '../../lib/lifecycle';
 import API_BASE from '../../utils/apiBase';
 import {
   fetchProtectedFileBlob,
@@ -221,16 +222,16 @@ export default function EmployeeProfilePage() {
   const [employee, setEmployee] = useState(null);
   const isActiveEmployee =
     employee?.is_active_employee ||
-    employee?.employee_status === 'active_employee' ||
-    employee?.status === 'active_employee' ||
-    employee?.status === 'active';
+    isActiveLifecycleStatus(employee?.employee_status) ||
+    isActiveLifecycleStatus(employee?.status);
+  const canonicalStage = getCanonicalPersonStage(employee);
   const isPreEmploymentEmployee =
     !isActiveEmployee && (
-      employee?.person_stage === 'employee' ||
+      canonicalStage === 'employee' ||
       employee?.is_approved ||
       employee?.recruitment_approved ||
-      employee?.employee_status === 'onboarding' ||
-      employee?.status === 'onboarding'
+      normalizeLifecycleStatus(employee?.employee_status) === 'onboarding' ||
+      normalizeLifecycleStatus(employee?.status) === 'onboarding'
     );
   const lifecycleStage = isActiveEmployee
     ? 'active'

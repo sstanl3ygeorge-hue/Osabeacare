@@ -34,17 +34,16 @@ export default function DashboardPage() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [statsRes, employeesRes, applicantsRes, expiryRes, recurringRes, trainingRes] = await Promise.all([
+        const results = await Promise.allSettled([
           axios.get(`${API}/dashboard/stats`, { headers: { Authorization: `Bearer ${token}` } }),
-          // Use staff/employees endpoint for employee-only data
           axios.get(`${API}/staff/employees`, { headers: { Authorization: `Bearer ${token}` } }),
-          // Also fetch applicants for dashboard metrics
-          axios.get(`${API}/recruitment/applicants`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => ({ data: [] })),
-          axios.get(`${API}/dashboard/expiry-alerts`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => ({ data: null })),
-          axios.get(`${API}/recurring-compliance/dashboard-summary`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => ({ data: null })),
-          axios.get(`${API}/dashboard/training-summary`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => ({ data: null }))
+          axios.get(`${API}/recruitment/applicants`, { headers: { Authorization: `Bearer ${token}` } }),
+          axios.get(`${API}/dashboard/expiry-alerts`, { headers: { Authorization: `Bearer ${token}` } }),
+          axios.get(`${API}/recurring-compliance/dashboard-summary`, { headers: { Authorization: `Bearer ${token}` } }),
+          axios.get(`${API}/dashboard/training-summary`, { headers: { Authorization: `Bearer ${token}` } })
         ]);
-        setStats(statsRes.data);
+        const [statsRes, employeesRes, applicantsRes, expiryRes, recurringRes, trainingRes] = results.map((r) => (r.status === 'fulfilled' ? r.value : { data: null }));
+        setStats(statsRes.data || {});
         // Ensure we only have employee-status records (staff, not applicants)
         const staffOnly = (employeesRes.data?.employees || employeesRes.data || [])
           .filter(e => ['onboarding', 'active', 'inactive'].includes(e.status));
@@ -853,4 +852,3 @@ export default function DashboardPage() {
     </div>
   );
 }
-

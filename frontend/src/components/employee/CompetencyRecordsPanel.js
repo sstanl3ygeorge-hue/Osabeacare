@@ -39,7 +39,7 @@ export default function CompetencyRecordsPanel({ employeeId, employeeName, isAud
       setLoading(true);
       const token = localStorage.getItem('token');
       
-      const [compRes, missingRes, typesRes] = await Promise.all([
+      const [compRes, missingRes, typesRes] = await Promise.allSettled([
         axios.get(`${API}/employees/${employeeId}/competencies`, {
           headers: { Authorization: `Bearer ${token}` }
         }),
@@ -48,12 +48,12 @@ export default function CompetencyRecordsPanel({ employeeId, employeeName, isAud
         }),
         axios.get(`${API}/competency-types`, {
           headers: { Authorization: `Bearer ${token}` }
-        }).catch(() => ({ data: { competency_types: [] } }))
+        })
       ]);
-      
-      setCompetencies(compRes.data.competencies || []);
-      setMissingCompetencies(missingRes.data || { missing_competencies: [], expiring_soon: [] });
-      setCompetencyTypes(typesRes.data.competency_types || []);
+
+      setCompetencies(compRes.status === 'fulfilled' ? (compRes.value.data.competencies || []) : []);
+      setMissingCompetencies(missingRes.status === 'fulfilled' ? (missingRes.value.data || { missing_competencies: [], expiring_soon: [] }) : { missing_competencies: [], expiring_soon: [] });
+      setCompetencyTypes(typesRes.status === 'fulfilled' ? (typesRes.value.data.competency_types || []) : []);
     } catch (error) {
       console.error('Failed to fetch competencies:', error);
     } finally {

@@ -14,6 +14,7 @@ all UI components (dashboard, profile, list badges, exports).
 """
 
 import logging
+import asyncio
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Dict, Any
 
@@ -557,16 +558,45 @@ async def check_recruitment_approval(
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
     
-    # Get compliance file sections
-    compliance_file = await get_compliance_file_data(employee_id, employee)
-    sections = compliance_file.get("sections", {})
-    
-    # Evaluate approval readiness (existing contract)
-    evaluation = evaluate_recruitment_approval(employee, sections)
+    try:
+        # P0 stability: timeout heavy helpers and return fallback instead of 502
+        compliance_file = await asyncio.wait_for(get_compliance_file_data(employee_id, employee), timeout=8.0)
+        sections = compliance_file.get("sections", {})
+        evaluation = evaluate_recruitment_approval(employee, sections)
+    except asyncio.TimeoutError:
+        logger.warning("recruitment-approval-check timeout employee_id=%s", employee_id)
+        return {
+            "employee_id": employee_id,
+            "can_approve": False,
+            "status_unavailable": True,
+            "message": "Status checks temporarily unavailable",
+            "blockers": [],
+            "warnings": [],
+            "verified_count": 0,
+            "required_count": 0,
+            "blocker_count": 0,
+        }
+    except Exception as exc:
+        logger.warning("recruitment-approval-check error employee_id=%s error=%s", employee_id, exc)
+        return {
+            "employee_id": employee_id,
+            "can_approve": False,
+            "status_unavailable": True,
+            "message": "Status checks temporarily unavailable",
+            "blockers": [],
+            "warnings": [],
+            "verified_count": 0,
+            "required_count": 0,
+            "blocker_count": 0,
+        }
 
     # Attach canonical interview truth from stage-gate resolver.
     stage_gate = StageGateService(db)
-    gate = await stage_gate.evaluate_recruitment_gate(employee_id)
+    try:
+        gate = await asyncio.wait_for(stage_gate.evaluate_recruitment_gate(employee_id), timeout=8.0)
+    except Exception as exc:
+        logger.warning("recruitment-approval-check gate fallback employee_id=%s error=%s", employee_id, exc)
+        gate = {"allowed": False, "blocking_items": [], "warning_items": []}
     interview = gate.get("interview") or {
         "exists": False,
         "completed": False,
@@ -633,12 +663,19 @@ async def check_recruitment_approval(
 
     # Domain-level blocker slices for UI summaries.
     get_unified_employee_status = get_unified_employee_status_func()
-    unified_status = await get_unified_employee_status(
-        employee_id,
-        db,
-        user_role="admin",
-        include_details=False,
-    )
+    try:
+        unified_status = await asyncio.wait_for(
+            get_unified_employee_status(
+                employee_id,
+                db,
+                user_role="admin",
+                include_details=False,
+            ),
+            timeout=8.0,
+        )
+    except Exception as exc:
+        logger.warning("recruitment-approval-check uce fallback employee_id=%s error=%s", employee_id, exc)
+        unified_status = {}
     uce_blockers = unified_status.get("blockers", []) if isinstance(unified_status, dict) else []
 
     def _domain_entries(domain_name: str):

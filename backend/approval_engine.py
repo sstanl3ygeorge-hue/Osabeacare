@@ -14,6 +14,7 @@ The approval engine:
 
 from typing import Optional
 from datetime import datetime, timezone
+from stage_identity import get_stage_identity
 
 # =============================================================================
 # ROLE-SPECIFIC APPROVAL REQUIREMENTS
@@ -357,9 +358,9 @@ def evaluate_recruitment_approval(
     # Determine approval status
     can_approve = len(blockers) == 0
     
-    # Determine stage identity
+    # Stage identity is lifecycle-status-driven; recruitment_* fields are telemetry only.
     is_already_approved = person.get("recruitment_approved", False)
-    stage_identity = "employee" if is_already_approved else "applicant"
+    stage_identity = get_stage_identity(person)
     
     return {
         "employee_id": person.get("id"),

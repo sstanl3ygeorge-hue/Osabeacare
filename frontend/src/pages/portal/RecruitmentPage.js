@@ -27,6 +27,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../../
 import { Info } from 'lucide-react';
 import EmployeeAvatar from '../../components/portal/EmployeeAvatar';
 import { cn } from '../../lib/utils';
+import { isApplicantStatus, normalizeLifecycleStatus } from '../../lib/lifecycle';
 import API_BASE from '../../utils/apiBase';
 
 const API = API_BASE;
@@ -65,6 +66,7 @@ export default function RecruitmentPage() {
   const [approvalNotes, setApprovalNotes] = useState('');
   const [isApproving, setIsApproving] = useState(false);
   const [loadingApprovalCheck, setLoadingApprovalCheck] = useState(null);
+  const [statusChecksUnavailable, setStatusChecksUnavailable] = useState(false);
 
   const canApprove = user?.role === 'super_admin' || user?.role === 'admin';
 
@@ -90,16 +92,18 @@ export default function RecruitmentPage() {
       const response = await axios.get(`${API}/recruitment/applicants?${params}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      setApplicants(response.data);
+      const applicantRows = (response.data || []).filter((person) => isApplicantStatus(person?.status));
+      setApplicants(applicantRows);
       
       // Fetch approval status for each applicant
-      response.data.forEach(applicant => {
+      applicantRows.forEach(applicant => {
         if (!applicant.recruitment_approved) {
           fetchApprovalStatus(applicant.id);
         }
       });
     } catch (error) {
       console.error('Failed to fetch applicants:', error);
+      setStatusChecksUnavailable(true);
     } finally {
       setLoading(false);
     }
@@ -124,11 +128,28 @@ export default function RecruitmentPage() {
         ...prev,
         [applicantId]: {
           ...approvalRes.data,
-          progressPct: progressRes.data.overall_percentage || 0
+          progressPct: progressRes.data.overall_percentage || 0,
+          status_unavailable: Boolean(approvalRes.data?.status_unavailable || progressRes.data?.status_unavailable)
         }
       }));
+      if (approvalRes.data?.status_unavailable || progressRes.data?.status_unavailable) {
+        setStatusChecksUnavailable(true);
+      }
     } catch (error) {
       console.error(`Failed to fetch approval status for ${applicantId}:`, error);
+      setStatusChecksUnavailable(true);
+      setApprovalData(prev => ({
+        ...prev,
+        [applicantId]: {
+          can_approve: false,
+          blocker_count: 0,
+          verified_count: 0,
+          required_count: 0,
+          progressPct: null,
+          status_unavailable: true,
+          message: 'Status unavailable'
+        }
+      }));
     }
   };
 
@@ -237,7 +258,8 @@ export default function RecruitmentPage() {
       canApprove: data.can_approve,
       blockerCount: data.blocker_count || 0,
       verifiedCount: data.verified_count || 0,
-      requiredCount: data.required_count || 0
+      requiredCount: data.required_count || 0,
+      statusUnavailable: Boolean(data.status_unavailable)
     };
   };
 
@@ -259,6 +281,12 @@ export default function RecruitmentPage() {
           View Staff
         </Button>
       </div>
+
+      {statusChecksUnavailable && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          Some status checks are temporarily unavailable. Applicant records are still accessible.
+        </div>
+      )}
 
       {/* Summary - Simplified (Pipeline stages removed) */}
       {pipeline && (
@@ -396,7 +424,7 @@ export default function RecruitmentPage() {
                           variant="outline" 
                           className={cn("text-xs", STAGE_COLORS[applicant.status])}
                         >
-                          {STAGE_LABELS[applicant.status] || applicant.status}
+                          {STAGE_LABELS[normalizeLifecycleStatus(applicant.status)] || normalizeLifecycleStatus(applicant.status)}
                         </Badge>
                         {/* Applicant Badge */}
                         <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 text-xs">
@@ -410,7 +438,12 @@ export default function RecruitmentPage() {
                       {approval ? (
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-4 text-sm">
-                            {approval.canApprove ? (
+                            {approval.statusUnavailable ? (
+                              <span className="flex items-center gap-1.5 text-slate-600 font-medium">
+                                <AlertTriangle className="w-4 h-4" />
+                                Status unavailable
+                              </span>
+                            ) : approval.canApprove ? (
                               <span className="flex items-center gap-1.5 text-emerald-600 font-medium">
                                 <CheckCircle className="w-4 h-4" />
                                 Ready for approval
@@ -422,12 +455,14 @@ export default function RecruitmentPage() {
                               </span>
                             )}
                           </div>
-                          <LabeledProgressBadge
-                            metricType="recruitment"
-                            completed={approval.verifiedCount}
-                            total={approval.requiredCount}
-                            size="sm"
-                          />
+                          {!approval.statusUnavailable && (
+                            <LabeledProgressBadge
+                              metricType="recruitment"
+                              completed={approval.verifiedCount}
+                              total={approval.requiredCount}
+                              size="sm"
+                            />
+                          )}
                         </div>
                       ) : (
                         <div className="flex items-center gap-2 text-sm text-text-muted">

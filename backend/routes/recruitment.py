@@ -994,7 +994,37 @@ async def get_recruitment_status(
     """Get full recruitment status including stage and approval."""
     db = get_db()
     
-    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    try:
+        employee = await asyncio.wait_for(db.employees.find_one({"id": employee_id}, {"_id": 0}), timeout=6.0)
+    except asyncio.TimeoutError:
+        logger.warning("recruitment-status timeout employee_id=%s", employee_id)
+        return {
+            "employee_id": employee_id,
+            "status_unavailable": True,
+            "message": "Recruitment status temporarily unavailable",
+            "status": None,
+            "person_stage": None,
+            "is_applicant": False,
+            "is_employee": False,
+            "recruitment_approved": False,
+            "recruitment_approved_at": None,
+            "employee_code": None
+        }
+    except Exception as exc:
+        logger.warning("recruitment-status error employee_id=%s error=%s", employee_id, exc)
+        return {
+            "employee_id": employee_id,
+            "status_unavailable": True,
+            "message": "Recruitment status temporarily unavailable",
+            "status": None,
+            "person_stage": None,
+            "is_applicant": False,
+            "is_employee": False,
+            "recruitment_approved": False,
+            "recruitment_approved_at": None,
+            "employee_code": None
+        }
+
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
     

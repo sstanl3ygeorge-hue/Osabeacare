@@ -28,6 +28,7 @@ from typing import Optional, List, Tuple
 from datetime import datetime, timezone, timedelta
 from bson import ObjectId
 from unified_compliance_engine import get_employee_competency
+from stage_identity import get_stage_identity, normalize_lifecycle_status
 
 # =============================================================================
 # ROLE-SPECIFIC WORK READINESS REQUIREMENTS
@@ -175,7 +176,7 @@ ROLE_REGISTRATION_REQUIREMENTS = {
 # Employee Status Values
 EMPLOYEE_STATUS_APPLICANT = "applicant"  # Initial application stage
 EMPLOYEE_STATUS_ONBOARDING = "onboarding"  # Conditional offer, checks in progress
-EMPLOYEE_STATUS_ACTIVE = "active_employee"  # Unconditional offer, cleared to work
+EMPLOYEE_STATUS_ACTIVE = "active"  # Unconditional offer, cleared to work
 EMPLOYEE_STATUS_SUSPENDED = "suspended"  # Temporarily not allowed to work
 EMPLOYEE_STATUS_ARCHIVED = "archived"  # Left organization
 
@@ -183,7 +184,7 @@ EMPLOYEE_STATUS_ARCHIVED = "archived"  # Left organization
 RECRUITMENT_STATUSES = [EMPLOYEE_STATUS_APPLICANT, EMPLOYEE_STATUS_ONBOARDING]
 
 # Statuses that appear in Active Employees (can work)
-ACTIVE_STATUSES = [EMPLOYEE_STATUS_ACTIVE]
+ACTIVE_STATUSES = [EMPLOYEE_STATUS_ACTIVE, "active_employee"]
 
 # Display labels for work readiness items
 WORK_READINESS_LABELS = {
@@ -1541,18 +1542,10 @@ async def evaluate_work_readiness(
     
     can_work = len(blockers) == 0
     
-    # Determine stage identity based on employee status field
-    employee_status = person.get("status", "applicant")
-    
-    # NHS two-status model:
-    # - Recruitment (Conditional Offer): applicant, onboarding
-    # - Active (Unconditional Offer): active_employee
-    if employee_status == EMPLOYEE_STATUS_ACTIVE:
-        stage_identity = "active_employee"
-    elif employee_status in [EMPLOYEE_STATUS_APPLICANT, EMPLOYEE_STATUS_ONBOARDING]:
-        stage_identity = "onboarding"
-    else:
-        stage_identity = "onboarding"  # Default to onboarding for unknown statuses
+    # Canonical lifecycle source is employees.status; normalize legacy aliases at read boundary.
+    employee_status = normalize_lifecycle_status(person.get("status", EMPLOYEE_STATUS_APPLICANT))
+    canonical_stage = get_stage_identity({"status": employee_status})
+    stage_identity = "active_employee" if (canonical_stage == "employee" and employee_status == EMPLOYEE_STATUS_ACTIVE) else "onboarding"
     
     # Work readiness status - NHS compliant (no READY_WITH_CONDITIONS)
     if can_work:

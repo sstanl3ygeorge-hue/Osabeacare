@@ -56,8 +56,8 @@ export default function ConsolidatedStatusPanel({
     setLoading(true);
     setLoadError(null);
     try {
-      // Fetch unified progress and pre-employment gates
-      const [progressRes, gatesRes] = await Promise.all([
+      // Fetch unified progress and pre-employment gates independently so one failure does not block panel shell.
+      const [progressRes, gatesRes] = await Promise.allSettled([
         axios.get(`${API}/employees/${employeeId}/unified-progress`, {
           headers: { Authorization: `Bearer ${token}` }
         }),
@@ -66,10 +66,20 @@ export default function ConsolidatedStatusPanel({
         })
       ]);
 
+      const progressData = progressRes.status === 'fulfilled'
+        ? progressRes.value.data
+        : { status_unavailable: true, overall_percentage: 0, completed_requirements: 0, total_requirements: 0, categories: {}, blockers: [], blocker_details: [] };
+      const gatesData = gatesRes.status === 'fulfilled'
+        ? gatesRes.value.data
+        : { status_unavailable: true, blockers: [], summary: { pending: 0, completed: 0, total: 0 } };
+
       setData({
-        progress: progressRes.data,
-        gates: gatesRes.data
+        progress: progressData,
+        gates: gatesData
       });
+      if (progressRes.status === 'rejected' && gatesRes.status === 'rejected') {
+        setLoadError('Unable to load readiness status');
+      }
     } catch (error) {
       console.error('Failed to fetch status:', error);
       setData(null);

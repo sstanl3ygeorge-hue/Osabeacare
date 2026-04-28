@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import DocumentExtractionReview from '../../components/documents/DocumentExtractionReview';
 import { formatBackendDate, formatBackendDateTime } from '../../lib/dateUtils';
+import { isActiveLifecycleStatus } from '../../lib/lifecycle';
 import API_BASE from '../../utils/apiBase';
 
 const API = API_BASE;
@@ -157,8 +158,7 @@ export default function TrainingPage() {
       
       setTraining(trainingRes.data || []);
       const activeWorkforceEmployees = (employeesRes.data || []).filter((employee) => {
-        const status = (employee?.status || '').toLowerCase();
-        return status === 'active' || status === 'active_employee';
+        return isActiveLifecycleStatus(employee?.status);
       });
       setEmployees(activeWorkforceEmployees);
       

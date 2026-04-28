@@ -304,6 +304,7 @@ export default function ComplianceCentrePage() {
   // Inspection Pack generation state
   const [generatingPack, setGeneratingPack] = useState(false);
   const [canonicalStaffReadiness, setCanonicalStaffReadiness] = useState(null);
+  const [statusUnavailable, setStatusUnavailable] = useState(false);
 
   useEffect(() => {
     fetchData();
@@ -311,12 +312,13 @@ export default function ComplianceCentrePage() {
 
   const fetchData = async () => {
     setLoading(true);
+    setStatusUnavailable(false);
     try {
       const insurancePromise = isAdmin()
         ? axios.get(`${API}/compliance/insurance`, { headers: { Authorization: `Bearer ${token}` } })
         : Promise.resolve({ data: [] });
 
-      const [dashRes, summaryRes, policiesRes, insuranceRes, incidentsRes, meetingsRes, auditsRes, employeesRes, assignmentsRes] = await Promise.all([
+      const settled = await Promise.allSettled([
         axios.get(`${API}/compliance/dashboard`, { headers: { Authorization: `Bearer ${token}` } }),
         axios.get(`${API}/compliance/centre-summary`, { headers: { Authorization: `Bearer ${token}` } }),
         axios.get(`${API}/compliance/policies`, { headers: { Authorization: `Bearer ${token}` } }),
@@ -330,15 +332,21 @@ export default function ComplianceCentrePage() {
         axios.get(`${API}/staff/employees`, { headers: { Authorization: `Bearer ${token}` } }),
         axios.get(`${API}/policy-assignments?include_inactive=true`, { headers: { Authorization: `Bearer ${token}` } })
       ]);
+      const [dashRes, summaryRes, policiesRes, insuranceRes, incidentsRes, meetingsRes, auditsRes, employeesRes, assignmentsRes] =
+        settled.map((r) => (r.status === 'fulfilled' ? r.value : { data: null }));
+      if (settled.some((r) => r.status === 'rejected')) setStatusUnavailable(true);
       
-      setDashboard(dashRes.data);
-      setCentreSummary(summaryRes.data);
-      setPolicies(policiesRes.data);
-      setInsurance(insuranceRes.data);
-      setIncidents(incidentsRes.data);
-      setStaffMeetings(meetingsRes.data);
-      setEmployerAudits(auditsRes.data);
-      const activeEmployees = employeesRes.data.filter(e => !['archived', 'withdrawn', 'superseded'].includes(e.status));
+      setDashboard(dashRes.data || null);
+      setCentreSummary(summaryRes.data || null);
+      setPolicies(Array.isArray(policiesRes.data) ? policiesRes.data : []);
+      setInsurance(Array.isArray(insuranceRes.data) ? insuranceRes.data : []);
+      setIncidents(Array.isArray(incidentsRes.data) ? incidentsRes.data : []);
+      setStaffMeetings(Array.isArray(meetingsRes.data) ? meetingsRes.data : []);
+      setEmployerAudits(Array.isArray(auditsRes.data) ? auditsRes.data : []);
+      const employeeRows = Array.isArray(employeesRes.data)
+        ? employeesRes.data
+        : (Array.isArray(employeesRes.data?.employees) ? employeesRes.data.employees : []);
+      const activeEmployees = employeeRows.filter(e => !['archived', 'withdrawn', 'superseded'].includes(e.status));
       setEmployees(activeEmployees);
       const staffForReadiness = activeEmployees.filter(e =>
         e.person_stage === 'employee' ||
@@ -357,7 +365,7 @@ export default function ComplianceCentrePage() {
         workReady,
         notReady: staffForReadiness.length - workReady
       });
-      setPolicyAssignments(assignmentsRes.data);
+      setPolicyAssignments(Array.isArray(assignmentsRes.data) ? assignmentsRes.data : []);
     } catch (error) {
       console.error('Failed to fetch compliance data:', error);
     } finally {
@@ -1134,6 +1142,11 @@ export default function ComplianceCentrePage() {
 
   return (
     <div className="space-y-6" data-testid="compliance-centre">
+      {statusUnavailable && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          Some status checks are temporarily unavailable. Core compliance data is still accessible.
+        </div>
+      )}
       {serviceUserIdFilter && (
         <div className="flex items-center justify-between rounded-lg border border-blue-200 bg-blue-50 px-3 py-2">
           <span className="text-sm text-blue-700 font-medium">Filtered by service user</span>

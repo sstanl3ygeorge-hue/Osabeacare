@@ -22,18 +22,22 @@ export default function AuditViewPage() {
   const [trainingAudit, setTrainingAudit] = useState(null);
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState(null);
+  const [statusUnavailable, setStatusUnavailable] = useState(false);
   const { token } = useAuth();
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [statsRes, empsRes, policiesRes, expiryRes, trainingRes] = await Promise.all([
+        setStatusUnavailable(false);
+        const settled = await Promise.allSettled([
           axios.get(`${API}/dashboard/stats`, { headers: { Authorization: `Bearer ${token}` } }),
           axios.get(`${API}/staff/employees`, { headers: { Authorization: `Bearer ${token}` } }),
           axios.get(`${API}/policies`, { headers: { Authorization: `Bearer ${token}` } }),
-          axios.get(`${API}/dashboard/expiry-alerts`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => ({ data: null })),
-          axios.get(`${API}/audit/training/summary`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => ({ data: null }))
+          axios.get(`${API}/dashboard/expiry-alerts`, { headers: { Authorization: `Bearer ${token}` } }),
+          axios.get(`${API}/audit/training/summary`, { headers: { Authorization: `Bearer ${token}` } })
         ]);
+        const [statsRes, empsRes, policiesRes, expiryRes, trainingRes] = settled.map((r) => (r.status === 'fulfilled' ? r.value : { data: null }));
+        if (settled.some((r) => r.status === 'rejected')) setStatusUnavailable(true);
         const staffRows = empsRes.data?.employees || empsRes.data || [];
         const employeeIds = staffRows.map((employee) => employee.id).filter(Boolean);
         const readinessRes = employeeIds.length > 0
@@ -45,12 +49,12 @@ export default function AuditViewPage() {
         const readinessByEmployeeId = new Map(
           (readinessRes.data || []).map((summary) => [summary.employee_id, summary])
         );
-        setStats(statsRes.data);
+        setStats(statsRes.data || {});
         setEmployees(staffRows.map((employee) => ({
           ...employee,
           canonical_readiness: readinessByEmployeeId.get(employee.id) || null
         })));
-        setPolicies(policiesRes.data);
+        setPolicies(Array.isArray(policiesRes.data) ? policiesRes.data : []);
         setExpiryAlerts(expiryRes.data);
         setTrainingAudit(trainingRes.data);
         setLastUpdated(new Date());
@@ -101,6 +105,11 @@ export default function AuditViewPage() {
 
   return (
     <div className="space-y-6" data-testid="audit-page">
+      {statusUnavailable && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          Some status checks are temporarily unavailable. Inspection view remains accessible.
+        </div>
+      )}
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -608,4 +617,3 @@ export default function AuditViewPage() {
     </div>
   );
 }
-

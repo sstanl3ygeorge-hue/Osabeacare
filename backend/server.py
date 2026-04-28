@@ -797,6 +797,49 @@ async def retrieve_file_bytes(file_url: str) -> tuple:
 
 app = FastAPI(title="Osabea Healthcare Solutions API")
 
+_P0_STABILITY_TIMEOUTS = {
+    "/api/auth/session-info": 4.0,
+    "/api/employees/": 10.0,
+    "/api/recruitment-status": 6.0,
+}
+
+def _p0_fallback_payload(path: str) -> dict:
+    if path == "/api/auth/session-info":
+        return {"session_expired": True, "expires_in_seconds": 0, "show_warning": False, "status_unavailable": True, "message": "Session check temporarily unavailable"}
+    if "/compliance-file" in path:
+        return {"status_unavailable": True, "message": "Compliance file temporarily unavailable", "sections": [], "serializer_version": "dual_row_v1"}
+    if "/compliance-requirements" in path:
+        return {"status_unavailable": True, "message": "Compliance requirements temporarily unavailable", "requirements": [], "summary": {"total_required": 0, "completed": 0, "verified": 0, "percent_complete": 0}}
+    if path.endswith("/unified-progress"):
+        return {"status_unavailable": True, "overall_percentage": 0, "completed_requirements": 0, "total_requirements": 0, "categories": {}, "category_details": {}, "is_work_ready": False, "can_promote": False}
+    if path.endswith("/recruitment-approval-check"):
+        return {"status_unavailable": True, "can_approve": False, "message": "Status checks temporarily unavailable", "blockers": [], "warnings": []}
+    if path.endswith("/recruitment-status"):
+        return {"status_unavailable": True, "message": "Recruitment status temporarily unavailable"}
+    return {"status_unavailable": True, "message": "Temporarily unavailable"}
+
+def _p0_timeout_for_path(path: str) -> float | None:
+    if path == "/api/auth/session-info":
+        return _P0_STABILITY_TIMEOUTS[path]
+    if path.endswith("/recruitment-status"):
+        return _P0_STABILITY_TIMEOUTS["/api/recruitment-status"]
+    if path.endswith("/compliance-file") or path.endswith("/compliance-requirements") or path.endswith("/unified-progress") or path.endswith("/recruitment-approval-check"):
+        return _P0_STABILITY_TIMEOUTS["/api/employees/"]
+    return None
+
+@app.middleware("http")
+async def p0_stability_wrapper(request, call_next):
+    path = request.url.path
+    timeout = _p0_timeout_for_path(path)
+    if timeout is None:
+        return await call_next(request)
+    try:
+        return await asyncio.wait_for(call_next(request), timeout=timeout)
+    except Exception as exc:
+        logger.warning(f"P0 stability fallback for {path}: {type(exc).__name__}: {exc}")
+        status_code = 503 if isinstance(exc, asyncio.TimeoutError) else 500
+        return JSONResponse(status_code=status_code, content=_p0_fallback_payload(path))
+
 
 # ── Global exception handler: return JSON (not plain text) for unhandled 500s ──
 from starlette.requests import Request
@@ -24756,11 +24799,81 @@ async def get_unified_progress(employee_id: str, user: dict = Depends(get_curren
     - NHS Level: Complete employment checks
     - CQC Level: Audit-ready with verifier names
     """
-    # P0 FIX: SINGLE SOURCE OF TRUTH - unified_compliance_engine
-    unified_status = await get_unified_employee_status(employee_id, db, user_role="admin", include_details=True)
-    
+    try:
+        # P0 stability guard: bounded UCE call and structured fallback on helper errors
+        unified_status = await asyncio.wait_for(
+            get_unified_employee_status(employee_id, db, user_role="admin", include_details=True),
+            timeout=8.0,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("unified-progress timeout employee_id=%s", employee_id)
+        return {
+            "employee_id": employee_id,
+            "overall_percentage": 0,
+            "completed_requirements": 0,
+            "total_requirements": 0,
+            "categories": {},
+            "category_details": {},
+            "blockers": ["Status temporarily unavailable"],
+            "blocker_details": [],
+            "legal_blockers": [],
+            "legal_blocker_details": [],
+            "internal_blockers": [],
+            "internal_blocker_details": [],
+            "is_work_ready": False,
+            "can_promote": False,
+            "role_requires_professional_registration": False,
+            "professional_registration_type": None,
+            "checks": {},
+            "status_unavailable": True,
+        }
+    except Exception as exc:
+        logger.warning("unified-progress error employee_id=%s error=%s", employee_id, exc)
+        return {
+            "employee_id": employee_id,
+            "overall_percentage": 0,
+            "completed_requirements": 0,
+            "total_requirements": 0,
+            "categories": {},
+            "category_details": {},
+            "blockers": ["Status temporarily unavailable"],
+            "blocker_details": [],
+            "legal_blockers": [],
+            "legal_blocker_details": [],
+            "internal_blockers": [],
+            "internal_blocker_details": [],
+            "is_work_ready": False,
+            "can_promote": False,
+            "role_requires_professional_registration": False,
+            "professional_registration_type": None,
+            "checks": {},
+            "status_unavailable": True,
+        }
+
     if unified_status.get("error"):
-        raise HTTPException(status_code=404, detail=unified_status["error"])
+        if unified_status["error"] == "Employee not found":
+            raise HTTPException(status_code=404, detail=unified_status["error"])
+        logger.warning("unified-progress helper error employee_id=%s error=%s", employee_id, unified_status.get("error"))
+        return {
+            "employee_id": employee_id,
+            "overall_percentage": 0,
+            "completed_requirements": 0,
+            "total_requirements": 0,
+            "categories": {},
+            "category_details": {},
+            "blockers": ["Status temporarily unavailable"],
+            "blocker_details": [],
+            "legal_blockers": [],
+            "legal_blocker_details": [],
+            "internal_blockers": [],
+            "internal_blocker_details": [],
+            "is_work_ready": False,
+            "can_promote": False,
+            "role_requires_professional_registration": False,
+            "professional_registration_type": None,
+            "checks": {},
+            "status_unavailable": True,
+        }
     
     # Determine professional registration requirements from role
     role = unified_status.get("role", "").lower()

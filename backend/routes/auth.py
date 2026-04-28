@@ -196,7 +196,13 @@ async def get_session_info(request: Request, user: dict = Depends(get_current_us
     token = auth_header.replace("Bearer ", "") if auth_header.startswith("Bearer ") else None
     
     if not token:
-        raise HTTPException(status_code=401, detail="No token provided")
+        return {
+            "session_expired": True,
+            "expires_in_seconds": 0,
+            "show_warning": False,
+            "status_unavailable": True,
+            "message": "No token provided"
+        }
     
     try:
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
@@ -227,7 +233,13 @@ async def get_session_info(request: Request, user: dict = Depends(get_current_us
         }
     except Exception as e:
         logger.warning(f"Session info error: {e}")
-        raise HTTPException(status_code=401, detail="Invalid session")
+        return {
+            "session_expired": True,
+            "expires_in_seconds": 0,
+            "show_warning": False,
+            "status_unavailable": True,
+            "message": "Session status unavailable"
+        }
 
 
 # Emergent Google OAuth session exchange

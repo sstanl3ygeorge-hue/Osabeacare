@@ -26,13 +26,13 @@ import {
 } from 'lucide-react';
 import { formatBackendDate } from '../../../lib/dateUtils';
 import {
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../../utils/apiBase';
   downloadBlobUrl,
   fetchProtectedFileBlob,
   revokeBlobUrlLater,
 } from '../../../lib/protectedFiles';
 
-const API = API_BASE_URL;
+const API = API_BASE;
 
 const PROOF_CHECK_ENDPOINTS = {
   right_to_work: (employeeId) =>

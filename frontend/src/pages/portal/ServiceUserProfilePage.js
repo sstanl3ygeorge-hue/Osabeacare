@@ -35,13 +35,13 @@ import FileUploader from '../../components/ui/file-uploader';
 import { formatBackendDate, parseBackendDate } from '../../lib/dateUtils';
 import { useAuth } from '../../context/AuthContext';
 import {
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
   fetchProtectedFileBlob,
   openBlobUrlInNewTab,
   revokeBlobUrlLater,
 } from '../../lib/protectedFiles';
 
-const API_URL = API_ROOT_URL;
+const API_URL = API_BASE;
 const CARE_PLAN_REQUIRED_SECTIONS = [
   'Personal information / This is me',
   'Consent and capacity',

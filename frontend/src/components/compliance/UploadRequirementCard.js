@@ -27,14 +27,14 @@ import {
 import { formatBackendDate } from '../../lib/dateUtils';
 import { getEvidenceRules } from './evidenceRules';
 import {
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
   fetchProtectedFileBlob,
   downloadBlobUrl,
   revokeBlobUrlLater,
 } from '../../lib/protectedFiles';
 
 // eslint-disable-next-line no-unused-vars
-const API = API_BASE_URL;
+const API = API_BASE;
 
 // Map requirement keys to check types for verification proof storage (used by RecordCheckDialog)
 // eslint-disable-next-line no-unused-vars

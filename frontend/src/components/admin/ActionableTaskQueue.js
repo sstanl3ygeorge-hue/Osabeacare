@@ -26,9 +26,9 @@ import {
 import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
 import { useAuth } from '../../context/AuthContext';
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
 
-const API = API_ROOT_URL;
+const API = API_BASE;
 
 export default function ActionableTaskQueue() {
   const { token } = useAuth();

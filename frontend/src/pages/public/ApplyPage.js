@@ -11,9 +11,9 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../..
 import { toast } from 'sonner';
 import { Loader2, CheckCircle, FileText, User, Briefcase, Clock, Shield, Heart, AlertTriangle, Upload, Plus, Trash2, ChevronRight, ChevronLeft, FileCheck, Phone, Mail } from 'lucide-react';
 import axios from 'axios';
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
 
-const API = API_BASE_URL;
+const API = API_BASE;
 
 const roles = [
   'Healthcare Assistant',

@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../utils/apiBase';
 
-const API = API_BASE_URL;
+const API = API_BASE;
 
 /**
  * Hook to fetch unified progress for an employee.

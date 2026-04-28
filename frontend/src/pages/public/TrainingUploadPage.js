@@ -10,9 +10,9 @@ import {
   Upload, Home, Clock, FileText, Plus, X, Send
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
 
-const API = API_ROOT_URL;
+const API = API_BASE;
 
 /**
  * TrainingUploadPage - Public page for employees to upload training certificates

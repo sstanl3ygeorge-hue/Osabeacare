@@ -23,12 +23,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { toast } from 'sonner';
 import { useAuth } from '../../context/AuthContext';
 import { 
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
   Loader2, CheckCircle, XCircle, AlertTriangle, Upload, 
   FileCheck, Eye, Globe, Shield
 } from 'lucide-react';
 
-const API = API_ROOT_URL;
+const API = API_BASE;
 
 const STAMP_TYPES = [
   {

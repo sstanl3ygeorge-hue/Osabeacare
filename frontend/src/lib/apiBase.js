@@ -9,13 +9,5 @@ const normalizeRoot = (value) => {
   return normalized;
 };
 
-export const API_ROOT_URL = normalizeRoot(process.env.REACT_APP_BACKEND_URL);
-export const API_BASE_URL = `${API_ROOT_URL}/api`;
-
-export const toApiUrl = (path = '') => {
-  if (!path) return API_BASE_URL;
-  if (/^https?:\/\//i.test(path)) return path;
-  if (path.startsWith('/api/')) return `${API_ROOT_URL}${path}`;
-  if (path.startsWith('/')) return `${API_BASE_URL}${path}`;
-  return `${API_BASE_URL}/${path}`;
-};
+import API_BASE from '../utils/apiBase';
+export default API_BASE;

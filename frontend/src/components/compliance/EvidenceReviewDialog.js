@@ -30,7 +30,8 @@ import {
   revokeBlobUrlLater,
 } from '../../lib/protectedFiles';
 
-const API = API_BASE_URL;
+import API_BASE from '../../utils/apiBase';
+const API = API_BASE;
 
 /**
  * EvidenceReviewDialog - Lightweight modal for reviewing uploaded evidence files
@@ -44,7 +45,7 @@ const API = API_BASE_URL;
  * - AND a Record Check has been completed
  */
 import { isPreviewableFile } from './complianceRequirementMap';
-import { API_BASE_URL, API_ROOT_URL } from './';
+// API_BASE_URL import removed; replaced with centralized API_BASE below.
 
 export default function EvidenceReviewDialog({
   isOpen,

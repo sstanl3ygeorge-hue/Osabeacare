@@ -62,12 +62,12 @@ import TrainingDetailDrawer from './TrainingDetailDrawer';
 import TrainingCertificateExtractor from './TrainingCertificateExtractor';
 import EvidenceReviewViewerDialog from '../compliance/EvidenceReviewViewerDialog';
 import {
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
   getPendingProposedTrainingItems,
   getTrainingLibraryBannerState,
 } from './trainingLibraryBanner';
 
-const API = API_ROOT_URL;
+const API = API_BASE;
 
 // Status styling for training items
 const STATUS_STYLES = {

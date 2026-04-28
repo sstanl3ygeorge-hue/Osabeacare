@@ -43,9 +43,9 @@ import {
   revokeBlobUrlLater,
 } from '../../lib/protectedFiles';
 import { isPreviewableFile } from './complianceRequirementMap';
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
 
-const API = API_BASE_URL;
+const API = API_BASE;
 
 /**
  * RequirementFilesDrawer - Shows all files for a requirement with full lifecycle data

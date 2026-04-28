@@ -10,9 +10,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog';
 import { Badge } from '../ui/badge';
 import { Plus, CalendarClock } from 'lucide-react';
 import { toast } from 'sonner';
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
 
-const API = API_BASE_URL;
+const API = API_BASE;
 
 function getBadgeVariant(nextDueAt) {
   if (!nextDueAt) return 'secondary';

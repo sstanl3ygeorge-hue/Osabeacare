@@ -8,9 +8,9 @@ import { Label } from '../../components/ui/label';
 import { User, Lock, Loader2, ArrowLeft, Eye, EyeOff, Mail, CheckCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { Link } from 'react-router-dom';
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
 
-const API = API_BASE_URL;
+const API = API_BASE;
 
 export default function WorkerLoginPage() {
   const navigate = useNavigate();

@@ -23,9 +23,9 @@ import {
 import { Label } from '../../components/ui/label';
 import { toast } from 'sonner';
 import { parseBackendDate } from '../../lib/dateUtils';
-import { API_BASE_URL, API_ROOT_URL } from './';
+import API_BASE from '../../utils/apiBase';
 
-const API_URL = API_ROOT_URL;
+const API_URL = API_BASE;
 
 export default function ServiceUsersPage() {
   const navigate = useNavigate();

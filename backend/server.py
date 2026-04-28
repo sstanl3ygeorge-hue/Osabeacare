@@ -8889,6 +8889,15 @@ async def sign_contract(
     resolved_status = (resolved_contract.get("status") or "").lower()
     if resolved_status == "awaiting_worker_signature":
         resolved_status = "pending_signature"
+    logger.info(
+        "worker_contract_sign_attempt employee_id=%s canonical_status=%s raw_status=%s source_record_id=%s template_version=%s rendered_file_url=%s",
+        employee_id,
+        resolved_status,
+        resolved_contract.get("raw_status") or resolved_contract.get("contract_state"),
+        resolved_contract.get("source_record_id"),
+        resolved_contract.get("template_version"),
+        resolved_contract.get("rendered_file_url"),
+    )
     if resolved_status in {"awaiting_company_countersignature", "fully_executed"}:
         return {
             "success": True,
@@ -8900,29 +8909,94 @@ async def sign_contract(
             "canonical_contract": resolved_contract,
         }
     if resolved_status != "pending_signature":
-        raise HTTPException(
+        return JSONResponse(
             status_code=409,
-            detail={
+            content={
                 "code": "already_has_active_contract",
                 "status": resolved_status or "unknown",
+                "message": "Contract is not in a worker-signable state",
                 "canonical_contract": resolved_contract,
             },
         )
 
     if not resolved_contract.get("source_record_id"):
-        raise HTTPException(
+        generated_id = (
+            resolved_contract.get("acknowledgement", {}) or {}
+        ).get("generated_contract_id")
+        if generated_id:
+            resolved_contract["source_record_id"] = generated_id
+        else:
+            latest_generated = await db.generated_contracts.find_one(
+                {
+                    "employee_id": employee_id,
+                    "status": {"$in": ["pending_signature", "awaiting_worker_signature"]},
+                    "$or": [
+                        {"superseded_by_contract_id": {"$exists": False}},
+                        {"superseded_by_contract_id": None},
+                        {"superseded_by_contract_id": ""},
+                    ],
+                },
+                {"_id": 0, "id": 1, "template_version": 1, "rendered_contract_pdf_url": 1, "file_url": 1},
+                sort=[("generated_at", -1), ("created_at", -1), ("id", -1)],
+            )
+            if latest_generated:
+                resolved_contract["source_record_id"] = latest_generated.get("id")
+                if not resolved_contract.get("template_version"):
+                    resolved_contract["template_version"] = latest_generated.get("template_version")
+                if not resolved_contract.get("rendered_file_url"):
+                    resolved_contract["rendered_file_url"] = (
+                        latest_generated.get("rendered_contract_pdf_url")
+                        or latest_generated.get("file_url")
+                    )
+
+    if not resolved_contract.get("template_version") or not resolved_contract.get("rendered_file_url"):
+        try:
+            await ensure_agreement_rendered(db, employee, CONTRACT_AGREEMENT_TYPE)
+            refreshed = await resolve_employee_agreement_state(db, employee, CONTRACT_AGREEMENT_TYPE)
+            if refreshed.get("source_record_id"):
+                resolved_contract["source_record_id"] = refreshed.get("source_record_id")
+            resolved_contract["template_version"] = resolved_contract.get("template_version") or refreshed.get("template_version")
+            resolved_contract["rendered_file_url"] = resolved_contract.get("rendered_file_url") or refreshed.get("rendered_file_url")
+        except ContractRenderError as e:
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "code": "render_issue",
+                    "status": resolved_status,
+                    "message": str(e),
+                    "canonical_contract": resolved_contract,
+                },
+            )
+
+    if not resolved_contract.get("source_record_id"):
+        return JSONResponse(
             status_code=409,
-            detail={"code": "missing_source_record_id", "status": resolved_status, "canonical_contract": resolved_contract},
+            content={
+                "code": "missing_source_record_id",
+                "status": resolved_status,
+                "message": "No active generated contract record available for signing",
+                "canonical_contract": resolved_contract,
+            },
         )
     if not resolved_contract.get("template_version"):
-        raise HTTPException(
+        return JSONResponse(
             status_code=409,
-            detail={"code": "missing_template_version", "status": resolved_status, "canonical_contract": resolved_contract},
+            content={
+                "code": "missing_template_version",
+                "status": resolved_status,
+                "message": "Contract template version is missing",
+                "canonical_contract": resolved_contract,
+            },
         )
     if not resolved_contract.get("rendered_file_url"):
-        raise HTTPException(
+        return JSONResponse(
             status_code=409,
-            detail={"code": "missing_render", "status": resolved_status, "canonical_contract": resolved_contract},
+            content={
+                "code": "missing_render",
+                "status": resolved_status,
+                "message": "Contract render is missing",
+                "canonical_contract": resolved_contract,
+            },
         )
 
     try:

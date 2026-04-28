@@ -103,6 +103,7 @@ from work_readiness_engine import (
     get_work_readiness_label,
     can_sign_contract
 )
+from services.compliance_requirement_resolver import resolve_compliance_requirement_state
 from supabase_storage import (
     download_file_from_storage,
     upload_file_to_storage,
@@ -8944,6 +8945,23 @@ async def sign_contract(
         resolved_contract.get("template_version"),
         resolved_contract.get("rendered_file_url"),
     )
+    requested_source_record_id = str(getattr(request, "source_record_id", "") or "").strip()
+    canonical_source_record_id = str(resolved_contract.get("source_record_id") or "").strip()
+    if requested_source_record_id and canonical_source_record_id and requested_source_record_id != canonical_source_record_id:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "code": "stale_target",
+                "message": "Requested contract source does not match canonical latest active contract",
+                "canonical_latest": {
+                    "source_record_id": resolved_contract.get("source_record_id"),
+                    "status": resolved_status or resolved_contract.get("raw_status") or "unknown",
+                    "template_version": resolved_contract.get("template_version"),
+                    "latest_active": resolved_contract.get("latest_active"),
+                },
+                "canonical_contract": resolved_contract,
+            },
+        )
     if resolved_status in {"awaiting_company_countersignature", "fully_executed"}:
         return {
             "success": True,
@@ -16970,6 +16988,77 @@ async def get_requirement_evidence(
     )
 
 
+def _build_stale_target_detail(
+    requirement_id: str,
+    canonical_state: dict,
+    message: str = "Requested target is stale. Refresh and retry with latest active evidence."
+) -> dict:
+    return {
+        "code": "stale_target",
+        "message": message,
+        "canonical_latest": {
+            "requirement_id": requirement_id,
+            "status": canonical_state.get("status"),
+            "document_count": canonical_state.get("document_count"),
+            "has_evidence": canonical_state.get("has_evidence"),
+            "status_unavailable": canonical_state.get("status_unavailable"),
+            "raw_refs": canonical_state.get("raw_refs") or {},
+            "warnings": canonical_state.get("warnings") or [],
+        },
+    }
+
+
+async def assert_canonical_compliance_target(
+    employee_id: str,
+    requirement_id: str,
+    *,
+    file_id: Optional[str] = None,
+) -> dict:
+    """
+    Soft stale-target guard for compliance mutations.
+    Raises HTTP 409 stale_target on canonical-unavailable or stale file target.
+    """
+    canonical_state = await resolve_compliance_requirement_state(
+        employee_id=employee_id,
+        requirement_id=requirement_id,
+        context={"db": db},
+    )
+
+    if canonical_state.get("status_unavailable"):
+        raise HTTPException(
+            status_code=409,
+            detail=_build_stale_target_detail(
+                requirement_id,
+                canonical_state,
+                message="Canonical compliance state is temporarily unavailable. Refresh and retry.",
+            ),
+        )
+
+    if file_id:
+        evidence = await get_requirement_evidence(
+            employee_id=employee_id,
+            requirement_id=requirement_id,
+            user={"user_id": "system", "role": "system"},
+        )
+        active_file_ids = {
+            str(f.get("file_id"))
+            for f in (evidence.evidence_files or [])
+            if str(f.get("status", "active")) == "active" and f.get("file_id")
+        }
+        parent_doc_ids = {
+            str(f.get("document_id"))
+            for f in (evidence.evidence_files or [])
+            if str(f.get("status", "active")) == "active" and f.get("document_id")
+        }
+        if str(file_id) not in active_file_ids and str(file_id) not in parent_doc_ids:
+            raise HTTPException(
+                status_code=409,
+                detail=_build_stale_target_detail(requirement_id, canonical_state),
+            )
+
+    return canonical_state
+
+
 @api_router.delete("/employees/{employee_id}/requirements/{requirement_id}/evidence/{file_id}")
 async def delete_requirement_evidence(
     employee_id: str,
@@ -16987,6 +17076,8 @@ async def delete_requirement_evidence(
     
     if not requirement:
         raise HTTPException(status_code=400, detail=f"Invalid requirement_id: {requirement_id}")
+    await assert_canonical_compliance_target(employee_id, requirement_id)
+    await assert_canonical_compliance_target(employee_id, requirement_id, file_id=file_id)
     
     req_type = requirement.get('type', 'document')
     now = datetime.now(timezone.utc).isoformat()
@@ -17079,6 +17170,8 @@ async def delete_requirement_evidence_permanently(
     
     if not requirement:
         raise HTTPException(status_code=400, detail=f"Invalid requirement_id: {requirement_id}")
+    await assert_canonical_compliance_target(employee_id, requirement_id)
+    await assert_canonical_compliance_target(employee_id, requirement_id, file_id=file_id)
     
     req_type = requirement.get('type', 'document')
     now = datetime.now(timezone.utc).isoformat()
@@ -17277,6 +17370,7 @@ async def remove_requirement_evidence_soft(
     
     if not requirement:
         raise HTTPException(status_code=400, detail=f"Invalid requirement_id: {requirement_id}")
+    await assert_canonical_compliance_target(employee_id, requirement_id, file_id=file_id)
     
     req_type = requirement.get('type', 'document')
     now = datetime.now(timezone.utc).isoformat()
@@ -17419,6 +17513,7 @@ async def replace_requirement_evidence(
     
     if not requirement:
         raise HTTPException(status_code=400, detail=f"Invalid requirement_id: {requirement_id}")
+    await assert_canonical_compliance_target(employee_id, requirement_id, file_id=file_id)
     
     req_type = requirement.get('type', 'document')
     now = datetime.now(timezone.utc).isoformat()
@@ -17813,6 +17908,7 @@ async def edit_evidence_metadata(
     employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
+    await assert_canonical_compliance_target(employee_id, requirement_id, file_id=file_id)
     
     user_doc = await db.users.find_one({"id": user['user_id']}, {"_id": 0})
     user_name = user_doc.get('name', user.get('email', 'Unknown')) if user_doc else user.get('email', 'Unknown')
@@ -19507,6 +19603,15 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
     # Track conditional requirements for summary info
     conditional_not_required = []
     
+    def _append_requirement_warning(req_obj: dict, warning: str) -> None:
+        if not warning:
+            return
+        warnings_list = req_obj.get("warnings")
+        if not isinstance(warnings_list, list):
+            warnings_list = []
+        warnings_list.append(str(warning))
+        req_obj["warnings"] = warnings_list
+
     for item in mandatory_items:
         req_id = item['id']
         req_type = item.get('type', 'document')
@@ -19974,6 +20079,115 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
                 if req['expiry_status']:
                     req['expiry_date'] = req['expiry_status'].get('expiry_date')
         
+        # P3 overlay: canonical compliance requirement resolver (read-only)
+        # Keep legacy row shape/details; only overlay safe state fields.
+        try:
+            resolver_context_docs = list(linked_docs) if req_type in ['document', 'form-generated'] else []
+            resolver_context_checks = []
+            if req_id in ["right_to_work", "right_to_work_documents", "right_to_work_evidence"]:
+                if current_rtw:
+                    resolver_context_checks = [{**current_rtw, "requirement_id": "right_to_work"}]
+            elif req_id in ["dbs", "dbs_certificate", "dbs_evidence", "dbs_certificate_evidence"]:
+                if current_dbs:
+                    resolver_context_checks = [{**current_dbs, "requirement_id": "dbs_certificate"}]
+
+            # P4 pass 1: low-risk synthetic canonical context for form/CV/reference families.
+            if req_type == "form-generated":
+                if req.get("form_submission"):
+                    fs = req["form_submission"]
+                    resolver_context_docs.append({
+                        "id": fs.get("id"),
+                        "requirement_id": req_id,
+                        "status": "accepted" if fs.get("verified") else "pending",
+                        "verified": bool(fs.get("verified")),
+                        "is_active": True,
+                        "updated_at": fs.get("verified_at") or fs.get("submitted_at"),
+                    })
+                    if fs.get("verified"):
+                        resolver_context_checks.append({
+                            "id": f"form_verify_{fs.get('id')}",
+                            "requirement_id": req_id,
+                            "status": "verified",
+                            "verified": True,
+                            "updated_at": fs.get("verified_at"),
+                        })
+                elif req.get("form"):
+                    fm = req["form"]
+                    resolver_context_docs.append({
+                        "id": fm.get("id"),
+                        "requirement_id": req_id,
+                        "status": "accepted" if req.get("verified") else ("pending" if fm.get("status") else "incomplete"),
+                        "verified": bool(req.get("verified")),
+                        "is_active": True,
+                        "updated_at": fm.get("completed_at"),
+                    })
+                    if req.get("verified"):
+                        resolver_context_checks.append({
+                            "id": f"form_check_{fm.get('id')}",
+                            "requirement_id": req_id,
+                            "status": "verified",
+                            "verified": True,
+                            "updated_at": req.get("verified_at"),
+                        })
+
+            if req_id == "cv":
+                for ef in evidence_files:
+                    resolver_context_docs.append({
+                        "id": ef.get("file_id") or ef.get("doc_id"),
+                        "requirement_id": req_id,
+                        "status": "accepted" if ef.get("verified") else "pending",
+                        "verified": bool(ef.get("verified")),
+                        "is_active": True,
+                        "updated_at": ef.get("uploaded_at"),
+                    })
+                if req.get("verified"):
+                    resolver_context_checks.append({
+                        "id": f"cv_check_{employee_id}",
+                        "requirement_id": req_id,
+                        "status": "verified",
+                        "verified": True,
+                        "updated_at": req.get("verified_at"),
+                    })
+
+            if req_type == "reference":
+                if req.get("status") in ["verified", "response_received", "sent", "declared"]:
+                    resolver_context_docs.append({
+                        "id": f"reference_doc_{req_id}_{employee_id}",
+                        "requirement_id": req_id,
+                        "status": "accepted" if req.get("is_verified") else "pending",
+                        "verified": bool(req.get("is_verified")),
+                        "is_active": True,
+                        "updated_at": req.get("verified_at"),
+                    })
+                if req.get("is_verified"):
+                    resolver_context_checks.append({
+                        "id": f"reference_check_{req_id}_{employee_id}",
+                        "requirement_id": req_id,
+                        "status": "verified",
+                        "verified": True,
+                        "updated_at": req.get("verified_at"),
+                    })
+
+            resolver_state = await resolve_compliance_requirement_state(
+                employee_id,
+                req_id,
+                context={
+                    "documents": resolver_context_docs,
+                    "check_rows": resolver_context_checks,
+                },
+            )
+            req["status"] = resolver_state.get("status") or req.get("status")
+            req["verified"] = bool(resolver_state.get("verified", req.get("verified", False)))
+            req["is_verified"] = req["verified"]
+            req["document_count"] = int(resolver_state.get("document_count", req.get("document_count", 0)))
+            req["has_evidence"] = bool(resolver_state.get("has_accepted_evidence", req.get("has_evidence", False)))
+            req["status_unavailable"] = bool(resolver_state.get("status_unavailable", False))
+            for w in resolver_state.get("warnings", []) or []:
+                _append_requirement_warning(req, w)
+        except Exception as exc:
+            req["status_unavailable"] = True
+            _append_requirement_warning(req, f"resolver_overlay_failed:{exc}")
+
         requirements.append(req)
     
     # ======== Calculate Expiry Alerts ========
@@ -22033,6 +22247,7 @@ async def verify_all_documents_in_requirement(employee_id: str, requirement_id: 
                 status_code=403,
                 detail=f"Legal/sensitive documents ({requirement_id}) require Admin verification."
             )
+    await assert_canonical_compliance_target(employee_id, requirement_id)
     
     now = datetime.now(timezone.utc).isoformat()
     
@@ -36645,6 +36860,10 @@ async def get_compliance_file_data(employee_id: str, employee: dict) -> dict:
     Internal helper to get compliance file data for approval evaluation.
     This mirrors the compliance-file endpoint logic but returns raw data.
     """
+    logger.warning(
+        "LEGACY_ADAPTER:get_compliance_file_data employee_id=%s using legacy compliance adapter shape",
+        employee_id,
+    )
     # This is a simplified version - we'll call the actual compliance file generation
     # For now, we construct the sections dict needed for approval evaluation
     
@@ -36885,7 +37104,11 @@ async def get_compliance_file_data(employee_id: str, employee: dict) -> dict:
         "rows": [await _build_employment_history_compliance_row(employee_id, employee)]
     }
     
-    return {"sections": sections}
+    return {
+        "sections": sections,
+        "legacy_adapter": True,
+        "adapter_warning": "legacy_compliance_file_data_adapter_in_use",
+    }
 
 
 @api_router.get("/employees/{employee_id}/compliance-file")
@@ -38493,6 +38716,58 @@ async def get_compliance_file(
             
             "counts_toward_readiness": False
         }
+
+    def _unavailable_row_fallback(row_key: str, row_title: str, row_type: str, warning: str, extra: dict = None) -> dict:
+        fallback = {
+            "key": row_key,
+            "title": row_title,
+            "row_type": row_type,
+            "status": "unavailable",
+            "status_summary": "Temporarily unavailable",
+            "status_unavailable": True,
+            "warnings": [str(warning)] if warning else ["row_unavailable"],
+            "allowed_actions": [],
+        }
+        if isinstance(extra, dict):
+            fallback.update(extra)
+        return fallback
+
+    def _safe_build_reference_row(ref_num: int) -> dict:
+        try:
+            return build_reference_row(ref_num)
+        except Exception as exc:
+            return _unavailable_row_fallback(
+                row_key=f"reference_{ref_num}",
+                row_title=f"Reference {ref_num}",
+                row_type="reference",
+                warning=f"reference_row_build_failed:{exc}",
+                extra={"affects_readiness": True, "is_verified": False},
+            )
+
+    def _safe_build_form_row(requirement_key: str, config: dict) -> dict:
+        try:
+            return build_form_row(requirement_key, config)
+        except Exception as exc:
+            title = (config or {}).get("title") or requirement_key.replace("_", " ").title()
+            return _unavailable_row_fallback(
+                row_key=requirement_key,
+                row_title=title,
+                row_type="form",
+                warning=f"form_row_build_failed:{exc}",
+                extra={"affects_readiness": bool((config or {}).get("affects_readiness", False)), "is_verified": False},
+            )
+
+    def _safe_build_cv_row() -> dict:
+        try:
+            return build_cv_row()
+        except Exception as exc:
+            return _unavailable_row_fallback(
+                row_key="cv",
+                row_title="CV / Resume",
+                row_type="evidence",
+                warning=f"cv_row_build_failed:{exc}",
+                extra={"affects_readiness": False, "is_verified": False, "files": [], "file_count": 0},
+            )
     
     # =========================================================================
     # BUILD DUAL-ROW SECTIONS
@@ -38606,8 +38881,8 @@ async def get_compliance_file(
         "references": {
             "title": "References",
             "rows": [
-                build_reference_row(1),
-                build_reference_row(2)
+                _safe_build_reference_row(1),
+                _safe_build_reference_row(2)
             ],
             "valid_count": sum([
                 1 if reference_verified_for_compliance_file(1) else 0,
@@ -38626,10 +38901,10 @@ async def get_compliance_file(
         "recruitment_record": {
             "title": "Recruitment Record",
             "rows": [
-                build_form_row("interview_record", FORM_REQUIREMENT_CONFIG["interview_record"]),
-                build_form_row("application_form", FORM_REQUIREMENT_CONFIG["application_form"]),
-                build_cv_row(),
-                build_form_row("recruitment_checklist", FORM_REQUIREMENT_CONFIG["recruitment_checklist"])
+                _safe_build_form_row("interview_record", FORM_REQUIREMENT_CONFIG["interview_record"]),
+                _safe_build_form_row("application_form", FORM_REQUIREMENT_CONFIG["application_form"]),
+                _safe_build_cv_row(),
+                _safe_build_form_row("recruitment_checklist", FORM_REQUIREMENT_CONFIG["recruitment_checklist"])
             ]
         },
         
@@ -38637,8 +38912,8 @@ async def get_compliance_file(
         "health_competency": {
             "title": "Health & Competency",
             "rows": [
-                build_form_row("staff_health_questionnaire", FORM_REQUIREMENT_CONFIG["staff_health_questionnaire"]),
-                build_form_row("induction", FORM_REQUIREMENT_CONFIG["induction"])
+                _safe_build_form_row("staff_health_questionnaire", FORM_REQUIREMENT_CONFIG["staff_health_questionnaire"]),
+                _safe_build_form_row("induction", FORM_REQUIREMENT_CONFIG["induction"])
             ]
         },
         
@@ -38646,19 +38921,98 @@ async def get_compliance_file(
         "admin_forms": {
             "title": "Admin Forms",
             "rows": [
-                build_form_row("staff_personal_info", FORM_REQUIREMENT_CONFIG["staff_personal_info"]),
-                build_form_row("hmrc_starter_checklist", FORM_REQUIREMENT_CONFIG["hmrc_starter_checklist"]),
-                build_form_row("emergency_contacts", FORM_REQUIREMENT_CONFIG["emergency_contacts"]),
-                build_form_row("equal_opportunities", FORM_REQUIREMENT_CONFIG["equal_opportunities"]),
-                build_form_row("conflict_of_interest", FORM_REQUIREMENT_CONFIG["conflict_of_interest"])
+                _safe_build_form_row("staff_personal_info", FORM_REQUIREMENT_CONFIG["staff_personal_info"]),
+                _safe_build_form_row("hmrc_starter_checklist", FORM_REQUIREMENT_CONFIG["hmrc_starter_checklist"]),
+                _safe_build_form_row("emergency_contacts", FORM_REQUIREMENT_CONFIG["emergency_contacts"]),
+                _safe_build_form_row("equal_opportunities", FORM_REQUIREMENT_CONFIG["equal_opportunities"]),
+                _safe_build_form_row("conflict_of_interest", FORM_REQUIREMENT_CONFIG["conflict_of_interest"])
             ]
         }
     }
-    
+
+    try:
+        employment_history_row = await _build_employment_history_compliance_row(employee_id, employee)
+    except Exception as exc:
+        employment_history_row = _unavailable_row_fallback(
+            row_key="employment_history_verification",
+            row_title="Employment Gap Review",
+            row_type="employment_gap",
+            warning=f"employment_history_row_build_failed:{exc}",
+            extra={"affects_readiness": True, "is_verified": False},
+        )
     sections["employment_history"] = {
         "title": "Employment History Verification",
-        "rows": [await _build_employment_history_compliance_row(employee_id, employee)]
+        "rows": [employment_history_row]
     }
+
+    # =========================================================================
+    # P3 overlay: canonical compliance requirement resolver (read-only)
+    # Keep legacy row shape/details; overlay only safe status fields.
+    # =========================================================================
+    resolver_requirement_map = {
+        "right_to_work_evidence": "right_to_work",
+        "right_to_work_check": "right_to_work",
+        "dbs_certificate_evidence": "dbs_certificate",
+        "dbs_status_check": "dbs_certificate",
+        "identity_evidence": "identity",
+        "identity_verification": "identity",
+        "proof_of_address_evidence": "proof_of_address",
+        "address_verification": "proof_of_address",
+    }
+
+    def _safe_append_row_warning(row: dict, warning: str) -> None:
+        if not warning:
+            return
+        row_warnings = row.get("warnings")
+        if not isinstance(row_warnings, list):
+            row_warnings = []
+        row_warnings.append(str(warning))
+        row["warnings"] = row_warnings
+
+    for section in sections.values():
+        rows = section.get("rows")
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            row_key = row.get("key")
+            requirement_id = resolver_requirement_map.get(row_key)
+            if not requirement_id:
+                continue
+            try:
+                row_docs = [
+                    d for d in documents
+                    if str(d.get("requirement_id") or "").strip().lower() == requirement_id.lower()
+                ]
+                row_checks = []
+                if requirement_id == "right_to_work" and rtw_check:
+                    row_checks = [{**rtw_check, "requirement_id": "right_to_work"}]
+                elif requirement_id == "dbs_certificate" and dbs_check:
+                    row_checks = [{**dbs_check, "requirement_id": "dbs_certificate"}]
+                elif requirement_id == "identity" and identity_check:
+                    row_checks = [{**identity_check, "requirement_id": "identity"}]
+                elif requirement_id == "proof_of_address" and address_check:
+                    row_checks = [{**address_check, "requirement_id": "proof_of_address"}]
+
+                resolver_state = await resolve_compliance_requirement_state(
+                    employee_id,
+                    requirement_id,
+                    context={
+                        "documents": row_docs,
+                        "check_rows": row_checks,
+                    },
+                )
+                row["status"] = resolver_state.get("status") or row.get("status")
+                verified_val = bool(resolver_state.get("verified", row.get("is_verified", False)))
+                row["is_verified"] = verified_val
+                row["verified"] = verified_val
+                row["document_count"] = int(resolver_state.get("document_count", row.get("document_count", row.get("file_count", 0) or 0)))
+                row["has_evidence"] = bool(resolver_state.get("has_accepted_evidence", row.get("has_files", False)))
+                row["status_unavailable"] = bool(resolver_state.get("status_unavailable", False))
+                for w in resolver_state.get("warnings", []) or []:
+                    _safe_append_row_warning(row, w)
+            except Exception as exc:
+                row["status_unavailable"] = True
+                _safe_append_row_warning(row, f"resolver_overlay_failed:{exc}")
     
     # =========================================================================
     # CALCULATE SUMMARY - P0 FIX: Use UNIFIED blockers from unified_compliance_engine

@@ -331,7 +331,8 @@ export function CheckSection({
                 size="sm"
                 variant="outline"
                 className="h-7 text-xs"
-                onClick={onRecordCheck}
+                onClick={() => typeof onRecordCheck === 'function' && onRecordCheck()}
+                disabled={typeof onRecordCheck !== 'function'}
                 data-testid={`${requirementKey}-edit-check-btn`}
               >
                 <Edit2 className="h-3 w-3 mr-1" />
@@ -342,7 +343,7 @@ export function CheckSection({
                   size="sm"
                   variant="ghost"
                   className="h-7 text-xs text-red-500 hover:text-red-700 hover:bg-red-50"
-                  onClick={onInvalidate}
+                  onClick={() => typeof onInvalidate === 'function' && onInvalidate()}
                   data-testid={`${requirementKey}-invalidate-check-btn`}
                 >
                   <Trash2 className="h-3 w-3 mr-1" />
@@ -379,8 +380,8 @@ export function CheckSection({
                 size="sm"
                 variant="default"
                 className="h-8 text-xs flex-shrink-0"
-                onClick={onRecordCheck}
-                disabled={!hasAcceptedEvidence}
+                onClick={() => typeof onRecordCheck === 'function' && onRecordCheck()}
+                disabled={!hasAcceptedEvidence || typeof onRecordCheck !== 'function'}
                 data-testid={`${requirementKey}-record-check-btn`}
               >
                 <Plus className="h-3.5 w-3.5 mr-1" />

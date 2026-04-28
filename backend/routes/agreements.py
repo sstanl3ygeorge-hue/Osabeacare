@@ -26,6 +26,11 @@ from .dependencies import (
     require_manager_or_admin,
     log_audit_action
 )
+from agreement_document_service import (
+    CONTRACT_AGREEMENT_TYPE,
+    HANDBOOK_AGREEMENT_TYPE,
+    resolve_employee_agreement_state,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +41,38 @@ AGREEMENT_TEMPLATE_IDS = {
 
 # ==================== ROUTER ====================
 router = APIRouter(tags=["Agreements"])
+
+
+def _canonical_latest_payload(resolved: dict) -> dict:
+    return {
+        "source_record_id": resolved.get("source_record_id"),
+        "status": resolved.get("status"),
+        "template_version": resolved.get("template_version"),
+        "latest_active": resolved.get("latest_active"),
+    }
+
+
+async def _guard_acknowledgement_target_is_latest(*, db, employee_id: str, agreement_type: str, acknowledgement_id: str):
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    canonical_type = (
+        HANDBOOK_AGREEMENT_TYPE
+        if agreement_type in {HANDBOOK_AGREEMENT_TYPE, "employee_handbook_acknowledgement"}
+        else CONTRACT_AGREEMENT_TYPE
+    )
+    resolved = await resolve_employee_agreement_state(db, employee, canonical_type)
+    latest_source_id = resolved.get("source_record_id")
+    if latest_source_id and acknowledgement_id and acknowledgement_id != latest_source_id:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "stale_target",
+                "message": "Acknowledgement target is not the canonical latest active record",
+                "canonical_latest": _canonical_latest_payload(resolved),
+            },
+        )
+    return resolved
 
 
 # ==================== PYDANTIC MODELS ====================
@@ -179,6 +216,19 @@ async def verify_agreement_acknowledgement(
     user: dict = Depends(require_manager_or_admin)
 ):
     """Verify an agreement acknowledgement."""
+    db = get_db()
+    existing = await db.agreement_acknowledgements.find_one(
+        {"id": acknowledgement_id, "employee_id": employee_id},
+        {"_id": 0, "agreement_type": 1},
+    )
+    if not existing:
+        raise HTTPException(status_code=404, detail="Acknowledgement not found")
+    await _guard_acknowledgement_target_is_latest(
+        db=db,
+        employee_id=employee_id,
+        agreement_type=existing.get("agreement_type") or HANDBOOK_AGREEMENT_TYPE,
+        acknowledgement_id=acknowledgement_id,
+    )
     AgreementAcknowledgementService = get_agreement_acknowledgement_service()
     result = await AgreementAcknowledgementService.verify_agreement(
         acknowledgement_id=acknowledgement_id,
@@ -200,6 +250,19 @@ async def reject_agreement_acknowledgement(
     user: dict = Depends(require_manager_or_admin)
 ):
     """Reject an agreement acknowledgement."""
+    db = get_db()
+    existing = await db.agreement_acknowledgements.find_one(
+        {"id": acknowledgement_id, "employee_id": employee_id},
+        {"_id": 0, "agreement_type": 1},
+    )
+    if not existing:
+        raise HTTPException(status_code=404, detail="Acknowledgement not found")
+    await _guard_acknowledgement_target_is_latest(
+        db=db,
+        employee_id=employee_id,
+        agreement_type=existing.get("agreement_type") or HANDBOOK_AGREEMENT_TYPE,
+        acknowledgement_id=acknowledgement_id,
+    )
     AgreementAcknowledgementService = get_agreement_acknowledgement_service()
     result = await AgreementAcknowledgementService.reject_agreement(
         acknowledgement_id=acknowledgement_id,
@@ -228,7 +291,21 @@ async def unverify_agreement_acknowledgement(
     """
     if not reason or len(reason.strip()) < 3:
         raise HTTPException(status_code=400, detail="Reason must be at least 3 characters")
-    
+
+    db = get_db()
+    existing = await db.agreement_acknowledgements.find_one(
+        {"id": acknowledgement_id, "employee_id": employee_id},
+        {"_id": 0, "agreement_type": 1},
+    )
+    if not existing:
+        raise HTTPException(status_code=404, detail="Acknowledgement not found")
+    await _guard_acknowledgement_target_is_latest(
+        db=db,
+        employee_id=employee_id,
+        agreement_type=existing.get("agreement_type") or HANDBOOK_AGREEMENT_TYPE,
+        acknowledgement_id=acknowledgement_id,
+    )
+
     AgreementAcknowledgementService = get_agreement_acknowledgement_service()
     result = await AgreementAcknowledgementService.unverify_agreement(
         acknowledgement_id=acknowledgement_id,
@@ -300,6 +377,12 @@ async def regenerate_agreement_acknowledgement(
         raise HTTPException(status_code=400, detail="Employee ID is required")
 
     agreement_type = existing.get("agreement_type")
+    await _guard_acknowledgement_target_is_latest(
+        db=db,
+        employee_id=employee_id,
+        agreement_type=agreement_type or HANDBOOK_AGREEMENT_TYPE,
+        acknowledgement_id=existing.get("id") or acknowledgement_id,
+    )
     template_id = existing.get("template_id") or AGREEMENT_TEMPLATE_IDS.get(agreement_type)
     if not template_id:
         raise HTTPException(status_code=400, detail="Agreement template is not configured")

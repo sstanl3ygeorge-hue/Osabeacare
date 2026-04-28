@@ -17,6 +17,8 @@ export function useComplianceWorkflow({
   requirementKey,
   evidenceFiles = [],
   checkRecord = null,
+  canonicalStatus = null,
+  statusUnavailable = false,
   isAdminView = true,
 }) {
   return useMemo(() => {
@@ -149,6 +151,26 @@ export function useComplianceWorkflow({
     }
 
     // ── Safeguard flags (used to show warning callouts in FinalStatusSection) ──
+    if (statusUnavailable) {
+      finalStatus = 'pending';
+      finalStatusLabel = 'Unavailable';
+    } else if (canonicalStatus) {
+      const normalized = String(canonicalStatus).toLowerCase();
+      if (normalized === 'verified') {
+        finalStatus = 'verified';
+        finalStatusLabel = 'Verified';
+      } else if (normalized === 'failed' || normalized === 'rejected') {
+        finalStatus = 'failed';
+        finalStatusLabel = 'Rejected / action required';
+      } else if (normalized === 'incomplete' || normalized === 'missing' || normalized === 'not_started') {
+        finalStatus = 'incomplete';
+        finalStatusLabel = 'Incomplete';
+      } else if (normalized === 'pending' || normalized === 'awaiting_check' || normalized === 'awaiting_verification' || normalized === 'evidence_under_review') {
+        finalStatus = 'pending';
+        finalStatusLabel = 'Awaiting review';
+      }
+    }
+
     const safeguards = {
       // A check record exists but evidence was removed → never show verified
       noEvidenceButCheckExists: !hasEvidence && hasCheck,
@@ -261,5 +283,5 @@ export function useComplianceWorkflow({
       // Safeguard flags
       safeguards,
     };
-  }, [requirementKey, evidenceFiles, checkRecord, isAdminView]);
+  }, [requirementKey, evidenceFiles, checkRecord, canonicalStatus, statusUnavailable, isAdminView]);
 }

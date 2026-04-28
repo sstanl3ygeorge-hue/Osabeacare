@@ -128,7 +128,9 @@ export function EvidenceSection({
 
   const handleConfirmRemove = () => {
     if (!removeDialog.docId) return;
-    onRemove(removeDialog.docId, removeReason.trim() || 'Uploaded in error');
+    if (typeof onRemove === 'function') {
+      onRemove(removeDialog.docId, removeReason.trim() || 'Uploaded in error');
+    }
     setRemoveDialog({ open: false, docId: null, fileName: '' });
     setRemoveReason('Uploaded in error');
   };
@@ -355,7 +357,7 @@ export function EvidenceSection({
                             ) : (
                               <DropdownMenuItem
                                 className="text-emerald-700 focus:bg-emerald-50 focus:text-emerald-800"
-                                onClick={() => onAccept(docId)}
+                                onClick={() => typeof onAccept === 'function' && onAccept(docId)}
                                 data-testid={`evidence-accept-${docId}`}
                               >
                                 <CheckCircle className="h-3.5 w-3.5 mr-2" />
@@ -364,7 +366,7 @@ export function EvidenceSection({
                             )}
                             <DropdownMenuItem
                               className="text-red-600 focus:bg-red-50 focus:text-red-700"
-                              onClick={() => onReviewFile(file)}
+                              onClick={() => typeof onReviewFile === 'function' && onReviewFile(file)}
                               data-testid={`evidence-reject-${docId}`}
                             >
                               <XCircle className="h-3.5 w-3.5 mr-2" />
@@ -374,7 +376,7 @@ export function EvidenceSection({
                           </>
                         )}
                         <DropdownMenuItem
-                          onClick={() => onRequestReplacement(docId)}
+                          onClick={() => typeof onRequestReplacement === 'function' && onRequestReplacement(docId)}
                           data-testid={`evidence-request-replacement-${docId}`}
                         >
                           <RefreshCw className="h-3.5 w-3.5 mr-2" />
@@ -420,7 +422,8 @@ export function EvidenceSection({
           size="sm"
           variant="outline"
           className="h-8 text-xs"
-          onClick={onUpload}
+          onClick={() => typeof onUpload === 'function' && onUpload()}
+          disabled={typeof onUpload !== 'function'}
           data-testid={`${requirementKey}-upload-evidence-btn`}
         >
           <Upload className="h-3.5 w-3.5 mr-1" />

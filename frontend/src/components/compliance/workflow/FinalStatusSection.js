@@ -68,7 +68,31 @@ const STATUS_DISPLAY = {
  *  requirementKey   — 'dbs' | 'right_to_work' | 'identity' | 'proof_of_address'
  *  checkRecord      — check_data from compliance-file (or null)
  */
-export function FinalStatusSection({ workflow, requirementKey, checkRecord }) {
+export function FinalStatusSection({ workflow, requirementKey, checkRecord, statusUnavailable = false }) {
+  if (statusUnavailable) {
+    return (
+      <div className="p-4 bg-gray-50/40" data-testid={`${requirementKey}-final-status-section`}>
+        <div className="flex items-center gap-2 mb-3">
+          <div className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 bg-gray-100 text-gray-500">
+            5
+          </div>
+          <h4 className="text-sm font-semibold text-text-primary">Final Status</h4>
+          <span className="text-xs text-text-muted">(system computed)</span>
+        </div>
+        <div className="flex items-start gap-3 p-3 rounded-lg border bg-gray-50 border-gray-200">
+          <AlertTriangle className="h-5 w-5 text-gray-500 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <Badge className="text-xs px-2 py-0.5 border font-semibold bg-gray-100 text-gray-700 border-gray-200">
+              Unavailable
+            </Badge>
+            <p className="text-xs text-gray-600 mt-1">
+              Compliance status is temporarily unavailable for this section.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
   const display =
     STATUS_DISPLAY[workflow.finalStatus] || STATUS_DISPLAY.pending;
   const Icon = display.icon;

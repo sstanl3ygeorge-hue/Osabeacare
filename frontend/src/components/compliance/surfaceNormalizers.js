@@ -246,6 +246,10 @@ export function normalizeUploadRequirementSurface({
   checks = [],
   freshness = null,  // PoA freshness data
   serverCounts = null,
+  canonicalStatus = null,
+  canonicalStatusUnavailable = false,
+  canonicalWarnings = [],
+  canonicalVerified = null,
 }) {
   const rules = getUploadRules(requirementKey);
   const activeFiles = files.filter(isActiveEvidenceFile);
@@ -268,7 +272,7 @@ export function normalizeUploadRequirementSurface({
   const validFreshOverride = requirementKey === 'proof_of_address'
     ? (freshness?.valid_count ?? undefined)
     : undefined;
-  const rowStatus = deriveUploadRowStatus({
+  let rowStatus = deriveUploadRowStatus({
     activeFiles,
     latestRequest,
     authoritativeCheck,
@@ -276,6 +280,11 @@ export function normalizeUploadRequirementSurface({
     activeCountOverride,
     validFreshOverride,
   });
+  if (canonicalStatusUnavailable) {
+    rowStatus = 'unavailable';
+  } else if (canonicalStatus) {
+    rowStatus = String(canonicalStatus).toLowerCase();
+  }
   
   // Build counters
   const counters = {
@@ -354,6 +363,10 @@ export function normalizeUploadRequirementSurface({
     counters,
     requestState,
     rowStatus,
+    canonicalStatus: canonicalStatus || null,
+    status_unavailable: canonicalStatusUnavailable,
+    warnings: Array.isArray(canonicalWarnings) ? canonicalWarnings : [],
+    verified: typeof canonicalVerified === 'boolean' ? canonicalVerified : counters.verified > 0,
     rules,
     freshness: requirementKey === 'proof_of_address' ? {
       validCount: counters.validFresh,

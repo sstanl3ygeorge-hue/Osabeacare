@@ -371,6 +371,13 @@ export default function DualRowComplianceSection({
       checks,
       freshness: sectionKey === 'proof_of_address' && checkRow ? checkRow.freshness : null,
       serverCounts: evidenceRow.counts || null,
+      canonicalStatus: evidenceRow.status || checkRow?.status || null,
+      canonicalStatusUnavailable: Boolean(evidenceRow.status_unavailable || checkRow?.status_unavailable),
+      canonicalWarnings: [
+        ...((Array.isArray(evidenceRow.warnings) ? evidenceRow.warnings : [])),
+        ...((Array.isArray(checkRow?.warnings) ? checkRow.warnings : []))
+      ],
+      canonicalVerified: Boolean(evidenceRow.is_verified || checkRow?.is_verified || evidenceRow.verified || checkRow?.verified),
     });
   };
 

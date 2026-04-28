@@ -135,19 +135,26 @@ export default function RequirementWorkflowCard({
       : null;
   const sectionTitle = sectionData?.title || requirementKey;
   const checkType = REQUIREMENT_TO_CHECK_TYPE[requirementKey] || requirementKey;
+  const rowUnavailable = Boolean(
+    sectionData?.status_unavailable ||
+    evidenceRow?.status_unavailable ||
+    checkRow?.status_unavailable
+  );
 
   // ── Derived workflow state ─────────────────────────────────────────────
   const workflow = useComplianceWorkflow({
     requirementKey,
     evidenceFiles,
     checkRecord,
+    canonicalStatus: evidenceRow?.status || checkRow?.status || sectionData?.status || null,
+    statusUnavailable: rowUnavailable,
     isAdminView,
   });
   const displaySteps = workflow.hasProofStep
     ? workflow.steps
     : workflow.steps.filter((step) => step.id !== 4);
   const canInvalidateCheck =
-    requirementKey === 'right_to_work' || requirementKey === 'dbs';
+    !rowUnavailable && (requirementKey === 'right_to_work' || requirementKey === 'dbs');
 
   const handleRefresh = useCallback(() => {
     if (onRefresh) onRefresh();
@@ -404,21 +411,26 @@ export default function RequirementWorkflowCard({
       {/* ── Section content ───────────────────────────────────────────── */}
       {isOpen && (
         <CardContent className="p-0 divide-y divide-gray-100">
+          {rowUnavailable && (
+            <div className="p-4 bg-gray-50 text-sm text-gray-700" data-testid={`${requirementKey}-status-unavailable`}>
+              Compliance status for this section is temporarily unavailable. Please refresh and try again.
+            </div>
+          )}
           {/* Steps 1 + 2: Evidence */}
           <EvidenceSection
             requirementKey={requirementKey}
-            files={evidenceFiles}
+            files={rowUnavailable ? [] : evidenceFiles}
             pendingRequests={evidenceRow?.pending_requests || []}
             counts={evidenceRow?.counts || {}}
             isAdminView={isAdminView}
-            onAccept={handleAcceptFile}
-            onReject={handleRejectFile}
-            onRemove={handleRemoveFile}
-            onRequestReplacement={handleRequestReplacement}
-            onReviewFile={(file) => setReviewDialog({ open: true, file })}
-            onViewAndApprove={usesEvidenceViewer ? (file) => setViewerDialog({ open: true, file }) : null}
+            onAccept={rowUnavailable ? null : handleAcceptFile}
+            onReject={rowUnavailable ? null : handleRejectFile}
+            onRemove={rowUnavailable ? null : handleRemoveFile}
+            onRequestReplacement={rowUnavailable ? null : handleRequestReplacement}
+            onReviewFile={rowUnavailable ? null : ((file) => setReviewDialog({ open: true, file }))}
+            onViewAndApprove={rowUnavailable ? null : (usesEvidenceViewer ? (file) => setViewerDialog({ open: true, file }) : null)}
             onPreviewFile={onPreviewFile}
-            onUpload={onUploadEvidence || (() => {})}
+            onUpload={rowUnavailable ? null : (onUploadEvidence || (() => {}))}
             workflow={workflow}
           />
 
@@ -426,10 +438,10 @@ export default function RequirementWorkflowCard({
           {workflow.hasCheckStage && (
             <CheckSection
               requirementKey={requirementKey}
-              checkRecord={checkRecord}
+              checkRecord={rowUnavailable ? null : checkRecord}
               hasAcceptedEvidence={workflow.hasAcceptedEvidence}
               isAdminView={isAdminView}
-              onRecordCheck={() => setCheckDialog({ open: true })}
+              onRecordCheck={rowUnavailable ? null : (() => setCheckDialog({ open: true }))}
               onInvalidate={canInvalidateCheck ? handleInvalidateCheck : null}
             />
           )}
@@ -454,7 +466,8 @@ export default function RequirementWorkflowCard({
           <FinalStatusSection
             workflow={workflow}
             requirementKey={requirementKey}
-            checkRecord={checkRecord}
+            checkRecord={rowUnavailable ? null : checkRecord}
+            statusUnavailable={rowUnavailable}
           />
         </CardContent>
       )}

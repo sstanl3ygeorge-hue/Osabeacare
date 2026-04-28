@@ -1682,6 +1682,26 @@ async def supersede_employee_contract(
     employee = await db.employees.find_one({"id": employee_id})
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
+
+    # Canonical guard: never let legacy supersede override an active worker-signable
+    # latest contract.
+    resolved_contract = await resolve_employee_agreement_state(db, employee, CONTRACT_AGREEMENT_TYPE)
+    canonical_status = str(resolved_contract.get("status") or "").strip().lower()
+    raw_status = str(resolved_contract.get("raw_status") or "").strip().lower()
+    if canonical_status == "pending_signature" or raw_status in {"awaiting_worker_signature", "pending_signature"}:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "stale_target",
+                "message": "Legacy supersede is blocked while an active canonical pending contract exists",
+                "canonical_latest": {
+                    "source_record_id": resolved_contract.get("source_record_id"),
+                    "status": canonical_status or raw_status or "unknown",
+                    "template_version": resolved_contract.get("template_version"),
+                    "latest_active": resolved_contract.get("latest_active"),
+                },
+            },
+        )
     
     # Find current active contract
     current_contract = await db.generated_contracts.find_one({

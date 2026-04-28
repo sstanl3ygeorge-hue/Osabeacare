@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+﻿import { useState, useEffect, useRef } from 'react';
 import { useParams, Link, useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import axios from 'axios';
 import { useAuth } from '../../context/AuthContext';
@@ -83,7 +83,7 @@ const FORM_BASED_REQUIREMENTS = [
   'hmrc_starter_checklist',
   'staff_personal_info',
   'staff_health_questionnaire',
-  // Worker-submittable forms — must open form viewer, not file upload
+  // Worker-submittable forms â€” must open form viewer, not file upload
   'emergency_contacts',
   'conflict_of_interest',
   'pre_interview_questionnaire',
@@ -1850,7 +1850,7 @@ export default function EmployeeProfilePage() {
         }
         
         // POST-UPLOAD FEEDBACK - Clear guidance on next step
-        toast.success('Document uploaded — please review and approve', {
+        toast.success('Document uploaded â€” please review and approve', {
           duration: 5000,
           description: 'Check the document is clear and correct, then mark as approved.'
         });
@@ -1872,7 +1872,7 @@ export default function EmployeeProfilePage() {
       }
       await Promise.all(refreshTasks);
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'Upload failed — please try again');
+      toast.error(error.response?.data?.detail || 'Upload failed â€” please try again');
     } finally {
       setIsUploading(false);
     }
@@ -3716,8 +3716,8 @@ export default function EmployeeProfilePage() {
   const cvLegacyNonPdfOnly = Boolean(!cvReviewReady && !cvLinkRecoveryAvailable && activeNonPdfCvCandidates.length > 0);
   // Display-only: surface the admin-requested replacement state alongside the
   // "On file" badge so the admin view does not silently contradict the
-  // readiness blocker ("CV was rejected — please upload a replacement") and
-  // the worker dashboard ("CV on file — replacement requested"). No new
+  // readiness blocker ("CV was rejected â€” please upload a replacement") and
+  // the worker dashboard ("CV on file â€” replacement requested"). No new
   // truth: reads employee.cv_status directly from the backend record.
   const cvReplacementPending = ['rejected', 'replacement_requested'].includes(
     (employee?.cv_status || '').toLowerCase()
@@ -3825,7 +3825,7 @@ export default function EmployeeProfilePage() {
   // CV linkage is supporting evidence, not a sign-off prerequisite.
   // The mandatory chain is: application form + employment history + coverage + gaps + declarations.
   // A CV may not exist (e.g. entry-level workers) and that already does not block sign-off,
-  // so an unlinked/non-PDF CV should not block either — it is surfaced as a warning instead.
+  // so an unlinked/non-PDF CV should not block either â€” it is surfaced as a warning instead.
   const cvLinkBlocksReview = Boolean(cvFileExists && !cvReviewReady && employee?.cv_status !== 'approved');
   // Pre-conditions gate: all data requirements satisfied, ready for admin sign-off
   // Coverage must be met AND all gaps resolved
@@ -3894,7 +3894,7 @@ export default function EmployeeProfilePage() {
     !applicationAvailable ? 'Application evidence missing' : null,
     !declarationsAdequatelyReviewed ? 'Declarations not reviewed' : null,
     !employmentHistoryExists ? 'Employment history missing' : null,
-    !employmentCoverage ? 'Coverage not assessed — run gap analysis' : null,
+    !employmentCoverage ? 'Coverage not assessed â€” run gap analysis' : null,
     (employmentCoverage && !coverageAssessed) ? 'Cannot assess 10-year coverage from current data' : null,
     (coverageAssessed && !coverageMet) ? '10-year coverage not met' : null,
     employmentGapsCannotAssess ? 'Unable to confirm gaps from the current history' : null,
@@ -3913,7 +3913,7 @@ export default function EmployeeProfilePage() {
         ...canonicalReviewBlockers,
       ].filter(Boolean)
     : legacyEmploymentStatusBlockers;
-  // CV is supporting evidence only — it does not block sign-off.
+  // CV is supporting evidence only â€” it does not block sign-off.
   // Employment history comes from the application form.
   const employmentStatusWarnings = [].filter(Boolean);
 
@@ -4049,7 +4049,7 @@ export default function EmployeeProfilePage() {
                   {employee.first_name} {employee.last_name}
                 </h1>
                 <p className="text-text-muted">
-                  {employee.employee_code || employee.applicant_reference || 'No ID assigned'} · {employee.role}
+                  {employee.employee_code || employee.applicant_reference || 'No ID assigned'} Â· {employee.role}
                 </p>
                 <div className="flex items-center gap-2 mt-2 flex-wrap">
                   {/* Person Stage Badge - CLEAR APPLICANT VS STAFF DISTINCTION */}
@@ -4070,7 +4070,7 @@ export default function EmployeeProfilePage() {
                   }`}>
                     {employee.status === 'compliance_review' ? 'Awaiting Approval' : employee.status?.replace('_', ' ')}
                   </span>
-                  {/* Simplified Status Flow: Awaiting Approval → Ready → Active Employee */}
+                  {/* Simplified Status Flow: Awaiting Approval â†’ Ready â†’ Active Employee */}
                   {(() => {
                     // Active Employee - already promoted
                     if (employee.status === 'active_employee') {
@@ -4236,219 +4236,137 @@ export default function EmployeeProfilePage() {
             </div>
           </div>
 
-          {/* AUDIT QUICK VIEW - Key compliance items at a glance */}
+                    {/* AUDIT QUICK VIEW - Key compliance items at a glance */}
           {(() => {
-            // Extract key compliance data for audit visibility
-            const reqs = complianceRequirements?.requirements || [];
-            
-            // SAFETY ENGINES - USE COMPUTED DATA FROM API (single source of truth)
-            const rtwSummary = complianceRequirements?.rtw_summary || {};
+            const categories = unifiedProgress?.categories || {};
+            const trainingCategory = categories?.training || {};
+            const agreementsCategory = categories?.agreements || {};
+            const inductionCategory = categories?.induction || {};
             const dbsSummary = complianceRequirements?.dbs_summary || {};
-            // DBS info from safety engine
-            const dbsExpiry = dbsSummary.review_due_date || dbsSummary.next_dbs_review_due;
-            const dbsExpiryDays = dbsSummary.days_remaining;
-            const dbsWorkflowStatus = getComplianceFileWorkflowStatus(complianceFile, 'dbs');
-            const dbsTone = dbsWorkflowStatus?.tone || (
-              dbsSummary.is_blocking || dbsSummary.dbs_status_color === 'red' ? 'red' :
-              dbsSummary.status_band === 'urgent' || dbsSummary.status_band === 'due_soon' ? 'amber' :
-              dbsSummary.dbs_status_color === 'green' ? 'green' : 'blue'
-            );
-            const dbsClasses = quickViewToneClasses[dbsTone] || quickViewToneClasses.blue;
-            const dbsBlocking = dbsWorkflowStatus ? dbsWorkflowStatus.isBlocking : dbsSummary.is_blocking;
-            
-            // RTW info from safety engine
-            const rtwExpiry = rtwSummary.expiry_date;
-            const rtwExpiryDays = rtwSummary.days_remaining;
-            const rtwWorkflowStatus = getComplianceFileWorkflowStatus(complianceFile, 'right_to_work');
-            const rtwTone = rtwWorkflowStatus?.tone || (
-              rtwSummary.rtw_status_color === 'red' || rtwSummary.status_band === 'expired' ? 'red' :
-              rtwSummary.rtw_status_color === 'amber' || rtwSummary.status_band === 'urgent' || rtwSummary.status_band === 'due_soon' ? 'amber' :
-              rtwSummary.rtw_status_color === 'green' ? 'green' :
-              rtwSummary.rtw_status_color === 'gray' || !rtwSummary.is_verified ? 'gray' : 'blue'
-            );
-            const rtwClasses = quickViewToneClasses[rtwTone] || quickViewToneClasses.blue;
-            
-            const canonicalCategories = canonicalProgress?.categories || {};
-            const categoryAliasMap = {
-              legalSafety: ['documents', 'agreements', 'references'],
-              training: ['training', 'induction'],
-              health: ['forms', 'competencies'],
-              recruitment: ['employment_review', 'application', 'pre_employment'],
+            const rtwSummary = complianceRequirements?.rtw_summary || {};
+            const dbsWorkflow = getComplianceFileWorkflowStatus(complianceFile, 'dbs') || {};
+            const rtwWorkflow = getComplianceFileWorkflowStatus(complianceFile, 'right_to_work') || {};
+            const blockers = asArray(canonicalBlockerObjects).filter((b) => String(b?.severity || '').toLowerCase() !== 'info');
+
+            const toDate = (value) => (value ? formatBackendDate(value) : 'Unavailable');
+            const toDays = (value) => (typeof value === 'number' ? `${value}d` : 'Unavailable');
+            const tone = (status, daysRemaining) => {
+              const s = String(status || '').toLowerCase();
+              if (s.includes('expired') || s.includes('missing') || s.includes('rejected')) return 'red';
+              if (s.includes('pending') || s.includes('awaiting') || s.includes('required') || s.includes('review')) return 'amber';
+              if (typeof daysRemaining === 'number' && daysRemaining < 0) return 'red';
+              if (typeof daysRemaining === 'number' && daysRemaining <= 60) return 'amber';
+              if (s.includes('verified') || s.includes('complete')) return 'green';
+              return 'gray';
             };
-            const getCategoryStats = (aliases) => aliases.reduce(
-              (acc, key) => {
-                const row = canonicalCategories[key] || {};
-                const total = Number(row.total || 0);
-                const completed = Number(row.completed || 0);
-                acc.required += total;
-                acc.completed += completed;
-                return acc;
-              },
-              { required: 0, completed: 0 },
-            );
-            const blockerText = (value) => (value === 1 ? '1 blocker' : `${value} blockers`);
-            const mappedCanonicalBlockers = canonicalBlockerObjects.map((b) => {
-              const gate = String(b?.gate || b?.id || '').toLowerCase();
-              const category = String(b?.category || '').toLowerCase();
-              if (category === 'training' || category === 'induction') return 'training';
-              if (['contract_signed', 'handbook_acknowledged', 'agreements'].some((x) => gate.includes(x))) return 'legalSafety';
-              if (['dbs', 'right_to_work', 'identity', 'documents', 'reference'].some((x) => gate.includes(x))) return 'legalSafety';
-              if (['health', 'staff_health', 'competenc'].some((x) => gate.includes(x))) return 'health';
-              if (['employment', 'recruit', 'pre_employment', 'application'].some((x) => gate.includes(x))) return 'recruitment';
-              return null;
-            });
-            const countBlockers = (bucket) => mappedCanonicalBlockers.filter((x) => x === bucket).length;
-            const quickCards = [
-              { key: 'legalSafety', title: 'Legal & Safety', stats: getCategoryStats(categoryAliasMap.legalSafety), blockers: countBlockers('legalSafety') },
-              { key: 'training', title: 'Training', stats: getCategoryStats(categoryAliasMap.training), blockers: countBlockers('training') },
-              { key: 'health', title: 'Health', stats: getCategoryStats(categoryAliasMap.health), blockers: countBlockers('health') },
-              { key: 'recruitment', title: 'Recruitment', stats: getCategoryStats(categoryAliasMap.recruitment), blockers: countBlockers('recruitment') },
-            ].map((card) => {
-              const required = card.stats.required;
-              const completed = card.stats.completed;
-              const complete = required > 0 ? completed >= required : card.blockers === 0;
-              const hasBlockers = card.blockers > 0;
-              const tone = hasBlockers ? 'red' : complete ? 'green' : 'amber';
-              return { ...card, required, completed, complete, tone };
-            });
-            
+
+            const dbsStatus = dbsWorkflow?.label || dbsSummary?.dbs_status_label || (dbsSummary?.is_verified ? 'Verified' : 'Unavailable');
+            const dbsChecked = dbsSummary?.checked_at || dbsSummary?.verified_at || null;
+            const dbsReview = dbsSummary?.review_due_date || dbsSummary?.next_dbs_review_due || null;
+            const dbsDays = Number.isFinite(dbsSummary?.days_until_review)
+              ? dbsSummary.days_until_review
+              : (Number.isFinite(dbsSummary?.days_remaining) ? dbsSummary.days_remaining : null);
+
+            const rtwStatus = rtwWorkflow?.label || rtwSummary?.rtw_status_label || (rtwSummary?.is_verified ? 'Verified' : 'Unavailable');
+            const rtwChecked = rtwSummary?.checked_at || rtwSummary?.verified_at || null;
+            const rtwExpiry = rtwSummary?.expiry_date || null;
+            const rtwDays = Number.isFinite(rtwSummary?.days_until_expiry)
+              ? rtwSummary.days_until_expiry
+              : (Number.isFinite(rtwSummary?.days_remaining) ? rtwSummary.days_remaining : null);
+
+            const trainingItems = asArray(trainingCategory?.items);
+            const trainingRequired = Number.isFinite(trainingCategory?.total) ? trainingCategory.total : null;
+            const trainingCompleted = Number.isFinite(trainingCategory?.completed) ? trainingCategory.completed : null;
+            const trainingExpiring = trainingItems.filter((i) => String(i?.status || '').toLowerCase() === 'expiring_soon').length;
+            const trainingExpired = trainingItems.filter((i) => String(i?.status || '').toLowerCase() === 'expired').length;
+            const trainingTone = trainingRequired == null || trainingCompleted == null
+              ? 'gray'
+              : (trainingExpired > 0 ? 'red' : (trainingCompleted < trainingRequired || trainingExpiring > 0 ? 'amber' : 'green'));
+
+            const agreementItems = asArray(agreementsCategory?.items);
+            const contractStatus = agreementItems.find((i) => String(i?.id || '').includes('contract'))?.status || 'Unavailable';
+            const handbookStatus = agreementItems.find((i) => String(i?.id || '').includes('handbook'))?.status || 'Unavailable';
+            const inductionCompleted = Number.isFinite(inductionCategory?.completed) ? inductionCategory.completed : null;
+            const inductionRequired = Number.isFinite(inductionCategory?.total) ? inductionCategory.total : null;
+            const agreementsTone = tone(`${contractStatus} ${handbookStatus}`, null);
+
+            const cardClass = (t) => (quickViewToneClasses[t] || quickViewToneClasses.gray).card;
+            const textClass = (t) => (quickViewToneClasses[t] || quickViewToneClasses.gray).text;
+            const iconClass = (t) => (quickViewToneClasses[t] || quickViewToneClasses.gray).icon;
+
             return (
               <div className="mt-6 pt-6 border-t border-[#E4E8EB]">
-                {/* Audit Quick View Header */}
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wider">Audit Quick View</h3>
-                  <p className="text-xs text-text-muted">Key compliance items for checker review</p>
+                  <p className="text-xs text-text-muted">Canonical compliance summary for checker review</p>
                 </div>
-                
-                {/* Quick Status Cards — horizontal scroll so more cards can be added without crowding */}
-                <div className="overflow-x-auto -mx-1 px-1 pb-2" data-testid="audit-quick-view">
-                  <div className="flex gap-3" style={{ minWidth: 'max-content' }}>
-                  {/* DBS Status with Expiry */}
-                  <div
-                    className={`p-3 rounded-xl border w-52 shrink-0 cursor-pointer hover:shadow-md transition-shadow ${dbsClasses.card}`}
-                    data-testid="dbs-status-card"
-                    onClick={() => setActiveTab('checklist')}
-                    title="Go to Checks & Evidence"
-                  >
-                    <div className="flex items-center gap-2 mb-1">
-                      <Shield className={`h-4 w-4 ${dbsClasses.icon}`} />
-                      <span className="text-xs font-semibold text-text-primary">DBS</span>
-                      {dbsBlocking && <span className="text-xs px-1 py-0.5 bg-red-600 text-white rounded">ACTION</span>}
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3" data-testid="audit-quick-view">
+                  <div className={`rounded-xl border p-3 ${cardClass(tone(dbsStatus, dbsDays))}`}>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-semibold text-text-primary">DBS</span>
+                      <Shield className={`h-4 w-4 ${iconClass(tone(dbsStatus, dbsDays))}`} />
                     </div>
-                    <p className={`text-sm font-medium ${dbsClasses.text}`}>
-                      {dbsWorkflowStatus?.label || dbsSummary.dbs_status_label || 'Unknown'}
+                    <p className={`text-sm font-semibold mt-1 ${textClass(tone(dbsStatus, dbsDays))}`}>{dbsStatus}</p>
+                    <p className="text-xs text-text-muted mt-1">Check date: {toDate(dbsChecked)}</p>
+                    <p className="text-xs text-text-muted">Review date: {toDate(dbsReview)}</p>
+                    <p className="text-xs text-text-muted">Days remaining: {toDays(dbsDays)}</p>
+                  </div>
+
+                  <div className={`rounded-xl border p-3 ${cardClass(tone(rtwStatus, rtwDays))}`}>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-semibold text-text-primary">Right to Work</span>
+                      <FileCheck className={`h-4 w-4 ${iconClass(tone(rtwStatus, rtwDays))}`} />
+                    </div>
+                    <p className={`text-sm font-semibold mt-1 ${textClass(tone(rtwStatus, rtwDays))}`}>{rtwStatus}</p>
+                    <p className="text-xs text-text-muted mt-1">Check date: {toDate(rtwChecked)}</p>
+                    <p className="text-xs text-text-muted">Expiry date: {toDate(rtwExpiry)}</p>
+                    <p className="text-xs text-text-muted">Days remaining: {toDays(rtwDays)}</p>
+                  </div>
+
+                  <div className={`rounded-xl border p-3 ${cardClass(trainingTone)}`}>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-semibold text-text-primary">Training</span>
+                      <GraduationCap className={`h-4 w-4 ${iconClass(trainingTone)}`} />
+                    </div>
+                    <p className={`text-sm font-semibold mt-1 ${textClass(trainingTone)}`}>
+                      {trainingCompleted == null || trainingRequired == null ? 'Unavailable' : `${trainingCompleted}/${trainingRequired}`}
                     </p>
-                    {dbsExpiry && (
-                      <p className={`text-xs mt-1 ${
-                        dbsExpiryDays !== null && dbsExpiryDays < 0 ? 'text-red-600 font-medium' :
-                        dbsSummary.status_band === 'urgent' ? 'text-amber-600 font-medium' : 'text-text-muted'
-                      }`}>
-                        {dbsExpiryDays !== null && dbsExpiryDays < 0 ? 'Overdue: ' : 'Review: '}
-                        {formatBackendDate(dbsExpiry)}
-                        {dbsExpiryDays !== null && dbsExpiryDays > 0 && dbsExpiryDays <= 60 && (
-                          <span className="ml-1">({dbsExpiryDays}d)</span>
-                        )}
-                      </p>
-                    )}
+                    <p className="text-xs text-text-muted mt-1">Expiring soon: {trainingCompleted == null ? 'Unavailable' : trainingExpiring}</p>
+                    <p className="text-xs text-text-muted">Expired: {trainingCompleted == null ? 'Unavailable' : trainingExpired}</p>
                   </div>
-                  
-                  {/* RTW Status with Expiry - Dynamic logic based on verification + expiry */}
-                  <div
-                    className={`p-3 rounded-xl border w-52 shrink-0 cursor-pointer hover:shadow-md transition-shadow ${rtwClasses.card}`}
-                    data-testid="rtw-status-card"
-                    onClick={() => setActiveTab('checklist')}
-                    title="Go to Checks & Evidence"
-                  >
-                    <div className="flex items-center gap-2 mb-1">
-                      <FileCheck className={`h-4 w-4 ${rtwClasses.icon}`} />
-                      <span className="text-xs font-semibold text-text-primary">Right to Work</span>
+
+                  <div className={`rounded-xl border p-3 ${cardClass(agreementsTone)}`}>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-semibold text-text-primary">Agreements & Induction</span>
+                      <ClipboardList className={`h-4 w-4 ${iconClass(agreementsTone)}`} />
                     </div>
-                    
-                    {rtwWorkflowStatus ? (
-                      <>
-                        <p className={`text-sm font-semibold ${rtwClasses.text}`}>
-                          {rtwWorkflowStatus.label}
-                        </p>
-                      </>
-                    ) : !rtwSummary.is_verified ? (
-                      // Not verified = not yet verified
-                      <p className="text-sm font-semibold text-gray-700">Not yet verified</p>
-                    ) : rtwSummary.status_band === 'expired' || rtwSummary.rtw_status_color === 'red' ? (
-                      // Expired
-                      <p className="text-sm font-semibold text-red-700">
-                        EXPIRED • Not valid to work
-                      </p>
-                    ) : rtwSummary.is_indefinite || rtwSummary.permission_type === 'permanent' ? (
-                      // Verified + No expiry
-                      <p className="text-sm font-semibold text-green-700">
-                        VERIFIED • No Expiry
-                      </p>
-                    ) : rtwExpiry ? (
-                      // Verified + Has expiry
-                      <p className={`text-sm font-semibold ${
-                        rtwSummary.status_band === 'urgent' ? 'text-amber-700' : 'text-green-700'
-                      }`}>
-                        VERIFIED • Expires {formatBackendDate(rtwExpiry)}
-                      </p>
-                    ) : (
-                      // Verified but no expiry info
-                      <p className="text-sm font-semibold text-green-700">VERIFIED</p>
-                    )}
-                    {!rtwWorkflowStatus && (
-                      <p className="text-[10px] mt-0.5 text-text-muted">Confirmation pending</p>
-                    )}
-                    
-                    {/* Days countdown for expiring */}
-                    {rtwSummary.is_verified && rtwExpiry && rtwExpiryDays !== undefined && rtwExpiryDays !== null && (
-                      <p className={`text-xs mt-1 font-medium ${
-                        rtwExpiryDays < 0 ? 'text-red-600' :
-                        rtwExpiryDays <= 30 ? 'text-red-600' :
-                        rtwExpiryDays <= 90 ? 'text-amber-600' : 'text-text-muted'
-                      }`}>
-                        {rtwExpiryDays < 0 ? `${Math.abs(rtwExpiryDays)} days overdue` :
-                         rtwExpiryDays === 0 ? 'Expires today' :
-                         `${rtwExpiryDays} days remaining`}
-                      </p>
-                    )}
+                    <p className={`text-sm font-semibold mt-1 ${textClass(agreementsTone)}`}>Contract: {contractStatus}</p>
+                    <p className="text-xs text-text-muted mt-1">Handbook: {handbookStatus}</p>
+                    <p className="text-xs text-text-muted">
+                      Induction: {inductionCompleted == null || inductionRequired == null ? 'Unavailable' : `${inductionCompleted}/${inductionRequired}`}
+                    </p>
                   </div>
-                  
-                  {/* Canonical category cards */}
-                  <div
-                    className="p-3 rounded-xl border border-slate-200 bg-slate-50 w-[28rem] shrink-0 cursor-pointer hover:shadow-md transition-shadow"
-                    data-testid="compliance-breakdown-card"
-                    onClick={() => setActiveTab('checklist')}
-                    title="Go to Checks & Evidence"
-                  >
-                    <div className="flex items-center gap-2 mb-2">
-                      <ClipboardList className="h-4 w-4 text-slate-600" />
-                      <span className="text-xs font-semibold text-text-primary">Breakdown</span>
-                    </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                      {quickCards.map((card) => {
-                        const tone = quickViewToneClasses[card.tone] || quickViewToneClasses.gray;
-                        return (
-                          <div key={card.key} className={`rounded-lg border p-2 ${tone.card}`}>
-                            <p className="text-xs font-semibold text-text-primary">{card.title}</p>
-                            <p className={`text-xs mt-0.5 ${tone.text}`}>
-                              {card.completed}/{card.required}
-                            </p>
-                            <p className="text-[11px] text-text-muted mt-0.5">
-                              {blockerText(card.blockers)}
-                            </p>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </div>{/* end flex row */}
-              </div>{/* end overflow-x-auto */}
-            </div>
+                </div>
+
+                <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                  <p className="text-xs font-semibold text-slate-700 mb-1">Action Required</p>
+                  {blockers.length === 0 ? (
+                    <p className="text-xs text-green-700">No blockers</p>
+                  ) : (
+                    <ul className="text-xs text-amber-700 space-y-0.5">
+                      {blockers.slice(0, 5).map((b, i) => (
+                        <li key={`aqv-blocker-${i}`}>- {b?.reason || b?.label || 'Action required'}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </div>
             );
           })()}
-
-          {/* Status Strip - Replaces contact row */}
+{/* Status Strip - Replaces contact row */}
           <div className="flex flex-wrap items-center gap-4 mt-4 pt-4 border-t border-[#E4E8EB]" data-testid="status-strip">
-            {/* Business-facing identifier — label adapts to person stage */}
+            {/* Business-facing identifier â€” label adapts to person stage */}
             <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-100 rounded-lg">
               <User className="h-4 w-4 text-slate-500" />
               <span className="text-sm text-slate-500">{employee.person_stage === 'applicant' ? 'Applicant Reference:' : 'Employee ID:'}</span>
@@ -4477,7 +4395,7 @@ export default function EmployeeProfilePage() {
                 }
               }
               
-              // Check DBS expiry — use only backend-computed days_until_review (safety engine).
+              // Check DBS expiry â€” use only backend-computed days_until_review (safety engine).
               // No local date arithmetic: if backend doesn't supply days_until_review, skip rendering.
               if (dbsSummary.next_dbs_review_due && dbsSummary.days_until_review != null) {
                 const days = dbsSummary.days_until_review;
@@ -4500,7 +4418,7 @@ export default function EmployeeProfilePage() {
             
           </div>
 
-          {/* What's left — compact operational checklist grouped by owner.
+          {/* What's left â€” compact operational checklist grouped by owner.
               Pure presentation over canonical UCE blockers + gates. No local
               readiness logic: every item below reflects an existing backend
               field (canonicalProgress.blockers[*] with backend-derived `owner`,
@@ -4552,11 +4470,11 @@ export default function EmployeeProfilePage() {
                         className={`text-sm flex items-start gap-2 ${severityCls(b.severity)}`}
                         data-testid={`whats-left-item-${owner}`}
                       >
-                        <span className="mt-0.5">•</span>
+                        <span className="mt-0.5">â€¢</span>
                         <span>
                           <span className="font-medium">{b.label || b.id}</span>
                           {b.reason && b.reason !== b.label ? (
-                            <span className="text-text-muted"> — {b.reason}</span>
+                            <span className="text-text-muted"> â€” {b.reason}</span>
                           ) : null}
                         </span>
                       </li>
@@ -4609,7 +4527,7 @@ export default function EmployeeProfilePage() {
 
           {/* Note: Global Upload Document button removed. */}
           {/* All upload actions now live INSIDE each compliance requirement card. */}
-          {/* Workflow: See issue → Scroll to section → Upload/Request/Verify there. */}
+          {/* Workflow: See issue â†’ Scroll to section â†’ Upload/Request/Verify there. */}
 
           {!isAuditor() && (
             <div className="flex flex-wrap gap-3 mt-6">
@@ -5162,7 +5080,7 @@ export default function EmployeeProfilePage() {
               </Card>
             )}
 
-            {/* ── Personal Details ── */}
+            {/* â”€â”€ Personal Details â”€â”€ */}
             {employee?.person_stage === 'employee' && (
               <Card className="border-[#E4E8EB] shadow-sm">
                 <CardHeader>
@@ -5264,7 +5182,7 @@ export default function EmployeeProfilePage() {
                   </div>
                   <div>
                     <p className="text-xs text-text-muted">Role</p>
-                    <p className="font-medium text-text-primary">{employee?.role || '—'}</p>
+                    <p className="font-medium text-text-primary">{employee?.role || 'â€”'}</p>
                   </div>
                   <div>
                     <p className="text-xs text-text-muted">Status</p>
@@ -5306,7 +5224,7 @@ export default function EmployeeProfilePage() {
               </CardContent>
             </Card>
 
-            {/* ── Contact Details ── */}
+            {/* â”€â”€ Contact Details â”€â”€ */}
             <Card className="border-[#E4E8EB] shadow-sm">
               <CardHeader className="flex flex-row items-center justify-between">
                 <CardTitle className="font-heading text-lg">Contact Details</CardTitle>
@@ -5320,11 +5238,11 @@ export default function EmployeeProfilePage() {
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                   <div>
                     <p className="text-xs text-text-muted">Email</p>
-                    <p className="font-medium text-text-primary break-all">{employee?.email || '—'}</p>
+                    <p className="font-medium text-text-primary break-all">{employee?.email || 'â€”'}</p>
                   </div>
                   <div>
                     <p className="text-xs text-text-muted">Phone</p>
-                    <p className="font-medium text-text-primary">{employee?.phone || employee?.phone_number || '—'}</p>
+                    <p className="font-medium text-text-primary">{employee?.phone || employee?.phone_number || 'â€”'}</p>
                   </div>
                   {employee?.mobile && (
                     <div>
@@ -5353,7 +5271,7 @@ export default function EmployeeProfilePage() {
               </CardContent>
             </Card>
 
-            {/* ── Emergency Contact / Next of Kin ── */}
+            {/* â”€â”€ Emergency Contact / Next of Kin â”€â”€ */}
             {(employee?.emergency_contact_name || employee?.next_of_kin_name) && (
               <Card className="border-[#E4E8EB] shadow-sm">
                 <CardHeader>
@@ -5364,19 +5282,19 @@ export default function EmployeeProfilePage() {
                     <div>
                       <p className="text-xs text-text-muted">Name</p>
                       <p className="font-medium text-text-primary">
-                        {employee?.emergency_contact_name || employee?.next_of_kin_name || '—'}
+                        {employee?.emergency_contact_name || employee?.next_of_kin_name || 'â€”'}
                       </p>
                     </div>
                     <div>
                       <p className="text-xs text-text-muted">Relationship</p>
                       <p className="font-medium text-text-primary">
-                        {employee?.emergency_contact_relationship || employee?.next_of_kin_relationship || '—'}
+                        {employee?.emergency_contact_relationship || employee?.next_of_kin_relationship || 'â€”'}
                       </p>
                     </div>
                     <div>
                       <p className="text-xs text-text-muted">Phone</p>
                       <p className="font-medium text-text-primary">
-                        {employee?.emergency_contact_phone || employee?.next_of_kin_phone || '—'}
+                        {employee?.emergency_contact_phone || employee?.next_of_kin_phone || 'â€”'}
                       </p>
                     </div>
                     {employee?.next_of_kin_address && (
@@ -5390,7 +5308,7 @@ export default function EmployeeProfilePage() {
               </Card>
             )}
 
-            {/* ── Employment History ── */}
+            {/* â”€â”€ Employment History â”€â”€ */}
             <Card className="border-[#E4E8EB] shadow-sm">
               <CardHeader className="flex flex-row items-center justify-between">
                 <CardTitle className="font-heading text-lg">Employment History</CardTitle>
@@ -5410,12 +5328,12 @@ export default function EmployeeProfilePage() {
                           <p className="text-xs text-gray-500">{job.job_title || job.position}</p>
                         </div>
                         <p className="text-xs text-gray-400 shrink-0 ml-2">
-                          {formatBackendDate(job.start_date, { format: 'short' })} – {job.end_date ? formatBackendDate(job.end_date, { format: 'short' }) : 'Present'}
+                          {formatBackendDate(job.start_date, { format: 'short' })} â€“ {job.end_date ? formatBackendDate(job.end_date, { format: 'short' }) : 'Present'}
                         </p>
                       </div>
                     ))}
                     {employee.employment_history.length > 5 && (
-                      <p className="text-xs text-gray-500 text-center">+{employee.employment_history.length - 5} more — see Employment Review tab</p>
+                      <p className="text-xs text-gray-500 text-center">+{employee.employment_history.length - 5} more â€” see Employment Review tab</p>
                     )}
                   </div>
                 ) : (
@@ -5424,7 +5342,7 @@ export default function EmployeeProfilePage() {
               </CardContent>
             </Card>
 
-            {/* ── References ── */}
+            {/* â”€â”€ References â”€â”€ */}
             <Card className="border-[#E4E8EB] shadow-sm">
               <CardHeader className="flex flex-row items-center justify-between">
                 <CardTitle className="font-heading text-lg">References</CardTitle>
@@ -5463,8 +5381,8 @@ export default function EmployeeProfilePage() {
               </CardContent>
             </Card>
 
-            {/* ── Recurring compliance (active workforce only, display-only surface of
-                 canonical /employees/{id}/recurring-compliance; no new truth) ── */}
+            {/* â”€â”€ Recurring compliance (active workforce only, display-only surface of
+                 canonical /employees/{id}/recurring-compliance; no new truth) â”€â”€ */}
             {lifecycleStage === 'active' && (
               <Card className="border-[#E4E8EB] shadow-sm" data-testid="section-recurring-compliance-root">
                 <CardHeader>
@@ -5486,9 +5404,9 @@ export default function EmployeeProfilePage() {
         </TabsContent>
         {/* Interview record + worker onboarding forms (health, personal, HMRC, declarations) */}
         <TabsContent value="forms">
-          {/* ── Top-level Forms & Interview Summary ── */}
+          {/* â”€â”€ Top-level Forms & Interview Summary â”€â”€ */}
           {(() => {
-            // Derive form-level counts — reused in summary banner and form cards
+            // Derive form-level counts â€” reused in summary banner and form cards
             const FORM_GROUPS = [
               {
                 label: 'Pre-Employment Checks',
@@ -5506,7 +5424,7 @@ export default function EmployeeProfilePage() {
                 sensitive: true,
                 forms: [
                   { key: 'conflict_of_interest', name: 'Conflict of Interest Declaration', description: 'Secondary employment, relationships or financial interests (NHS standard)', sensitive: true },
-                  ...(/manager|director/i.test(employee?.role || '') ? [{ key: 'fit_proper_persons', name: 'Fit and Proper Persons Declaration', description: 'CQC Regulation 5 — managers and directors only', sensitive: true }] : []),
+                  ...(/manager|director/i.test(employee?.role || '') ? [{ key: 'fit_proper_persons', name: 'Fit and Proper Persons Declaration', description: 'CQC Regulation 5 â€” managers and directors only', sensitive: true }] : []),
                 ]
               },
             ];
@@ -5544,7 +5462,7 @@ export default function EmployeeProfilePage() {
             const totalForms = allFormDefinitions.length;
             const allSignedOff = signedOffCount === totalForms && !cannotAssessForms;
 
-            // Interview record status (from formSubmissions — interview submission)
+            // Interview record status (from formSubmissions â€” interview submission)
             const interviewSubmission = formSubmissions?.find(fs =>
               fs.form_type === 'interview_record' || fs.requirement_id === 'interview_record'
             );
@@ -5602,7 +5520,7 @@ export default function EmployeeProfilePage() {
 
             return (
               <div className="space-y-6">
-                {/* ── Summary banner ── */}
+                {/* â”€â”€ Summary banner â”€â”€ */}
                 <div className={`rounded-xl border p-4 ${summaryBorderClass}`}>
                   <div className="flex items-start gap-3">
                     <div className="mt-0.5">
@@ -5615,7 +5533,7 @@ export default function EmployeeProfilePage() {
                     <div className="flex-1">
                       <p className={`font-medium ${summaryTextClass}`}>
                         {cannotAssessForms
-                          ? 'Cannot assess forms — submission data unavailable'
+                          ? 'Cannot assess forms â€” submission data unavailable'
                           : allSignedOff
                             ? `All ${totalForms} forms signed off`
                             : `Forms Signed Off: ${signedOffCount} / ${totalForms}`}
@@ -5642,7 +5560,7 @@ export default function EmployeeProfilePage() {
                   </div>
                 </div>
 
-                {/* ── Interview Record (distinct recruitment decision) ── */}
+                {/* â”€â”€ Interview Record (distinct recruitment decision) â”€â”€ */}
                 <Card className={`shadow-sm ${
                   cannotAssessForms ? 'border-red-200'
                   : !interviewExists ? 'border-amber-200'
@@ -5682,16 +5600,16 @@ export default function EmployeeProfilePage() {
                           </Badge>
                           {interviewPassed !== null && (
                             <span className={`text-xs font-medium ${interviewPassed ? 'text-green-600' : 'text-red-600'}`}>
-                              Score: {interviewScore}/{interviewSubmission?.form_data?.max_score || interviewSubmission?.data?.max_score || 24} — {interviewPassed ? 'Passed' : 'Failed'}
+                              Score: {interviewScore}/{interviewSubmission?.form_data?.max_score || interviewSubmission?.data?.max_score || 24} â€” {interviewPassed ? 'Passed' : 'Failed'}
                             </span>
                           )}
                         </div>
                       ) : interviewPassed !== null ? (
                         <Badge className={interviewPassed ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}>
-                          {interviewPassed ? 'Completed — Passed' : 'Completed — Failed'}
+                          {interviewPassed ? 'Completed â€” Passed' : 'Completed â€” Failed'}
                         </Badge>
                       ) : (
-                        <Badge className="bg-blue-100 text-blue-700">Record exists — no outcome recorded</Badge>
+                        <Badge className="bg-blue-100 text-blue-700">Record exists â€” no outcome recorded</Badge>
                       )}
                     </div>
                   </CardHeader>
@@ -5716,7 +5634,7 @@ export default function EmployeeProfilePage() {
                   </CardContent>
                 </Card>
 
-                {/* ── Worker Onboarding Forms ── */}
+                {/* â”€â”€ Worker Onboarding Forms â”€â”€ */}
                 <Card className="border-[#E4E8EB] shadow-sm" data-testid="section-forms-core">
                   <CardHeader>
                     <CardTitle className="font-heading text-lg">Worker Onboarding Forms</CardTitle>
@@ -5744,7 +5662,7 @@ export default function EmployeeProfilePage() {
                             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2 px-1">
                               {group.label}
                               {group.sensitive && (
-                                <span className="ml-2 text-slate-400 normal-case font-normal">— sensitive recruitment records</span>
+                                <span className="ml-2 text-slate-400 normal-case font-normal">â€” sensitive recruitment records</span>
                               )}
                             </p>
                             <div className="space-y-2">
@@ -5812,7 +5730,7 @@ export default function EmployeeProfilePage() {
                                       <div className="flex items-center gap-2 shrink-0">
                                         <Badge className={cfg.color}>{cfg.label}</Badge>
                                         <div className="flex gap-1">
-                                          {/* Signed off → View */}
+                                          {/* Signed off â†’ View */}
                                           {derived.status === 'signed_off' && hasSubmission && (
                                             <>
                                               <Button size="sm" variant="outline"
@@ -5835,7 +5753,7 @@ export default function EmployeeProfilePage() {
                                             </>
                                           )}
 
-                                          {/* Reviewed → View + Sign Off */}
+                                          {/* Reviewed â†’ View + Sign Off */}
                                           {derived.status === 'reviewed' && hasSubmission && (
                                             <>
                                               <Button size="sm" variant="outline"
@@ -5883,7 +5801,7 @@ export default function EmployeeProfilePage() {
                                             </>
                                           )}
 
-                                          {/* Submitted → Review & Approve (forced viewing) */}
+                                          {/* Submitted â†’ Review & Approve (forced viewing) */}
                                           {derived.status === 'submitted' && hasSubmission && (
                                             <Button size="sm" variant="outline"
                                               onClick={() => setFormReviewViewer({
@@ -5897,7 +5815,7 @@ export default function EmployeeProfilePage() {
                                             </Button>
                                           )}
 
-                                          {/* Missing / in-progress → passive label */}
+                                          {/* Missing / in-progress â†’ passive label */}
                                           {(derived.status === 'missing' || derived.status === 'in_progress') && (
                                             <Badge
                                               className={derived.status === 'in_progress' ? 'bg-amber-50 text-amber-700 text-xs' : 'bg-slate-100 text-slate-600 text-xs'}
@@ -5907,7 +5825,7 @@ export default function EmployeeProfilePage() {
                                             </Badge>
                                           )}
 
-                                          {/* Rejected → View */}
+                                          {/* Rejected â†’ View */}
                                           {derived.status === 'rejected' && hasSubmission && (
                                             <Button size="sm" variant="outline"
                                               onClick={() => openFormSubmissionPdfViewer(submission, form)}
@@ -5916,7 +5834,7 @@ export default function EmployeeProfilePage() {
                                             </Button>
                                           )}
 
-                                          {/* Returned for correction → View only until worker resubmits */}
+                                          {/* Returned for correction â†’ View only until worker resubmits */}
                                           {derived.status === 'returned_for_correction' && hasSubmission && (
                                             <Button size="sm" variant="outline"
                                               onClick={() => openFormSubmissionPdfViewer(submission, form)}
@@ -6099,7 +6017,7 @@ export default function EmployeeProfilePage() {
                   </p>
                   {employmentComplete && (
                     <p className="mt-1 text-xs text-green-700">
-                      ✓ Signed off by {employmentSignedOffBy || 'admin'}
+                      âœ“ Signed off by {employmentSignedOffBy || 'admin'}
                       {employmentSignedOffAt ? ` on ${new Date(employmentSignedOffAt).toLocaleDateString('en-GB')}` : ''}
                     </p>
                   )}
@@ -6194,8 +6112,8 @@ export default function EmployeeProfilePage() {
                         10-Year Employment Coverage: {coveragePercent}%
                       </p>
                       <p className="text-xs text-slate-600">
-                        Required: {employmentCoverage.coverage_start ? new Date(employmentCoverage.coverage_start + 'T00:00:00Z').toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }) : '?'} — Today
-                        {' · '}Status: {coverageMet ? 'Coverage met' : 'Coverage incomplete'}
+                        Required: {employmentCoverage.coverage_start ? new Date(employmentCoverage.coverage_start + 'T00:00:00Z').toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }) : '?'} â€” Today
+                        {' Â· '}Status: {coverageMet ? 'Coverage met' : 'Coverage incomplete'}
                       </p>
                       <div className="w-full bg-gray-200 rounded-full h-2">
                         <div
@@ -6208,7 +6126,7 @@ export default function EmployeeProfilePage() {
                       </p>
                       <p className="text-xs text-slate-500">
                         {employmentCoverage.total_days_covered} of {employmentCoverage.total_days_required} days covered
-                        {employmentCoverage.earliest_entry_date && ` · Earliest entry: ${new Date(employmentCoverage.earliest_entry_date + 'T00:00:00Z').toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })}`}
+                        {employmentCoverage.earliest_entry_date && ` Â· Earliest entry: ${new Date(employmentCoverage.earliest_entry_date + 'T00:00:00Z').toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })}`}
                       </p>
                     </div>
                   </div>
@@ -6394,7 +6312,7 @@ export default function EmployeeProfilePage() {
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <h4 className="font-medium text-gray-800">CV / Resume</h4>
-                        <p className="mt-1 text-xs text-text-muted">Supporting evidence — view alongside the structured employment history below.</p>
+                        <p className="mt-1 text-xs text-text-muted">Supporting evidence â€” view alongside the structured employment history below.</p>
                       </div>
                       <Badge variant="outline" className={cvStatusBadgeClass}>
                         {cvStatusLabel}
@@ -6451,7 +6369,7 @@ export default function EmployeeProfilePage() {
                       <div className="mt-4 rounded-lg border border-dashed border-gray-300 bg-white p-4">
                         <p className="text-sm font-medium text-gray-700">CV not uploaded</p>
                         <p className="mt-1 text-xs text-text-muted">
-                          Worker has not uploaded a CV yet. The CV is supporting evidence — employment history is taken from the application form.
+                          Worker has not uploaded a CV yet. The CV is supporting evidence â€” employment history is taken from the application form.
                         </p>
                         <p className="mt-3 text-xs text-text-muted">
                           The worker uploads the CV from their own dashboard.
@@ -6525,7 +6443,7 @@ export default function EmployeeProfilePage() {
                             await axios.post(`${API}/employees/${employeeId}/detect-employment-gaps`, {}, {
                               headers: { Authorization: `Bearer ${token}` }
                             });
-                            toast.success('Gap analysis completed — refreshing…');
+                            toast.success('Gap analysis completed â€” refreshingâ€¦');
                             await Promise.all([
                               fetchEmployee(),
                               fetchCompliance(),
@@ -6553,7 +6471,7 @@ export default function EmployeeProfilePage() {
                 <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg flex items-start gap-3">
                   <CheckCircle className="h-5 w-5 text-green-600 flex-shrink-0 mt-0.5" />
                   <div>
-                    <p className="font-medium text-green-800">{employmentHistoryGapRow.status_summary || 'No detected gaps — 10-year coverage met'}</p>
+                    <p className="font-medium text-green-800">{employmentHistoryGapRow.status_summary || 'No detected gaps â€” 10-year coverage met'}</p>
                     <p className="text-sm text-green-600 mt-1">Gap analysis has run and the dated employment history meets the required 10-year period. Admin sign-off is still required to complete the review.</p>
                   </div>
                 </div>
@@ -6595,7 +6513,7 @@ export default function EmployeeProfilePage() {
                 </div>
               )}
               
-              {/* Matched Applicant Gap Explanations — linked to detected gaps */}
+              {/* Matched Applicant Gap Explanations â€” linked to detected gaps */}
               {matchedApplicantGapExplanations.length > 0 && (
                 <div className="mt-4 mb-4" data-testid="section-matched-gap-explanations">
                   <h4 className="font-medium text-gray-800 mb-2">Matched Applicant Gap Explanations</h4>
@@ -6616,7 +6534,7 @@ export default function EmployeeProfilePage() {
                           <div className="flex items-center gap-2 mb-1 flex-wrap">
                             {hasDateRange ? (
                               <span className="text-xs font-medium text-green-800">
-                                {fmtDate(gapStart)} — {fmtDate(gapEnd)}
+                                {fmtDate(gapStart)} â€” {fmtDate(gapEnd)}
                               </span>
                             ) : (
                               <span className="text-xs font-medium text-green-800">
@@ -6645,7 +6563,7 @@ export default function EmployeeProfilePage() {
                 </div>
               )}
 
-              {/* Unmatched Supporting Notes — NOT linked to any detected gap */}
+              {/* Unmatched Supporting Notes â€” NOT linked to any detected gap */}
               {unmatchedApplicantGapExplanations.length > 0 && (
                 <div className="mt-4 mb-4" data-testid="section-unmatched-supporting-notes">
                   <h4 className="font-medium text-slate-700 mb-2">Unmatched Supporting Notes</h4>
@@ -6666,7 +6584,7 @@ export default function EmployeeProfilePage() {
                           <div className="flex items-center gap-2 mb-1 flex-wrap">
                             {hasDateRange ? (
                               <span className="text-xs font-medium text-slate-700">
-                                {fmtDate(gapStart)} — {fmtDate(gapEnd)}
+                                {fmtDate(gapStart)} â€” {fmtDate(gapEnd)}
                               </span>
                             ) : (
                               <span className="text-xs font-medium text-slate-700">
@@ -6746,7 +6664,7 @@ export default function EmployeeProfilePage() {
                 </div>
               )}
 
-              {/* Qualifications & Education — supporting context, shown last */}
+              {/* Qualifications & Education â€” supporting context, shown last */}
               {(employee?.qualifications || employee?.education) && (
                 <div className="mt-6 pt-6 border-t border-gray-200" data-testid="section-employment-qualifications">
                   <h4 className="font-medium text-gray-800 mb-3">Qualifications & Education</h4>
@@ -6796,7 +6714,7 @@ export default function EmployeeProfilePage() {
               {/* ============================================== */}
               {/* COMPLIANCE FILE - Linear Workflow                */}
               {/* All actions live INSIDE each requirement card    */}
-              {/* No global actions - see issue → scroll → fix     */}
+              {/* No global actions - see issue â†’ scroll â†’ fix     */}
               {/* ============================================== */}
 
               {/* Conditional Items - Keep minimal info about items not required */}
@@ -6809,7 +6727,7 @@ export default function EmployeeProfilePage() {
                       <ul className="mt-1 space-y-0.5">
                         {complianceRequirements.conditional_not_required.map((item, idx) => (
                           <li key={idx} className="text-xs text-gray-600">
-                            {item.name} — {item.reason}
+                            {item.name} â€” {item.reason}
                           </li>
                         ))}
                       </ul>
@@ -8124,7 +8042,7 @@ export default function EmployeeProfilePage() {
                       </p>
                       {entry.field_changed && (
                         <p className="text-sm text-text-muted">
-                          <span className="font-medium">{entry.field_changed}</span>: {entry.old_value || '(empty)'} → {entry.new_value}
+                          <span className="font-medium">{entry.field_changed}</span>: {entry.old_value || '(empty)'} â†’ {entry.new_value}
                         </p>
                       )}
                       {entry.reason && (
@@ -8843,7 +8761,7 @@ export default function EmployeeProfilePage() {
                           <td className="p-3 font-medium text-text-primary">
                             {FIELD_LABELS[field.field_name] || field.field_name}
                             {isLowConfidence && (
-                              <span className="ml-2 text-red-500" title="Low confidence - please verify">⚠</span>
+                              <span className="ml-2 text-red-500" title="Low confidence - please verify">âš </span>
                             )}
                           </td>
                           <td className="p-3">
@@ -8989,7 +8907,7 @@ export default function EmployeeProfilePage() {
             {refFromCv === false && (
               <div className="space-y-2">
                 <label className="block text-sm font-medium text-red-700">
-                  ⚠️ Justification Required
+                  âš ï¸ Justification Required
                 </label>
                 <Textarea
                   value={refOverrideReason}
@@ -9470,10 +9388,10 @@ export default function EmployeeProfilePage() {
                     <p className={`text-sm font-medium ${
                       mismatch.severity === 'critical' ? 'text-red-800' : 'text-amber-800'
                     }`}>
-                      {mismatch.type === 'missing_in_structured' && '⚠️ Role in CV not in structured history'}
-                      {mismatch.type === 'missing_in_cv' && '⚠️ Role in structured history not in CV'}
-                      {mismatch.type === 'date_inconsistency' && '⚠️ Date mismatch'}
-                      {mismatch.type === 'overlap_inconsistency' && '⚠️ Overlap inconsistency'}
+                      {mismatch.type === 'missing_in_structured' && 'âš ï¸ Role in CV not in structured history'}
+                      {mismatch.type === 'missing_in_cv' && 'âš ï¸ Role in structured history not in CV'}
+                      {mismatch.type === 'date_inconsistency' && 'âš ï¸ Date mismatch'}
+                      {mismatch.type === 'overlap_inconsistency' && 'âš ï¸ Overlap inconsistency'}
                     </p>
                     <p className="text-sm text-gray-700 mt-1">{mismatch.description}</p>
                     
@@ -9540,7 +9458,7 @@ export default function EmployeeProfilePage() {
                   <h4 className="font-medium text-gray-900">Apply CV Roles to Employment History</h4>
                   <p className="text-xs text-gray-500">
                     Select roles from the CV to append to the canonical employment history.
-                    Existing records are never overwritten — only new entries are added.
+                    Existing records are never overwritten â€” only new entries are added.
                     Gaps and coverage will recalculate automatically.
                   </p>
                   <div className="space-y-2">
@@ -9555,7 +9473,7 @@ export default function EmployeeProfilePage() {
                         <div className="text-sm">
                           <p className="font-medium text-gray-900">{role.employer}</p>
                           <p className="text-gray-600">{role.job_title}</p>
-                          <p className="text-xs text-gray-500">{role.start_date} – {role.end_date || 'Present'}</p>
+                          <p className="text-xs text-gray-500">{role.start_date} â€“ {role.end_date || 'Present'}</p>
                         </div>
                       </label>
                     ))}
@@ -10140,7 +10058,7 @@ export default function EmployeeProfilePage() {
         </DialogContent>
       </Dialog>
 
-      {/* Inline Document Viewer (PDF / image) — replaces window.open */}
+      {/* Inline Document Viewer (PDF / image) â€” replaces window.open */}
       <InlineDocumentViewer
         open={inlineViewerOpen}
         onClose={() => {
@@ -10177,3 +10095,4 @@ export default function EmployeeProfilePage() {
     </div>
   );
 }
+

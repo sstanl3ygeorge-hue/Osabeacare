@@ -980,7 +980,22 @@ async def get_compliance_requirements_for_employee(employee_id: str, role: str =
     
     requirements = []
     from agreement_document_service import resolve_employee_agreement_state, CONTRACT_AGREEMENT_TYPE, HANDBOOK_AGREEMENT_TYPE
+    _agreement_resolver_calls = 0
+    _agreement_cache = {}
+    async def _resolve_agreement_once(agreement_type: str):
+        nonlocal _agreement_resolver_calls
+        cache_key = f"{employee_id}:{agreement_type}"
+        if cache_key in _agreement_cache:
+            return _agreement_cache[cache_key]
+        _agreement_resolver_calls += 1
+        resolved = await resolve_employee_agreement_state(db, db_employee, agreement_type)
+        _agreement_cache[cache_key] = resolved
+        return resolved
     db_employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    agreement_states = {}
+    if db_employee:
+        for _agr in (CONTRACT_AGREEMENT_TYPE, HANDBOOK_AGREEMENT_TYPE):
+            agreement_states[_agr] = await _resolve_agreement_once(_agr)
     for item in mandatory_items:
         req_id = item['id']
         req_type = item.get('type', 'document')
@@ -1001,7 +1016,7 @@ async def get_compliance_requirements_for_employee(employee_id: str, role: str =
         }
         # Canonical agreement resolver for contract/handbook
         if req_id in (CONTRACT_AGREEMENT_TYPE, HANDBOOK_AGREEMENT_TYPE) and db_employee:
-            resolver = await resolve_employee_agreement_state(db, db_employee, req_id)
+            resolver = agreement_states.get(req_id, {})
             ack = resolver.get("acknowledgement", {})
             if resolver.get("latest_active"):
                 result["status"] = resolver.get("status") or "not_started"
@@ -1050,6 +1065,11 @@ async def get_compliance_requirements_for_employee(employee_id: str, role: str =
                     result["has_evidence"] = bool(form.get('pdf_url'))
                     result["verified"] = form.get('status') == 'signed_off'
         requirements.append(result)
+    logger.info(
+        "agreement_resolver_calls helper=get_compliance_requirements_for_employee employee_id=%s calls=%s",
+        employee_id,
+        _agreement_resolver_calls,
+    )
     return requirements
 
 
@@ -37227,6 +37247,18 @@ async def get_compliance_file(
     employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
+    _agreement_resolver_calls = 0
+    _agreement_cache = {}
+    async def _resolve_agreement_once(agreement_type: str):
+        nonlocal _agreement_resolver_calls
+        cache_key = f"{employee_id}:{agreement_type}"
+        if cache_key in _agreement_cache:
+            return _agreement_cache[cache_key]
+        from agreement_document_service import resolve_employee_agreement_state
+        _agreement_resolver_calls += 1
+        resolved = await resolve_employee_agreement_state(db, employee, agreement_type)
+        _agreement_cache[cache_key] = resolved
+        return resolved
     
     # =========================================================================
     # FETCH ALL DATA
@@ -38055,7 +38087,6 @@ async def get_compliance_file(
         agreement_type: str
     ) -> dict:
         """Build an agreement row (form acknowledgement)."""
-        from agreement_document_service import resolve_employee_agreement_state
         # Find acknowledgements for this type (old format)
         acks = [a for a in agreements.get("acknowledgements", []) 
                 if a.get("agreement_type") == agreement_type]
@@ -38066,7 +38097,38 @@ async def get_compliance_file(
         template_id = AGREEMENT_TYPE_TO_TEMPLATE.get(agreement_type)
         submission = submissions_by_template.get(template_id) if template_id else None
 
-        agreement_state = await resolve_employee_agreement_state(db, employee, agreement_type)
+        try:
+            agreement_state = await _resolve_agreement_once(agreement_type)
+        except Exception as exc:
+            logger.warning(
+                "agreement_resolver_failed endpoint=compliance-file employee_id=%s agreement_type=%s error=%s",
+                employee_id,
+                agreement_type,
+                exc,
+            )
+            return {
+                "key": key,
+                "title": title,
+                "row_type": "form_acknowledgement",
+                "status": "unavailable",
+                "status_summary": "Temporarily unavailable",
+                "status_unavailable": True,
+                "warnings": [f"agreement_resolver_failed:{exc}"],
+                "agreement_type": agreement_type,
+                "template_version": None,
+                "can_sign": None,
+                "can_acknowledge": None,
+                "latest_active": False,
+                "source_record_id": None,
+                "current_lifecycle": {"status": "unavailable"},
+                "acknowledgement_data": None,
+                "pending_requests": [],
+                "counts": {"history": len(acks)},
+                "allowed_actions": ["view_history"],
+                "affects_readiness": True,
+                "is_supporting_evidence": False,
+                "blocker_text": f"{title} status unavailable",
+            }
         latest_ack = agreement_state.get("acknowledgement") or (acks[0] if len(acks) > 0 else None)
         resolved_ack = agreement_state.get("acknowledgement") or {}
         has_acknowledgement = bool(agreement_state.get("has_acknowledgement")) or submission is not None
@@ -38138,8 +38200,13 @@ async def get_compliance_file(
             "template_version": resolved_template_version,
             "can_sign": can_worker_sign if agreement_type == "contract_acceptance" else None,
             "can_acknowledge": can_worker_sign if agreement_type == "handbook_acknowledgement" else None,
-            "latest_active": True,
-            "source_record_id": (latest_ack or {}).get("id") or (submission or {}).get("id") or (agreement_state.get("acknowledgement") or {}).get("id"),
+            "latest_active": bool(agreement_state.get("latest_active")),
+            "source_record_id": (
+                agreement_state.get("source_record_id")
+                or (agreement_state.get("acknowledgement") or {}).get("id")
+                or (latest_ack or {}).get("id")
+                or (submission or {}).get("id")
+            ),
             "current_lifecycle": {
                 "status": canonical_status,
                 "message": agreement_state.get("state_label"),
@@ -39153,6 +39220,11 @@ async def get_compliance_file(
                         "status": row.get("status")
                     })
     
+    logger.info(
+        "agreement_resolver_calls endpoint=compliance-file employee_id=%s calls=%s",
+        employee_id,
+        _agreement_resolver_calls,
+    )
     return {
         "employee_id": employee_id,
         "employee_name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),

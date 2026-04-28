@@ -29,6 +29,7 @@ import {
   Trash2, Edit2, Send, RefreshCw, Download, Users, Sparkles
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import API_BASE from '../../utils/apiBase';
 
 const API = API_BASE;
 
@@ -565,7 +566,6 @@ export default function BulkImportPanel() {
             <CardTitle className="text-lg flex items-center gap-2 text-green-700">
               <CheckCircle className="h-5 w-5" />
               Import Complete
-import API_BASE from '../../utils/apiBase';
             </CardTitle>
           </CardHeader>
           <CardContent>

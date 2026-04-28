@@ -9633,7 +9633,7 @@ async def get_employee(employee_id: str, user: dict = Depends(get_current_user))
     # Try Supabase if enabled
     if source == ReadSource.SUPABASE:
         try:
-            employee = await read_employee_by_id_pg(employee_id)
+            employee = await asyncio.wait_for(read_employee_by_id_pg(employee_id), timeout=5.0)
             if employee:
                 # Convert date fields for compatibility
                 if employee.get('date_of_birth'):

@@ -1606,7 +1606,7 @@ async def get_readiness_debug(
 
     from unified_compliance_engine import get_unified_employee_status
 
-    progress = await get_unified_employee_status(db, employee_id)
+    progress = await get_unified_employee_status(employee_id, db, user_role="admin", include_details=True)
 
     categories = progress.get("category_details") or {}
     blockers = progress.get("blockers") or []

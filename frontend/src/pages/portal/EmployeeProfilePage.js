@@ -1316,19 +1316,25 @@ export default function EmployeeProfilePage() {
   };
 
   const fetchData = async () => {
-    // Use Promise.allSettled to allow partial success
-    const results = await Promise.allSettled([
-      axios.get(`${API}/employees/${employeeId}`, { headers: { Authorization: `Bearer ${token}` } }),
-      axios.get(`${API}/employee-documents?employee_id=${employeeId}`, { headers: { Authorization: `Bearer ${token}` } }),
-      axios.get(`${API}/document-types`, { headers: { Authorization: `Bearer ${token}` } }),
-      axios.get(`${API}/policy-assignments?employee_id=${employeeId}&include_inactive=true`, { headers: { Authorization: `Bearer ${token}` } }),
-      axios.get(`${API}/training-records?employee_id=${employeeId}`, { headers: { Authorization: `Bearer ${token}` } }),
-      axios.get(`${API}/audit-logs?entity_id=${employeeId}&compliance_only=true`, { headers: { Authorization: `Bearer ${token}` } }),
-      axios.get(`${API}/generated-forms?employee_id=${employeeId}`, { headers: { Authorization: `Bearer ${token}` } }),
-      axios.get(`${API}/templates`, { headers: { Authorization: `Bearer ${token}` } }),
-      axios.get(`${API}/employees/${employeeId}/compliance-requirements`, { headers: { Authorization: `Bearer ${token}` } }),
-      axios.get(`${API}/employees/${employeeId}/unified-progress`, { headers: { Authorization: `Bearer ${token}` } })
+    const headers = { Authorization: `Bearer ${token}` };
+    // Throttle request fan-out: fetch critical first, then optional panels in batches.
+    const criticalResults = await Promise.allSettled([
+      axios.get(`${API}/employees/${employeeId}`, { headers }),
+      axios.get(`${API}/employees/${employeeId}/unified-progress`, { headers }),
+      axios.get(`${API}/employees/${employeeId}/compliance-requirements`, { headers }),
     ]);
+    const optionalBatch1 = await Promise.allSettled([
+      axios.get(`${API}/employee-documents?employee_id=${employeeId}`, { headers }),
+      axios.get(`${API}/document-types`, { headers }),
+      axios.get(`${API}/training-records?employee_id=${employeeId}`, { headers }),
+      axios.get(`${API}/policy-assignments?employee_id=${employeeId}&include_inactive=true`, { headers }),
+    ]);
+    const optionalBatch2 = await Promise.allSettled([
+      axios.get(`${API}/audit-logs?entity_id=${employeeId}&compliance_only=true`, { headers }),
+      axios.get(`${API}/generated-forms?employee_id=${employeeId}`, { headers }),
+      axios.get(`${API}/templates`, { headers }),
+    ]);
+    const results = [...criticalResults, ...optionalBatch1, ...optionalBatch2];
     
     // Process results - extract data or use defaults
     const [empRes, docsRes, typesRes, policiesRes, trainingRes, logsRes, formsRes, templatesRes, compReqRes, unifiedProgressRes] = results;
@@ -4241,27 +4247,49 @@ export default function EmployeeProfilePage() {
             );
             const rtwClasses = quickViewToneClasses[rtwTone] || quickViewToneClasses.blue;
             
-            // Category breakdown
-            const categoryStats = {};
-            reqs.forEach(r => {
-              const cat = r.category || 'Other';
-              if (!categoryStats[cat]) {
-                categoryStats[cat] = { total: 0, complete: 0, verified: 0 };
-              }
-              categoryStats[cat].total += 1;
-              if (r.has_evidence) categoryStats[cat].complete += 1;
-              if (r.verified) categoryStats[cat].verified += 1;
-            });
-            
-            // Map categories to display names
-            const categoryDisplayNames = {
-              '1_Legal_Safety': 'Legal & Safety',
-              '2_Core_Training': 'Training',
-              '3_Competency_Health': 'Health',
-              '4_Recruitment_Record': 'Recruitment',
-              '5_Agreements': 'Agreements',
-              '6_Admin': 'Admin'
+            const canonicalCategories = canonicalProgress?.categories || {};
+            const categoryAliasMap = {
+              legalSafety: ['documents', 'agreements', 'references'],
+              training: ['training', 'induction'],
+              health: ['forms', 'competencies'],
+              recruitment: ['employment_review', 'application', 'pre_employment'],
             };
+            const getCategoryStats = (aliases) => aliases.reduce(
+              (acc, key) => {
+                const row = canonicalCategories[key] || {};
+                const total = Number(row.total || 0);
+                const completed = Number(row.completed || 0);
+                acc.required += total;
+                acc.completed += completed;
+                return acc;
+              },
+              { required: 0, completed: 0 },
+            );
+            const blockerText = (value) => (value === 1 ? '1 blocker' : `${value} blockers`);
+            const mappedCanonicalBlockers = canonicalBlockerObjects.map((b) => {
+              const gate = String(b?.gate || b?.id || '').toLowerCase();
+              const category = String(b?.category || '').toLowerCase();
+              if (category === 'training' || category === 'induction') return 'training';
+              if (['contract_signed', 'handbook_acknowledged', 'agreements'].some((x) => gate.includes(x))) return 'legalSafety';
+              if (['dbs', 'right_to_work', 'identity', 'documents', 'reference'].some((x) => gate.includes(x))) return 'legalSafety';
+              if (['health', 'staff_health', 'competenc'].some((x) => gate.includes(x))) return 'health';
+              if (['employment', 'recruit', 'pre_employment', 'application'].some((x) => gate.includes(x))) return 'recruitment';
+              return null;
+            });
+            const countBlockers = (bucket) => mappedCanonicalBlockers.filter((x) => x === bucket).length;
+            const quickCards = [
+              { key: 'legalSafety', title: 'Legal & Safety', stats: getCategoryStats(categoryAliasMap.legalSafety), blockers: countBlockers('legalSafety') },
+              { key: 'training', title: 'Training', stats: getCategoryStats(categoryAliasMap.training), blockers: countBlockers('training') },
+              { key: 'health', title: 'Health', stats: getCategoryStats(categoryAliasMap.health), blockers: countBlockers('health') },
+              { key: 'recruitment', title: 'Recruitment', stats: getCategoryStats(categoryAliasMap.recruitment), blockers: countBlockers('recruitment') },
+            ].map((card) => {
+              const required = card.stats.required;
+              const completed = card.stats.completed;
+              const complete = required > 0 ? completed >= required : card.blockers === 0;
+              const hasBlockers = card.blockers > 0;
+              const tone = hasBlockers ? 'red' : complete ? 'green' : 'amber';
+              return { ...card, required, completed, complete, tone };
+            });
             
             return (
               <div className="mt-6 pt-6 border-t border-[#E4E8EB]">
@@ -4363,9 +4391,9 @@ export default function EmployeeProfilePage() {
                     )}
                   </div>
                   
-                  {/* Compliance Breakdown Card */}
+                  {/* Canonical category cards */}
                   <div
-                    className="p-3 rounded-xl border border-slate-200 bg-slate-50 w-52 shrink-0 cursor-pointer hover:shadow-md transition-shadow"
+                    className="p-3 rounded-xl border border-slate-200 bg-slate-50 w-[28rem] shrink-0 cursor-pointer hover:shadow-md transition-shadow"
                     data-testid="compliance-breakdown-card"
                     onClick={() => setActiveTab('checklist')}
                     title="Go to Checks & Evidence"
@@ -4374,22 +4402,21 @@ export default function EmployeeProfilePage() {
                       <ClipboardList className="h-4 w-4 text-slate-600" />
                       <span className="text-xs font-semibold text-text-primary">Breakdown</span>
                     </div>
-                    <div className="grid grid-cols-2 gap-x-3 gap-y-1">
-                      {Object.entries(categoryStats)
-                        .sort(([a], [b]) => a.localeCompare(b))
-                        .slice(0, 4) // Show top 4 categories
-                        .map(([cat, stats]) => {
-                          const displayName = categoryDisplayNames[cat] || cat.replace(/^\d+_/, '').replace(/_/g, ' ');
-                          const isComplete = stats.complete === stats.total;
-                          return (
-                            <div key={cat} className="flex items-center justify-between">
-                              <span className="text-xs text-text-muted truncate">{displayName}</span>
-                              <span className={`text-xs font-medium ${isComplete ? 'text-green-600' : 'text-amber-600'}`}>
-                                {stats.complete}/{stats.total}
-                              </span>
-                            </div>
-                          );
-                        })}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                      {quickCards.map((card) => {
+                        const tone = quickViewToneClasses[card.tone] || quickViewToneClasses.gray;
+                        return (
+                          <div key={card.key} className={`rounded-lg border p-2 ${tone.card}`}>
+                            <p className="text-xs font-semibold text-text-primary">{card.title}</p>
+                            <p className={`text-xs mt-0.5 ${tone.text}`}>
+                              {card.completed}/{card.required}
+                            </p>
+                            <p className="text-[11px] text-text-muted mt-0.5">
+                              {blockerText(card.blockers)}
+                            </p>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 </div>{/* end flex row */}
@@ -10129,4 +10156,3 @@ export default function EmployeeProfilePage() {
     </div>
   );
 }
-

@@ -132,7 +132,17 @@ async def generate_employee_code() -> str:
     return f"EMP-{new_num:04d}"
 
 
-async def calculate_completion_percentage_simple(employee_id: str) -> dict:
+def _safe_progress_from_employee_row(employee: dict) -> dict:
+    return {
+        "overall_percentage": int(employee.get("completion_percentage") or 0),
+        "completed_requirements": int(employee.get("completed_requirements") or 0),
+        "total_requirements": int(employee.get("total_requirements") or 0),
+        "blockers_count": int(employee.get("blockers_count") or 0),
+        "awaiting_review_count": int(employee.get("awaiting_review_count") or 0),
+    }
+
+
+async def calculate_completion_percentage_simple(employee_id: str, db=None) -> dict:
     """
     Canonical completion percentage — delegates entirely to the Unified Compliance Engine
     so that all surfaces (list, profile, pipeline) report the same numbers.
@@ -142,7 +152,7 @@ async def calculate_completion_percentage_simple(employee_id: str) -> dict:
     """
     try:
         from unified_compliance_engine import get_unified_employee_status
-        db = get_db()
+        db = db or get_db()
         if not hasattr(db, "employees"):
             logger.warning(
                 "calculate_completion_percentage_simple invalid db handle for %s (type=%s); using fallback",
@@ -156,7 +166,7 @@ async def calculate_completion_percentage_simple(employee_id: str) -> dict:
                 "blockers_count": 0,
                 "awaiting_review_count": 0,
             }
-        progress = await get_unified_employee_status(db, employee_id)
+        progress = await get_unified_employee_status(employee_id, db, user_role="admin", include_details=False)
         blockers = progress.get("blockers", []) or []
         awaiting = [b for b in blockers if b.get("severity") == "pending"]
         return {
@@ -220,10 +230,11 @@ async def get_applicants(
     
     applicants = await db.employees.find(query, {"_id": 0}).to_list(1000)
     
-    # Enrich with computed fields
+    # Enrich with lightweight cached progress fields only.
+    # Avoid per-applicant UCE recomputation on list endpoints.
     result = []
     for app in applicants:
-        progress = await calculate_completion_percentage_simple(app['id'])
+        progress = _safe_progress_from_employee_row(app)
         result.append({
             "id": app["id"],
             "applicant_reference": app.get("applicant_reference"),
@@ -313,7 +324,7 @@ async def get_applicant(
         raise HTTPException(status_code=404, detail="Applicant not found")
     
     applicant["person_stage"] = PersonStage.APPLICANT
-    _ap = await calculate_completion_percentage_simple(applicant_id)
+    _ap = await calculate_completion_percentage_simple(applicant_id, db=db)
     applicant["completion_percentage"] = _ap["overall_percentage"]
     applicant["completed_requirements"] = _ap["completed_requirements"]
     applicant["total_requirements"] = _ap["total_requirements"]
@@ -364,10 +375,11 @@ async def get_staff_employees(
     
     employees = await db.employees.find(query, {"_id": 0}).to_list(1000)
     
-    # Enrich with basic computed fields
+    # Enrich with cached progress fields only.
+    # Avoid per-employee UCE recomputation on list endpoint.
     for emp in employees:
         emp['person_stage'] = PersonStage.EMPLOYEE
-        _ep = await calculate_completion_percentage_simple(emp['id'])
+        _ep = _safe_progress_from_employee_row(emp)
         emp['completion_percentage'] = _ep['overall_percentage']
         emp['completed_requirements'] = _ep['completed_requirements']
         emp['total_requirements'] = _ep['total_requirements']

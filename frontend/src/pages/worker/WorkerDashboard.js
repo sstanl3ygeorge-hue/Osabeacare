@@ -1442,15 +1442,30 @@ export default function WorkerDashboard() {
   const handleAcknowledgeAgreement = async (agreement) => {
     try {
       const token = localStorage.getItem('workerToken');
-      await axios.post(
+      const response = await axios.post(
         `${API}/worker/agreements/${agreement.id}/acknowledge`,
         { signer_name: employee?.name },
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      toast.success(`${agreement.name} acknowledged`);
+      const idempotent = Boolean(response?.data?.idempotent);
+      toast.success(idempotent ? `${agreement.name} already acknowledged` : `${agreement.name} acknowledged`);
       fetchDashboard();
+      return true;
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'Failed to acknowledge agreement');
+      const detail = error?.response?.data?.detail;
+      const message =
+        (typeof detail === 'string' && detail) ||
+        (detail && typeof detail.message === 'string' && detail.message) ||
+        (typeof error?.response?.data?.message === 'string' && error.response.data.message) ||
+        'Failed to acknowledge agreement';
+      const code = detail && typeof detail === 'object' ? detail.code : null;
+      if (error?.response?.status === 409 && code === 'not_actionable') {
+        toast.info(message);
+      } else {
+        toast.error(message);
+      }
+      fetchDashboard();
+      return false;
     }
   };
 
@@ -1488,11 +1503,13 @@ export default function WorkerDashboard() {
     if (!handbookPdfViewed || !handbookAckConfirmed) return;
     setSubmittingHandbookAck(true);
     try {
-      await handleAcknowledgeAgreement(handbookAckAgreement);
-      setShowHandbookAckModal(false);
-      setHandbookAckAgreement(null);
-      setHandbookPdfViewed(false);
-      setHandbookAckConfirmed(false);
+      const ok = await handleAcknowledgeAgreement(handbookAckAgreement);
+      if (ok) {
+        setShowHandbookAckModal(false);
+        setHandbookAckAgreement(null);
+        setHandbookPdfViewed(false);
+        setHandbookAckConfirmed(false);
+      }
     } finally {
       setSubmittingHandbookAck(false);
     }
@@ -5195,4 +5212,3 @@ export default function WorkerDashboard() {
     </WorkerDashboardPage>
   );
 }
-

@@ -553,13 +553,19 @@ async def acknowledge_worker_agreement(
         else agreement_type
     )
     if normalized_agreement_type != HANDBOOK_AGREEMENT_TYPE:
-        raise HTTPException(status_code=400, detail="Only handbook acknowledgement is supported on this route")
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "unsupported_agreement_type",
+                "message": "Only handbook acknowledgement is supported on this route",
+            },
+        )
 
     db = get_db()
     employee_id = worker.get("employee_id")
     employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
     if not employee:
-        raise HTTPException(status_code=404, detail="Employee not found")
+        raise HTTPException(status_code=404, detail={"code": "employee_not_found", "message": "Employee not found"})
 
     # Canonical, validation-first resolution before any writes.
     resolved = await resolve_employee_agreement_state(db, employee, normalized_agreement_type)
@@ -569,6 +575,7 @@ async def acknowledge_worker_agreement(
             "success": True,
             "agreement": resolved,
             "message": "Agreement already acknowledged",
+            "idempotent": True,
         }
     if resolved_status not in {"pending", "pending_acknowledgement"}:
         raise HTTPException(
@@ -577,23 +584,39 @@ async def acknowledge_worker_agreement(
                 "code": "not_actionable",
                 "agreement_type": normalized_agreement_type,
                 "status": resolved_status or "unknown",
+                "message": "Handbook is not currently actionable",
+                "canonical_handbook": resolved,
             },
         )
     if not resolved.get("source_record_id"):
         raise HTTPException(
             status_code=409,
-            detail={"code": "no_active_agreement", "agreement_type": normalized_agreement_type},
+            detail={
+                "code": "no_active_agreement",
+                "agreement_type": normalized_agreement_type,
+                "message": "No active handbook agreement found",
+                "canonical_handbook": resolved,
+            },
         )
     if not resolved.get("template_version"):
         raise HTTPException(
             status_code=409,
-            detail={"code": "missing_template_version", "agreement_type": normalized_agreement_type},
+            detail={
+                "code": "missing_template_version",
+                "agreement_type": normalized_agreement_type,
+                "message": "Handbook template version is missing",
+                "canonical_handbook": resolved,
+            },
         )
     rendered_file_url = resolved.get("rendered_file_url")
     if not rendered_file_url:
         raise HTTPException(
             status_code=409,
-            detail="Handbook is still being prepared. Please try again shortly.",
+            detail={
+                "code": "missing_render",
+                "message": "Handbook is still being prepared. Please try again shortly.",
+                "canonical_handbook": resolved,
+            },
         )
     agreement_record = await ensure_agreement_rendered(db, employee, normalized_agreement_type)
     now = datetime.now(timezone.utc).isoformat()

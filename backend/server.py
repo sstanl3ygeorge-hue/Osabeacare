@@ -809,7 +809,19 @@ def _p0_fallback_payload(path: str) -> dict:
     if path == "/api/auth/session-info":
         return {"session_expired": True, "expires_in_seconds": 0, "show_warning": False, "status_unavailable": True, "message": "Session check temporarily unavailable"}
     if "/compliance-file" in path:
-        return {"status_unavailable": True, "message": "Compliance file temporarily unavailable", "sections": [], "serializer_version": "dual_row_v1"}
+        return {
+            "employee_id": path.split("/employees/")[-1].split("/")[0] if "/employees/" in path else None,
+            "status_unavailable": True,
+            "message": "Compliance file temporarily unavailable",
+            "sections": [],
+            "summary": {
+                "status_unavailable": True,
+                "overall_status": "unavailable",
+                "ready_for_work": False,
+            },
+            "errors": [],
+            "serializer_version": "dual_row_v1",
+        }
     if "/compliance-requirements" in path:
         return {"status_unavailable": True, "message": "Compliance requirements temporarily unavailable", "requirements": [], "summary": {"total_required": 0, "completed": 0, "verified": 0, "percent_complete": 0}}
     if path.endswith("/unified-progress"):
@@ -838,6 +850,21 @@ async def p0_stability_wrapper(request, call_next):
     try:
         return await asyncio.wait_for(call_next(request), timeout=timeout)
     except Exception as exc:
+        if path.endswith("/compliance-file"):
+            employee_id = path.split("/employees/")[-1].split("/")[0] if "/employees/" in path else None
+            logger.error(
+                "get_compliance_file failed employee_id=%s exception_type=%s message=%s",
+                employee_id,
+                type(exc).__name__,
+                str(exc),
+                exc_info=True,
+            )
+            payload = _p0_fallback_payload(path)
+            payload["errors"] = [{
+                "code": "compliance_file_build_failed",
+                "message": f"{type(exc).__name__}: {str(exc)[:300]}",
+            }]
+            return JSONResponse(status_code=200, content=payload)
         logger.warning(f"P0 stability fallback for {path}: {type(exc).__name__}: {exc}")
         status_code = 503 if isinstance(exc, asyncio.TimeoutError) else 500
         return JSONResponse(status_code=status_code, content=_p0_fallback_payload(path))

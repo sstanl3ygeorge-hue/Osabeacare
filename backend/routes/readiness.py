@@ -20,6 +20,7 @@ from typing import Optional, List, Dict, Any
 
 from fastapi import APIRouter, HTTPException, Depends, Query
 from stageGates import StageGateService
+from stage_identity import normalize_lifecycle_status, get_stage_identity
 
 from .dependencies import (
     get_db,
@@ -33,6 +34,11 @@ logger = logging.getLogger(__name__)
 
 # ==================== ROUTER ====================
 router = APIRouter(tags=["Readiness"])
+
+
+def _is_recruitment_lifecycle(status: str) -> bool:
+    normalized = normalize_lifecycle_status(status)
+    return normalized in {"new", "screening", "interview", "compliance_review", "onboarding"}
 
 
 # ==================== LAZY IMPORTS ====================
@@ -594,6 +600,23 @@ async def check_recruitment_approval(
     employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
+    lifecycle_status = normalize_lifecycle_status(employee.get("status"))
+    if not _is_recruitment_lifecycle(lifecycle_status):
+        return {
+            "employee_id": employee_id,
+            "status_unavailable": True,
+            "not_applicable": True,
+            "reason": "not_recruitment_lifecycle",
+            "status": lifecycle_status,
+            "person_stage": get_stage_identity(employee),
+            "can_approve": False,
+            "message": "Not applicable for non-recruitment lifecycle",
+            "blockers": [],
+            "warnings": [],
+            "verified_count": 0,
+            "required_count": 0,
+            "blocker_count": 0,
+        }
     
     try:
         # P0 stability: timeout heavy helpers and return fallback instead of 502

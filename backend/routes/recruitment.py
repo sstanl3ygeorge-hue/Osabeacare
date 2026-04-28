@@ -490,7 +490,15 @@ async def get_recruitment_gate(
     employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
-
+    lifecycle_status = normalize_lifecycle_status(employee.get("status"))
+    if lifecycle_status in {EmployeeStatus.ACTIVE, EmployeeStatus.INACTIVE}:
+        return {
+            "employee_id": employee_id,
+            "not_applicable": True,
+            "reason": "not_recruitment_lifecycle",
+            "status_unavailable": True,
+            "message": "Not applicable for non-recruitment lifecycle"
+        }
     stage_gate = StageGateService(db)
     gate_result = await stage_gate.evaluate_recruitment_gate(employee_id)
     return {
@@ -1031,6 +1039,21 @@ async def get_recruitment_status(
     
     current_status = normalize_lifecycle_status(employee.get("status", EmployeeStatus.NEW))
     person_stage = _derive_person_stage_from_status(current_status)
+    if current_status not in {"new", "screening", "interview", "compliance_review", "onboarding"}:
+        return {
+            "employee_id": employee_id,
+            "status_unavailable": True,
+            "not_applicable": True,
+            "reason": "not_recruitment_lifecycle",
+            "message": "Recruitment status not applicable for non-recruitment lifecycle",
+            "status": current_status,
+            "person_stage": get_stage_identity(employee),
+            "is_applicant": False,
+            "is_employee": True,
+            "recruitment_approved": bool(employee.get("recruitment_approved", False)),
+            "recruitment_approved_at": employee.get("recruitment_approved_at"),
+            "employee_code": employee.get("employee_code")
+        }
     
     return {
         "employee_id": employee_id,

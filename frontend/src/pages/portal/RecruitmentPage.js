@@ -28,6 +28,15 @@ import { Info } from 'lucide-react';
 import EmployeeAvatar from '../../components/portal/EmployeeAvatar';
 import { cn } from '../../lib/utils';
 import { isApplicantStatus, normalizeLifecycleStatus } from '../../lib/lifecycle';
+
+// Canonical statuses for which to fetch per-card status
+const CANONICAL_STATUSES = [
+  'new',
+  'screening',
+  'interview',
+  'compliance_review',
+  'onboarding', // optional, remove if not needed
+];
 import API_BASE from '../../utils/apiBase';
 
 const API = API_BASE;
@@ -95,12 +104,7 @@ export default function RecruitmentPage() {
       const applicantRows = (response.data || []).filter((person) => isApplicantStatus(person?.status));
       setApplicants(applicantRows);
       
-      // Fetch approval status for each applicant
-      applicantRows.forEach(applicant => {
-        if (!applicant.recruitment_approved) {
-          fetchApprovalStatus(applicant.id);
-        }
-      });
+      // Defer per-card status fetches to after list render (handled in useEffect below)
     } catch (error) {
       console.error('Failed to fetch applicants:', error);
       setStatusChecksUnavailable(true);
@@ -158,16 +162,38 @@ export default function RecruitmentPage() {
     fetchApplicants();
   }, [token, search, statusFilter]);
 
-  // Fetch approval status for all visible applicants
+  // Fetch approval status for canonical-status applicants, defer and limit concurrency
   useEffect(() => {
-    if (applicants.length > 0) {
-      applicants.forEach(applicant => {
-        if (!approvalData[applicant.id]) {
-          fetchApprovalStatus(applicant.id);
-        }
-      });
+    if (applicants.length === 0) return;
+    // Only fetch for canonical statuses
+    const toFetch = applicants.filter(
+      (a) =>
+        CANONICAL_STATUSES.includes(normalizeLifecycleStatus(a.status)) &&
+        !approvalData[a.id]
+    );
+    if (toFetch.length === 0) return;
+
+    let isCancelled = false;
+    const CONCURRENCY_LIMIT = 3;
+    let inFlight = 0;
+    let idx = 0;
+
+    function next() {
+      if (isCancelled) return;
+      while (inFlight < CONCURRENCY_LIMIT && idx < toFetch.length) {
+        const applicant = toFetch[idx++];
+        inFlight++;
+        fetchApprovalStatus(applicant.id).finally(() => {
+          inFlight--;
+          next();
+        });
+      }
     }
-  }, [applicants]);
+    next();
+    return () => {
+      isCancelled = true;
+    };
+  }, [applicants, approvalData]);
 
   // Handle "Review Applicant" - navigate to recruitment context profile
   const handleReviewApplicant = (applicantId) => {
@@ -386,6 +412,8 @@ export default function RecruitmentPage() {
               {applicants.map((applicant) => {
                 const approval = getApprovalSummary(applicant.id);
                 const isLoadingApproval = loadingApprovalCheck === applicant.id;
+                // Only show status for canonical statuses, fallback UI otherwise
+                const showStatus = CANONICAL_STATUSES.includes(normalizeLifecycleStatus(applicant.status));
                 
                 return (
                   <div
@@ -435,40 +463,44 @@ export default function RecruitmentPage() {
 
                     {/* Middle Row: Quick Review Summary with Labeled Progress */}
                     <div className="mb-4 px-3 py-2 bg-gray-50 rounded-lg">
-                      {approval ? (
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-4 text-sm">
-                            {approval.statusUnavailable ? (
-                              <span className="flex items-center gap-1.5 text-slate-600 font-medium">
-                                <AlertTriangle className="w-4 h-4" />
-                                Status unavailable
-                              </span>
-                            ) : approval.canApprove ? (
-                              <span className="flex items-center gap-1.5 text-emerald-600 font-medium">
-                                <CheckCircle className="w-4 h-4" />
-                                Ready for approval
-                              </span>
-                            ) : (
-                              <span className="flex items-center gap-1.5 text-amber-600 font-medium">
-                                <AlertTriangle className="w-4 h-4" />
-                                Review needed ({approval.blockerCount})
-                              </span>
+                      {showStatus ? (
+                        approval ? (
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-4 text-sm">
+                              {approval.statusUnavailable ? (
+                                <span className="flex items-center gap-1.5 text-slate-600 font-medium">
+                                  <AlertTriangle className="w-4 h-4" />
+                                  Status unavailable
+                                </span>
+                              ) : approval.canApprove ? (
+                                <span className="flex items-center gap-1.5 text-emerald-600 font-medium">
+                                  <CheckCircle className="w-4 h-4" />
+                                  Ready for approval
+                                </span>
+                              ) : (
+                                <span className="flex items-center gap-1.5 text-amber-600 font-medium">
+                                  <AlertTriangle className="w-4 h-4" />
+                                  Review needed ({approval.blockerCount})
+                                </span>
+                              )}
+                            </div>
+                            {!approval.statusUnavailable && (
+                              <LabeledProgressBadge
+                                metricType="recruitment"
+                                completed={approval.verifiedCount}
+                                total={approval.requiredCount}
+                                size="sm"
+                              />
                             )}
                           </div>
-                          {!approval.statusUnavailable && (
-                            <LabeledProgressBadge
-                              metricType="recruitment"
-                              completed={approval.verifiedCount}
-                              total={approval.requiredCount}
-                              size="sm"
-                            />
-                          )}
-                        </div>
+                        ) : (
+                          <div className="flex items-center gap-2 text-sm text-text-muted">
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                            Loading approval status...
+                          </div>
+                        )
                       ) : (
-                        <div className="flex items-center gap-2 text-sm text-text-muted">
-                          <Loader2 className="w-3 h-3 animate-spin" />
-                          Loading approval status...
-                        </div>
+                        <span className="text-xs text-gray-400">Status not required for this stage</span>
                       )}
                     </div>
 

@@ -146,7 +146,7 @@ export default function RequirementWorkflowCard({
     requirementKey,
     evidenceFiles,
     checkRecord,
-    canonicalStatus: evidenceRow?.status || checkRow?.status || sectionData?.status || null,
+    canonicalStatus: checkRow?.status || sectionData?.status || evidenceRow?.status || null,
     statusUnavailable: rowUnavailable,
     isAdminView,
   });

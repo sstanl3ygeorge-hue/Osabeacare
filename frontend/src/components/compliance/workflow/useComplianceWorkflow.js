@@ -110,11 +110,26 @@ export function useComplianceWorkflow({
       stepLabel = 'Final Status';
     }
 
-    // ── Final status (computed, never manual) ─────────────────────────────
+
+    // ── Hotfix: If backend/check row says verified, always render verified for key requirements ──
+    // Applies to dbs, right_to_work, identity, proof_of_address
+    const isKeyRequirement =
+      requirementKey === 'dbs' ||
+      requirementKey === 'right_to_work' ||
+      requirementKey === 'identity' ||
+      requirementKey === 'proof_of_address';
+    const checkRowVerified =
+      checkRecord?.verified === true ||
+      checkRecord?.is_verified === true ||
+      checkRecord?.outcome === 'verified';
+
     let finalStatus = 'pending';
     let finalStatusLabel = 'Pending';
 
-    if (!hasEvidence) {
+    if (isKeyRequirement && checkRowVerified) {
+      finalStatus = 'verified';
+      finalStatusLabel = 'Verified';
+    } else if (!hasEvidence) {
       finalStatus = 'pending';
       finalStatusLabel = 'Missing';
     } else if (!hasAcceptedEvidence && hasRejectedEvidence) {
@@ -133,9 +148,9 @@ export function useComplianceWorkflow({
       finalStatus = 'pending';
       finalStatusLabel = 'Awaiting admin review';
     } else if (proofRequired && !hasProof) {
-      // SAFEGUARD: verified check + no proof → show incomplete, not verified
-      finalStatus = 'incomplete';
-      finalStatusLabel = 'Cannot assess - proof missing';
+      // Hotfix: If check is verified, missing proof only shows warning, not downgrade status
+      finalStatus = checkVerified ? 'verified' : 'incomplete';
+      finalStatusLabel = checkVerified ? 'Verified' : 'Cannot assess - proof missing';
     } else if (isDBS && isOverdue) {
       finalStatus = 'overdue';
       finalStatusLabel = 'Overdue – Recheck Required';

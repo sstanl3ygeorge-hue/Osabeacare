@@ -132,8 +132,10 @@ def test_latest_generated_contract_overrides_stale_rejected_ack(monkeypatch):
     monkeypatch.setattr("agreement_document_service.ensure_agreement_rendered", _ensure)
 
     state = asyncio.run(resolve_employee_agreement_state(db, employee, CONTRACT_AGREEMENT_TYPE))
-    assert state["contract_state"] == "awaiting_worker_signature"
-    assert state["status"] == "awaiting_worker_signature"
+    assert state["contract_state"] == "pending_signature"
+    assert state["status"] == "pending_signature"
+    assert state["raw_status"] == "awaiting_worker_signature"
     assert state["rejected"] is False
     assert state["can_sign"] is True
     assert state["acknowledgement"]["active_contract_id"] == "contract-v2"
+    assert state["template_version"] == "contract_acceptance_v_new"

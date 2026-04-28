@@ -37506,6 +37506,7 @@ async def get_compliance_file(
 
         agreement_state = await resolve_employee_agreement_state(db, employee, agreement_type)
         latest_ack = agreement_state.get("acknowledgement") or (acks[0] if len(acks) > 0 else None)
+        resolved_ack = agreement_state.get("acknowledgement") or {}
         has_acknowledgement = bool(agreement_state.get("has_acknowledgement")) or submission is not None
         
         # Determine verification status (prefer new submission over old ack)
@@ -37513,6 +37514,14 @@ async def get_compliance_file(
             is_verified = submission.get("verification_status") == "verified"
         else:
             is_verified = bool(agreement_state.get("verified"))
+        can_worker_sign = bool(agreement_state.get("can_sign"))
+        resolved_template_version = (
+            agreement_state.get("template_version")
+            or resolved_ack.get("template_version")
+            or (latest_ack or {}).get("template_version")
+            or (submission or {}).get("template_version")
+        )
+        canonical_status = agreement_state.get("status")
         
         # Status summary - prefer new submission data over old ack
         if submission and is_verified:
@@ -37528,9 +37537,9 @@ async def get_compliance_file(
             vs = (submission.get("verification_status", "unknown") or "unknown").replace("_", " ").title()
             status_summary = vs
             status = "recorded"
-        elif has_acknowledgement and latest_ack:
+        elif has_acknowledgement and (latest_ack or agreement_state.get("has_acknowledgement")):
             status_summary = agreement_state.get("state_label") or ((latest_ack.get("verification_status", "unknown") or "unknown").replace("_", " ").title())
-            status = agreement_state.get("status") or ("awaiting_review" if latest_ack.get("verification_status") == "awaiting_review" else "recorded")
+            status = canonical_status or ("awaiting_review" if latest_ack and latest_ack.get("verification_status") == "awaiting_review" else "recorded")
         elif len(pending_reqs) > 0:
             status_summary = f"Sent, awaiting completion"
             status = "sent"
@@ -37539,7 +37548,7 @@ async def get_compliance_file(
             status = "not_completed"
         
         blocker_text = None
-        if not is_verified:
+        if not is_verified and not can_worker_sign:
             blocker_text = f"{title} required"
         
         # Allowed actions
@@ -37563,45 +37572,60 @@ async def get_compliance_file(
             
             "has_acknowledgement": has_acknowledgement,
             "is_verified": is_verified,
+            "agreement_type": agreement_type,
+            "template_version": resolved_template_version,
+            "can_sign": can_worker_sign if agreement_type == "contract_acceptance" else None,
+            "can_acknowledge": can_worker_sign if agreement_type == "handbook_acknowledgement" else None,
+            "latest_active": True,
+            "source_record_id": (latest_ack or {}).get("id") or (submission or {}).get("id") or (agreement_state.get("acknowledgement") or {}).get("id"),
+            "current_lifecycle": {
+                "status": canonical_status,
+                "message": agreement_state.get("state_label"),
+                "can_worker_sign": can_worker_sign,
+                "rejected": bool(agreement_state.get("rejected")),
+                "verified": bool(agreement_state.get("verified")),
+                "signed": bool(agreement_state.get("signed")),
+            },
             "acknowledgement_data": {
-                "id": latest_ack.get("id") if latest_ack else None,
+                "id": resolved_ack.get("id") or (latest_ack.get("id") if latest_ack else None),
                 "agreement_type": agreement_type,
-                "version_acknowledged": latest_ack.get("version_acknowledged") if latest_ack else None,
-                "completion_mode": latest_ack.get("completion_mode") if latest_ack else None,
-                "completed_at": latest_ack.get("completed_at") if latest_ack else None,
-                "completed_by": latest_ack.get("completed_by") if latest_ack else None,
-                "assisted_by": latest_ack.get("assisted_by") if latest_ack else None,
-                "call_note": latest_ack.get("call_note") if latest_ack else None,
-                "verification_status": latest_ack.get("verification_status") if latest_ack else None,
-                "verified_at": latest_ack.get("verified_at") if latest_ack else None,
-                "verified_by": latest_ack.get("verified_by") if latest_ack else None,
-                "verified_by_name": latest_ack.get("verified_by_name") if latest_ack else None,
-                "rendered_file_url": latest_ack.get("rendered_file_url") if latest_ack else None,
-                "rendered_contract_pdf_url": latest_ack.get("rendered_contract_pdf_url") if latest_ack else None,
-                "worker_signed_contract_pdf_url": latest_ack.get("worker_signed_contract_pdf_url") if latest_ack else None,
-                "executed_contract_pdf_url": latest_ack.get("executed_contract_pdf_url") if latest_ack else None,
-                "signed_document_url": latest_ack.get("signed_document_url") if latest_ack else None,
-                "template_version": latest_ack.get("template_version") if latest_ack else None,
-                "contract_state": latest_ack.get("contract_state") if latest_ack else None,
-                "worker_signed_at": latest_ack.get("worker_signed_at") if latest_ack else None,
-                "worker_signer_name": latest_ack.get("worker_signer_name") if latest_ack else None,
-                "company_signed_at": latest_ack.get("company_signed_at") if latest_ack else None,
-                "company_signer_name": latest_ack.get("company_signer_name") if latest_ack else None,
+                "version_acknowledged": resolved_ack.get("version_acknowledged") or (latest_ack.get("version_acknowledged") if latest_ack else None),
+                "completion_mode": resolved_ack.get("completion_mode") or (latest_ack.get("completion_mode") if latest_ack else None),
+                "completed_at": resolved_ack.get("completed_at") or (latest_ack.get("completed_at") if latest_ack else None),
+                "completed_by": resolved_ack.get("completed_by") or (latest_ack.get("completed_by") if latest_ack else None),
+                "assisted_by": resolved_ack.get("assisted_by") or (latest_ack.get("assisted_by") if latest_ack else None),
+                "call_note": resolved_ack.get("call_note") or (latest_ack.get("call_note") if latest_ack else None),
+                "verification_status": resolved_ack.get("verification_status") or (latest_ack.get("verification_status") if latest_ack else None),
+                "verified_at": resolved_ack.get("verified_at") or (latest_ack.get("verified_at") if latest_ack else None),
+                "verified_by": resolved_ack.get("verified_by") or (latest_ack.get("verified_by") if latest_ack else None),
+                "verified_by_name": resolved_ack.get("verified_by_name") or (latest_ack.get("verified_by_name") if latest_ack else None),
+                "rendered_file_url": resolved_ack.get("rendered_file_url") or (latest_ack.get("rendered_file_url") if latest_ack else None),
+                "rendered_contract_pdf_url": resolved_ack.get("rendered_contract_pdf_url") or (latest_ack.get("rendered_contract_pdf_url") if latest_ack else None),
+                "worker_signed_contract_pdf_url": resolved_ack.get("worker_signed_contract_pdf_url") or (latest_ack.get("worker_signed_contract_pdf_url") if latest_ack else None),
+                "executed_contract_pdf_url": resolved_ack.get("executed_contract_pdf_url") or (latest_ack.get("executed_contract_pdf_url") if latest_ack else None),
+                "signed_document_url": resolved_ack.get("signed_document_url") or (latest_ack.get("signed_document_url") if latest_ack else None),
+                "template_version": resolved_template_version,
+                "contract_state": agreement_state.get("contract_state") or resolved_ack.get("contract_state") or (latest_ack.get("contract_state") if latest_ack else None),
+                "worker_signed_at": resolved_ack.get("worker_signed_at") or (latest_ack.get("worker_signed_at") if latest_ack else None),
+                "worker_signer_name": resolved_ack.get("worker_signer_name") or (latest_ack.get("worker_signer_name") if latest_ack else None),
+                "company_signed_at": resolved_ack.get("company_signed_at") or (latest_ack.get("company_signed_at") if latest_ack else None),
+                "company_signer_name": resolved_ack.get("company_signer_name") or (latest_ack.get("company_signer_name") if latest_ack else None),
                 "rejection_reason": agreement_state.get("rejection_reason"),
                 "rejected_at": agreement_state.get("rejected_at"),
                 "rejected_by_name": agreement_state.get("rejected_by_name"),
                 "state_label": agreement_state.get("state_label"),
-                "status": agreement_state.get("status"),
+                "status": canonical_status,
+                "raw_status": agreement_state.get("raw_status"),
                 "signed": agreement_state.get("signed"),
                 "verified": agreement_state.get("verified"),
-                "can_sign": agreement_state.get("can_sign"),
+                "can_sign": can_worker_sign,
                 "file_url": agreement_state.get("file_url"),
                 "download_url": agreement_state.get("download_url"),
                 "render_issue": agreement_state.get("render_issue"),
                 "system_issue": agreement_state.get("system_issue"),
                 # Link to new-style submission if available
                 "submission_id": str(submission.get("_id")) if submission else None
-            } if latest_ack or submission else None,
+            } if latest_ack or submission or agreement_state.get("has_acknowledgement") else None,
             
             # New-style template submission data
             "submission_data": {
@@ -37638,7 +37662,7 @@ async def get_compliance_file(
                 "history": len(acks)
             },
             
-            "status": status,
+            "status": canonical_status or status,
             "status_summary": status_summary,
             
             "allowed_actions": allowed_actions

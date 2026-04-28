@@ -1168,6 +1168,12 @@ async def resolve_employee_agreement_state(db, employee: Dict[str, Any], agreeme
                     agreement["verification_status"] = "verified"
 
         contract_state = agreement.get("contract_state") or "awaiting_worker_signature"
+        # Canonicalize worker-signable pending states so all API surfaces agree.
+        canonical_contract_state = (
+            "pending_signature"
+            if contract_state in {"pending_signature", "awaiting_worker_signature"}
+            else contract_state
+        )
         verification_status = str((agreement or {}).get("verification_status") or "").strip().lower()
         canonical_contract = _is_canonical_contract_template_version(agreement.get("template_version"))
         contract_file_url = current_contract_artifact(agreement)
@@ -1200,8 +1206,9 @@ async def resolve_employee_agreement_state(db, employee: Dict[str, Any], agreeme
             "fully_executed": fully_executed,
             "state_label": state_label,
             "can_sign": bool(canonical_contract and contract_file_url and (bool(effective_rejected) or contract_state in (None, "", "draft_rendered", "awaiting_worker_signature", "pending_signature", "rejected_reopen_required"))),
-            "status": "rejected" if effective_rejected else contract_state,
-            "contract_state": contract_state,
+            "status": "rejected" if effective_rejected else canonical_contract_state,
+            "raw_status": contract_state,
+            "contract_state": canonical_contract_state,
             "file_url": contract_file_url,
             "download_url": contract_file_url,
             "rendered_file_url": agreement.get("rendered_contract_pdf_url") or agreement.get("rendered_file_url"),

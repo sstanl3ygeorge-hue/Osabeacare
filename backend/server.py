@@ -39363,33 +39363,9 @@ async def get_compliance_file(
     employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "status": 1, "employee_code": 1})
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
-    lifecycle_status = normalize_lifecycle_status(employee.get("status"))
-    if lifecycle_status not in {"new", "screening", "interview", "compliance_review", "onboarding"}:
-        return {
-            "employee_id": employee_id,
-            "status_unavailable": True,
-            "not_applicable": True,
-            "reason": "not_recruitment_lifecycle",
-            "message": "Unified recruitment progress not applicable for non-recruitment lifecycle",
-            "status": lifecycle_status,
-            "person_stage": get_stage_identity(employee),
-            "overall_percentage": 0,
-            "completed_requirements": 0,
-            "total_requirements": 0,
-            "categories": {},
-            "category_details": {},
-            "blockers": [],
-            "blocker_details": [],
-            "legal_blockers": [],
-            "legal_blocker_details": [],
-            "internal_blockers": [],
-            "internal_blocker_details": [],
-            "is_work_ready": False,
-            "can_promote": False,
-            "role_requires_professional_registration": False,
-            "professional_registration_type": None,
-            "checks": {}
-        }
+    # Important: compliance-file must remain available for ALL employee lifecycle states,
+    # including active workforce records. Recruitment lifecycle gating belongs only to
+    # recruitment/unified-progress serializers.
     try:
         employment_history_row = await _build_employment_history_compliance_row(employee_id, employee)
     except Exception as exc:

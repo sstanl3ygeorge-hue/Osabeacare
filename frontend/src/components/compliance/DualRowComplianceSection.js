@@ -30,6 +30,19 @@ import API_BASE from '../../utils/apiBase';
 
 const API = API_BASE;
 
+const normalizeComplianceSections = (sections) => {
+  if (!sections) return {};
+  if (Array.isArray(sections)) {
+    return sections.reduce((acc, section, index) => {
+      const key = section?.key || section?.id || section?.section_key || section?.requirement_id || `section_${index}`;
+      if (key) acc[String(key)] = section;
+      return acc;
+    }, {});
+  }
+  if (typeof sections === 'object') return sections;
+  return {};
+};
+
 /**
  * DualRowComplianceSection - Displays the dual-row compliance file structure
  * 
@@ -178,18 +191,37 @@ export default function DualRowComplianceSection({
         headers: { Authorization: `Bearer ${token}` }
       });
       const payload = (response?.data && typeof response.data === 'object') ? response.data : {};
+      const normalizedSections = normalizeComplianceSections(payload.sections);
       
       // Verify it's the dual-row format
       if (payload.serializer_version && payload.serializer_version !== 'dual_row_v1') {
         console.warn('Unexpected serializer version:', payload.serializer_version);
       }
       
-      setComplianceFile({
-        ...payload,
-        sections: (payload.sections && typeof payload.sections === 'object') ? payload.sections : {},
-        summary: (payload.summary && typeof payload.summary === 'object')
-          ? payload.summary
-          : { status_unavailable: Boolean(payload.status_unavailable), overall_status: 'unavailable', ready_for_work: false },
+      setComplianceFile((prev) => {
+        const prevSections = normalizeComplianceSections(prev?.sections);
+        const nextHasSections = Object.keys(normalizedSections).length > 0;
+        const prevHasSections = Object.keys(prevSections).length > 0;
+        if (payload?.serializer_version === 'dual_row_v1' && !nextHasSections && prevHasSections) {
+          console.warn('dual_row_v1 returned empty sections; preserving previous valid compliance sections', {
+            employeeId,
+            previousSectionCount: Object.keys(prevSections).length
+          });
+          return {
+            ...payload,
+            sections: prevSections,
+            summary: (payload.summary && typeof payload.summary === 'object')
+              ? payload.summary
+              : { status_unavailable: Boolean(payload.status_unavailable), overall_status: 'unavailable', ready_for_work: false },
+          };
+        }
+        return {
+          ...payload,
+          sections: normalizedSections,
+          summary: (payload.summary && typeof payload.summary === 'object')
+            ? payload.summary
+            : { status_unavailable: Boolean(payload.status_unavailable), overall_status: 'unavailable', ready_for_work: false },
+        };
       });
     } catch (err) {
       const message = err?.response?.data?.message || err?.response?.data?.detail || err?.message || 'Failed to load compliance file';

@@ -118,8 +118,9 @@ export default function RequirementWorkflowCard({
   const usesEvidenceViewer = isIdentityOrPOA || isRTWOrDBS;
 
   // ── Extract rows from section data ────────────────────────────────────
-  const evidenceRow = sectionData?.rows?.find((r) => r.row_type === 'evidence');
-  const checkRow = sectionData?.rows?.find((r) => r.row_type === 'check');
+  const sectionRows = Array.isArray(sectionData?.rows) ? sectionData.rows : [];
+  const evidenceRow = sectionRows.find((r) => r?.row_type === 'evidence');
+  const checkRow = sectionRows.find((r) => r?.row_type === 'check');
   const evidenceFiles = evidenceRow?.documents_preview || [];
   const rawCheckRecord = checkRow?.check_data || null;
   const checkRecord = rawCheckRecord

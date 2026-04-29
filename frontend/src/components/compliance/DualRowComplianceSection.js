@@ -177,16 +177,31 @@ export default function DualRowComplianceSection({
       const response = await axios.get(`${API}/employees/${employeeId}/compliance-file`, {
         headers: { Authorization: `Bearer ${token}` }
       });
+      const payload = (response?.data && typeof response.data === 'object') ? response.data : {};
       
       // Verify it's the dual-row format
-      if (response.data.serializer_version !== 'dual_row_v1') {
-        console.warn('Unexpected serializer version:', response.data.serializer_version);
+      if (payload.serializer_version && payload.serializer_version !== 'dual_row_v1') {
+        console.warn('Unexpected serializer version:', payload.serializer_version);
       }
       
-      setComplianceFile(response.data);
+      setComplianceFile({
+        ...payload,
+        sections: (payload.sections && typeof payload.sections === 'object') ? payload.sections : {},
+        summary: (payload.summary && typeof payload.summary === 'object')
+          ? payload.summary
+          : { status_unavailable: Boolean(payload.status_unavailable), overall_status: 'unavailable', ready_for_work: false },
+      });
     } catch (err) {
-      setError(err.response?.data?.detail || 'Failed to load compliance file');
-      toast.error('Failed to load compliance file');
+      const message = err?.response?.data?.message || err?.response?.data?.detail || err?.message || 'Failed to load compliance file';
+      setError(message);
+      setComplianceFile({
+        employee_id: employeeId,
+        status_unavailable: true,
+        message: 'Compliance temporarily unavailable',
+        sections: {},
+        summary: { status_unavailable: true, overall_status: 'unavailable', ready_for_work: false },
+      });
+      toast.error('Compliance temporarily unavailable');
     } finally {
       setLoading(false);
     }
@@ -214,10 +229,10 @@ export default function DualRowComplianceSection({
    * Transform backend evidence/check rows into a normalized surface for UploadRequirementCard
    */
   const transformToUploadSurface = (sectionKey, section) => {
-    if (!section || !section.rows) return null;
+    if (!section || !Array.isArray(section.rows)) return null;
     
-    const evidenceRow = section.rows.find(r => r.row_type === 'evidence');
-    const checkRow = section.rows.find(r => r.row_type === 'check');
+    const evidenceRow = section.rows.find(r => r?.row_type === 'evidence');
+    const checkRow = section.rows.find(r => r?.row_type === 'check');
     
     if (!evidenceRow) return null;
     
@@ -767,8 +782,8 @@ export default function DualRowComplianceSection({
     return (
       <div className="text-center py-12">
         <AlertTriangle className="h-12 w-12 mx-auto text-red-400 mb-4" />
-        <p className="font-medium text-red-700">Cannot assess compliance file</p>
-        <p className="text-sm text-red-600 mt-1 mb-4">{error}</p>
+        <p className="font-medium text-amber-700">Compliance temporarily unavailable</p>
+        <p className="text-sm text-amber-700 mt-1 mb-4">{error}</p>
         <p className="text-xs text-red-500 mb-4">Verification and row actions are unavailable until this source loads.</p>
         <Button variant="outline" onClick={handleRefresh}>
           <RefreshCw className="h-4 w-4 mr-2" />
@@ -782,11 +797,20 @@ export default function DualRowComplianceSection({
     return null;
   }
 
+  if (complianceFile?.status_unavailable) {
+    return (
+      <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+        <p className="font-medium">Compliance temporarily unavailable</p>
+        <p className="mt-1">{complianceFile?.message || 'Some compliance checks are temporarily unavailable.'}</p>
+      </div>
+    );
+  }
+
   // UI-only: filter out staff_health_questionnaire from all sections before rendering
   const { summary } = complianceFile;
   // Deep clone sections to avoid mutating original
   const filteredSections = (() => {
-    if (!complianceFile.sections) return complianceFile.sections;
+    if (!complianceFile.sections || typeof complianceFile.sections !== 'object') return {};
     const clone = {};
     for (const [sectionKey, section] of Object.entries(complianceFile.sections)) {
       if (!section || !Array.isArray(section.rows)) {
@@ -800,7 +824,7 @@ export default function DualRowComplianceSection({
     }
     return clone;
   })();
-  const sectionRows = Object.values(filteredSections || {}).flatMap((section) => section?.rows || []);
+  const sectionRows = Object.values(filteredSections || {}).flatMap((section) => Array.isArray(section?.rows) ? section.rows : []);
   const blockerCount = sectionRows.filter((row) => row.blocker_text).length;
   const pendingReviewCount = sectionRows.filter((row) => (
     row.status === 'submitted' ||
@@ -899,7 +923,7 @@ export default function DualRowComplianceSection({
       
       {/* Serializer Version (for debugging) */}
       <div className="text-xs text-text-muted text-right">
-        Serializer: {complianceFile.serializer_version}
+        Serializer: {complianceFile.serializer_version || 'unavailable'}
       </div>
       
       {/* Ticket C: Evidence Management Drawer for RTW, DBS, Identity, PoA */}

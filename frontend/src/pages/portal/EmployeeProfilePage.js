@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, Link, useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import axios from 'axios';
 import { useAuth } from '../../context/AuthContext';
@@ -74,6 +74,33 @@ import {
 
 const API = API_BASE;
 
+class ComplianceTabErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error) {
+    console.error('Checks & Compliance tab render failure:', error);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+          <p className="font-medium">Compliance temporarily unavailable</p>
+          <p className="mt-1">Checks & Compliance data could not be rendered right now. Please retry.</p>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 // Form-based requirements (open modal instead of file upload)
 const FORM_BASED_REQUIREMENTS = [
   // 'health_screening' - ARCHIVED: replaced by staff_health_questionnaire
@@ -84,7 +111,7 @@ const FORM_BASED_REQUIREMENTS = [
   'hmrc_starter_checklist',
   'staff_personal_info',
   'staff_health_questionnaire',
-  // Worker-submittable forms â€” must open form viewer, not file upload
+  // Worker-submittable forms — must open form viewer, not file upload
   'emergency_contacts',
   'conflict_of_interest',
   'pre_interview_questionnaire',
@@ -1496,9 +1523,31 @@ export default function EmployeeProfilePage() {
       const response = await axios.get(`${API}/employees/${employeeId}/compliance-file`, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      setComplianceFile(response.data);
+      const payload = (response?.data && typeof response.data === 'object') ? response.data : {};
+      setComplianceFile({
+        ...payload,
+        sections: (payload.sections && typeof payload.sections === 'object') ? payload.sections : {},
+        summary: (payload.summary && typeof payload.summary === 'object')
+          ? payload.summary
+          : { status_unavailable: Boolean(payload.status_unavailable), overall_status: 'unavailable', ready_for_work: false },
+      });
     } catch (error) {
       console.error('Failed to fetch compliance file:', error);
+      setComplianceFile({
+        employee_id: employeeId,
+        status_unavailable: true,
+        message: 'Compliance temporarily unavailable',
+        sections: {},
+        summary: {
+          status_unavailable: true,
+          overall_status: 'unavailable',
+          ready_for_work: false
+        },
+        errors: [{
+          code: 'compliance_file_fetch_failed',
+          message: error?.response?.data?.message || error?.message || 'Failed to load compliance file'
+        }]
+      });
     }
   };
 
@@ -1877,7 +1926,7 @@ export default function EmployeeProfilePage() {
         }
         
         // POST-UPLOAD FEEDBACK - Clear guidance on next step
-        toast.success('Document uploaded â€” please review and approve', {
+        toast.success('Document uploaded — please review and approve', {
           duration: 5000,
           description: 'Check the document is clear and correct, then mark as approved.'
         });
@@ -1899,7 +1948,7 @@ export default function EmployeeProfilePage() {
       }
       await Promise.all(refreshTasks);
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'Upload failed â€” please try again');
+      toast.error(error.response?.data?.detail || 'Upload failed — please try again');
     } finally {
       setIsUploading(false);
     }
@@ -3743,8 +3792,8 @@ export default function EmployeeProfilePage() {
   const cvLegacyNonPdfOnly = Boolean(!cvReviewReady && !cvLinkRecoveryAvailable && activeNonPdfCvCandidates.length > 0);
   // Display-only: surface the admin-requested replacement state alongside the
   // "On file" badge so the admin view does not silently contradict the
-  // readiness blocker ("CV was rejected â€” please upload a replacement") and
-  // the worker dashboard ("CV on file â€” replacement requested"). No new
+  // readiness blocker ("CV was rejected — please upload a replacement") and
+  // the worker dashboard ("CV on file — replacement requested"). No new
   // truth: reads employee.cv_status directly from the backend record.
   const cvReplacementPending = ['rejected', 'replacement_requested'].includes(
     (employee?.cv_status || '').toLowerCase()
@@ -3852,7 +3901,7 @@ export default function EmployeeProfilePage() {
   // CV linkage is supporting evidence, not a sign-off prerequisite.
   // The mandatory chain is: application form + employment history + coverage + gaps + declarations.
   // A CV may not exist (e.g. entry-level workers) and that already does not block sign-off,
-  // so an unlinked/non-PDF CV should not block either â€” it is surfaced as a warning instead.
+  // so an unlinked/non-PDF CV should not block either — it is surfaced as a warning instead.
   const cvLinkBlocksReview = Boolean(cvFileExists && !cvReviewReady && employee?.cv_status !== 'approved');
   // Pre-conditions gate: all data requirements satisfied, ready for admin sign-off
   // Coverage must be met AND all gaps resolved
@@ -3921,7 +3970,7 @@ export default function EmployeeProfilePage() {
     !applicationAvailable ? 'Application evidence missing' : null,
     !declarationsAdequatelyReviewed ? 'Declarations not reviewed' : null,
     !employmentHistoryExists ? 'Employment history missing' : null,
-    !employmentCoverage ? 'Coverage not assessed â€” run gap analysis' : null,
+    !employmentCoverage ? 'Coverage not assessed — run gap analysis' : null,
     (employmentCoverage && !coverageAssessed) ? 'Cannot assess 10-year coverage from current data' : null,
     (coverageAssessed && !coverageMet) ? '10-year coverage not met' : null,
     employmentGapsCannotAssess ? 'Unable to confirm gaps from the current history' : null,
@@ -3940,7 +3989,7 @@ export default function EmployeeProfilePage() {
         ...canonicalReviewBlockers,
       ].filter(Boolean)
     : legacyEmploymentStatusBlockers;
-  // CV is supporting evidence only â€” it does not block sign-off.
+  // CV is supporting evidence only — it does not block sign-off.
   // Employment history comes from the application form.
   const employmentStatusWarnings = [].filter(Boolean);
 
@@ -4076,7 +4125,7 @@ export default function EmployeeProfilePage() {
                   {employee.first_name} {employee.last_name}
                 </h1>
                 <p className="text-text-muted">
-                  {employee.employee_code || employee.applicant_reference || 'No ID assigned'} Â· {employee.role}
+                  {employee.employee_code || employee.applicant_reference || 'No ID assigned'} · {employee.role}
                 </p>
                 <div className="flex items-center gap-2 mt-2 flex-wrap">
                   {/* Person Stage Badge - CLEAR APPLICANT VS STAFF DISTINCTION */}
@@ -4097,7 +4146,7 @@ export default function EmployeeProfilePage() {
                   }`}>
                     {employee.status === 'compliance_review' ? 'Awaiting Approval' : employee.status?.replace('_', ' ')}
                   </span>
-                  {/* Simplified Status Flow: Awaiting Approval â†’ Ready â†’ Active Employee */}
+                  {/* Simplified Status Flow: Awaiting Approval → Ready → Active Employee */}
                   {(() => {
                     // Active Employee - already promoted
                     if (employee.status === 'active_employee') {
@@ -4399,7 +4448,7 @@ export default function EmployeeProfilePage() {
           })()}
 {/* Status Strip - Replaces contact row */}
           <div className="flex flex-wrap items-center gap-4 mt-4 pt-4 border-t border-[#E4E8EB]" data-testid="status-strip">
-            {/* Business-facing identifier â€” label adapts to person stage */}
+            {/* Business-facing identifier — label adapts to person stage */}
             <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-100 rounded-lg">
               <User className="h-4 w-4 text-slate-500" />
               <span className="text-sm text-slate-500">{employee.person_stage === 'applicant' ? 'Applicant Reference:' : 'Employee ID:'}</span>
@@ -4428,7 +4477,7 @@ export default function EmployeeProfilePage() {
                 }
               }
               
-              // Check DBS expiry â€” use only backend-computed days_until_review (safety engine).
+              // Check DBS expiry — use only backend-computed days_until_review (safety engine).
               // No local date arithmetic: if backend doesn't supply days_until_review, skip rendering.
               if (dbsSummary.next_dbs_review_due && dbsSummary.days_until_review != null) {
                 const days = dbsSummary.days_until_review;
@@ -4451,7 +4500,7 @@ export default function EmployeeProfilePage() {
             
           </div>
 
-          {/* What's left â€” compact operational checklist grouped by owner.
+          {/* What's left — compact operational checklist grouped by owner.
               Pure presentation over canonical UCE blockers + gates. No local
               readiness logic: every item below reflects an existing backend
               field (canonicalProgress.blockers[*] with backend-derived `owner`,
@@ -4503,11 +4552,11 @@ export default function EmployeeProfilePage() {
                         className={`text-sm flex items-start gap-2 ${severityCls(b.severity)}`}
                         data-testid={`whats-left-item-${owner}`}
                       >
-                        <span className="mt-0.5">â€¢</span>
+                        <span className="mt-0.5">•</span>
                         <span>
                           <span className="font-medium">{b.label || b.id}</span>
                           {b.reason && b.reason !== b.label ? (
-                            <span className="text-text-muted"> â€” {b.reason}</span>
+                            <span className="text-text-muted"> — {b.reason}</span>
                           ) : null}
                         </span>
                       </li>
@@ -4560,7 +4609,7 @@ export default function EmployeeProfilePage() {
 
           {/* Note: Global Upload Document button removed. */}
           {/* All upload actions now live INSIDE each compliance requirement card. */}
-          {/* Workflow: See issue â†’ Scroll to section â†’ Upload/Request/Verify there. */}
+          {/* Workflow: See issue → Scroll to section → Upload/Request/Verify there. */}
 
           {!isAuditor() && (
             <div className="flex flex-wrap gap-3 mt-6">
@@ -5113,7 +5162,7 @@ export default function EmployeeProfilePage() {
               </Card>
             )}
 
-            {/* â”€â”€ Personal Details â”€â”€ */}
+            {/* ── Personal Details ── */}
             {employee?.person_stage === 'employee' && (
               <Card className="border-[#E4E8EB] shadow-sm">
                 <CardHeader>
@@ -5215,7 +5264,7 @@ export default function EmployeeProfilePage() {
                   </div>
                   <div>
                     <p className="text-xs text-text-muted">Role</p>
-                    <p className="font-medium text-text-primary">{employee?.role || 'â€”'}</p>
+                    <p className="font-medium text-text-primary">{employee?.role || '—'}</p>
                   </div>
                   <div>
                     <p className="text-xs text-text-muted">Status</p>
@@ -5257,7 +5306,7 @@ export default function EmployeeProfilePage() {
               </CardContent>
             </Card>
 
-            {/* â”€â”€ Contact Details â”€â”€ */}
+            {/* ── Contact Details ── */}
             <Card className="border-[#E4E8EB] shadow-sm">
               <CardHeader className="flex flex-row items-center justify-between">
                 <CardTitle className="font-heading text-lg">Contact Details</CardTitle>
@@ -5271,11 +5320,11 @@ export default function EmployeeProfilePage() {
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                   <div>
                     <p className="text-xs text-text-muted">Email</p>
-                    <p className="font-medium text-text-primary break-all">{employee?.email || 'â€”'}</p>
+                    <p className="font-medium text-text-primary break-all">{employee?.email || '—'}</p>
                   </div>
                   <div>
                     <p className="text-xs text-text-muted">Phone</p>
-                    <p className="font-medium text-text-primary">{employee?.phone || employee?.phone_number || 'â€”'}</p>
+                    <p className="font-medium text-text-primary">{employee?.phone || employee?.phone_number || '—'}</p>
                   </div>
                   {employee?.mobile && (
                     <div>
@@ -5304,7 +5353,7 @@ export default function EmployeeProfilePage() {
               </CardContent>
             </Card>
 
-            {/* â”€â”€ Emergency Contact / Next of Kin â”€â”€ */}
+            {/* ── Emergency Contact / Next of Kin ── */}
             {(employee?.emergency_contact_name || employee?.next_of_kin_name) && (
               <Card className="border-[#E4E8EB] shadow-sm">
                 <CardHeader>
@@ -5315,19 +5364,19 @@ export default function EmployeeProfilePage() {
                     <div>
                       <p className="text-xs text-text-muted">Name</p>
                       <p className="font-medium text-text-primary">
-                        {employee?.emergency_contact_name || employee?.next_of_kin_name || 'â€”'}
+                        {employee?.emergency_contact_name || employee?.next_of_kin_name || '—'}
                       </p>
                     </div>
                     <div>
                       <p className="text-xs text-text-muted">Relationship</p>
                       <p className="font-medium text-text-primary">
-                        {employee?.emergency_contact_relationship || employee?.next_of_kin_relationship || 'â€”'}
+                        {employee?.emergency_contact_relationship || employee?.next_of_kin_relationship || '—'}
                       </p>
                     </div>
                     <div>
                       <p className="text-xs text-text-muted">Phone</p>
                       <p className="font-medium text-text-primary">
-                        {employee?.emergency_contact_phone || employee?.next_of_kin_phone || 'â€”'}
+                        {employee?.emergency_contact_phone || employee?.next_of_kin_phone || '—'}
                       </p>
                     </div>
                     {employee?.next_of_kin_address && (
@@ -5341,7 +5390,7 @@ export default function EmployeeProfilePage() {
               </Card>
             )}
 
-            {/* â”€â”€ Employment History â”€â”€ */}
+            {/* ── Employment History ── */}
             <Card className="border-[#E4E8EB] shadow-sm">
               <CardHeader className="flex flex-row items-center justify-between">
                 <CardTitle className="font-heading text-lg">Employment History</CardTitle>
@@ -5361,12 +5410,12 @@ export default function EmployeeProfilePage() {
                           <p className="text-xs text-gray-500">{job.job_title || job.position}</p>
                         </div>
                         <p className="text-xs text-gray-400 shrink-0 ml-2">
-                          {formatBackendDate(job.start_date, { format: 'short' })} â€“ {job.end_date ? formatBackendDate(job.end_date, { format: 'short' }) : 'Present'}
+                          {formatBackendDate(job.start_date, { format: 'short' })} – {job.end_date ? formatBackendDate(job.end_date, { format: 'short' }) : 'Present'}
                         </p>
                       </div>
                     ))}
                     {employee.employment_history.length > 5 && (
-                      <p className="text-xs text-gray-500 text-center">+{employee.employment_history.length - 5} more â€” see Employment Review tab</p>
+                      <p className="text-xs text-gray-500 text-center">+{employee.employment_history.length - 5} more — see Employment Review tab</p>
                     )}
                   </div>
                 ) : (
@@ -5375,7 +5424,7 @@ export default function EmployeeProfilePage() {
               </CardContent>
             </Card>
 
-            {/* â”€â”€ References â”€â”€ */}
+            {/* ── References ── */}
             <Card className="border-[#E4E8EB] shadow-sm">
               <CardHeader className="flex flex-row items-center justify-between">
                 <CardTitle className="font-heading text-lg">References</CardTitle>
@@ -5414,8 +5463,8 @@ export default function EmployeeProfilePage() {
               </CardContent>
             </Card>
 
-            {/* â”€â”€ Recurring compliance (active workforce only, display-only surface of
-                 canonical /employees/{id}/recurring-compliance; no new truth) â”€â”€ */}
+            {/* ── Recurring compliance (active workforce only, display-only surface of
+                 canonical /employees/{id}/recurring-compliance; no new truth) ── */}
             {lifecycleStage === 'active' && (
               <Card className="border-[#E4E8EB] shadow-sm" data-testid="section-recurring-compliance-root">
                 <CardHeader>
@@ -5437,9 +5486,9 @@ export default function EmployeeProfilePage() {
         </TabsContent>
         {/* Interview record + worker onboarding forms (health, personal, HMRC, declarations) */}
         <TabsContent value="forms">
-          {/* â”€â”€ Top-level Forms & Interview Summary â”€â”€ */}
+          {/* ── Top-level Forms & Interview Summary ── */}
           {(() => {
-            // Derive form-level counts â€” reused in summary banner and form cards
+            // Derive form-level counts — reused in summary banner and form cards
             const FORM_GROUPS = [
               {
                 label: 'Pre-Employment Checks',
@@ -5457,7 +5506,7 @@ export default function EmployeeProfilePage() {
                 sensitive: true,
                 forms: [
                   { key: 'conflict_of_interest', name: 'Conflict of Interest Declaration', description: 'Secondary employment, relationships or financial interests (NHS standard)', sensitive: true },
-                  ...(/manager|director/i.test(employee?.role || '') ? [{ key: 'fit_proper_persons', name: 'Fit and Proper Persons Declaration', description: 'CQC Regulation 5 â€” managers and directors only', sensitive: true }] : []),
+                  ...(/manager|director/i.test(employee?.role || '') ? [{ key: 'fit_proper_persons', name: 'Fit and Proper Persons Declaration', description: 'CQC Regulation 5 — managers and directors only', sensitive: true }] : []),
                 ]
               },
             ];
@@ -5495,7 +5544,7 @@ export default function EmployeeProfilePage() {
             const totalForms = allFormDefinitions.length;
             const allSignedOff = signedOffCount === totalForms && !cannotAssessForms;
 
-            // Interview record status (from formSubmissions â€” interview submission)
+            // Interview record status (from formSubmissions — interview submission)
             const interviewSubmission = formSubmissions?.find(fs =>
               fs.form_type === 'interview_record' || fs.requirement_id === 'interview_record'
             );
@@ -5553,7 +5602,7 @@ export default function EmployeeProfilePage() {
 
             return (
               <div className="space-y-6">
-                {/* â”€â”€ Summary banner â”€â”€ */}
+                {/* ── Summary banner ── */}
                 <div className={`rounded-xl border p-4 ${summaryBorderClass}`}>
                   <div className="flex items-start gap-3">
                     <div className="mt-0.5">
@@ -5566,7 +5615,7 @@ export default function EmployeeProfilePage() {
                     <div className="flex-1">
                       <p className={`font-medium ${summaryTextClass}`}>
                         {cannotAssessForms
-                          ? 'Cannot assess forms â€” submission data unavailable'
+                          ? 'Cannot assess forms — submission data unavailable'
                           : allSignedOff
                             ? `All ${totalForms} forms signed off`
                             : `Forms Signed Off: ${signedOffCount} / ${totalForms}`}
@@ -5593,7 +5642,7 @@ export default function EmployeeProfilePage() {
                   </div>
                 </div>
 
-                {/* â”€â”€ Interview Record (distinct recruitment decision) â”€â”€ */}
+                {/* ── Interview Record (distinct recruitment decision) ── */}
                 <Card className={`shadow-sm ${
                   cannotAssessForms ? 'border-red-200'
                   : !interviewExists ? 'border-amber-200'
@@ -5633,16 +5682,16 @@ export default function EmployeeProfilePage() {
                           </Badge>
                           {interviewPassed !== null && (
                             <span className={`text-xs font-medium ${interviewPassed ? 'text-green-600' : 'text-red-600'}`}>
-                              Score: {interviewScore}/{interviewSubmission?.form_data?.max_score || interviewSubmission?.data?.max_score || 24} â€” {interviewPassed ? 'Passed' : 'Failed'}
+                              Score: {interviewScore}/{interviewSubmission?.form_data?.max_score || interviewSubmission?.data?.max_score || 24} — {interviewPassed ? 'Passed' : 'Failed'}
                             </span>
                           )}
                         </div>
                       ) : interviewPassed !== null ? (
                         <Badge className={interviewPassed ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}>
-                          {interviewPassed ? 'Completed â€” Passed' : 'Completed â€” Failed'}
+                          {interviewPassed ? 'Completed — Passed' : 'Completed — Failed'}
                         </Badge>
                       ) : (
-                        <Badge className="bg-blue-100 text-blue-700">Record exists â€” no outcome recorded</Badge>
+                        <Badge className="bg-blue-100 text-blue-700">Record exists — no outcome recorded</Badge>
                       )}
                     </div>
                   </CardHeader>
@@ -5667,7 +5716,7 @@ export default function EmployeeProfilePage() {
                   </CardContent>
                 </Card>
 
-                {/* â”€â”€ Worker Onboarding Forms â”€â”€ */}
+                {/* ── Worker Onboarding Forms ── */}
                 <Card className="border-[#E4E8EB] shadow-sm" data-testid="section-forms-core">
                   <CardHeader>
                     <CardTitle className="font-heading text-lg">Worker Onboarding Forms</CardTitle>
@@ -5695,7 +5744,7 @@ export default function EmployeeProfilePage() {
                             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2 px-1">
                               {group.label}
                               {group.sensitive && (
-                                <span className="ml-2 text-slate-400 normal-case font-normal">â€” sensitive recruitment records</span>
+                                <span className="ml-2 text-slate-400 normal-case font-normal">— sensitive recruitment records</span>
                               )}
                             </p>
                             <div className="space-y-2">
@@ -5763,7 +5812,7 @@ export default function EmployeeProfilePage() {
                                       <div className="flex items-center gap-2 shrink-0">
                                         <Badge className={cfg.color}>{cfg.label}</Badge>
                                         <div className="flex gap-1">
-                                          {/* Signed off â†’ View */}
+                                          {/* Signed off → View */}
                                           {derived.status === 'signed_off' && hasSubmission && (
                                             <>
                                               <Button size="sm" variant="outline"
@@ -5786,7 +5835,7 @@ export default function EmployeeProfilePage() {
                                             </>
                                           )}
 
-                                          {/* Reviewed â†’ View + Sign Off */}
+                                          {/* Reviewed → View + Sign Off */}
                                           {derived.status === 'reviewed' && hasSubmission && (
                                             <>
                                               <Button size="sm" variant="outline"
@@ -5834,7 +5883,7 @@ export default function EmployeeProfilePage() {
                                             </>
                                           )}
 
-                                          {/* Submitted â†’ Review & Approve (forced viewing) */}
+                                          {/* Submitted → Review & Approve (forced viewing) */}
                                           {derived.status === 'submitted' && hasSubmission && (
                                             <Button size="sm" variant="outline"
                                               onClick={() => setFormReviewViewer({
@@ -5848,7 +5897,7 @@ export default function EmployeeProfilePage() {
                                             </Button>
                                           )}
 
-                                          {/* Missing / in-progress â†’ passive label */}
+                                          {/* Missing / in-progress → passive label */}
                                           {(derived.status === 'missing' || derived.status === 'in_progress') && (
                                             <Badge
                                               className={derived.status === 'in_progress' ? 'bg-amber-50 text-amber-700 text-xs' : 'bg-slate-100 text-slate-600 text-xs'}
@@ -5858,7 +5907,7 @@ export default function EmployeeProfilePage() {
                                             </Badge>
                                           )}
 
-                                          {/* Rejected â†’ View */}
+                                          {/* Rejected → View */}
                                           {derived.status === 'rejected' && hasSubmission && (
                                             <Button size="sm" variant="outline"
                                               onClick={() => openFormSubmissionPdfViewer(submission, form)}
@@ -5867,7 +5916,7 @@ export default function EmployeeProfilePage() {
                                             </Button>
                                           )}
 
-                                          {/* Returned for correction â†’ View only until worker resubmits */}
+                                          {/* Returned for correction → View only until worker resubmits */}
                                           {derived.status === 'returned_for_correction' && hasSubmission && (
                                             <Button size="sm" variant="outline"
                                               onClick={() => openFormSubmissionPdfViewer(submission, form)}
@@ -6050,7 +6099,7 @@ export default function EmployeeProfilePage() {
                   </p>
                   {employmentComplete && (
                     <p className="mt-1 text-xs text-green-700">
-                      âœ“ Signed off by {employmentSignedOffBy || 'admin'}
+                      ✓ Signed off by {employmentSignedOffBy || 'admin'}
                       {employmentSignedOffAt ? ` on ${new Date(employmentSignedOffAt).toLocaleDateString('en-GB')}` : ''}
                     </p>
                   )}
@@ -6145,8 +6194,8 @@ export default function EmployeeProfilePage() {
                         10-Year Employment Coverage: {coveragePercent}%
                       </p>
                       <p className="text-xs text-slate-600">
-                        Required: {employmentCoverage.coverage_start ? new Date(employmentCoverage.coverage_start + 'T00:00:00Z').toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }) : '?'} â€” Today
-                        {' Â· '}Status: {coverageMet ? 'Coverage met' : 'Coverage incomplete'}
+                        Required: {employmentCoverage.coverage_start ? new Date(employmentCoverage.coverage_start + 'T00:00:00Z').toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }) : '?'} — Today
+                        {' · '}Status: {coverageMet ? 'Coverage met' : 'Coverage incomplete'}
                       </p>
                       <div className="w-full bg-gray-200 rounded-full h-2">
                         <div
@@ -6159,7 +6208,7 @@ export default function EmployeeProfilePage() {
                       </p>
                       <p className="text-xs text-slate-500">
                         {employmentCoverage.total_days_covered} of {employmentCoverage.total_days_required} days covered
-                        {employmentCoverage.earliest_entry_date && ` Â· Earliest entry: ${new Date(employmentCoverage.earliest_entry_date + 'T00:00:00Z').toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })}`}
+                        {employmentCoverage.earliest_entry_date && ` · Earliest entry: ${new Date(employmentCoverage.earliest_entry_date + 'T00:00:00Z').toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })}`}
                       </p>
                     </div>
                   </div>
@@ -6345,7 +6394,7 @@ export default function EmployeeProfilePage() {
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <h4 className="font-medium text-gray-800">CV / Resume</h4>
-                        <p className="mt-1 text-xs text-text-muted">Supporting evidence â€” view alongside the structured employment history below.</p>
+                        <p className="mt-1 text-xs text-text-muted">Supporting evidence — view alongside the structured employment history below.</p>
                       </div>
                       <Badge variant="outline" className={cvStatusBadgeClass}>
                         {cvStatusLabel}
@@ -6402,7 +6451,7 @@ export default function EmployeeProfilePage() {
                       <div className="mt-4 rounded-lg border border-dashed border-gray-300 bg-white p-4">
                         <p className="text-sm font-medium text-gray-700">CV not uploaded</p>
                         <p className="mt-1 text-xs text-text-muted">
-                          Worker has not uploaded a CV yet. The CV is supporting evidence â€” employment history is taken from the application form.
+                          Worker has not uploaded a CV yet. The CV is supporting evidence — employment history is taken from the application form.
                         </p>
                         <p className="mt-3 text-xs text-text-muted">
                           The worker uploads the CV from their own dashboard.
@@ -6476,7 +6525,7 @@ export default function EmployeeProfilePage() {
                             await axios.post(`${API}/employees/${employeeId}/detect-employment-gaps`, {}, {
                               headers: { Authorization: `Bearer ${token}` }
                             });
-                            toast.success('Gap analysis completed â€” refreshingâ€¦');
+                            toast.success('Gap analysis completed — refreshing…');
                             await Promise.all([
                               fetchEmployee(),
                               fetchCompliance(),
@@ -6504,7 +6553,7 @@ export default function EmployeeProfilePage() {
                 <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg flex items-start gap-3">
                   <CheckCircle className="h-5 w-5 text-green-600 flex-shrink-0 mt-0.5" />
                   <div>
-                    <p className="font-medium text-green-800">{employmentHistoryGapRow.status_summary || 'No detected gaps â€” 10-year coverage met'}</p>
+                    <p className="font-medium text-green-800">{employmentHistoryGapRow.status_summary || 'No detected gaps — 10-year coverage met'}</p>
                     <p className="text-sm text-green-600 mt-1">Gap analysis has run and the dated employment history meets the required 10-year period. Admin sign-off is still required to complete the review.</p>
                   </div>
                 </div>
@@ -6546,7 +6595,7 @@ export default function EmployeeProfilePage() {
                 </div>
               )}
               
-              {/* Matched Applicant Gap Explanations â€” linked to detected gaps */}
+              {/* Matched Applicant Gap Explanations — linked to detected gaps */}
               {matchedApplicantGapExplanations.length > 0 && (
                 <div className="mt-4 mb-4" data-testid="section-matched-gap-explanations">
                   <h4 className="font-medium text-gray-800 mb-2">Matched Applicant Gap Explanations</h4>
@@ -6567,7 +6616,7 @@ export default function EmployeeProfilePage() {
                           <div className="flex items-center gap-2 mb-1 flex-wrap">
                             {hasDateRange ? (
                               <span className="text-xs font-medium text-green-800">
-                                {fmtDate(gapStart)} â€” {fmtDate(gapEnd)}
+                                {fmtDate(gapStart)} — {fmtDate(gapEnd)}
                               </span>
                             ) : (
                               <span className="text-xs font-medium text-green-800">
@@ -6596,7 +6645,7 @@ export default function EmployeeProfilePage() {
                 </div>
               )}
 
-              {/* Unmatched Supporting Notes â€” NOT linked to any detected gap */}
+              {/* Unmatched Supporting Notes — NOT linked to any detected gap */}
               {unmatchedApplicantGapExplanations.length > 0 && (
                 <div className="mt-4 mb-4" data-testid="section-unmatched-supporting-notes">
                   <h4 className="font-medium text-slate-700 mb-2">Unmatched Supporting Notes</h4>
@@ -6617,7 +6666,7 @@ export default function EmployeeProfilePage() {
                           <div className="flex items-center gap-2 mb-1 flex-wrap">
                             {hasDateRange ? (
                               <span className="text-xs font-medium text-slate-700">
-                                {fmtDate(gapStart)} â€” {fmtDate(gapEnd)}
+                                {fmtDate(gapStart)} — {fmtDate(gapEnd)}
                               </span>
                             ) : (
                               <span className="text-xs font-medium text-slate-700">
@@ -6697,7 +6746,7 @@ export default function EmployeeProfilePage() {
                 </div>
               )}
 
-              {/* Qualifications & Education â€” supporting context, shown last */}
+              {/* Qualifications & Education — supporting context, shown last */}
               {(employee?.qualifications || employee?.education) && (
                 <div className="mt-6 pt-6 border-t border-gray-200" data-testid="section-employment-qualifications">
                   <h4 className="font-medium text-gray-800 mb-3">Qualifications & Education</h4>
@@ -6747,7 +6796,7 @@ export default function EmployeeProfilePage() {
               {/* ============================================== */}
               {/* COMPLIANCE FILE - Linear Workflow                */}
               {/* All actions live INSIDE each requirement card    */}
-              {/* No global actions - see issue â†’ scroll â†’ fix     */}
+              {/* No global actions - see issue → scroll → fix     */}
               {/* ============================================== */}
 
               {/* Conditional Items - Keep minimal info about items not required */}
@@ -6760,7 +6809,7 @@ export default function EmployeeProfilePage() {
                       <ul className="mt-1 space-y-0.5">
                         {complianceRequirements.conditional_not_required.map((item, idx) => (
                           <li key={idx} className="text-xs text-gray-600">
-                            {item.name} â€” {item.reason}
+                            {item.name} — {item.reason}
                           </li>
                         ))}
                       </ul>
@@ -6783,69 +6832,66 @@ export default function EmployeeProfilePage() {
                   {/* ============================================ */}
                   <div className="mb-6">
                     
-                    <DualRowComplianceSection
-                      employeeId={employeeId}
-                      employeeEmail={employee?.email}
-                      employeeName={employee ? `${employee.first_name} ${employee.last_name}` : ''}
-                      onUpload={(key) => {
-                        // Trigger document upload for the specified requirement
-                        setSelectedRequirement(key);
-                        setUploadDialogOpen(true);
-                      }}
-                      onRequest={(key, title) => {
-                        // Trigger request document dialog with proper requirement object
-                        setRequestingRequirement({ id: key, name: title || key });
-                        setRequestDocMessage('');
-                        setRequestDocDialogOpen(true);
-                      }}
-                      onPreviewFile={(fileObj) => {
-                        // Handle both old format (doc.file_url) and new format from RequirementFilesDrawer
-                        const rawUrl = fileObj?.file_url || fileObj?.url;
-                        const name = fileObj?.file_name || fileObj?.name || 'Document';
-                        if (rawUrl) {
-                          // FIX: Ensure URL is absolute - API already ends with /api
-                          let url = rawUrl;
-                          if (rawUrl.startsWith('/api/')) {
-                            url = `${API}${rawUrl.substring(4)}`; // "/api/foo" -> API + "/foo"
+                    <ComplianceTabErrorBoundary>
+                      <DualRowComplianceSection
+                        employeeId={employeeId}
+                        employeeEmail={employee?.email}
+                        employeeName={employee ? `${employee.first_name} ${employee.last_name}` : ''}
+                        onUpload={(key) => {
+                          setSelectedRequirement(key);
+                          setUploadDialogOpen(true);
+                        }}
+                        onRequest={(key, title) => {
+                          setRequestingRequirement({ id: key, name: title || key });
+                          setRequestDocMessage('');
+                          setRequestDocDialogOpen(true);
+                        }}
+                        onPreviewFile={(fileObj) => {
+                          const rawUrl = fileObj?.file_url || fileObj?.url;
+                          const name = fileObj?.file_name || fileObj?.name || 'Document';
+                          if (rawUrl) {
+                            let url = rawUrl;
+                            if (rawUrl.startsWith('/api/')) {
+                              url = `${API}${rawUrl.substring(4)}`;
+                            }
+                            let stampedUrl = fileObj?.stamped_file_url || null;
+                            if (stampedUrl && stampedUrl.startsWith('/api/')) {
+                              stampedUrl = `${API}${stampedUrl.substring(4)}`;
+                            }
+                            setPreviewFile({
+                              url,
+                              name,
+                              filename: name,
+                              stampedFileUrl: stampedUrl,
+                              verificationStampByName: fileObj?.verification_stamp_by_name || null,
+                              verificationStampAt: fileObj?.verification_stamp_at || null,
+                            });
+                            setPreviewFiles([]);
+                            setPreviewOpen(true);
+                          } else {
+                            console.error('No file URL available for preview', fileObj);
                           }
-                          let stampedUrl = fileObj?.stamped_file_url || null;
-                          if (stampedUrl && stampedUrl.startsWith('/api/')) {
-                            stampedUrl = `${API}${stampedUrl.substring(4)}`;
-                          }
-                          setPreviewFile({
-                            url,
-                            name,
-                            filename: name,
-                            stampedFileUrl: stampedUrl,
-                            verificationStampByName: fileObj?.verification_stamp_by_name || null,
-                            verificationStampAt: fileObj?.verification_stamp_at || null,
-                          });
-                          setPreviewFiles([]); // Clear multi-file array
-                          setPreviewOpen(true);
-                        } else {
-                          // No URL available - show error toast
-                          console.error('No file URL available for preview', fileObj);
-                        }
-                      }}
-                      onExtractReview={(docId) => {
-                        setDocExtractionDocumentId(docId);
-                        setDocExtractionReviewOpen(true);
-                      }}
-                      onRecordCheck={(checkType) => {
-                        setRecordCheckType(checkType);
-                        setRecordCheckDialogOpen(true);
-                      }}
-                      onReissueContract={(contract) => {
-                        setCurrentContract(contract || null);
-                        setSupersedeContractOpen(true);
-                      }}
-                      employeeData={employee}
-                      isAuditor={isAuditor()}
-                      onRefresh={() => {
-                        fetchData();
-                        fetchCompliance();
-                      }}
-                    />
+                        }}
+                        onExtractReview={(docId) => {
+                          setDocExtractionDocumentId(docId);
+                          setDocExtractionReviewOpen(true);
+                        }}
+                        onRecordCheck={(checkType) => {
+                          setRecordCheckType(checkType);
+                          setRecordCheckDialogOpen(true);
+                        }}
+                        onReissueContract={(contract) => {
+                          setCurrentContract(contract || null);
+                          setSupersedeContractOpen(true);
+                        }}
+                        employeeData={employee}
+                        isAuditor={isAuditor()}
+                        onRefresh={() => {
+                          fetchData();
+                          fetchCompliance();
+                        }}
+                      />
+                    </ComplianceTabErrorBoundary>
                   </div>
 
                   {/* TRAINING SUMMARY CARD - Phase 4A */}
@@ -8075,7 +8121,7 @@ export default function EmployeeProfilePage() {
                       </p>
                       {entry.field_changed && (
                         <p className="text-sm text-text-muted">
-                          <span className="font-medium">{entry.field_changed}</span>: {entry.old_value || '(empty)'} â†’ {entry.new_value}
+                          <span className="font-medium">{entry.field_changed}</span>: {entry.old_value || '(empty)'} → {entry.new_value}
                         </p>
                       )}
                       {entry.reason && (
@@ -8794,7 +8840,7 @@ export default function EmployeeProfilePage() {
                           <td className="p-3 font-medium text-text-primary">
                             {FIELD_LABELS[field.field_name] || field.field_name}
                             {isLowConfidence && (
-                              <span className="ml-2 text-red-500" title="Low confidence - please verify">âš </span>
+                              <span className="ml-2 text-red-500" title="Low confidence - please verify">⚠</span>
                             )}
                           </td>
                           <td className="p-3">
@@ -8940,7 +8986,7 @@ export default function EmployeeProfilePage() {
             {refFromCv === false && (
               <div className="space-y-2">
                 <label className="block text-sm font-medium text-red-700">
-                  âš ï¸ Justification Required
+                  ⚠️ Justification Required
                 </label>
                 <Textarea
                   value={refOverrideReason}
@@ -9421,10 +9467,10 @@ export default function EmployeeProfilePage() {
                     <p className={`text-sm font-medium ${
                       mismatch.severity === 'critical' ? 'text-red-800' : 'text-amber-800'
                     }`}>
-                      {mismatch.type === 'missing_in_structured' && 'âš ï¸ Role in CV not in structured history'}
-                      {mismatch.type === 'missing_in_cv' && 'âš ï¸ Role in structured history not in CV'}
-                      {mismatch.type === 'date_inconsistency' && 'âš ï¸ Date mismatch'}
-                      {mismatch.type === 'overlap_inconsistency' && 'âš ï¸ Overlap inconsistency'}
+                      {mismatch.type === 'missing_in_structured' && '⚠️ Role in CV not in structured history'}
+                      {mismatch.type === 'missing_in_cv' && '⚠️ Role in structured history not in CV'}
+                      {mismatch.type === 'date_inconsistency' && '⚠️ Date mismatch'}
+                      {mismatch.type === 'overlap_inconsistency' && '⚠️ Overlap inconsistency'}
                     </p>
                     <p className="text-sm text-gray-700 mt-1">{mismatch.description}</p>
                     
@@ -9491,7 +9537,7 @@ export default function EmployeeProfilePage() {
                   <h4 className="font-medium text-gray-900">Apply CV Roles to Employment History</h4>
                   <p className="text-xs text-gray-500">
                     Select roles from the CV to append to the canonical employment history.
-                    Existing records are never overwritten â€” only new entries are added.
+                    Existing records are never overwritten — only new entries are added.
                     Gaps and coverage will recalculate automatically.
                   </p>
                   <div className="space-y-2">
@@ -9506,7 +9552,7 @@ export default function EmployeeProfilePage() {
                         <div className="text-sm">
                           <p className="font-medium text-gray-900">{role.employer}</p>
                           <p className="text-gray-600">{role.job_title}</p>
-                          <p className="text-xs text-gray-500">{role.start_date} â€“ {role.end_date || 'Present'}</p>
+                          <p className="text-xs text-gray-500">{role.start_date} – {role.end_date || 'Present'}</p>
                         </div>
                       </label>
                     ))}
@@ -10091,7 +10137,7 @@ export default function EmployeeProfilePage() {
         </DialogContent>
       </Dialog>
 
-      {/* Inline Document Viewer (PDF / image) â€” replaces window.open */}
+      {/* Inline Document Viewer (PDF / image) — replaces window.open */}
       <InlineDocumentViewer
         open={inlineViewerOpen}
         onClose={() => {

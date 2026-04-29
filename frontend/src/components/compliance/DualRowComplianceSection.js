@@ -74,6 +74,14 @@ export default function DualRowComplianceSection({
   const [complianceFile, setComplianceFile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const externalSections = normalizeComplianceSections(externalComplianceFile?.sections);
+  const hasExternalDualRowSections =
+    externalComplianceFile?.serializer_version === 'dual_row_v1' &&
+    Object.keys(externalSections).length > 0;
+  const effectiveComplianceFile = hasExternalDualRowSections ? {
+    ...externalComplianceFile,
+    sections: externalSections
+  } : complianceFile;
   
   // STEP 11E: Centralized open state for all requirement sections
   const [expandedSections, setExpandedSections] = useState({
@@ -1232,12 +1240,3 @@ export default function DualRowComplianceSection({
     </div>
   );
 }
-
-  const externalSections = normalizeComplianceSections(externalComplianceFile?.sections);
-  const hasExternalDualRowSections =
-    externalComplianceFile?.serializer_version === 'dual_row_v1' &&
-    Object.keys(externalSections).length > 0;
-  const effectiveComplianceFile = hasExternalDualRowSections ? {
-    ...externalComplianceFile,
-    sections: externalSections
-  } : complianceFile;

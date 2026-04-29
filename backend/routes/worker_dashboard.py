@@ -2202,6 +2202,28 @@ async def worker_upload_document(
     
     await db.employee_documents.insert_one(doc_record)
     
+    # Special handling for CV uploads
+    if requirement_id.lower() in ["cv", "resume", "curriculum_vitae"]:
+        # Check if employee already has a CV - prevent duplicates
+        existing_cv = await db.employees.find_one({"id": employee_id, "cv_document_id": {"$exists": True, "$ne": None}})
+        if existing_cv:
+            # Mark the new upload as superseded since they already have a CV
+            await db.employee_documents.update_one(
+                {"id": doc_id},
+                {"$set": {"status": "superseded", "supersede_reason": "CV already exists"}}
+            )
+            raise HTTPException(
+                status_code=400, 
+                detail="You have already uploaded a CV. Please contact admin if you need to replace it."
+            )
+        
+        # Set cv_document_id on employee record so cv-extraction-status returns has_cv: true
+        await db.employees.update_one(
+            {"id": employee_id},
+            {"$set": {"cv_document_id": doc_id}}
+        )
+        logger.info(f"CV uploaded by worker {employee_id}, set cv_document_id: {doc_id}")
+    
     await log_audit_action(f"worker_{employee_id}", "worker_document_upload", "employee", employee_id, {
         "requirement_id": requirement_id,
         "document_id": doc_id,

@@ -37418,11 +37418,63 @@ async def get_compliance_file(
     # FETCH ALL DATA
     # =========================================================================
     
-    # Get all documents for employee
-    documents = await db.employee_documents.find(
-        {"employee_id": employee_id},
-        {"_id": 0}
-    ).to_list(200)
+    async def _safe_timed_fetch(label: str, coro, default, timeout_s: float = 3.0):
+        try:
+            return await _timed_await(label, coro, timeout_s=timeout_s)
+        except asyncio.TimeoutError:
+            section_warnings.append(f"{label}_timeout")
+            logger.warning("compliance_file_fetch_timeout employee_id=%s fetch=%s timeout_s=%s", employee_id, label, timeout_s)
+            return default
+        except Exception as exc:
+            section_warnings.append(f"{label}_failed:{exc}")
+            logger.warning("compliance_file_fetch_failed employee_id=%s fetch=%s error=%s", employee_id, label, exc)
+            return default
+
+    # Fetch core datasets in parallel with fail-soft timeouts.
+    (
+        documents,
+        requests,
+        rtw_check,
+        dbs_check,
+        identity_check,
+        address_check,
+        rtw_history,
+        dbs_history,
+        agreements,
+        agreement_submissions_list,
+        ref1,
+        ref2,
+        refs,
+    ) = await asyncio.gather(
+        _safe_timed_fetch(
+            "fetch_documents",
+            db.employee_documents.find({"employee_id": employee_id}, {"_id": 0}).to_list(200),
+            [],
+            timeout_s=4.0,
+        ),
+        _safe_timed_fetch(
+            "fetch_email_requests",
+            db.email_requests.find({"person_id": employee_id}, {"_id": 0}).sort("created_at", -1).to_list(100),
+            [],
+            timeout_s=3.0,
+        ),
+        _safe_timed_fetch("fetch_rtw_check", CheckRecordService.get_current_rtw_check(employee_id), None, timeout_s=2.5),
+        _safe_timed_fetch("fetch_dbs_check", CheckRecordService.get_current_dbs_check(employee_id), None, timeout_s=2.5),
+        _safe_timed_fetch("fetch_identity_check", CheckRecordService.get_current_identity_check(employee_id), None, timeout_s=2.5),
+        _safe_timed_fetch("fetch_address_check", CheckRecordService.get_current_address_check(employee_id), None, timeout_s=2.5),
+        _safe_timed_fetch("fetch_rtw_history", CheckRecordService.get_rtw_check_history(employee_id, limit=50), [], timeout_s=2.5),
+        _safe_timed_fetch("fetch_dbs_history", CheckRecordService.get_dbs_check_history(employee_id, limit=50), [], timeout_s=2.5),
+        _safe_timed_fetch("fetch_agreements", AgreementAcknowledgementService.get_employee_agreements(employee_id), [], timeout_s=3.0),
+        _safe_timed_fetch(
+            "fetch_agreement_submissions",
+            db.agreement_submissions.find({"employee_id": employee_id}).sort("completed_at", -1).to_list(length=100),
+            [],
+            timeout_s=3.0,
+        ),
+        _safe_timed_fetch("fetch_reference_integrity_1", ReferenceIntegrityService.get_reference_integrity(employee_id, 1), None, timeout_s=2.5),
+        _safe_timed_fetch("fetch_reference_integrity_2", ReferenceIntegrityService.get_reference_integrity(employee_id, 2), None, timeout_s=2.5),
+        _safe_timed_fetch("fetch_references_doc", db.references.find_one({"employee_id": employee_id}, {"_id": 0}), {}, timeout_s=2.5),
+    )
     
     # DIAGNOSTIC: Log what we found
     logger.info(f"COMPLIANCE_READ_DIAGNOSTIC: Fetching documents for employee_id={employee_id}")
@@ -37446,17 +37498,13 @@ async def get_compliance_file(
     doc_ids = [d.get("id") for d in documents if d.get("id")]
     extractions = {}
     if doc_ids:
-        ext_list = await db.document_extractions.find(
-            {"document_id": {"$in": doc_ids}},
-            {"_id": 0}
-        ).to_list(len(doc_ids))
+        ext_list = await _safe_timed_fetch(
+            "fetch_document_extractions",
+            db.document_extractions.find({"document_id": {"$in": doc_ids}}, {"_id": 0}).to_list(len(doc_ids)),
+            [],
+            timeout_s=3.0,
+        )
         extractions = {e["document_id"]: e for e in ext_list if e.get("document_id")}
-    
-    # Get pending requests
-    requests = await db.email_requests.find(
-        {"person_id": employee_id},
-        {"_id": 0}
-    ).sort("created_at", -1).to_list(100)
     
     request_by_requirement = {}
     for req in requests:
@@ -37466,10 +37514,6 @@ async def get_compliance_file(
         request_by_requirement[req_id].append(req)
     
     # Get check records (Step 11)
-    rtw_check = await CheckRecordService.get_current_rtw_check(employee_id)
-    dbs_check = await CheckRecordService.get_current_dbs_check(employee_id)
-    identity_check = await CheckRecordService.get_current_identity_check(employee_id)
-    address_check = await CheckRecordService.get_current_address_check(employee_id)
     current_proof_doc_ids = {
         doc_id for doc_id in [
             (rtw_check or {}).get("proof_document_id"),
@@ -37478,16 +37522,6 @@ async def get_compliance_file(
     }
     
     # Get check history counts
-    rtw_history = await CheckRecordService.get_rtw_check_history(employee_id, limit=50)
-    dbs_history = await CheckRecordService.get_dbs_check_history(employee_id, limit=50)
-    
-    # Get agreements
-    agreements = await AgreementAcknowledgementService.get_employee_agreements(employee_id)
-    
-    # Get new-style agreement submissions
-    agreement_submissions_list = await db.agreement_submissions.find(
-        {"employee_id": employee_id}
-    ).sort("completed_at", -1).to_list(length=100)
     
     # Index submissions by template_id for quick lookup
     submissions_by_template = {}
@@ -37497,11 +37531,7 @@ async def get_compliance_file(
             submissions_by_template[tid] = sub
     
     # Get reference integrity
-    ref1 = await ReferenceIntegrityService.get_reference_integrity(employee_id, 1)
-    ref2 = await ReferenceIntegrityService.get_reference_integrity(employee_id, 2)
-    
-    # Raw references document — used by build_reference_row closure helpers
-    refs = await db.references.find_one({"employee_id": employee_id}, {"_id": 0}) or {}
+    refs = refs or {}
     
     # Group documents by requirement
     docs_by_requirement = {}

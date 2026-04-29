@@ -102,7 +102,7 @@ export default function AgreementRow({
   // Determine lifecycle status
   const getLifecycleStatus = () => {
     if (is_verified) return 'verified';
-    if (acknowledgement_data?.verification_status === 'rejected') return 'rejected';
+    if (acknowledgement_data?.latest_active !== false && acknowledgement_data?.verification_status === 'rejected') return 'rejected';
     if (has_acknowledgement || submission_data) return 'submitted';
     if (pending_requests.length > 0) return 'sent';
     return 'not_sent';
@@ -112,7 +112,11 @@ export default function AgreementRow({
   const contractResolution = resolveLatestContractState(acknowledgement_data, {});
   const normalizedContractStatus = contractResolution.status;
   const isAwaitingWorkerSignature = contractResolution.isAwaitingWorkerSignature;
-  const canonicalLifecycleStatus = String(acknowledgement_data?.current_lifecycle || '').trim().toLowerCase();
+  const canonicalLifecycleStatus = String(
+    acknowledgement_data?.current_lifecycle?.status ||
+    row?.current_lifecycle?.status ||
+    ''
+  ).trim().toLowerCase();
   const canonicalLatestActive = acknowledgement_data?.latest_active === true;
   const canonicalStatus = String(acknowledgement_data?.status || '').trim().toLowerCase();
   const contractNeedsReissue =

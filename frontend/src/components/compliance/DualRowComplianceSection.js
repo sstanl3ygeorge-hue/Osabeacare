@@ -237,7 +237,18 @@ export default function DualRowComplianceSection({
     if (!evidenceRow) return null;
     
     // Transform documents_preview to files array format
-    const files = (evidenceRow.documents_preview || []).map(doc => ({
+    const baseActiveDocs = Array.isArray(evidenceRow.active_documents)
+      ? evidenceRow.active_documents
+      : (Array.isArray(evidenceRow.documents_preview) ? evidenceRow.documents_preview : []);
+    const seenDocIds = new Set();
+    const dedupedActiveDocs = baseActiveDocs.filter((doc) => {
+      const id = doc?.id || doc?.file_id || doc?.document_id;
+      if (!id) return true;
+      if (seenDocIds.has(id)) return false;
+      seenDocIds.add(id);
+      return true;
+    });
+    const files = dedupedActiveDocs.map(doc => ({
       file_id: doc.id,
       id: doc.id,
       file_name: doc.file_name,
@@ -288,7 +299,12 @@ export default function DualRowComplianceSection({
     // Add remaining files if has_more_documents indicates there are more
     // The counts tell us how many total active files
     const totalActive = evidenceRow.counts?.active_files || files.length;
-    const totalHistorical = (evidenceRow.counts?.superseded || 0) + (evidenceRow.counts?.history || 0) - totalActive;
+    const historyDocs = Array.isArray(evidenceRow.history_documents)
+      ? evidenceRow.history_documents
+      : (Array.isArray(evidenceRow.historical_documents) ? evidenceRow.historical_documents : []);
+    const totalHistorical = historyDocs.length > 0
+      ? historyDocs.length
+      : ((evidenceRow.counts?.superseded || 0) + (evidenceRow.counts?.history || 0) - totalActive);
     
     // Transform request_lifecycle to requests array
     const requests = [];
@@ -386,7 +402,7 @@ export default function DualRowComplianceSection({
       checks,
       freshness: sectionKey === 'proof_of_address' && checkRow ? checkRow.freshness : null,
       serverCounts: evidenceRow.counts || null,
-      canonicalStatus: evidenceRow.status || checkRow?.status || null,
+      canonicalStatus: checkRow?.status || evidenceRow.status || null,
       canonicalStatusUnavailable: Boolean(evidenceRow.status_unavailable || checkRow?.status_unavailable),
       canonicalWarnings: [
         ...((Array.isArray(evidenceRow.warnings) ? evidenceRow.warnings : [])),
@@ -459,15 +475,18 @@ export default function DualRowComplianceSection({
 
   // Render a legacy section with paired rows (for agreements and references)
   const renderSection = (sectionKey, section) => {
-    if (!section || !section.rows) return null;
+    if (!section || !Array.isArray(section.rows)) return null;
     
     const isExpanded = expandedSections[sectionKey] !== false;
     
     // Count blockers in this section
-    const blockers = section.rows.filter(r => r.blocker_text);
+    const blockers = section.rows.filter(r => r?.blocker_text);
     const isAgreementsSection = sectionKey === 'agreements';
     const agreementRows = isAgreementsSection
-      ? section.rows.filter((row) => row.row_type === 'form_acknowledgement')
+      ? section.rows
+          .filter((row) => row?.row_type === 'form_acknowledgement')
+          .filter((row) => row?.latest_active !== false)
+          .filter((row, idx, arr) => arr.findIndex((x) => x?.id === row?.id) === idx)
       : [];
     const agreementSatisfiedCount = agreementRows.filter((row) => row.is_verified).length;
     const agreementPendingReviewCount = agreementRows.filter((row) => (

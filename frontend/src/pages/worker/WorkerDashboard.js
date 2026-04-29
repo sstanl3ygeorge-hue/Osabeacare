@@ -1750,7 +1750,10 @@ export default function WorkerDashboard() {
   const alerts = _alerts || [];
   const references = _references || [];
   const supervisions = _supervisions || [];
-  const agreements = _agreements || [];
+  const agreements = Array.isArray(_agreements) ? _agreements : [];
+  const operationalAgreements = agreements
+    .filter((agreement) => agreement?.latest_active !== false)
+    .filter((agreement, idx, arr) => arr.findIndex((x) => x?.id === agreement?.id) === idx);
   const worker_tasks = _worker_tasks || [];
   const recurring_compliance_summary = _recurring_compliance_summary || { total: 0, overdue: 0, due: 0, upcoming: 0, scheduled: 0, preview: [] };
   const recurringItems = recurring_compliance_summary.items || recurring_compliance_summary.preview || [];
@@ -1790,8 +1793,8 @@ export default function WorkerDashboard() {
 
   const gapsNeedAction = hasCanonicalBlockerMatch(BLOCKER_KEYS_EMPLOYMENT_GAPS, 'other');
   const referencesNeedActionFromBlockers = hasCanonicalBlockerMatch(BLOCKER_KEYS_REFERENCES, 'references');
-  const latestContractAgreement = getLatestActiveContract(agreements, { contractEligibility });
-  const contractAgreement = latestContractAgreement || agreements.find((agreement) => agreement.id === 'contract_acceptance');
+  const latestContractAgreement = getLatestActiveContract(operationalAgreements, { contractEligibility });
+  const contractAgreement = latestContractAgreement || operationalAgreements.find((agreement) => agreement.id === 'contract_acceptance');
   
   const isActiveEmployee =
     typeof dashboard?.is_active_employee === 'boolean'
@@ -1818,8 +1821,10 @@ export default function WorkerDashboard() {
       ? 'pre_employment'
       : 'recruitment';
   const showOnboardingContractSection = false;
-  const handbookAgreement = getLatestActiveAgreementById(agreements, 'handbook_acknowledgement')
-    || agreements.find((agreement) => agreement.id === 'handbook_acknowledgement');
+  const handbookAgreement = getLatestActiveAgreementById(operationalAgreements, 'handbook_acknowledgement')
+    || getLatestActiveAgreementById(operationalAgreements, 'employee_handbook_acknowledgement')
+    || operationalAgreements.find((agreement) => agreement.id === 'handbook_acknowledgement')
+    || operationalAgreements.find((agreement) => agreement.id === 'employee_handbook_acknowledgement');
   const contractDisplay = getAgreementDisplay(contractAgreement, { contractEligibility });
   const latestContractState = resolveLatestContractState(contractAgreement, { contractEligibility });
   const contractLifecycleStatus = latestContractState.status;
@@ -1845,10 +1850,10 @@ export default function WorkerDashboard() {
   const completedReferencesCount = references.filter((reference) => isReferenceComplete(reference?.status)).length;
   const referencesNeedAction = referencesNeedActionFromBlockers || references.some((reference) => !isReferenceComplete(reference?.status));
   const normalizedAgreements = [
-    ...agreements.filter((agreement) => agreement.id !== 'contract_acceptance' && agreement.id !== 'handbook_acknowledgement'),
+    ...operationalAgreements.filter((agreement) => agreement.id !== 'contract_acceptance' && agreement.id !== 'handbook_acknowledgement' && agreement.id !== 'employee_handbook_acknowledgement'),
     ...(handbookAgreement ? [handbookAgreement] : []),
     ...(contractAgreement ? [contractAgreement] : []),
-  ];
+  ].filter((agreement, idx, arr) => arr.findIndex((x) => x?.id === agreement?.id) === idx);
   const agreementDisplays = normalizedAgreements.map((agreement) => ({
     agreement,
     display: getAgreementDisplay(agreement, { contractEligibility }),

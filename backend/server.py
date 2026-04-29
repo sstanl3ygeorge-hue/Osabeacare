@@ -37819,6 +37819,39 @@ async def get_compliance_file(
                 }
                 for d in active_docs[:3]
             ],
+            # Canonical operational/document suppression split
+            "active_documents": [
+                {
+                    "id": d.get("id"),
+                    "file_id": d.get("id"),
+                    "file_name": d.get("file_name") or d.get("original_filename"),
+                    "original_filename": d.get("original_filename"),
+                    "file_url": f"/api/employee-documents/{d.get('id')}/file" if d.get("id") else None,
+                    "download_url": f"/api/employee-documents/{d.get('id')}/download" if d.get("id") else None,
+                    "stamped_file_url": d.get("stamped_file_url"),
+                    "content_type": d.get("content_type") or d.get("mime_type"),
+                    "file_available": bool(d.get("file_url")),
+                    "uploaded_at": d.get("uploaded_at") or d.get("created_at"),
+                    "uploaded_by": d.get("uploaded_by"),
+                    "status": d.get("status", "uploaded"),
+                    "verified": d.get("verified", False),
+                    "verified_by": d.get("verified_by"),
+                    "verified_by_name": d.get("verified_by_name"),
+                    "verified_at": d.get("verified_at"),
+                    "extraction_status": {"status": extractions.get(d.get("id"), {}).get("review_status")} if d.get("id") in extractions else None,
+                    "verification_stamp": d.get("verification_stamp"),
+                    "verification_stamp_label": d.get("verification_stamp_label"),
+                    "verification_stamp_audit_text": d.get("verification_stamp_audit_text"),
+                    "verification_stamp_badge_color": d.get("verification_stamp_badge_color"),
+                    "verification_stamp_by_name": d.get("verification_stamp_by_name"),
+                    "verification_stamp_at": d.get("verification_stamp_at"),
+                    "rejected_by": d.get("rejected_by"),
+                    "rejected_by_name": d.get("rejected_by_name"),
+                    "rejected_at": d.get("rejected_at"),
+                    "rejection_reason": d.get("rejection_reason"),
+                }
+                for d in active_docs
+            ],
             "has_more_documents": active_count > 3,
             
             # DIAGNOSTIC: Log documents being added to preview
@@ -37838,6 +37871,20 @@ async def get_compliance_file(
                     "superseded_at": d.get("superseded_at"),
                 }
                 for d in historical_docs[:5]
+            ],
+            "history_documents": [
+                {
+                    "id": d.get("id"),
+                    "file_name": d.get("file_name") or d.get("original_filename"),
+                    "status": d.get("status"),
+                    "uploaded_at": d.get("uploaded_at") or d.get("created_at"),
+                    "rejected_at": d.get("rejected_at"),
+                    "rejection_reason": d.get("rejection_reason"),
+                    "marked_in_error_at": d.get("marked_in_error_at"),
+                    "marked_in_error_reason": d.get("marked_in_error_reason"),
+                    "superseded_at": d.get("superseded_at"),
+                }
+                for d in historical_docs
             ],
             "historical_count": len(historical_docs),
             

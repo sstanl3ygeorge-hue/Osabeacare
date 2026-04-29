@@ -39520,6 +39520,27 @@ async def get_compliance_file(
                         "status": row.get("status")
                     })
     
+    # Canonical section-derived summary counters for frontend/header serializers.
+    total_rows = 0
+    completed_rows = 0
+    verified_rows = 0
+    for section in sections.values():
+        rows = section.get("rows")
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            total_rows += 1
+            row_status = str(row.get("status") or "").lower()
+            if row.get("is_verified") is True or row.get("verified") is True or row_status in {"verified", "complete", "completed"}:
+                verified_rows += 1
+                completed_rows += 1
+            elif row_status in {"recorded", "accepted", "approved"}:
+                completed_rows += 1
+
+    section_completion_pct = int((completed_rows / total_rows) * 100) if total_rows > 0 else 0
+
     logger.info(
         "agreement_resolver_calls endpoint=compliance-file employee_id=%s calls=%s",
         employee_id,
@@ -39534,7 +39555,11 @@ async def get_compliance_file(
             "blocking_requirements": len(blocking_rows),
             "blocking_items": blocking_rows,  # All blockers from unified source
             "awaiting_review": len(awaiting_review_rows),
-            "total_pending_requests": len([r for r in requests if r.get("status") in ["sent", "clicked", "action_started"]])
+            "total_pending_requests": len([r for r in requests if r.get("status") in ["sent", "clicked", "action_started"]]),
+            "section_total_rows": total_rows,
+            "section_completed_rows": completed_rows,
+            "section_verified_rows": verified_rows,
+            "section_completion_percentage": section_completion_pct,
         },
         
         "sections": sections,

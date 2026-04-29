@@ -4029,6 +4029,27 @@ export default function EmployeeProfilePage() {
   const canonicalCompletedRequirements = canonicalProgress?.completed_requirements ?? canonicalProgress?.progress?.completed ?? null;
   const canonicalTotalRequirements = canonicalProgress?.total_requirements ?? canonicalProgress?.progress?.total ?? null;
   const canonicalRequirementCountAvailable = Number.isFinite(canonicalTotalRequirements) && canonicalTotalRequirements > 0;
+  const complianceSections = complianceFile?.sections && typeof complianceFile.sections === 'object' ? complianceFile.sections : {};
+  const sectionRows = Object.values(complianceSections).flatMap((section) => (
+    Array.isArray(section?.rows) ? section.rows.filter((r) => r && typeof r === 'object') : []
+  ));
+  const sectionTotalRows = sectionRows.length;
+  const sectionCompletedRows = sectionRows.filter((row) => {
+    const s = String(row?.status || '').toLowerCase();
+    return row?.is_verified === true || row?.verified === true || ['verified', 'complete', 'completed', 'accepted', 'approved', 'recorded'].includes(s);
+  }).length;
+  const sectionProgressAvailable = sectionTotalRows > 0;
+  const effectiveCompletedRequirements = sectionProgressAvailable
+    ? sectionCompletedRows
+    : (canonicalCompletedRequirements ?? 0);
+  const effectiveTotalRequirements = sectionProgressAvailable
+    ? sectionTotalRows
+    : (canonicalTotalRequirements ?? 0);
+  const effectiveProgressPct = sectionProgressAvailable
+    ? Math.round((sectionCompletedRows / sectionTotalRows) * 100)
+    : canonicalProgressPct;
+  const isSectionUnavailable = Boolean(complianceFile?.status_unavailable);
+  const requirementCountUnavailable = !sectionProgressAvailable && !canonicalRequirementCountAvailable;
   const canonicalReadinessLabel = canonicalIsWorkReady
     ? 'Ready for Work'
     : canonicalCanPromote
@@ -4216,12 +4237,12 @@ export default function EmployeeProfilePage() {
                 <div className="text-right">
                   <p className="text-sm text-text-muted">Overall Compliance</p>
                   <p className="text-3xl font-heading font-bold text-text-primary">
-                    {canonicalProgressPct}% Complete
+                    {effectiveProgressPct}% Complete
                   </p>
                   <p className="text-xs text-text-muted mt-0.5">
-                    {canonicalRequirementCountAvailable
-                      ? `${canonicalCompletedRequirements ?? 0} of ${canonicalTotalRequirements} requirements`
-                      : 'Requirement count unavailable'}
+                    {requirementCountUnavailable
+                      ? (isSectionUnavailable ? 'Requirement count temporarily unavailable' : 'Requirement count unavailable')
+                      : `${effectiveCompletedRequirements} of ${effectiveTotalRequirements} requirements`}
                   </p>
                 </div>
                 {!isAuditor() && (
@@ -4318,10 +4339,10 @@ export default function EmployeeProfilePage() {
             const trainingCategory = categories?.training || {};
             const agreementsCategory = categories?.agreements || {};
             const inductionCategory = categories?.induction || {};
-            const dbsSummary = complianceRequirements?.dbs_summary || {};
-            const rtwSummary = complianceRequirements?.rtw_summary || {};
             const dbsWorkflow = getComplianceFileWorkflowStatus(complianceFile, 'dbs') || {};
             const rtwWorkflow = getComplianceFileWorkflowStatus(complianceFile, 'right_to_work') || {};
+            const dbsCheckRow = asArray(complianceSections?.dbs?.rows).find((row) => row?.row_type === 'check') || {};
+            const rtwCheckRow = asArray(complianceSections?.right_to_work?.rows).find((row) => row?.row_type === 'check') || {};
             const blockers = asArray(canonicalBlockerObjects).filter((b) => String(b?.severity || '').toLowerCase() !== 'info');
 
             const toDate = (value) => (value ? formatBackendDate(value) : 'Unavailable');
@@ -4336,19 +4357,19 @@ export default function EmployeeProfilePage() {
               return 'gray';
             };
 
-            const dbsStatus = dbsWorkflow?.label || dbsSummary?.dbs_status_label || (dbsSummary?.is_verified ? 'Verified' : 'Unavailable');
-            const dbsChecked = dbsSummary?.checked_at || dbsSummary?.verified_at || null;
-            const dbsReview = dbsSummary?.review_due_date || dbsSummary?.next_dbs_review_due || null;
-            const dbsDays = Number.isFinite(dbsSummary?.days_until_review)
-              ? dbsSummary.days_until_review
-              : (Number.isFinite(dbsSummary?.days_remaining) ? dbsSummary.days_remaining : null);
+            const dbsStatus = dbsWorkflow?.label || dbsCheckRow?.status_summary || (complianceSections?.dbs ? 'Awaiting review' : 'Unavailable');
+            const dbsChecked = dbsCheckRow?.check_data?.checked_at || dbsCheckRow?.verified_at || null;
+            const dbsReview = dbsCheckRow?.check_data?.review_due_at || dbsCheckRow?.check_data?.next_recheck_date || null;
+            const dbsDays = Number.isFinite(dbsCheckRow?.check_data?.days_until_review)
+              ? dbsCheckRow.check_data.days_until_review
+              : null;
 
-            const rtwStatus = rtwWorkflow?.label || rtwSummary?.rtw_status_label || (rtwSummary?.is_verified ? 'Verified' : 'Unavailable');
-            const rtwChecked = rtwSummary?.checked_at || rtwSummary?.verified_at || null;
-            const rtwExpiry = rtwSummary?.expiry_date || null;
-            const rtwDays = Number.isFinite(rtwSummary?.days_until_expiry)
-              ? rtwSummary.days_until_expiry
-              : (Number.isFinite(rtwSummary?.days_remaining) ? rtwSummary.days_remaining : null);
+            const rtwStatus = rtwWorkflow?.label || rtwCheckRow?.status_summary || (complianceSections?.right_to_work ? 'Awaiting review' : 'Unavailable');
+            const rtwChecked = rtwCheckRow?.check_data?.checked_at || rtwCheckRow?.verified_at || null;
+            const rtwExpiry = rtwCheckRow?.check_data?.permission_end_date || null;
+            const rtwDays = Number.isFinite(rtwCheckRow?.check_data?.days_until_expiry)
+              ? rtwCheckRow.check_data.days_until_expiry
+              : null;
 
             const trainingItems = asArray(trainingCategory?.items);
             const trainingRequired = Number.isFinite(trainingCategory?.total) ? trainingCategory.total : null;

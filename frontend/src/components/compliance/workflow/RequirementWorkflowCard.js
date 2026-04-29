@@ -147,7 +147,13 @@ export default function RequirementWorkflowCard({
     requirementKey,
     evidenceFiles,
     checkRecord,
-    canonicalStatus: checkRow?.status || sectionData?.status || evidenceRow?.status || null,
+    canonicalStatus: (
+      checkRecord?.outcome === 'verified' ||
+      checkRecord?.verified === true ||
+      checkRecord?.is_verified === true
+    )
+      ? 'verified'
+      : (checkRow?.status || sectionData?.status || evidenceRow?.status || null),
     statusUnavailable: rowUnavailable,
     isAdminView,
   });

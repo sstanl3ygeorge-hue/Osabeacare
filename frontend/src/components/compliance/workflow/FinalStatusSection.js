@@ -61,7 +61,7 @@ const STATUS_DISPLAY = {
  *
  * Safeguards rendered here:
  * - `noEvidenceButCheckExists` — prevents showing "Verified" with no evidence
- * - `proofMissingButCheckVerified` — shows "Incomplete" instead of "Verified"
+ * - `proofMissingButCheckVerified` — warning only; does not downgrade verified check status
  *
  * Props:
  *  workflow         — returned from useComplianceWorkflow
@@ -111,7 +111,7 @@ export function FinalStatusSection({ workflow, requirementKey, checkRecord, stat
         return 'Check recorded but not yet verified.';
 
       case 'incomplete':
-        return 'Check is verified, but a required proof document is missing.';
+        return 'Verification is incomplete.';
 
       case 'failed':
         if (workflow.hasRejectedEvidence && !workflow.hasAcceptedEvidence) {
@@ -210,9 +210,8 @@ export function FinalStatusSection({ workflow, requirementKey, checkRecord, stat
           {workflow.safeguards.proofMissingButCheckVerified && (
             <div className="mt-2 text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded p-2">
               <AlertTriangle className="h-3 w-3 inline mr-1" />
-              The check is verified, but the required proof document is
-              missing. Upload a proof document in Step 4 to reach
-              "Verified" status.
+              The check remains verified, but the proof document is missing.
+              Upload proof in Step 4 for audit completeness.
             </div>
           )}
         </div>

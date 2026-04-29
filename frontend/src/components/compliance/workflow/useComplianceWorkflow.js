@@ -171,16 +171,39 @@ export function useComplianceWorkflow({
       finalStatusLabel = 'Unavailable';
     } else if (canonicalStatus) {
       const normalized = String(canonicalStatus).toLowerCase();
-      if (normalized === 'verified') {
+      const hardFailureOverride = [
+        'failed',
+        'rejected',
+        'expired',
+        'revoked',
+      ].includes(normalized);
+      const isPendingLike = [
+        'pending',
+        'awaiting_check',
+        'awaiting_verification',
+        'evidence_under_review',
+        'incomplete',
+        'missing',
+        'not_started',
+      ].includes(normalized);
+
+      // For key check-driven requirements, a verified check is terminal authority.
+      // Canonical status may only override verified state for hard failures.
+      if (isKeyRequirement && checkRowVerified) {
+        if (hardFailureOverride) {
+          finalStatus = normalized === 'expired' ? 'expired' : 'failed';
+          finalStatusLabel = normalized === 'expired' ? 'Expired' : 'Rejected / action required';
+        }
+      } else if (normalized === 'verified') {
         finalStatus = 'verified';
         finalStatusLabel = 'Verified';
-      } else if (normalized === 'failed' || normalized === 'rejected') {
+      } else if (hardFailureOverride) {
         finalStatus = 'failed';
         finalStatusLabel = 'Rejected / action required';
       } else if (normalized === 'incomplete' || normalized === 'missing' || normalized === 'not_started') {
         finalStatus = 'incomplete';
         finalStatusLabel = 'Incomplete';
-      } else if (normalized === 'pending' || normalized === 'awaiting_check' || normalized === 'awaiting_verification' || normalized === 'evidence_under_review') {
+      } else if (isPendingLike) {
         finalStatus = 'pending';
         finalStatusLabel = 'Awaiting review';
       }

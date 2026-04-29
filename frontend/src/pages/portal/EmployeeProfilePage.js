@@ -4478,12 +4478,22 @@ export default function EmployeeProfilePage() {
             
             {/* Key Expiry - Show most critical */}
             {(() => {
+              const statusDbsCheckRow = asArray(complianceSections?.dbs?.rows).find((row) => row?.row_type === 'check') || {};
+              const statusRtwCheckRow = asArray(complianceSections?.right_to_work?.rows).find((row) => row?.row_type === 'check') || {};
               const dbsSummary = complianceRequirements?.dbs_summary || {};
               const rtwSummary = complianceRequirements?.rtw_summary || {};
+              const rtwExpiryDate = statusRtwCheckRow?.check_data?.permission_end_date || rtwSummary.expiry_date;
+              const rtwDaysRemaining = Number.isFinite(statusRtwCheckRow?.check_data?.days_until_expiry)
+                ? statusRtwCheckRow.check_data.days_until_expiry
+                : rtwSummary.days_until_expiry;
+              const dbsReviewDueDate = statusDbsCheckRow?.check_data?.review_due_at || statusDbsCheckRow?.check_data?.next_recheck_date || dbsSummary.next_dbs_review_due;
+              const dbsDaysRemaining = Number.isFinite(statusDbsCheckRow?.check_data?.days_until_review)
+                ? statusDbsCheckRow.check_data.days_until_review
+                : dbsSummary.days_until_review;
               
               // Check RTW expiry first (more critical)
-              if (rtwSummary.expiry_date) {
-                const days = rtwSummary.days_until_expiry;
+              if (rtwExpiryDate) {
+                const days = rtwDaysRemaining;
                 if (days !== undefined && days <= 30) {
                   return (
                     <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg ${
@@ -4500,8 +4510,8 @@ export default function EmployeeProfilePage() {
               
               // Check DBS expiry — use only backend-computed days_until_review (safety engine).
               // No local date arithmetic: if backend doesn't supply days_until_review, skip rendering.
-              if (dbsSummary.next_dbs_review_due && dbsSummary.days_until_review != null) {
-                const days = dbsSummary.days_until_review;
+              if (dbsReviewDueDate && dbsDaysRemaining != null) {
+                const days = dbsDaysRemaining;
                 if (days <= 30) {
                   return (
                     <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg ${

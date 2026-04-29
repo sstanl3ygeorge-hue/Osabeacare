@@ -38396,6 +38396,9 @@ async def get_compliance_file(
             or (submission or {}).get("template_version")
         )
         canonical_status = agreement_state.get("status")
+        if canonical_status in {"fully_executed", "verified"}:
+            has_acknowledgement = True
+            is_verified = True
         
         # Status summary - canonical resolver status takes precedence.
         if canonical_status == "fully_executed":

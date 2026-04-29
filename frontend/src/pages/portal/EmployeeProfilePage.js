@@ -1369,7 +1369,7 @@ export default function EmployeeProfilePage() {
 
   const fetchData = async () => {
     const headers = { Authorization: `Bearer ${token}` };
-    // Throttle request fan-out: fetch critical first, then optional panels in batches.
+    // Throttle request fan-out: fetch critical first, render shell, then optional panels.
     const criticalRequests = [
       axios.get(`${API}/employees/${employeeId}`, { headers }),
       axios.get(`${API}/employees/${employeeId}/unified-progress`, { headers }),
@@ -1384,36 +1384,16 @@ export default function EmployeeProfilePage() {
       );
     }
     const criticalResults = await Promise.allSettled(criticalRequests);
-    const optionalBatch1 = await Promise.allSettled([
-      axios.get(`${API}/employee-documents?employee_id=${employeeId}`, { headers }),
-      axios.get(`${API}/document-types`, { headers }),
-      axios.get(`${API}/training-records?employee_id=${employeeId}`, { headers }),
-      axios.get(`${API}/policy-assignments?employee_id=${employeeId}&include_inactive=true`, { headers }),
-    ]);
-    const optionalBatch2 = await Promise.allSettled([
-      axios.get(`${API}/audit-logs?entity_id=${employeeId}&compliance_only=true`, { headers }),
-      axios.get(`${API}/generated-forms?employee_id=${employeeId}`, { headers }),
-      axios.get(`${API}/templates`, { headers }),
-    ]);
-    const results = [...criticalResults, ...optionalBatch1, ...optionalBatch2];
 
     // Process results - extract data or use defaults
     // Order must match:
     // critical: employee, unified-progress, compliance-requirements
     // optional1: employee-documents, document-types, training-records, policy-assignments
     // optional2: audit-logs, generated-forms, templates
-    const empRes = results[0];
-    const unifiedProgressRes = results[1];
-    const compReqRes = results[2];
-    const listReadinessRes = profileMode === 'employee' ? results[3] : null;
-    const optionalStart = profileMode === 'employee' ? 4 : 3;
-    const docsRes = results[optionalStart];
-    const typesRes = results[optionalStart + 1];
-    const trainingRes = results[optionalStart + 2];
-    const policiesRes = results[optionalStart + 3];
-    const logsRes = results[optionalStart + 4];
-    const formsRes = results[optionalStart + 5];
-    const templatesRes = results[optionalStart + 6];
+    const empRes = criticalResults[0];
+    const unifiedProgressRes = criticalResults[1];
+    const compReqRes = criticalResults[2];
+    const listReadinessRes = profileMode === 'employee' ? criticalResults[3] : null;
     
     let hasError = false;
     
@@ -1437,13 +1417,13 @@ export default function EmployeeProfilePage() {
     }
     
     // Other data can fail gracefully with defaults
-    const documentsData = docsRes.status === 'fulfilled' ? asArray(docsRes.value.data, ['items', 'records', 'documents']) : [];
-    const documentTypesData = typesRes.status === 'fulfilled' ? asArray(typesRes.value.data, ['items', 'records']) : [];
-    const policiesData = policiesRes.status === 'fulfilled' ? asArray(policiesRes.value.data, ['items', 'records']) : [];
-    const trainingData = trainingRes.status === 'fulfilled' ? asArray(trainingRes.value.data, ['items', 'records']) : [];
-    const auditLogsData = logsRes.status === 'fulfilled' ? asArray(logsRes.value.data, ['items', 'records']) : [];
-    const generatedFormsData = formsRes.status === 'fulfilled' ? asArray(formsRes.value.data, ['forms', 'items', 'records']) : [];
-    const templatesData = templatesRes.status === 'fulfilled' ? asArray(templatesRes.value.data, ['items', 'records']) : [];
+    const documentsData = [];
+    const documentTypesData = [];
+    const policiesData = [];
+    const trainingData = [];
+    const auditLogsData = [];
+    const generatedFormsData = [];
+    const templatesData = [];
     const complianceRequirementsData = compReqRes.status === 'fulfilled'
       ? (compReqRes.value.data && typeof compReqRes.value.data === 'object' ? compReqRes.value.data : { requirements: [] })
       : { requirements: [] };
@@ -1501,8 +1481,69 @@ export default function EmployeeProfilePage() {
     if (hasError) {
       toast.error('Failed to load employee data');
     }
-    
+
     setLoading(false);
+
+    // Optional panels load after shell render; failures are panel-local only.
+    Promise.allSettled([
+      axios.get(`${API}/employee-documents?employee_id=${employeeId}`, { headers }),
+      axios.get(`${API}/document-types`, { headers }),
+      axios.get(`${API}/training-records?employee_id=${employeeId}`, { headers }),
+      axios.get(`${API}/policy-assignments?employee_id=${employeeId}&include_inactive=true`, { headers }),
+      axios.get(`${API}/audit-logs?entity_id=${employeeId}&compliance_only=true`, { headers }),
+      axios.get(`${API}/generated-forms?employee_id=${employeeId}`, { headers }),
+      axios.get(`${API}/templates`, { headers }),
+    ]).then((optionalResults) => {
+      const docsRes = optionalResults[0];
+      const typesRes = optionalResults[1];
+      const trainingRes = optionalResults[2];
+      const policiesRes = optionalResults[3];
+      const logsRes = optionalResults[4];
+      const formsRes = optionalResults[5];
+      const templatesRes = optionalResults[6];
+
+      setDocuments(docsRes.status === 'fulfilled' ? asArray(docsRes.value.data, ['items', 'records', 'documents']) : []);
+      setDocumentTypes(typesRes.status === 'fulfilled' ? asArray(typesRes.value.data, ['items', 'records']) : []);
+      setTraining(trainingRes.status === 'fulfilled' ? asArray(trainingRes.value.data, ['items', 'records']) : []);
+      setPolicies(policiesRes.status === 'fulfilled' ? asArray(policiesRes.value.data, ['items', 'records']) : []);
+      setAuditLogs(logsRes.status === 'fulfilled' ? asArray(logsRes.value.data, ['items', 'records']) : []);
+      setGeneratedForms(formsRes.status === 'fulfilled' ? asArray(formsRes.value.data, ['forms', 'items', 'records']) : []);
+      setTemplates(templatesRes.status === 'fulfilled' ? asArray(templatesRes.value.data, ['items', 'records']) : []);
+
+      if (empRes.status === 'fulfilled' && docsRes.status === 'fulfilled') {
+        const refreshedEmployee = empRes.value.data || {};
+        const refreshedDocuments = asArray(docsRes.value.data, ['items', 'records', 'documents']);
+        const cvLikeDocuments = refreshedDocuments.filter((document) => {
+          const label = [
+            document?.requirement_name,
+            document?.document_type_name,
+            document?.document_label,
+            document?.original_filename,
+            document?.file_name
+          ].filter(Boolean).join(' ').toLowerCase();
+          return (
+            ['cv', 'resume', 'curriculum_vitae'].includes(document?.requirement_id) ||
+            [document?.id, document?.file_id, document?.document_id].filter(Boolean).includes(refreshedEmployee?.cv_document_id) ||
+            /\b(cv|resume|curriculum vitae)\b/.test(label)
+          );
+        });
+        console.debug('CV_LINK_DIAGNOSTIC profile_refresh', {
+          employeeId,
+          cv_document_id: refreshedEmployee?.cv_document_id,
+          cv_documents: cvLikeDocuments.map((document) => ({
+            id: document?.id,
+            file_id: document?.file_id,
+            document_id: document?.document_id,
+            requirement_id: document?.requirement_id,
+            document_type_name: document?.document_type_name,
+            requirement_name: document?.requirement_name,
+            status: document?.status
+          }))
+        });
+      }
+    }).catch((optionalErr) => {
+      console.warn('EmployeeProfile optional panel batch failed:', optionalErr);
+    });
   };
 
   const fetchCompliance = async () => {

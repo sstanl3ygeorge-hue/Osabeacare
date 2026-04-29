@@ -1328,6 +1328,12 @@ export default function WorkerDashboard() {
 
   // Trigger CV file input
   const triggerCvFileInput = () => {
+    // Double-check that user doesn't already have a CV
+    if (cvStatus?.has_cv) {
+      toast.error('You have already uploaded a CV. Please contact admin if you need to replace it.');
+      return;
+    }
+    
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = '.pdf';

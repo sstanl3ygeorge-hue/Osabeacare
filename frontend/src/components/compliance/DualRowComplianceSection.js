@@ -546,6 +546,7 @@ export default function DualRowComplianceSection({
               </div>
             )}
             {section.rows.map((row, idx) => {
+              if (!row || typeof row !== 'object') return null;
               // CV row is evidence type but should use FormRequirementRow for file display
               if (row.row_type === 'evidence' && row.key !== 'cv') {
                 return (
@@ -816,7 +817,12 @@ export default function DualRowComplianceSection({
     return null;
   }
 
-  if (complianceFile?.status_unavailable) {
+  const hasAnySections =
+    complianceFile?.sections &&
+    typeof complianceFile.sections === 'object' &&
+    Object.keys(complianceFile.sections).length > 0;
+
+  if (complianceFile?.status_unavailable && !hasAnySections) {
     return (
       <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
         <p className="font-medium">Compliance temporarily unavailable</p>
@@ -844,6 +850,9 @@ export default function DualRowComplianceSection({
     return clone;
   })();
   const sectionRows = Object.values(filteredSections || {}).flatMap((section) => Array.isArray(section?.rows) ? section.rows : []);
+  const sectionUnavailableCount = Object.values(filteredSections || {}).filter(
+    (section) => Boolean(section?.status_unavailable) || !Array.isArray(section?.rows)
+  ).length;
   const blockerCount = sectionRows.filter((row) => row.blocker_text).length;
   const pendingReviewCount = sectionRows.filter((row) => (
     row.status === 'submitted' ||
@@ -881,11 +890,41 @@ export default function DualRowComplianceSection({
 
     return hasAcceptedEvidence && hasVerifiedCheck && (!proofRequired || hasProof);
   }).length;
-  const agreementRowsForSummary = filteredSections?.agreements?.rows?.filter((row) => row.row_type === 'form_acknowledgement') || [];
+  const agreementRowsForSummary = Array.isArray(filteredSections?.agreements?.rows)
+    ? filteredSections.agreements.rows.filter((row) => row.row_type === 'form_acknowledgement')
+    : [];
   const agreementSatisfiedCount = agreementRowsForSummary.filter((row) => row.is_verified).length;
   const agreementBlockingCount = agreementRowsForSummary.filter((row) => row.blocker_text).length;
   const satisfiedRequirementCount = coreSatisfiedCount + agreementSatisfiedCount;
   const totalRequirementCount = presentCoreRequirementKeys.length + agreementRowsForSummary.length;
+
+  const renderUnavailableSection = (sectionKey, sectionTitle, sectionObj) => {
+    console.warn('compliance-section-unavailable', {
+      employeeId,
+      sectionKey,
+      status_unavailable: sectionObj?.status_unavailable === true,
+      warning_count: Array.isArray(sectionObj?.warnings) ? sectionObj.warnings.length : 0,
+    });
+    return (
+      <div key={sectionKey} className="mb-6" data-testid={`section-${sectionKey}-unavailable`}>
+        <Card className="border border-amber-200 bg-amber-50/40">
+          <CardHeader>
+            <CardTitle className="text-base font-semibold text-amber-900">{sectionTitle}</CardTitle>
+          </CardHeader>
+          <CardContent className="text-sm text-amber-800">
+            <p>Temporarily unavailable for this section.</p>
+            {Array.isArray(sectionObj?.warnings) && sectionObj.warnings.length > 0 && (
+              <ul className="mt-2 list-disc pl-5">
+                {sectionObj.warnings.slice(0, 3).map((warning, idx) => (
+                  <li key={`${sectionKey}-warning-${idx}`}>{String(warning)}</li>
+                ))}
+              </ul>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-6" data-testid="dual-row-compliance-section">
@@ -904,7 +943,7 @@ export default function DualRowComplianceSection({
       <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
         <span className="font-medium">Compliance blockers:</span> {blockerCount} &nbsp;|&nbsp;
         <span className="font-medium">Pending reviews:</span> {pendingReviewCount} &nbsp;|&nbsp;
-        <span className="font-medium">Cannot assess:</span> 0 &nbsp;|&nbsp;
+        <span className="font-medium">Cannot assess:</span> {sectionUnavailableCount} &nbsp;|&nbsp;
         <span className="font-medium">Checks complete:</span> {satisfiedRequirementCount}/{totalRequirementCount}
         {agreementRowsForSummary.length > 0 && (
           <>
@@ -918,19 +957,39 @@ export default function DualRowComplianceSection({
       {filteredSections && (
         <>
           {/* Right to Work */}
-          {filteredSections.right_to_work && renderUploadSection('right_to_work', filteredSections.right_to_work)}
+          {filteredSections.right_to_work && (
+            (filteredSections.right_to_work?.status_unavailable || !Array.isArray(filteredSections.right_to_work?.rows))
+              ? renderUnavailableSection('right_to_work', 'Right to Work', filteredSections.right_to_work)
+              : renderUploadSection('right_to_work', filteredSections.right_to_work)
+          )}
           
           {/* DBS */}
-          {filteredSections.dbs && renderUploadSection('dbs', filteredSections.dbs)}
+          {filteredSections.dbs && (
+            (filteredSections.dbs?.status_unavailable || !Array.isArray(filteredSections.dbs?.rows))
+              ? renderUnavailableSection('dbs', 'DBS', filteredSections.dbs)
+              : renderUploadSection('dbs', filteredSections.dbs)
+          )}
           
           {/* Identity */}
-          {filteredSections.identity && renderUploadSection('identity', filteredSections.identity)}
+          {filteredSections.identity && (
+            (filteredSections.identity?.status_unavailable || !Array.isArray(filteredSections.identity?.rows))
+              ? renderUnavailableSection('identity', 'Identity', filteredSections.identity)
+              : renderUploadSection('identity', filteredSections.identity)
+          )}
           
           {/* Proof of Address */}
-          {filteredSections.proof_of_address && renderUploadSection('proof_of_address', filteredSections.proof_of_address)}
+          {filteredSections.proof_of_address && (
+            (filteredSections.proof_of_address?.status_unavailable || !Array.isArray(filteredSections.proof_of_address?.rows))
+              ? renderUnavailableSection('proof_of_address', 'Proof of Address', filteredSections.proof_of_address)
+              : renderUploadSection('proof_of_address', filteredSections.proof_of_address)
+          )}
           
           {/* Agreements - Uses legacy section for now */}
-          {filteredSections.agreements && renderSection('agreements', filteredSections.agreements)}
+          {filteredSections.agreements && (
+            (filteredSections.agreements?.status_unavailable || !Array.isArray(filteredSections.agreements?.rows))
+              ? renderUnavailableSection('agreements', 'Agreements', filteredSections.agreements)
+              : renderSection('agreements', filteredSections.agreements)
+          )}
           
           {/* NOTE: References REMOVED - Now ONLY in dedicated References tab */}
           {/* NOTE: Training REMOVED - Now ONLY in dedicated Training tab */}

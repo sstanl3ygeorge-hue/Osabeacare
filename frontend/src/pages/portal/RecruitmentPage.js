@@ -101,7 +101,10 @@ export default function RecruitmentPage() {
       const response = await axios.get(`${API}/recruitment/applicants?${params}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      const applicantRows = (response.data || []).filter((person) => isApplicantStatus(person?.status));
+      const applicantRows = (response.data || []).filter((person) => {
+        const normalized = normalizeLifecycleStatus(person?.status);
+        return isApplicantStatus(normalized) || normalized === 'onboarding';
+      });
       setApplicants(applicantRows);
       
       // Defer per-card status fetches to after list render (handled in useEffect below)
@@ -744,4 +747,3 @@ export default function RecruitmentPage() {
     </div>
   );
 }
-

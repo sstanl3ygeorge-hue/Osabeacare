@@ -314,6 +314,7 @@ export default function EmployeeProfilePage() {
   const [isImporting, setIsImporting] = useState(false);
   const [complianceRequirements, setComplianceRequirements] = useState(null);
   const [unifiedProgress, setUnifiedProgress] = useState(null);
+  const [employeeCanonicalReadiness, setEmployeeCanonicalReadiness] = useState(null);
   const [selectedRequirement, setSelectedRequirement] = useState('');
   const [documentLabel, setDocumentLabel] = useState('');
   
@@ -1369,11 +1370,20 @@ export default function EmployeeProfilePage() {
   const fetchData = async () => {
     const headers = { Authorization: `Bearer ${token}` };
     // Throttle request fan-out: fetch critical first, then optional panels in batches.
-    const criticalResults = await Promise.allSettled([
+    const criticalRequests = [
       axios.get(`${API}/employees/${employeeId}`, { headers }),
       axios.get(`${API}/employees/${employeeId}/unified-progress`, { headers }),
       axios.get(`${API}/employees/${employeeId}/compliance-requirements`, { headers }),
-    ]);
+    ];
+    if (profileMode === 'employee') {
+      criticalRequests.push(
+        axios.get(`${API}/employees/unified-progress-summary`, {
+          params: { employee_ids: employeeId },
+          headers
+        })
+      );
+    }
+    const criticalResults = await Promise.allSettled(criticalRequests);
     const optionalBatch1 = await Promise.allSettled([
       axios.get(`${API}/employee-documents?employee_id=${employeeId}`, { headers }),
       axios.get(`${API}/document-types`, { headers }),
@@ -1392,18 +1402,18 @@ export default function EmployeeProfilePage() {
     // critical: employee, unified-progress, compliance-requirements
     // optional1: employee-documents, document-types, training-records, policy-assignments
     // optional2: audit-logs, generated-forms, templates
-    const [
-      empRes,
-      unifiedProgressRes,
-      compReqRes,
-      docsRes,
-      typesRes,
-      trainingRes,
-      policiesRes,
-      logsRes,
-      formsRes,
-      templatesRes
-    ] = results;
+    const empRes = results[0];
+    const unifiedProgressRes = results[1];
+    const compReqRes = results[2];
+    const listReadinessRes = profileMode === 'employee' ? results[3] : null;
+    const optionalStart = profileMode === 'employee' ? 4 : 3;
+    const docsRes = results[optionalStart];
+    const typesRes = results[optionalStart + 1];
+    const trainingRes = results[optionalStart + 2];
+    const policiesRes = results[optionalStart + 3];
+    const logsRes = results[optionalStart + 4];
+    const formsRes = results[optionalStart + 5];
+    const templatesRes = results[optionalStart + 6];
     
     let hasError = false;
     
@@ -1448,6 +1458,14 @@ export default function EmployeeProfilePage() {
     setTemplates(templatesData);
     setComplianceRequirements(complianceRequirementsData);
     setUnifiedProgress(unifiedProgressRes.status === 'fulfilled' ? unifiedProgressRes.value.data : null);
+    if (profileMode === 'employee') {
+      const listSummary = listReadinessRes?.status === 'fulfilled'
+        ? (Array.isArray(listReadinessRes.value?.data) ? listReadinessRes.value.data[0] : null)
+        : null;
+      setEmployeeCanonicalReadiness(listSummary || null);
+    } else {
+      setEmployeeCanonicalReadiness(null);
+    }
     if (empRes.status === 'fulfilled' && docsRes.status === 'fulfilled') {
       const refreshedEmployee = empRes.value.data || {};
       const refreshedDocuments = documentsData;
@@ -4046,7 +4064,9 @@ export default function EmployeeProfilePage() {
   }
 
   // UCE is the ONLY source of readiness truth. No fallback to the embedded copy.
-  const canonicalProgress = unifiedProgress || null;
+  const canonicalProgress = profileMode === 'employee'
+    ? (employeeCanonicalReadiness || null)
+    : (unifiedProgress || null);
   const canonicalProgressPct = canonicalProgress?.overall_percentage ?? 0;
   const canonicalBlockers = canonicalProgress?.blockers || [];
   const canonicalBlockerDetails = canonicalProgress?.blocker_details || [];
@@ -4087,7 +4107,9 @@ export default function EmployeeProfilePage() {
   const requirementsSummaryPct = Number(requirementsSummary.completion_percentage);
   const requirementsSummaryAvailable = Number.isFinite(requirementsSummaryTotal) && requirementsSummaryTotal > 0;
 
-  let summarySource = 'unified_progress';
+  let summarySource = profileMode === 'employee'
+    ? 'employee_list_canonical_readiness_fallback'
+    : 'unified_progress';
   let effectiveCompletedRequirements = canonicalCompletedRequirements ?? 0;
   let effectiveTotalRequirements = canonicalTotalRequirements ?? 0;
   let effectiveProgressPct = canonicalProgressPct;
@@ -4237,7 +4259,7 @@ export default function EmployeeProfilePage() {
                 </p>
                 <div className="flex items-center gap-2 mt-2 flex-wrap">
                   {/* Person Stage Badge - CLEAR APPLICANT VS STAFF DISTINCTION */}
-                  {employee.person_stage === 'applicant' ? (
+                  {canonicalStage === 'applicant' ? (
                     <span className="px-2 py-1 rounded-lg text-xs font-medium bg-blue-100 text-blue-800 border border-blue-200">
                       Applicant
                     </span>
@@ -4285,7 +4307,7 @@ export default function EmployeeProfilePage() {
                       </span>
                     );
                   })()}
-                  {employee.person_stage === 'employee' && (
+                  {canonicalStage === 'employee' && (
                     <span className={`px-2 py-1 rounded-lg text-xs font-medium ${
                       employee.status === 'active' || employee.status === 'active_employee'
                         ? 'bg-green-100 text-green-800'
@@ -4305,7 +4327,7 @@ export default function EmployeeProfilePage() {
                     </span>
                   )}
                   {/* Canonical Work Readiness Status Badge */}
-                  {employee.person_stage === 'employee' && (
+                  {canonicalStage === 'employee' && (
                     <span className={`px-2.5 py-1 rounded-lg text-xs font-medium flex items-center gap-1.5 ${canonicalReadinessClass}`} data-testid="work-readiness-badge">
                       {canonicalIsWorkReady || canonicalCanPromote ? (
                         <Shield className="h-3.5 w-3.5" />
@@ -4592,7 +4614,7 @@ export default function EmployeeProfilePage() {
             {/* Business-facing identifier — label adapts to person stage */}
             <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-100 rounded-lg">
               <User className="h-4 w-4 text-slate-500" />
-              <span className="text-sm text-slate-500">{employee.person_stage === 'applicant' ? 'Applicant Reference:' : 'Employee ID:'}</span>
+              <span className="text-sm text-slate-500">{canonicalStage === 'applicant' ? 'Applicant Reference:' : 'Employee ID:'}</span>
               <span className="text-sm font-semibold text-slate-700">{employee.employee_code || employee.applicant_reference || 'Not assigned'}</span>
             </div>
             
@@ -5124,7 +5146,7 @@ export default function EmployeeProfilePage() {
           employeeId={employee?.id}
           employeeName={`${employee?.first_name} ${employee?.last_name}`}
           role={employee?.role}
-          personStage={employee?.person_stage}
+            personStage={canonicalStage}
           recruitmentApproved={employee?.recruitment_approved}
           showQuickActions={false}
           complianceFile={complianceFile}

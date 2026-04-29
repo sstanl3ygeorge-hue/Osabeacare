@@ -37357,6 +37357,17 @@ async def get_compliance_file(
     employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
+    section_timings_ms: dict[str, int] = {}
+    section_warnings: list[str] = []
+
+    async def _timed_await(label: str, coro, timeout_s: float | None = None):
+        started = time.monotonic()
+        try:
+            if timeout_s and timeout_s > 0:
+                return await asyncio.wait_for(coro, timeout=timeout_s)
+            return await coro
+        finally:
+            section_timings_ms[label] = int((time.monotonic() - started) * 1000)
     _agreement_resolver_calls = 0
     _agreement_cache = {}
     async def _resolve_agreement_once(agreement_type: str):
@@ -39162,10 +39173,30 @@ async def get_compliance_file(
 
     async def _safe_build_agreement_row(key: str, title: str, agreement_type: str) -> dict:
         try:
-            return await build_agreement_row(
+            return await _timed_await(
+                f"agreement_row:{agreement_type}",
+                build_agreement_row(
                 key=key,
                 title=title,
                 agreement_type=agreement_type,
+                ),
+                timeout_s=2.0,
+            )
+        except asyncio.TimeoutError as exc:
+            logger.warning(
+                "compliance_file_row_builder_timeout employee_id=%s builder=build_agreement_row row_key=%s agreement_type=%s timeout_s=%s",
+                employee_id,
+                key,
+                agreement_type,
+                2.0,
+            )
+            section_warnings.append(f"agreement_row_timeout:{agreement_type}")
+            return _unavailable_row_fallback(
+                row_key=key,
+                row_title=title,
+                row_type="form_acknowledgement",
+                warning=f"agreement_row_timeout:{agreement_type}:{exc}",
+                extra={"affects_readiness": True, "is_verified": False},
             )
         except Exception as exc:
             logger.warning(
@@ -39185,7 +39216,24 @@ async def get_compliance_file(
 
     async def _safe_training_evaluation() -> dict:
         try:
-            return await evaluate_employee_training_status(employee_id, employee.get("role", ""))
+            return await _timed_await(
+                "section:training_evaluation",
+                evaluate_employee_training_status(employee_id, employee.get("role", "")),
+                timeout_s=2.5,
+            )
+        except asyncio.TimeoutError as exc:
+            logger.warning(
+                "compliance_file_section_builder_timeout employee_id=%s section=training builder=evaluate_employee_training_status timeout_s=%s",
+                employee_id,
+                2.5,
+            )
+            section_warnings.append("training_evaluation_timeout")
+            return {
+                "status_unavailable": True,
+                "status": "unavailable",
+                "warnings": [f"training_evaluation_timeout:{exc}"],
+                "summary": {"required": 0, "verified": 0, "missing": 0},
+            }
         except Exception as exc:
             logger.warning(
                 "compliance_file_section_builder_failed employee_id=%s section=training builder=evaluate_employee_training_status error=%s",
@@ -39367,7 +39415,25 @@ async def get_compliance_file(
     # including active workforce records. Recruitment lifecycle gating belongs only to
     # recruitment/unified-progress serializers.
     try:
-        employment_history_row = await _build_employment_history_compliance_row(employee_id, employee)
+        employment_history_row = await _timed_await(
+            "section:employment_history_row",
+            _build_employment_history_compliance_row(employee_id, employee),
+            timeout_s=2.5,
+        )
+    except asyncio.TimeoutError as exc:
+        logger.warning(
+            "compliance_file_section_builder_timeout employee_id=%s section=employment_history builder=_build_employment_history_compliance_row timeout_s=%s",
+            employee_id,
+            2.5,
+        )
+        section_warnings.append("employment_history_row_timeout")
+        employment_history_row = _unavailable_row_fallback(
+            row_key="employment_history_verification",
+            row_title="Employment Gap Review",
+            row_type="employment_gap",
+            warning=f"employment_history_row_timeout:{exc}",
+            extra={"affects_readiness": True, "is_verified": False},
+        )
     except Exception as exc:
         employment_history_row = _unavailable_row_fallback(
             row_key="employment_history_verification",
@@ -39457,7 +39523,11 @@ async def get_compliance_file(
     # P0 FIX: Get blockers from the SINGLE SOURCE OF TRUTH
     # This ensures "X Blocking Requirements" matches "What's Blocking Promotion"
     try:
-        unified_status = await get_unified_employee_status(employee_id, db, user_role="admin", include_details=False)
+        unified_status = await _timed_await(
+            "summary:unified_status",
+            get_unified_employee_status(employee_id, db, user_role="admin", include_details=False),
+            timeout_s=1.5,
+        )
         unified_blockers = unified_status.get("blockers", [])
         
         # Convert unified blockers to blocking_rows format
@@ -39470,8 +39540,23 @@ async def get_compliance_file(
                 "severity": b.get("severity", "critical"),
                 "gate": b.get("gate", b.get("id"))
             })
+    except asyncio.TimeoutError as e:
+        logger.warning("compliance_file_summary_timeout employee_id=%s section=unified_status timeout_s=%s", employee_id, 1.5)
+        section_warnings.append("unified_status_timeout")
+        # Fallback to local section-based blockers if unified is slow
+        blocking_rows = []
+        for section_key, section in sections.items():
+            if "rows" in section:
+                for row in section["rows"]:
+                    if row.get("affects_readiness") and row.get("blocker_text"):
+                        blocking_rows.append({
+                            "section": section_key,
+                            "row_key": row.get("key"),
+                            "message": row.get("blocker_text")
+                        })
     except Exception as e:
         logger.warning(f"Failed to get unified blockers for compliance-file: {e}")
+        section_warnings.append(f"unified_status_failed:{e}")
         # Fallback to legacy calculation if unified fails
         blocking_rows = []
         for section_key, section in sections.items():
@@ -39518,9 +39603,10 @@ async def get_compliance_file(
     section_completion_pct = int((completed_rows / total_rows) * 100) if total_rows > 0 else 0
 
     logger.info(
-        "agreement_resolver_calls endpoint=compliance-file employee_id=%s calls=%s",
+        "agreement_resolver_calls endpoint=compliance-file employee_id=%s calls=%s section_timings_ms=%s",
         employee_id,
         _agreement_resolver_calls,
+        section_timings_ms,
     )
     return {
         "employee_id": employee_id,
@@ -39536,7 +39622,9 @@ async def get_compliance_file(
             "section_completed_rows": completed_rows,
             "section_verified_rows": verified_rows,
             "section_completion_percentage": section_completion_pct,
+            "section_timings_ms": section_timings_ms,
         },
+        "warnings": section_warnings,
         
         "sections": sections,
         

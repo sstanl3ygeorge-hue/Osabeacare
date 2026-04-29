@@ -17,7 +17,7 @@ import { Textarea } from '../../components/ui/textarea';
 import EmployeeAvatar from '../../components/portal/EmployeeAvatar';
 import LifecycleReasonDialog from '../../components/portal/LifecycleReasonDialog';
 import { StageIdentityBadge } from '../../components/compliance';
-import { isActiveLifecycleStatus, normalizeLifecycleStatus } from '../../lib/lifecycle';
+import { isActiveLifecycleStatus, isEmployeeStatus, normalizeLifecycleStatus, TERMINAL_STATUSES } from '../../lib/lifecycle';
 import API_BASE from '../../utils/apiBase';
 
 const API = API_BASE;
@@ -178,7 +178,12 @@ export default function EmployeesPage() {
       const response = await axios.get(`${endpoint}?${params}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      const employeeRows = response.data || [];
+      const employeeRows = (response.data || []).filter((employee) => {
+        const status = normalizeLifecycleStatus(employee?.status);
+        if (isEmployeeStatus(status)) return true;
+        if (showArchived && TERMINAL_STATUSES.includes(status)) return true;
+        return false;
+      });
       const employeeIds = employeeRows.map((employee) => employee.id).filter(Boolean);
       const readinessRes = employeeIds.length > 0
         ? await axios.get(`${API}/employees/unified-progress-summary`, {

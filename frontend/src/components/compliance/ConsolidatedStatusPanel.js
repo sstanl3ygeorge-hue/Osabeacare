@@ -42,7 +42,8 @@ export default function ConsolidatedStatusPanel({
   personStage,
   recruitmentApproved,
   onRefresh,
-  showQuickActions = true
+  showQuickActions = true,
+  complianceFile = null
 }) {
   const { token } = useAuth();
   const [loading, setLoading] = useState(true);
@@ -207,6 +208,19 @@ export default function ConsolidatedStatusPanel({
 
   const progress = data?.progress || {};
   const gates = data?.gates || {};
+  const complianceSections =
+    complianceFile?.sections && typeof complianceFile.sections === 'object'
+      ? complianceFile.sections
+      : {};
+  const sectionRows = Object.values(complianceSections).flatMap((section) =>
+    Array.isArray(section?.rows) ? section.rows.filter((row) => row && typeof row === 'object') : []
+  );
+  const sectionTotalRows = sectionRows.length;
+  const sectionCompletedRows = sectionRows.filter((row) => {
+    const s = String(row?.status || '').toLowerCase();
+    return row?.is_verified === true || row?.verified === true || ['verified', 'complete', 'completed', 'accepted', 'approved', 'recorded'].includes(s);
+  }).length;
+  const sectionProgressAvailable = complianceFile?.serializer_version === 'dual_row_v1' && sectionTotalRows > 0;
   const progressBlockerDetails = Array.isArray(progress.blocker_details) ? progress.blocker_details : [];
   const progressBlockerStrings = Array.isArray(progress.blockers)
     ? progress.blockers.map((blocker) => (
@@ -220,15 +234,48 @@ export default function ConsolidatedStatusPanel({
     : progressBlockerStrings.length > 0
       ? progressBlockerStrings
       : [];
-  const progressCompleted = progress.completed_requirements;
-  const progressTotal = progress.total_requirements;
+  const progressCompleted = sectionProgressAvailable ? sectionCompletedRows : progress.completed_requirements;
+  const progressTotal = sectionProgressAvailable ? sectionTotalRows : progress.total_requirements;
   const progressCountAvailable = Number.isFinite(progressTotal) && progressTotal > 0;
   
-  // Canonical readiness/progression percentage comes from unified-progress.
-  const progressPercentage = progress.overall_percentage ?? 0;
+  const progressPercentage = sectionProgressAvailable
+    ? Math.round((sectionCompletedRows / sectionTotalRows) * 100)
+    : (progress.overall_percentage ?? 0);
   
-  // Use categories breakdown from unified-progress for the detailed grid
-  const breakdown = progress.categories || {};
+  // Use dual-row section breakdown for employee operational view when available.
+  const sectionBreakdown = {
+    documents: {
+      completed: (complianceSections?.right_to_work?.rows || []).filter((r) => r?.row_type === 'evidence' && (r?.is_verified || r?.verified || ['verified', 'accepted', 'approved'].includes(String(r?.status || '').toLowerCase()))).length
+        + (complianceSections?.identity?.rows || []).filter((r) => r?.row_type === 'evidence' && (r?.is_verified || r?.verified || ['verified', 'accepted', 'approved'].includes(String(r?.status || '').toLowerCase()))).length
+        + (complianceSections?.proof_of_address?.rows || []).filter((r) => r?.row_type === 'evidence' && (r?.is_verified || r?.verified || ['verified', 'accepted', 'approved'].includes(String(r?.status || '').toLowerCase()))).length
+        + (complianceSections?.dbs?.rows || []).filter((r) => r?.row_type === 'evidence' && (r?.is_verified || r?.verified || ['verified', 'accepted', 'approved'].includes(String(r?.status || '').toLowerCase()))).length,
+      total: (complianceSections?.right_to_work?.rows || []).filter((r) => r?.row_type === 'evidence').length
+        + (complianceSections?.identity?.rows || []).filter((r) => r?.row_type === 'evidence').length
+        + (complianceSections?.proof_of_address?.rows || []).filter((r) => r?.row_type === 'evidence').length
+        + (complianceSections?.dbs?.rows || []).filter((r) => r?.row_type === 'evidence').length
+    },
+    forms: {
+      completed: (complianceSections?.forms?.rows || []).filter((r) => r?.is_verified || r?.verified || ['verified', 'accepted', 'approved', 'completed'].includes(String(r?.status || '').toLowerCase())).length,
+      total: (complianceSections?.forms?.rows || []).length
+    },
+    training: {
+      completed: (complianceSections?.training?.rows || []).filter((r) => r?.is_verified || r?.verified || ['verified', 'accepted', 'approved', 'completed'].includes(String(r?.status || '').toLowerCase())).length,
+      total: (complianceSections?.training?.rows || []).length
+    },
+    references: {
+      completed: (complianceSections?.references?.rows || []).filter((r) => r?.is_verified || r?.verified || ['verified', 'accepted', 'approved', 'completed'].includes(String(r?.status || '').toLowerCase())).length,
+      total: (complianceSections?.references?.rows || []).length
+    },
+    agreements: {
+      completed: (complianceSections?.agreements?.rows || []).filter((r) => r?.latest_active !== false).filter((r) => r?.is_verified || r?.verified || ['verified', 'accepted', 'approved', 'completed', 'acknowledged'].includes(String(r?.status || '').toLowerCase())).length,
+      total: (complianceSections?.agreements?.rows || []).filter((r) => r?.latest_active !== false).length
+    },
+    induction: {
+      completed: (complianceSections?.induction?.rows || []).filter((r) => r?.is_verified || r?.verified || ['verified', 'accepted', 'approved', 'completed'].includes(String(r?.status || '').toLowerCase())).length,
+      total: (complianceSections?.induction?.rows || []).length
+    }
+  };
+  const breakdown = sectionProgressAvailable ? sectionBreakdown : (progress.categories || {});
 
   // Determine overall status
   const isApplicant = personStage === 'applicant';

@@ -5074,6 +5074,7 @@ export default function EmployeeProfilePage() {
           personStage={employee?.person_stage}
           recruitmentApproved={employee?.recruitment_approved}
           showQuickActions={false}
+          complianceFile={complianceFile}
           onNavigateToTab={(tab) => {
             setActiveTab(tab === 'compliance' ? 'checklist' : tab);
           }}
@@ -6936,6 +6937,7 @@ export default function EmployeeProfilePage() {
                         employeeId={employeeId}
                         employeeEmail={employee?.email}
                         employeeName={employee ? `${employee.first_name} ${employee.last_name}` : ''}
+                        complianceFile={complianceFile}
                         onUpload={(key) => {
                           setSelectedRequirement(key);
                           setUploadDialogOpen(true);

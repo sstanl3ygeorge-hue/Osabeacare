@@ -61,6 +61,7 @@ export default function DualRowComplianceSection({
   employeeEmail,
   employeeName,
   employeeData,  // Full employee data for pre-filling forms
+  complianceFile: externalComplianceFile = null,
   onUpload,
   onRequest,
   onPreviewFile,
@@ -179,6 +180,10 @@ export default function DualRowComplianceSection({
 
   // Fetch compliance file data
   const fetchComplianceFile = async () => {
+    if (hasExternalDualRowSections) {
+      // Parent has authoritative dual_row_v1 payload; avoid split state/fetch drift.
+      return;
+    }
     if (!employeeId || !token) {
       console.debug('Skipping dual-row compliance-file fetch until employeeId and auth token are available');
       return;
@@ -240,13 +245,18 @@ export default function DualRowComplianceSection({
   };
 
   useEffect(() => {
-    fetchComplianceFile();
-  }, [employeeId, token]);
+    if (!hasExternalDualRowSections) {
+      fetchComplianceFile();
+    } else {
+      setLoading(false);
+      setError(null);
+    }
+  }, [employeeId, token, hasExternalDualRowSections]);
 
   // Refresh handler
   const handleRefresh = () => {
-    fetchComplianceFile();
     if (onRefresh) onRefresh();
+    if (!hasExternalDualRowSections) fetchComplianceFile();
   };
 
   // Toggle section expansion
@@ -869,16 +879,16 @@ export default function DualRowComplianceSection({
     );
   }
 
-  if (!complianceFile) {
+  if (!effectiveComplianceFile) {
     return null;
   }
 
   const hasAnySections =
-    complianceFile?.sections &&
-    typeof complianceFile.sections === 'object' &&
-    Object.keys(complianceFile.sections).length > 0;
+    effectiveComplianceFile?.sections &&
+    typeof effectiveComplianceFile.sections === 'object' &&
+    Object.keys(effectiveComplianceFile.sections).length > 0;
 
-  if (complianceFile?.status_unavailable && !hasAnySections) {
+  if (effectiveComplianceFile?.status_unavailable && !hasAnySections) {
     return (
       <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
         <p className="font-medium">Compliance temporarily unavailable</p>
@@ -891,9 +901,9 @@ export default function DualRowComplianceSection({
   const { summary } = complianceFile;
   // Deep clone sections to avoid mutating original
   const filteredSections = (() => {
-    if (!complianceFile.sections || typeof complianceFile.sections !== 'object') return {};
+    if (!effectiveComplianceFile?.sections || typeof effectiveComplianceFile.sections !== 'object') return {};
     const clone = {};
-    for (const [sectionKey, section] of Object.entries(complianceFile.sections)) {
+    for (const [sectionKey, section] of Object.entries(effectiveComplianceFile.sections)) {
       if (!section || !Array.isArray(section.rows)) {
         clone[sectionKey] = section;
         continue;
@@ -1223,3 +1233,11 @@ export default function DualRowComplianceSection({
   );
 }
 
+  const externalSections = normalizeComplianceSections(externalComplianceFile?.sections);
+  const hasExternalDualRowSections =
+    externalComplianceFile?.serializer_version === 'dual_row_v1' &&
+    Object.keys(externalSections).length > 0;
+  const effectiveComplianceFile = hasExternalDualRowSections ? {
+    ...externalComplianceFile,
+    sections: externalSections
+  } : complianceFile;

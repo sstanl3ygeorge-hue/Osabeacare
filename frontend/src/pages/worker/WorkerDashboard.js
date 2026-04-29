@@ -1455,14 +1455,17 @@ export default function WorkerDashboard() {
       fetchDashboard();
       return true;
     } catch (error) {
-      const detail = error?.response?.data?.detail;
+      const payload = error?.response?.data || {};
+      const detail = payload?.detail;
       const message =
         (typeof detail === 'string' && detail) ||
         (detail && typeof detail.message === 'string' && detail.message) ||
-        (typeof error?.response?.data?.message === 'string' && error.response.data.message) ||
+        (typeof payload?.message === 'string' && payload.message) ||
         'Failed to acknowledge agreement';
-      const code = detail && typeof detail === 'object' ? detail.code : null;
-      if (error?.response?.status === 409 && code === 'not_actionable') {
+      const code =
+        (typeof payload?.code === 'string' && payload.code) ||
+        (detail && typeof detail === 'object' ? detail.code : null);
+      if (error?.response?.status === 409 && (code === 'not_actionable' || code === 'already_acknowledged' || code === 'already_signed')) {
         toast.info(message);
       } else {
         toast.error(message);

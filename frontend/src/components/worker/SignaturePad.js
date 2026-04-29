@@ -117,16 +117,24 @@ export default function SignaturePad({ employeeId, employeeName, sourceRecordId 
       toast.success('Contract signed successfully!');
       if (onSigned) onSigned(response.data);
     } catch (error) {
-      const detail = error.response?.data?.detail;
-      const code = typeof detail === 'object' ? detail?.code : null;
-      if (error.response?.status === 409 && code === 'already_has_active_contract') {
+      const payload = error?.response?.data || {};
+      const detail = payload?.detail;
+      const code =
+        (typeof payload?.code === 'string' && payload.code) ||
+        (typeof detail === 'object' && typeof detail?.code === 'string' ? detail.code : null);
+      if (error.response?.status === 409 && (code === 'already_has_active_contract' || code === 'already_signed')) {
         toast.info('Contract is already signed or moved to the next stage. Refreshing dashboard.');
-        if (onSigned) onSigned({ success: true, idempotent: true, detail });
+        if (onSigned) onSigned({ success: true, idempotent: true, detail: payload });
+        return;
+      }
+      if (error.response?.status === 409 && code === 'stale_target') {
+        toast.info('A newer contract version is now active. Refreshing dashboard.');
+        if (onSigned) onSigned({ success: true, idempotent: true, detail: payload });
         return;
       }
       const message = typeof detail === 'string'
         ? detail
-        : (detail?.message || 'Failed to sign contract');
+        : (payload?.message || detail?.message || 'Failed to sign contract');
       toast.error(message);
     } finally {
       setSigning(false);

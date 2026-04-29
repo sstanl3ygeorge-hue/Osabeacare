@@ -256,6 +256,7 @@ export default function EmployeeProfilePage() {
   
   // Route context detection - determines if viewing from recruitment or employee context
   const isRecruitmentView = location.pathname.startsWith('/portal/recruitment/');
+  const profileMode = isRecruitmentView ? 'applicant' : 'employee';
   
   // Initialize active tab from URL for navigation state persistence
   const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'employment');
@@ -4073,15 +4074,48 @@ export default function EmployeeProfilePage() {
   }).length;
   const sectionProgressAvailable = sectionTotalRows > 0;
   const useComplianceSectionsAsPrimary = isDualRowCompliance && sectionProgressAvailable;
-  const effectiveCompletedRequirements = sectionProgressAvailable
-    ? sectionCompletedRows
-    : (canonicalCompletedRequirements ?? 0);
-  const effectiveTotalRequirements = sectionProgressAvailable
-    ? sectionTotalRows
-    : (canonicalTotalRequirements ?? 0);
-  const effectiveProgressPct = sectionProgressAvailable
-    ? Math.round((sectionCompletedRows / sectionTotalRows) * 100)
-    : canonicalProgressPct;
+  const complianceSummary = (complianceFile?.summary && typeof complianceFile.summary === 'object') ? complianceFile.summary : {};
+  const requirementsSummary = (complianceRequirements?.summary && typeof complianceRequirements.summary === 'object')
+    ? complianceRequirements.summary
+    : {};
+  const complianceSummaryCompleted = Number(complianceSummary.section_completed_rows);
+  const complianceSummaryTotal = Number(complianceSummary.section_total_rows);
+  const complianceSummaryPct = Number(complianceSummary.section_completion_percentage);
+  const complianceSummaryAvailable = Number.isFinite(complianceSummaryTotal) && complianceSummaryTotal > 0;
+  const requirementsSummaryCompleted = Number(requirementsSummary.completed);
+  const requirementsSummaryTotal = Number(requirementsSummary.total);
+  const requirementsSummaryPct = Number(requirementsSummary.completion_percentage);
+  const requirementsSummaryAvailable = Number.isFinite(requirementsSummaryTotal) && requirementsSummaryTotal > 0;
+
+  let summarySource = 'unified_progress';
+  let effectiveCompletedRequirements = canonicalCompletedRequirements ?? 0;
+  let effectiveTotalRequirements = canonicalTotalRequirements ?? 0;
+  let effectiveProgressPct = canonicalProgressPct;
+
+  if (sectionProgressAvailable) {
+    summarySource = 'compliance_file_sections';
+    effectiveCompletedRequirements = sectionCompletedRows;
+    effectiveTotalRequirements = sectionTotalRows;
+    effectiveProgressPct = Math.round((sectionCompletedRows / sectionTotalRows) * 100);
+  } else if (profileMode === 'employee') {
+    if (complianceSummaryAvailable) {
+      summarySource = 'compliance_file_summary';
+      effectiveCompletedRequirements = complianceSummaryCompleted;
+      effectiveTotalRequirements = complianceSummaryTotal;
+      effectiveProgressPct = Number.isFinite(complianceSummaryPct) ? complianceSummaryPct : 0;
+    } else if (requirementsSummaryAvailable) {
+      summarySource = 'compliance_requirements_summary';
+      effectiveCompletedRequirements = requirementsSummaryCompleted;
+      effectiveTotalRequirements = requirementsSummaryTotal;
+      effectiveProgressPct = Number.isFinite(requirementsSummaryPct) ? requirementsSummaryPct : 0;
+    }
+  } else if (profileMode === 'applicant' && requirementsSummaryAvailable && !canonicalRequirementCountAvailable) {
+    summarySource = 'compliance_requirements_summary';
+    effectiveCompletedRequirements = requirementsSummaryCompleted;
+    effectiveTotalRequirements = requirementsSummaryTotal;
+    effectiveProgressPct = Number.isFinite(requirementsSummaryPct) ? requirementsSummaryPct : 0;
+  }
+
   const isSectionUnavailable = Boolean(complianceFile?.status_unavailable);
   const requirementCountUnavailable = !sectionProgressAvailable && !canonicalRequirementCountAvailable;
   const canonicalReadinessLabel = canonicalIsWorkReady
@@ -4093,6 +4127,25 @@ export default function EmployeeProfilePage() {
     ? 'bg-green-100 text-green-800'
     : 'bg-red-100 text-red-800';
   const canonicalProgressComplete = effectiveProgressPct === 100;
+
+  if (process.env.NODE_ENV === 'development') {
+    const endpointSet = [
+      '/employees/{id}',
+      '/employees/{id}/compliance-file',
+      '/employees/{id}/compliance-requirements',
+      profileMode === 'applicant' ? '/employees/{id}/unified-progress' : '/employees/{id}/unified-progress (legacy only)',
+      profileMode === 'applicant' ? '/employees/{id}/recruitment-status' : '/employees/{id}/recruitment-status (context only)',
+    ];
+    console.debug('PROFILE_MODE_DIAGNOSTIC', {
+      employeeId,
+      pathname: location.pathname,
+      profileMode,
+      endpointsUsed: endpointSet,
+      summarySource,
+      complianceSectionCount: Object.keys(complianceSections).length,
+      complianceRowCount: sectionRows.length
+    });
+  }
 
   return (
     <div className="space-y-6" data-testid="employee-profile">

@@ -4507,11 +4507,29 @@ export default function EmployeeProfilePage() {
                   return row?.is_verified === true || row?.verified === true || ['verified', 'complete', 'completed', 'accepted', 'approved', 'recorded'].includes(s);
                 }).length
               : null;
+            const trainingEvalSummary = (trainingEvaluation && typeof trainingEvaluation === 'object')
+              ? (trainingEvaluation.summary || trainingEvaluation.top_summary || trainingEvaluation)
+              : {};
+            const trainingEvalRequired = Number(
+              trainingEvalSummary?.required_total
+              ?? trainingEvalSummary?.mandatory_total
+              ?? trainingEvalSummary?.required
+            );
+            const trainingEvalVerified = Number(
+              trainingEvalSummary?.verified_total
+              ?? trainingEvalSummary?.mandatory_verified
+              ?? trainingEvalSummary?.verified
+              ?? trainingEvalSummary?.completed
+            );
             const trainingRequired = trainingSectionRequired ?? (
-              !useComplianceSectionsAsPrimary && Number.isFinite(trainingCategory?.total) ? trainingCategory.total : null
+              Number.isFinite(trainingEvalRequired)
+                ? trainingEvalRequired
+                : (Number.isFinite(trainingCategory?.total) ? trainingCategory.total : null)
             );
             const trainingCompleted = trainingSectionCompleted ?? (
-              !useComplianceSectionsAsPrimary && Number.isFinite(trainingCategory?.completed) ? trainingCategory.completed : null
+              Number.isFinite(trainingEvalVerified)
+                ? trainingEvalVerified
+                : (Number.isFinite(trainingCategory?.completed) ? trainingCategory.completed : null)
             );
             const trainingExpiring = trainingSectionRows.length > 0
               ? trainingSectionRows.filter((row) => String(row?.status || '').toLowerCase() === 'expiring_soon').length
@@ -4525,7 +4543,7 @@ export default function EmployeeProfilePage() {
 
             const agreementItems = agreementsSectionRows.length > 0
               ? agreementsSectionRows.filter((row) => row?.latest_active !== false)
-              : (!useComplianceSectionsAsPrimary ? asArray(agreementsCategory?.items) : []);
+              : asArray(agreementsCategory?.items);
             const selectLatestAgreement = (matcher) => {
               const scoped = agreementItems.filter((item) =>
                 matcher(String(item?.id || item?.requirement_id || item?.agreement_type || ''))
@@ -4543,11 +4561,26 @@ export default function EmployeeProfilePage() {
                   return row?.is_verified === true || row?.verified === true || ['verified', 'complete', 'completed', 'accepted', 'approved', 'recorded'].includes(s);
                 }).length
               : null;
+            const inductionFromChecklist = employee?.induction_checklist_summary || employee?.induction_summary || {};
+            const inductionChecklistCompleted = Number(
+              inductionFromChecklist?.completed
+              ?? inductionFromChecklist?.completed_count
+              ?? inductionFromChecklist?.verified_count
+            );
+            const inductionChecklistTotal = Number(
+              inductionFromChecklist?.total
+              ?? inductionFromChecklist?.total_count
+              ?? inductionFromChecklist?.required_count
+            );
             const inductionCompleted = inductionSectionCompleted ?? (
-              !useComplianceSectionsAsPrimary && Number.isFinite(inductionCategory?.completed) ? inductionCategory.completed : null
+              Number.isFinite(inductionChecklistCompleted)
+                ? inductionChecklistCompleted
+                : (Number.isFinite(inductionCategory?.completed) ? inductionCategory.completed : null)
             );
             const inductionRequired = inductionSectionRequired ?? (
-              !useComplianceSectionsAsPrimary && Number.isFinite(inductionCategory?.total) ? inductionCategory.total : null
+              Number.isFinite(inductionChecklistTotal)
+                ? inductionChecklistTotal
+                : (Number.isFinite(inductionCategory?.total) ? inductionCategory.total : null)
             );
             const agreementsTone = tone(`${contractStatus} ${handbookStatus}`, null);
 

@@ -900,13 +900,13 @@ export default function DualRowComplianceSection({
     return (
       <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
         <p className="font-medium">Compliance temporarily unavailable</p>
-        <p className="mt-1">{complianceFile?.message || 'Some compliance checks are temporarily unavailable.'}</p>
+        <p className="mt-1">{effectiveComplianceFile?.message || 'Some compliance checks are temporarily unavailable.'}</p>
       </div>
     );
   }
 
   // UI-only: filter out staff_health_questionnaire from all sections before rendering
-  const { summary } = complianceFile;
+  const { summary } = effectiveComplianceFile || {};
   // Deep clone sections to avoid mutating original
   const filteredSections = (() => {
     if (!effectiveComplianceFile?.sections || typeof effectiveComplianceFile.sections !== 'object') return {};
@@ -1075,7 +1075,7 @@ export default function DualRowComplianceSection({
       
       {/* Serializer Version (for debugging) */}
       <div className="text-xs text-text-muted text-right">
-        Serializer: {complianceFile.serializer_version || 'unavailable'}
+        Serializer: {effectiveComplianceFile?.serializer_version || 'unavailable'}
       </div>
       
       {/* Ticket C: Evidence Management Drawer for RTW, DBS, Identity, PoA */}

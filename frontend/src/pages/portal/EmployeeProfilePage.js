@@ -4303,7 +4303,9 @@ export default function EmployeeProfilePage() {
                     // Outstanding items remain - 0-99% complete (default for all applicants/onboarding)
                     return (
                       <span className="px-2 py-1 rounded-lg text-xs font-medium bg-amber-100 text-amber-800" data-testid="awaiting-approval-badge">
-                        Outstanding items remain
+                        {(canonicalIsWorkReady || canonicalCanPromote) && canonicalProgressComplete !== true
+                          ? 'Audit/admin items remain'
+                          : 'Outstanding items remain'}
                       </span>
                     );
                   })()}
@@ -4337,6 +4339,11 @@ export default function EmployeeProfilePage() {
                       {canonicalReadinessLabel}
                     </span>
                   )}
+                  {canonicalStage === 'employee' && (
+                    <span className="px-2 py-1 rounded-lg text-xs font-medium bg-slate-100 text-slate-700">
+                      Work Status: {canonicalReadinessLabel}
+                    </span>
+                  )}
                 </div>
               </div>
             </div>
@@ -4344,7 +4351,7 @@ export default function EmployeeProfilePage() {
             <div className="flex flex-col items-end gap-4">
               <div className="flex items-center gap-3">
                 <div className="text-right">
-                  <p className="text-sm text-text-muted">Overall Compliance</p>
+                  <p className="text-sm text-text-muted">Compliance File Completion</p>
                   <p className="text-3xl font-heading font-bold text-text-primary">
                     {effectiveProgressPct}% Complete
                   </p>

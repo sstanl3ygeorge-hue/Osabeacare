@@ -38318,24 +38318,43 @@ async def get_compliance_file(
         agreement_type: str
     ) -> dict:
         """Build an agreement row (form acknowledgement)."""
+        agreement_type_candidates = [agreement_type]
+        if agreement_type == "handbook_acknowledgement":
+            agreement_type_candidates.append("employee_handbook_acknowledgement")
         # Find acknowledgements for this type (old format)
-        acks = [a for a in agreements.get("acknowledgements", []) 
-                if a.get("agreement_type") == agreement_type]
+        acks = [a for a in agreements.get("acknowledgements", [])
+                if a.get("agreement_type") in agreement_type_candidates]
         pending_reqs = [r for r in agreements.get("pending_requests", [])
-                       if r.get("agreement_type") == agreement_type]
+                       if r.get("agreement_type") in agreement_type_candidates]
 
         # Find new-style submission for this type
         template_id = AGREEMENT_TYPE_TO_TEMPLATE.get(agreement_type)
         submission = submissions_by_template.get(template_id) if template_id else None
 
-        try:
-            agreement_state = await _resolve_agreement_once(agreement_type)
-        except Exception as exc:
+        agreement_state = {}
+        resolver_error = None
+        for agreement_type_candidate in agreement_type_candidates:
+            try:
+                candidate_state = await _resolve_agreement_once(agreement_type_candidate)
+                if candidate_state and (
+                    candidate_state.get("source_record_id")
+                    or candidate_state.get("template_version")
+                    or candidate_state.get("has_acknowledgement")
+                    or candidate_state.get("status")
+                ):
+                    agreement_state = candidate_state
+                    break
+                if not agreement_state:
+                    agreement_state = candidate_state or {}
+            except Exception as exc:
+                resolver_error = exc
+                continue
+        if resolver_error and not agreement_state:
             logger.warning(
                 "agreement_resolver_failed endpoint=compliance-file employee_id=%s agreement_type=%s error=%s",
                 employee_id,
                 agreement_type,
-                exc,
+                resolver_error,
             )
             return {
                 "key": key,
@@ -38344,7 +38363,7 @@ async def get_compliance_file(
                 "status": "unavailable",
                 "status_summary": "Temporarily unavailable",
                 "status_unavailable": True,
-                "warnings": [f"agreement_resolver_failed:{exc}"],
+                "warnings": [f"agreement_resolver_failed:{resolver_error}"],
                 "agreement_type": agreement_type,
                 "template_version": None,
                 "can_sign": None,
@@ -38378,8 +38397,20 @@ async def get_compliance_file(
         )
         canonical_status = agreement_state.get("status")
         
-        # Status summary - prefer new submission data over old ack
-        if submission and is_verified:
+        # Status summary - canonical resolver status takes precedence.
+        if canonical_status == "fully_executed":
+            status_summary = agreement_state.get("state_label") or "Fully executed"
+            status = "fully_executed"
+        elif canonical_status == "verified":
+            status_summary = agreement_state.get("state_label") or "Verified"
+            status = "verified"
+        elif canonical_status in {"pending_signature", "awaiting_worker_signature"}:
+            status_summary = agreement_state.get("state_label") or "Awaiting worker signature"
+            status = "pending_signature"
+        elif canonical_status in {"pending", "pending_acknowledgement"}:
+            status_summary = agreement_state.get("state_label") or "Awaiting acknowledgement"
+            status = "pending"
+        elif submission and is_verified:
             version = submission.get("template_version", "")
             completed_at = (submission.get("completed_at", "") or "")[:10] if submission.get("completed_at") else ""
             mode = (submission.get("completion_mode", "") or "").replace("_", " ").title()

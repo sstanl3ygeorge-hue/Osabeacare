@@ -4515,6 +4515,7 @@ export default function EmployeeProfilePage() {
               ...asArray(sectionRowsByType?.training),
               ...asArray(sectionRowsByType?.training_record)
             ];
+            const trainingOperationalRows = trainingSectionRows;
             const agreementsSectionRows = [
               ...asArray(sectionRowsByType?.form_acknowledgement),
               ...asArray(sectionRowsByType?.agreement),

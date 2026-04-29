@@ -15760,9 +15760,10 @@ async def override_employee_status(
     """
     Manually override onboarding status (Super Admin only).
     
-    RECRUITMENT APPROVAL GATE:
+    RECRUITMENT + ACTIVATION GATE:
     - Setting status to ACTIVE requires recruitment_approved=True
-    - Super Admin can override but recruitment approval is still checked
+    - Activation gate (readiness + fit-for-work) must pass, OR
+    - Super Admin must supply explicit override reason (audited)
     """
     if user.get('role') != UserRole.SUPER_ADMIN:
         raise HTTPException(status_code=403, detail="Only Super Admin can override onboarding status")
@@ -15783,6 +15784,32 @@ async def override_employee_status(
             raise HTTPException(
                 status_code=400, 
                 detail="Cannot activate employee without recruitment approval. Use /approve-recruitment first."
+            )
+        # ACTIVATION GATE: require readiness + fit-for-work approval unless explicit audited override reason is supplied.
+        gate_reason = (reason or "").strip()
+        unified_status = await get_unified_employee_status(
+            employee_id,
+            db,
+            user_role="admin",
+            include_details=False,
+        )
+        if unified_status.get("error"):
+            raise HTTPException(status_code=400, detail=f"Cannot evaluate activation gate: {unified_status.get('error')}")
+        latest_decision = await db.work_readiness_decisions.find_one(
+            {"employee_id": employee_id},
+            {"_id": 0},
+            sort=[("decided_at", -1), ("created_at", -1)],
+        )
+        decision_outcome = (latest_decision or {}).get("outcome")
+        has_fit_for_work_approval = decision_outcome in ("ready", "ready_with_conditions")
+        gate_passed = bool(unified_status.get("can_promote")) and has_fit_for_work_approval
+        if not gate_passed and len(gate_reason) < 10:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Cannot activate: readiness gate failed. "
+                    "Provide an explicit override reason (min 10 chars) to proceed with audited manual override."
+                ),
             )
     
     previous_status = employee.get("onboarding_status", "New")
@@ -15806,7 +15833,13 @@ async def override_employee_status(
         {
             "previous_status": previous_status,
             "new_status": new_status,
-            "reason": reason or "Manual override by Super Admin"
+            "reason": reason or "Manual override by Super Admin",
+            "activation_gate_evaluated": bool(new_status == OnboardingStatus.ACTIVE),
+            "activation_gate_passed": bool(gate_passed) if new_status == OnboardingStatus.ACTIVE else None,
+            "activation_override_used": bool((new_status == OnboardingStatus.ACTIVE) and (not gate_passed)),
+            "activation_override_reason_supplied": bool((reason or "").strip()),
+            "activation_unified_can_promote": bool(unified_status.get("can_promote")) if new_status == OnboardingStatus.ACTIVE else None,
+            "activation_fit_for_work_approved": bool(has_fit_for_work_approval) if new_status == OnboardingStatus.ACTIVE else None,
         }
     )
     

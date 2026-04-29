@@ -220,7 +220,7 @@ export default function RecruitmentApprovalPanel({
               <>
                 <CheckCircle2 className="h-5 w-5 text-emerald-600" />
                 <div>
-                  <p className="font-medium text-emerald-800">Ready for Approval</p>
+                  <p className="font-medium text-emerald-800">Ready for Recruitment Approval</p>
                   <p className="text-sm text-emerald-600">All required items verified</p>
                 </div>
               </>
@@ -316,7 +316,7 @@ export default function RecruitmentApprovalPanel({
               ) : (
                 <UserCheck className="h-4 w-4 mr-2" />
               )}
-              Approve for Recruitment
+              Approve to Onboarding
             </Button>
           ) : (
             <Button
@@ -338,7 +338,7 @@ export default function RecruitmentApprovalPanel({
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <UserCheck className="h-5 w-5 text-emerald-600" />
-              Approve for Recruitment?
+              Approve to Onboarding?
             </DialogTitle>
             <DialogDescription>
               This will transition <strong>{employeeName}</strong> from Applicant to Employee status.

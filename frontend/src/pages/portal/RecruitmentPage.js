@@ -297,7 +297,7 @@ export default function RecruitmentPage() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-text-primary">Recruitment Pipeline</h1>
+          <h1 className="text-2xl font-bold text-text-primary">Applicants and Onboarding Starters</h1>
           <p className="text-text-muted mt-1">
             {pipeline?.summary?.total_applicants || 0} applicants awaiting review
           </p>
@@ -327,7 +327,7 @@ export default function RecruitmentPage() {
                   <Users className="h-6 w-6 text-blue-600" />
                 </div>
                 <div>
-                  <h3 className="font-semibold text-blue-800">All Applicants</h3>
+                  <h3 className="font-semibold text-blue-800">Applicants and Onboarding Starters</h3>
                   <p className="text-sm text-blue-600">
                     {pipeline?.summary?.total_applicants || 0} applicants awaiting review
                   </p>
@@ -394,7 +394,7 @@ export default function RecruitmentPage() {
             <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 text-xs">
               Applicants
             </Badge>
-            Recruitment Pipeline
+            Applicants and Onboarding Starters
           </CardTitle>
           <CardDescription>
             Review each applicant's record before approval, with employment history and interview checks completed first.
@@ -478,7 +478,7 @@ export default function RecruitmentPage() {
                               ) : approval.canApprove ? (
                                 <span className="flex items-center gap-1.5 text-emerald-600 font-medium">
                                   <CheckCircle className="w-4 h-4" />
-                                  Ready for approval
+                                  Ready for recruitment approval
                                 </span>
                               ) : (
                                 <span className="flex items-center gap-1.5 text-amber-600 font-medium">
@@ -589,7 +589,7 @@ export default function RecruitmentPage() {
                             onClick={() => navigate(`/portal/recruitment/${applicant.id}?tab=checklist`)}
                           >
                             <FileText className="w-4 h-4 mr-2" />
-                            Review Verification File
+                            Review Compliance File
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>

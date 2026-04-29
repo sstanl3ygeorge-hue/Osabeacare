@@ -111,6 +111,7 @@ class OnboardingStatus:
 class RecruitmentApprovalRequest(BaseModel):
     notes: Optional[str] = None
     force: bool = False  # Admin bypass of compliance gate (logged in audit)
+    force_reason: Optional[str] = None
 
 
 class EmploymentReviewSignOffRequest(BaseModel):
@@ -541,6 +542,13 @@ async def approve_recruitment(
             "recruitment_approved_by": employee.get("recruitment_approved_by")
         }
 
+    force_reason = (approval.force_reason or "").strip()
+    if approval.force:
+        if user.get("role") != UserRole.SUPER_ADMIN:
+            raise HTTPException(status_code=403, detail="Only Super Admin can force-approve recruitment")
+        if len(force_reason) < 10:
+            raise HTTPException(status_code=400, detail="force_reason must be at least 10 characters for force approval")
+
     # ── Compliance gate ────────────────────────────────────────────────────────
     stage_gate = StageGateService(db)
     gate_result = await stage_gate.evaluate_recruitment_gate(employee_id)
@@ -556,7 +564,7 @@ async def approve_recruitment(
                 "blocking_items": gate_result["blocking_items"],
                 "warning_items": gate_result["warning_items"],
                 "missing_requirements": gate_result["missing_requirements"],
-                "hint": "Set force=true to override (requires admin; logged in audit)"
+                "hint": "Set force=true with force_reason (Super Admin only; logged in audit)"
             }
         )
     
@@ -567,6 +575,7 @@ async def approve_recruitment(
         "recruitment_approved_by": user['user_id'],
         "recruitment_approved_at": now,
         "recruitment_approval_notes": approval.notes,
+        "recruitment_force_approval_reason": force_reason if approval.force and not can_approve else None,
         "updated_at": now
     }
     
@@ -601,6 +610,11 @@ async def approve_recruitment(
             "compliance_gate_blockers": gate_blockers if approval.force and not can_approve else [],
             "compliance_gate_warnings": [w["label"] for w in gate_result.get("warning_items", [])],
             "compliance_gate_missing": gate_result.get("missing_requirements", []),
+            "override_type": "recruitment_force_approval" if approval.force and not can_approve else None,
+            "gate_passed": bool(can_approve),
+            "blockers_present": bool(gate_result.get("blocking_items")),
+            "reason": force_reason if approval.force and not can_approve else None,
+            "actor": user.get("user_id"),
             "employee_code_assigned": employee_code if not employee.get("employee_code") else None,
             "status_changed_from": current_status if current_status in APPLICANT_STATUSES else None,
             "status_changed_to": EmployeeStatus.ONBOARDING if current_status in APPLICANT_STATUSES else None

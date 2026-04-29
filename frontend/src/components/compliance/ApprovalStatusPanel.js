@@ -83,8 +83,8 @@ export default function ApprovalStatusPanel({
                 status === 'ready' ? 'text-green-900' :
                 status === 'blocked' ? 'text-red-900' : 'text-amber-900'
               }`}>
-                {status === 'ready' ? 'Ready for Approval' :
-                 status === 'blocked' ? 'Not ready for work' : 'Awaiting admin review'}
+                {status === 'ready' ? 'Ready for Recruitment Approval' :
+                 status === 'blocked' ? 'Not ready for recruitment approval' : 'Awaiting admin review'}
               </h3>
               <p className={`text-sm ${
                 status === 'ready' ? 'text-green-700' :
@@ -224,7 +224,7 @@ export default function ApprovalStatusPanel({
               ) : (
                 <>
                   <Shield className="h-4 w-4 mr-1.5" />
-                  {isReady ? 'Approve Recruitment' : 'Cannot Approve'}
+                  {isReady ? 'Approve to Onboarding' : 'Cannot Approve'}
                 </>
               )}
             </Button>

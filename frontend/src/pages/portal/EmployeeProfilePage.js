@@ -1561,6 +1561,10 @@ export default function EmployeeProfilePage() {
         const prevSections = normalizeComplianceSections(prev?.sections);
         const nextHasSections = Object.keys(normalizedSections).length > 0;
         const prevHasSections = Object.keys(prevSections).length > 0;
+        const shouldStickyPreserve =
+          profileMode === 'employee' &&
+          prevHasSections &&
+          (!nextHasSections || payload?.status_unavailable === true);
         if (payload?.serializer_version === 'dual_row_v1' && !nextHasSections && prevHasSections) {
           console.warn('dual_row_v1 returned empty sections; preserving previous valid compliance sections', {
             employeeId,
@@ -1569,6 +1573,19 @@ export default function EmployeeProfilePage() {
           return {
             ...payload,
             sections: prevSections,
+            stale_data_preserved: true,
+            stale_data_message: 'Latest refresh failed; showing last valid compliance data.',
+            summary: (payload.summary && typeof payload.summary === 'object')
+              ? payload.summary
+              : { status_unavailable: Boolean(payload.status_unavailable), overall_status: 'unavailable', ready_for_work: false },
+          };
+        }
+        if (shouldStickyPreserve) {
+          return {
+            ...payload,
+            sections: prevSections,
+            stale_data_preserved: true,
+            stale_data_message: 'Latest refresh failed; showing last valid compliance data.',
             summary: (payload.summary && typeof payload.summary === 'object')
               ? payload.summary
               : { status_unavailable: Boolean(payload.status_unavailable), overall_status: 'unavailable', ready_for_work: false },
@@ -1577,6 +1594,8 @@ export default function EmployeeProfilePage() {
         return {
           ...payload,
           sections: normalizedSections,
+          stale_data_preserved: false,
+          stale_data_message: null,
           summary: (payload.summary && typeof payload.summary === 'object')
             ? payload.summary
             : { status_unavailable: Boolean(payload.status_unavailable), overall_status: 'unavailable', ready_for_work: false },
@@ -1584,20 +1603,40 @@ export default function EmployeeProfilePage() {
       });
     } catch (error) {
       console.error('Failed to fetch compliance file:', error);
-      setComplianceFile({
-        employee_id: employeeId,
-        status_unavailable: true,
-        message: 'Compliance temporarily unavailable',
-        sections: {},
-        summary: {
+      setComplianceFile((prev) => {
+        const prevSections = normalizeComplianceSections(prev?.sections);
+        const prevHasSections = Object.keys(prevSections).length > 0;
+        if (profileMode === 'employee' && prevHasSections) {
+          return {
+            ...(prev || {}),
+            employee_id: employeeId,
+            status_unavailable: true,
+            stale_data_preserved: true,
+            stale_data_message: 'Latest refresh failed; showing last valid compliance data.',
+            sections: prevSections,
+            errors: [{
+              code: 'compliance_file_fetch_failed',
+              message: error?.response?.data?.message || error?.message || 'Failed to load compliance file'
+            }]
+          };
+        }
+        return {
+          employee_id: employeeId,
           status_unavailable: true,
-          overall_status: 'unavailable',
-          ready_for_work: false
-        },
-        errors: [{
-          code: 'compliance_file_fetch_failed',
-          message: error?.response?.data?.message || error?.message || 'Failed to load compliance file'
-        }]
+          message: 'Compliance temporarily unavailable',
+          stale_data_preserved: false,
+          stale_data_message: null,
+          sections: {},
+          summary: {
+            status_unavailable: true,
+            overall_status: 'unavailable',
+            ready_for_work: false
+          },
+          errors: [{
+            code: 'compliance_file_fetch_failed',
+            message: error?.response?.data?.message || error?.message || 'Failed to load compliance file'
+          }]
+        };
       });
     }
   };
@@ -4149,7 +4188,7 @@ export default function EmployeeProfilePage() {
   const canonicalReadinessLabel = canonicalIsWorkReady
     ? 'Ready for Work'
     : canonicalCanPromote
-      ? 'Eligible to Move to Active'
+                        ? 'Activation Eligible'
       : 'Not ready for work';
   const canonicalReadinessClass = canonicalIsWorkReady || canonicalCanPromote
     ? 'bg-green-100 text-green-800'
@@ -4295,7 +4334,7 @@ export default function EmployeeProfilePage() {
                     if (canonicalCanPromote) {
                       return (
                         <span className="px-2 py-1 rounded-lg text-xs font-medium bg-green-100 text-green-800" data-testid="ready-badge">
-                          Eligible to Move to Active
+                        Activation Eligible
                         </span>
                       );
                     }
@@ -4328,7 +4367,7 @@ export default function EmployeeProfilePage() {
                       {employee.status === 'active' || employee.status === 'active_employee'
                         ? 'Lifecycle: Active Workforce'
                         : canPromoteToActiveNow
-                          ? 'Lifecycle: Eligible to move to Active'
+                  ? 'Lifecycle: Activation Eligible'
                           : employee.status === 'onboarding'
                             ? 'Lifecycle: Onboarding'
                             : `Lifecycle: ${(employee.status || 'unknown').replace(/_/g, ' ')}`}
@@ -4454,6 +4493,12 @@ export default function EmployeeProfilePage() {
               />
             </div>
           </div>
+
+          {profileMode === 'employee' && complianceFile?.stale_data_preserved && (
+            <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              {complianceFile?.stale_data_message || 'Latest refresh failed; showing last valid compliance data.'}
+            </div>
+          )}
 
                     {/* AUDIT QUICK VIEW - Key compliance items at a glance */}
           {(() => {
@@ -5335,7 +5380,7 @@ export default function EmployeeProfilePage() {
                       disabled={!canPromoteToActiveNow}
                       className="w-full sm:w-auto"
                     >
-                      Promote to Active
+                    Activate Employee
                     </Button>
                   </div>
 

@@ -47,7 +47,7 @@ const STAGE_PRESETS = [
   { key: 'ALL', label: 'All' },
   { key: 'ONBOARDING', label: 'Onboarding' },
   { key: 'READY_TO_WORK', label: 'Ready for Work' },
-  { key: 'CAN_PROMOTE', label: 'Eligible to Move to Active' },
+  { key: 'CAN_PROMOTE', label: 'Activation Eligible' },
   { key: 'ACTIVE', label: 'Active' },
   { key: 'INACTIVE', label: 'Inactive' },
 ];
@@ -312,7 +312,7 @@ export default function EmployeesPage() {
     if (isActiveLifecycleStatus(status)) return 'Active Workforce';
     if (status === 'inactive') return 'Inactive';
     if (status === 'onboarding') {
-      return canPromoteEmployee(emp) ? 'Eligible to move to Active' : 'Onboarding';
+      return canPromoteEmployee(emp) ? 'Activation Eligible' : 'Onboarding';
     }
     return (status || 'Unknown').replace(/_/g, ' ');
   };
@@ -810,7 +810,7 @@ export default function EmployeesPage() {
                 <SelectItem value="CAN_PROMOTE">
                   <span className="flex items-center gap-2">
                     <span className="w-2 h-2 rounded-full bg-warning"></span>
-                    Eligible to Move to Active
+                Activation Eligible
                   </span>
                 </SelectItem>
                 <SelectItem value="NOT_READY">
@@ -963,7 +963,7 @@ export default function EmployeesPage() {
                     const statusLabel = readiness.is_work_ready === true
                       ? 'Ready for Work'
                       : readiness.can_promote === true
-                        ? 'Eligible to Move to Active'
+                  ? 'Activation Eligible'
                         : 'Not ready for work';
                     const statusColor = readiness.is_work_ready === true ? 'bg-success/10 text-success' :
                                       readiness.can_promote === true ? 'bg-warning/10 text-warning' :
@@ -1095,7 +1095,7 @@ export default function EmployeesPage() {
                                   <DropdownMenuSeparator />
                                   <DropdownMenuItem onClick={() => handlePromoteToActive(emp)}>
                                     <CheckCircle className="h-4 w-4 mr-2" />
-                                    Promote to Active
+                              Activate Employee
                                   </DropdownMenuItem>
                                 </>
                               )}

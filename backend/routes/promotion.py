@@ -22,6 +22,7 @@ from .dependencies import (
     get_current_user,
     require_admin,
     require_manager_or_admin,
+    UserRole,
     log_audit_action,
 )
 
@@ -202,6 +203,9 @@ async def force_promote_to_active(
     Admin override to promote someone before all checks complete.
     RARE - only for emergencies. Full audit trail required.
     """
+    if user.get("role") != UserRole.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="Only Super Admin can force-promote to active")
+
     db = get_db()
     employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
     if not employee:
@@ -212,7 +216,8 @@ async def force_promote_to_active(
     if current_status in (EMPLOYEE_STATUS_ACTIVE, LEGACY_EMPLOYEE_STATUS_ACTIVE):
         raise HTTPException(status_code=400, detail="Employee is already active")
     
-    if len(request.reason) < 10:
+    reason_text = (request.reason or "").strip()
+    if len(reason_text) < 10:
         raise HTTPException(status_code=400, detail="Reason must be at least 10 characters")
     
     # Get missing checks for audit
@@ -227,9 +232,11 @@ async def force_promote_to_active(
         "promoted_by": user['user_id'],
         "promoted_by_name": user.get('name', user.get('email', 'Unknown')),
         "promoted_at": now,
-        "reason": request.reason,
+        "reason": reason_text,
         "notes": request.notes,
-        "missing_checks": missing_checks
+        "missing_checks": missing_checks,
+        "override_type": "force_promote",
+        "readiness_gate_passed": bool(can_promote),
     }
     
     await db.manual_promotions.insert_one(override_record)
@@ -255,10 +262,12 @@ async def force_promote_to_active(
             "employee_name": f"{employee.get('first_name')} {employee.get('last_name')}",
             "previous_status": current_status,
             "new_status": EMPLOYEE_STATUS_ACTIVE,
-            "reason": request.reason,
+            "reason": reason_text,
             "notes": request.notes,
             "missing_checks": missing_checks,
-            "override": True
+            "override": True,
+            "override_type": "force_promote",
+            "readiness_gate_passed": bool(can_promote),
         }
     )
     

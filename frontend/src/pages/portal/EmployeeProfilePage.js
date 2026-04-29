@@ -1369,17 +1369,20 @@ export default function EmployeeProfilePage() {
 
   const fetchData = async () => {
     const headers = { Authorization: `Bearer ${token}` };
+    const CRITICAL_TIMEOUT_MS = 12000;
+    const OPTIONAL_TIMEOUT_MS = 8000;
     // Throttle request fan-out: fetch critical first, render shell, then optional panels.
     const criticalRequests = [
-      axios.get(`${API}/employees/${employeeId}`, { headers }),
-      axios.get(`${API}/employees/${employeeId}/unified-progress`, { headers }),
-      axios.get(`${API}/employees/${employeeId}/compliance-requirements`, { headers }),
+      axios.get(`${API}/employees/${employeeId}`, { headers, timeout: CRITICAL_TIMEOUT_MS }),
+      axios.get(`${API}/employees/${employeeId}/unified-progress`, { headers, timeout: CRITICAL_TIMEOUT_MS }),
+      axios.get(`${API}/employees/${employeeId}/compliance-requirements`, { headers, timeout: CRITICAL_TIMEOUT_MS }),
     ];
     if (profileMode === 'employee') {
       criticalRequests.push(
         axios.get(`${API}/employees/unified-progress-summary`, {
           params: { employee_ids: employeeId },
-          headers
+          headers,
+          timeout: CRITICAL_TIMEOUT_MS,
         })
       );
     }
@@ -1486,13 +1489,13 @@ export default function EmployeeProfilePage() {
 
     // Optional panels load after shell render; failures are panel-local only.
     Promise.allSettled([
-      axios.get(`${API}/employee-documents?employee_id=${employeeId}`, { headers }),
-      axios.get(`${API}/document-types`, { headers }),
-      axios.get(`${API}/training-records?employee_id=${employeeId}`, { headers }),
-      axios.get(`${API}/policy-assignments?employee_id=${employeeId}&include_inactive=true`, { headers }),
-      axios.get(`${API}/audit-logs?entity_id=${employeeId}&compliance_only=true`, { headers }),
-      axios.get(`${API}/generated-forms?employee_id=${employeeId}`, { headers }),
-      axios.get(`${API}/templates`, { headers }),
+      axios.get(`${API}/employee-documents?employee_id=${employeeId}`, { headers, timeout: OPTIONAL_TIMEOUT_MS }),
+      axios.get(`${API}/document-types`, { headers, timeout: OPTIONAL_TIMEOUT_MS }),
+      axios.get(`${API}/training-records?employee_id=${employeeId}`, { headers, timeout: OPTIONAL_TIMEOUT_MS }),
+      axios.get(`${API}/policy-assignments?employee_id=${employeeId}&include_inactive=true`, { headers, timeout: OPTIONAL_TIMEOUT_MS }),
+      axios.get(`${API}/audit-logs?entity_id=${employeeId}&compliance_only=true`, { headers, timeout: OPTIONAL_TIMEOUT_MS }),
+      axios.get(`${API}/generated-forms?employee_id=${employeeId}`, { headers, timeout: OPTIONAL_TIMEOUT_MS }),
+      axios.get(`${API}/templates`, { headers, timeout: OPTIONAL_TIMEOUT_MS }),
     ]).then((optionalResults) => {
       const docsRes = optionalResults[0];
       const typesRes = optionalResults[1];

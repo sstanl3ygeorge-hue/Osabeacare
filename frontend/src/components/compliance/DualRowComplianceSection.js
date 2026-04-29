@@ -1032,35 +1032,35 @@ export default function DualRowComplianceSection({
         <>
           {/* Right to Work */}
           {filteredSections.right_to_work && (
-            (filteredSections.right_to_work?.status_unavailable || !Array.isArray(filteredSections.right_to_work?.rows))
+            (!Array.isArray(filteredSections.right_to_work?.rows) || filteredSections.right_to_work.rows.length === 0)
               ? renderUnavailableSection('right_to_work', 'Right to Work', filteredSections.right_to_work)
               : renderUploadSection('right_to_work', filteredSections.right_to_work)
           )}
           
           {/* DBS */}
           {filteredSections.dbs && (
-            (filteredSections.dbs?.status_unavailable || !Array.isArray(filteredSections.dbs?.rows))
+            (!Array.isArray(filteredSections.dbs?.rows) || filteredSections.dbs.rows.length === 0)
               ? renderUnavailableSection('dbs', 'DBS', filteredSections.dbs)
               : renderUploadSection('dbs', filteredSections.dbs)
           )}
           
           {/* Identity */}
           {filteredSections.identity && (
-            (filteredSections.identity?.status_unavailable || !Array.isArray(filteredSections.identity?.rows))
+            (!Array.isArray(filteredSections.identity?.rows) || filteredSections.identity.rows.length === 0)
               ? renderUnavailableSection('identity', 'Identity', filteredSections.identity)
               : renderUploadSection('identity', filteredSections.identity)
           )}
           
           {/* Proof of Address */}
           {filteredSections.proof_of_address && (
-            (filteredSections.proof_of_address?.status_unavailable || !Array.isArray(filteredSections.proof_of_address?.rows))
+            (!Array.isArray(filteredSections.proof_of_address?.rows) || filteredSections.proof_of_address.rows.length === 0)
               ? renderUnavailableSection('proof_of_address', 'Proof of Address', filteredSections.proof_of_address)
               : renderUploadSection('proof_of_address', filteredSections.proof_of_address)
           )}
           
           {/* Agreements - Uses legacy section for now */}
           {filteredSections.agreements && (
-            (filteredSections.agreements?.status_unavailable || !Array.isArray(filteredSections.agreements?.rows))
+            (!Array.isArray(filteredSections.agreements?.rows) || filteredSections.agreements.rows.length === 0)
               ? renderUnavailableSection('agreements', 'Agreements', filteredSections.agreements)
               : renderSection('agreements', filteredSections.agreements)
           )}

@@ -37361,13 +37361,13 @@ async def get_compliance_file(
     section_warnings: list[str] = []
 
     async def _timed_await(label: str, coro, timeout_s: float | None = None):
-        started = time.monotonic()
+        started = time_module.monotonic()
         try:
             if timeout_s and timeout_s > 0:
                 return await asyncio.wait_for(coro, timeout=timeout_s)
             return await coro
         finally:
-            section_timings_ms[label] = int((time.monotonic() - started) * 1000)
+            section_timings_ms[label] = int((time_module.monotonic() - started) * 1000)
     _agreement_resolver_calls = 0
     _agreement_cache = {}
     async def _resolve_agreement_once(agreement_type: str):

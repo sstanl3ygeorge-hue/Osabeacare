@@ -1369,7 +1369,7 @@ export default function EmployeeProfilePage() {
 
   const fetchData = async () => {
     const headers = { Authorization: `Bearer ${token}` };
-    const CRITICAL_TIMEOUT_MS = 12000;
+    const CRITICAL_TIMEOUT_MS = 45000;
     const OPTIONAL_TIMEOUT_MS = 8000;
     // Throttle request fan-out: fetch critical first, render shell, then optional panels.
     const criticalRequests = [
@@ -1449,37 +1449,7 @@ export default function EmployeeProfilePage() {
     } else {
       setEmployeeCanonicalReadiness(null);
     }
-    if (empRes.status === 'fulfilled' && docsRes.status === 'fulfilled') {
-      const refreshedEmployee = empRes.value.data || {};
-      const refreshedDocuments = documentsData;
-      const cvLikeDocuments = refreshedDocuments.filter((document) => {
-        const label = [
-          document?.requirement_name,
-          document?.document_type_name,
-          document?.document_label,
-          document?.original_filename,
-          document?.file_name
-        ].filter(Boolean).join(' ').toLowerCase();
-        return (
-          ['cv', 'resume', 'curriculum_vitae'].includes(document?.requirement_id) ||
-          [document?.id, document?.file_id, document?.document_id].filter(Boolean).includes(refreshedEmployee?.cv_document_id) ||
-          /\b(cv|resume|curriculum vitae)\b/.test(label)
-        );
-      });
-      console.debug('CV_LINK_DIAGNOSTIC profile_refresh', {
-        employeeId,
-        cv_document_id: refreshedEmployee?.cv_document_id,
-        cv_documents: cvLikeDocuments.map((document) => ({
-          id: document?.id,
-          file_id: document?.file_id,
-          document_id: document?.document_id,
-          requirement_id: document?.requirement_id,
-          document_type_name: document?.document_type_name,
-          requirement_name: document?.requirement_name,
-          status: document?.status
-        }))
-      });
-    }
+    // Optional documents are loaded in the non-blocking batch below.
     
     if (hasError) {
       toast.error('Failed to load employee data');

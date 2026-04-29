@@ -25227,7 +25227,7 @@ async def get_unified_progress(employee_id: str, user: dict = Depends(get_curren
     - CQC Level: Audit-ready with verifier names
     """
     try:
-        employee = await db.employees.find_one({"_id": employee_id}, {"status": 1, "recruitment_status": 1, "onboarding_status": 1})
+        employee = await db.employees.find_one({"id": employee_id}, {"status": 1, "recruitment_status": 1, "onboarding_status": 1})
         if not employee:
             raise HTTPException(status_code=404, detail="Employee not found")
         lifecycle_status = normalize_lifecycle_status(employee.get("status"))

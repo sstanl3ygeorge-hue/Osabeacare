@@ -37523,6 +37523,23 @@ async def get_compliance_file(
     
     # Get check history counts
     
+    # Normalize agreements payload shape (service may return list or dict).
+    if isinstance(agreements, list):
+        agreements = {
+            "acknowledgements": agreements,
+            "pending_requests": [],
+        }
+    elif not isinstance(agreements, dict):
+        agreements = {
+            "acknowledgements": [],
+            "pending_requests": [],
+        }
+    else:
+        if not isinstance(agreements.get("acknowledgements"), list):
+            agreements["acknowledgements"] = []
+        if not isinstance(agreements.get("pending_requests"), list):
+            agreements["pending_requests"] = []
+
     # Index submissions by template_id for quick lookup
     submissions_by_template = {}
     for sub in agreement_submissions_list:

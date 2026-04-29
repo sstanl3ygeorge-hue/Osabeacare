@@ -39342,12 +39342,21 @@ async def get_compliance_file(
             }
     
     # =========================================================================
-    # BUILD DUAL-ROW SECTIONS
+    # BUILD DUAL-ROW SECTIONS (P0: per-section fail-soft, partial return)
     # =========================================================================
-    
-    sections = {
-        # Right to Work - Evidence + Check
-        "right_to_work": {
+
+    def _section_unavailable(section_key: str, title: str, warning: str) -> dict:
+        return {
+            "title": title,
+            "status_unavailable": True,
+            "warnings": [warning],
+            "rows": []
+        }
+
+    sections = {}
+
+    try:
+        sections["right_to_work"] = {
             "title": "Right to Work",
             "rtw_status": rtw_check.get("rtw_status") if rtw_check else CheckRecordService.compute_rtw_status(None),
             "rows": [
@@ -39367,10 +39376,13 @@ async def get_compliance_file(
                     blocker_message="Right to Work Check not recorded"
                 )
             ]
-        },
-        
-        # DBS - Evidence + Check
-        "dbs": {
+        }
+    except Exception as exc:
+        section_warnings.append(f"right_to_work_section_failed:{exc}")
+        sections["right_to_work"] = _section_unavailable("right_to_work", "Right to Work", f"section_failed:{exc}")
+
+    try:
+        sections["dbs"] = {
             "title": "DBS",
             "rows": [
                 _safe_build_evidence_row(
@@ -39389,10 +39401,13 @@ async def get_compliance_file(
                     blocker_message="DBS Status Check not recorded"
                 )
             ]
-        },
-        
-        # Identity - Evidence + Verification
-        "identity": {
+        }
+    except Exception as exc:
+        section_warnings.append(f"dbs_section_failed:{exc}")
+        sections["dbs"] = _section_unavailable("dbs", "DBS", f"section_failed:{exc}")
+
+    try:
+        sections["identity"] = {
             "title": "Identity",
             "rows": [
                 _safe_build_evidence_row(
@@ -39408,32 +39423,37 @@ async def get_compliance_file(
                     key="identity_verification",
                     title="Identity Verification",
                     check_data=identity_check,
-                    check_history=[],  # TODO: Add history
+                    check_history=[],
                     paired_evidence_key="identity_evidence",
                     blocker_code="identity_verification_missing",
                     blocker_message="Identity Verification not recorded"
                 )
             ]
-        },
-        
-        # Proof of Address - Evidence + Verification (special count-based)
-        # Note: proof_of_address_2, proof_of_address_3, etc. are numbered variants for multiple uploads
-        "proof_of_address": {
+        }
+    except Exception as exc:
+        section_warnings.append(f"identity_section_failed:{exc}")
+        sections["identity"] = _section_unavailable("identity", "Identity", f"section_failed:{exc}")
+
+    try:
+        sections["proof_of_address"] = {
             "title": "Proof of Address",
             "rows": [
                 _safe_build_evidence_row(
                     key="proof_of_address_evidence",
                     title="Proof of Address Evidence",
-                    doc_requirement_keys=["proof_of_address", "proof_of_address_evidence", "address_evidence", 
+                    doc_requirement_keys=["proof_of_address", "proof_of_address_evidence", "address_evidence",
                                           "proof_of_address_2", "proof_of_address_3", "proof_of_address_4", "proof_of_address_5"],
                     paired_check_key="address_verification"
                 ),
                 _safe_build_address_verification_row()
             ]
-        },
-        
-        # Agreements - Form-based acknowledgements
-        "agreements": {
+        }
+    except Exception as exc:
+        section_warnings.append(f"proof_of_address_section_failed:{exc}")
+        sections["proof_of_address"] = _section_unavailable("proof_of_address", "Proof of Address", f"section_failed:{exc}")
+
+    try:
+        sections["agreements"] = {
             "title": "Agreements",
             "rows": [
                 await _safe_build_agreement_row(
@@ -39447,10 +39467,13 @@ async def get_compliance_file(
                     agreement_type="handbook_acknowledgement"
                 )
             ]
-        },
-        
-        # References - Dual-row structure with full lifecycle
-        "references": {
+        }
+    except Exception as exc:
+        section_warnings.append(f"agreements_section_failed:{exc}")
+        sections["agreements"] = _section_unavailable("agreements", "Agreements", f"section_failed:{exc}")
+
+    try:
+        sections["references"] = {
             "title": "References",
             "rows": [
                 _safe_build_reference_row(1),
@@ -39461,16 +39484,27 @@ async def get_compliance_file(
                 1 if reference_verified_for_compliance_file(2) else 0
             ]),
             "required_count": 2
-        },
-        
-        # Training - Keep existing structure
-        "training": {
+        }
+    except Exception as exc:
+        section_warnings.append(f"references_section_failed:{exc}")
+        sections["references"] = _section_unavailable("references", "References", f"section_failed:{exc}")
+
+    try:
+        sections["training"] = {
             "title": "Training",
             "evaluation": await _safe_training_evaluation()
-        },
-        
-        # Recruitment & Application - Form-based records
-        "recruitment_record": {
+        }
+    except Exception as exc:
+        section_warnings.append(f"training_section_failed:{exc}")
+        sections["training"] = {
+            "title": "Training",
+            "status_unavailable": True,
+            "warnings": [f"section_failed:{exc}"],
+            "evaluation": {"status_unavailable": True, "summary": {"required": 0, "verified": 0, "missing": 0}}
+        }
+
+    try:
+        sections["recruitment_record"] = {
             "title": "Recruitment Record",
             "rows": [
                 _safe_build_form_row("interview_record", FORM_REQUIREMENT_CONFIG["interview_record"]),
@@ -39478,19 +39512,25 @@ async def get_compliance_file(
                 _safe_build_cv_row(),
                 _safe_build_form_row("recruitment_checklist", FORM_REQUIREMENT_CONFIG["recruitment_checklist"])
             ]
-        },
-        
-        # Health & Competency - Form-based assessments
-        "health_competency": {
+        }
+    except Exception as exc:
+        section_warnings.append(f"recruitment_record_section_failed:{exc}")
+        sections["recruitment_record"] = _section_unavailable("recruitment_record", "Recruitment Record", f"section_failed:{exc}")
+
+    try:
+        sections["health_competency"] = {
             "title": "Health & Competency",
             "rows": [
                 _safe_build_form_row("staff_health_questionnaire", FORM_REQUIREMENT_CONFIG["staff_health_questionnaire"]),
                 _safe_build_form_row("induction", FORM_REQUIREMENT_CONFIG["induction"])
             ]
-        },
-        
-        # Admin Forms - Misc internal forms
-        "admin_forms": {
+        }
+    except Exception as exc:
+        section_warnings.append(f"health_competency_section_failed:{exc}")
+        sections["health_competency"] = _section_unavailable("health_competency", "Health & Competency", f"section_failed:{exc}")
+
+    try:
+        sections["admin_forms"] = {
             "title": "Admin Forms",
             "rows": [
                 _safe_build_form_row("staff_personal_info", FORM_REQUIREMENT_CONFIG["staff_personal_info"]),
@@ -39500,7 +39540,9 @@ async def get_compliance_file(
                 _safe_build_form_row("conflict_of_interest", FORM_REQUIREMENT_CONFIG["conflict_of_interest"])
             ]
         }
-    }
+    except Exception as exc:
+        section_warnings.append(f"admin_forms_section_failed:{exc}")
+        sections["admin_forms"] = _section_unavailable("admin_forms", "Admin Forms", f"section_failed:{exc}")
 
     employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "status": 1, "employee_code": 1})
     if not employee:
@@ -39696,6 +39738,26 @@ async def get_compliance_file(
 
     section_completion_pct = int((completed_rows / total_rows) * 100) if total_rows > 0 else 0
 
+    core_section_keys = [
+        "right_to_work",
+        "dbs",
+        "identity",
+        "proof_of_address",
+        "agreements",
+        "references",
+        "training",
+        "recruitment_record",
+        "employment_history",
+        "admin_forms",
+    ]
+    has_any_core_section_rows = any(
+        isinstance(sections.get(k, {}).get("rows"), list) and len(sections.get(k, {}).get("rows")) > 0
+        for k in core_section_keys
+    ) or (
+        isinstance(sections.get("training", {}).get("evaluation"), dict)
+        and sections.get("training", {}).get("evaluation") != {}
+    )
+
     logger.info(
         "agreement_resolver_calls endpoint=compliance-file employee_id=%s calls=%s section_timings_ms=%s",
         employee_id,
@@ -39706,6 +39768,7 @@ async def get_compliance_file(
         "employee_id": employee_id,
         "employee_name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
         "serializer_version": "dual_row_v1",
+        "status_unavailable": False if has_any_core_section_rows else True,
         
         "summary": {
             "blocking_requirements": len(blocking_rows),

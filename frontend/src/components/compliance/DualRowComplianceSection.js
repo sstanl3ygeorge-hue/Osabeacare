@@ -535,6 +535,30 @@ export default function DualRowComplianceSection({
       !row.acknowledgement_data?.submission_id
     )).length;
     
+    const operationalRows = section.rows
+      .filter((row) => row?.latest_active !== false)
+      .filter((row, idx, arr) => {
+        const stableKey = [
+          row?.row_type,
+          row?.key,
+          row?.id,
+          row?.requirement_id,
+          row?.template_version,
+          row?.submission_id,
+          row?.reference_num
+        ].filter(Boolean).join('::');
+        if (!stableKey) return true;
+        return arr.findIndex((x) => [
+          x?.row_type,
+          x?.key,
+          x?.id,
+          x?.requirement_id,
+          x?.template_version,
+          x?.submission_id,
+          x?.reference_num
+        ].filter(Boolean).join('::') === stableKey) === idx;
+      });
+
     return (
       <div key={sectionKey} className="mb-6" data-testid={`section-${sectionKey}`}>
         {/* Section Header */}
@@ -577,7 +601,7 @@ export default function DualRowComplianceSection({
                 {agreementSatisfiedCount} checks complete
               </div>
             )}
-            {section.rows.map((row, idx) => {
+            {operationalRows.map((row, idx) => {
               if (!row || typeof row !== 'object') return null;
               // CV row is evidence type but should use FormRequirementRow for file display
               if (row.row_type === 'evidence' && row.key !== 'cv') {

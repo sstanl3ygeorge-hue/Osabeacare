@@ -41,7 +41,8 @@ export default function ConsolidatedStatusPanel({
   role,
   personStage,
   recruitmentApproved,
-  onRefresh
+  onRefresh,
+  showQuickActions = true
 }) {
   const { token } = useAuth();
   const [loading, setLoading] = useState(true);
@@ -298,7 +299,7 @@ export default function ConsolidatedStatusPanel({
       </Card>
 
       {/* QUICK ACTIONS */}
-      <Card className="border border-gray-200 shadow-sm">
+      {showQuickActions && <Card className="border border-gray-200 shadow-sm">
         <CardHeader className="py-3 px-4 bg-gray-50/50 border-b border-gray-100">
           <CardTitle className="text-base font-semibold text-gray-700">
             QUICK ACTIONS
@@ -342,7 +343,7 @@ export default function ConsolidatedStatusPanel({
             )}
           </div>
         </CardContent>
-      </Card>
+      </Card>}
     </div>
   );
 }

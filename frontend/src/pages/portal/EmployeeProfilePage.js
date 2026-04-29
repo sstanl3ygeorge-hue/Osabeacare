@@ -4062,6 +4062,7 @@ export default function EmployeeProfilePage() {
   const canonicalTotalRequirements = canonicalProgress?.total_requirements ?? canonicalProgress?.progress?.total ?? null;
   const canonicalRequirementCountAvailable = Number.isFinite(canonicalTotalRequirements) && canonicalTotalRequirements > 0;
   const complianceSections = complianceFile?.sections && typeof complianceFile.sections === 'object' ? complianceFile.sections : {};
+  const isDualRowCompliance = complianceFile?.serializer_version === 'dual_row_v1';
   const sectionRows = Object.values(complianceSections).flatMap((section) => (
     Array.isArray(section?.rows) ? section.rows.filter((r) => r && typeof r === 'object') : []
   ));
@@ -4071,6 +4072,7 @@ export default function EmployeeProfilePage() {
     return row?.is_verified === true || row?.verified === true || ['verified', 'complete', 'completed', 'accepted', 'approved', 'recorded'].includes(s);
   }).length;
   const sectionProgressAvailable = sectionTotalRows > 0;
+  const useComplianceSectionsAsPrimary = isDualRowCompliance && sectionProgressAvailable;
   const effectiveCompletedRequirements = sectionProgressAvailable
     ? sectionCompletedRows
     : (canonicalCompletedRequirements ?? 0);
@@ -4414,19 +4416,25 @@ export default function EmployeeProfilePage() {
                   return row?.is_verified === true || row?.verified === true || ['verified', 'complete', 'completed', 'accepted', 'approved', 'recorded'].includes(s);
                 }).length
               : null;
-            const trainingRequired = trainingSectionRequired ?? (Number.isFinite(trainingCategory?.total) ? trainingCategory.total : null);
-            const trainingCompleted = trainingSectionCompleted ?? (Number.isFinite(trainingCategory?.completed) ? trainingCategory.completed : null);
+            const trainingRequired = trainingSectionRequired ?? (
+              !useComplianceSectionsAsPrimary && Number.isFinite(trainingCategory?.total) ? trainingCategory.total : null
+            );
+            const trainingCompleted = trainingSectionCompleted ?? (
+              !useComplianceSectionsAsPrimary && Number.isFinite(trainingCategory?.completed) ? trainingCategory.completed : null
+            );
             const trainingExpiring = trainingSectionRows.length > 0
               ? trainingSectionRows.filter((row) => String(row?.status || '').toLowerCase() === 'expiring_soon').length
-              : trainingItems.filter((i) => String(i?.status || '').toLowerCase() === 'expiring_soon').length;
+              : (!useComplianceSectionsAsPrimary ? trainingItems.filter((i) => String(i?.status || '').toLowerCase() === 'expiring_soon').length : 0);
             const trainingExpired = trainingSectionRows.length > 0
               ? trainingSectionRows.filter((row) => String(row?.status || '').toLowerCase() === 'expired').length
-              : trainingItems.filter((i) => String(i?.status || '').toLowerCase() === 'expired').length;
+              : (!useComplianceSectionsAsPrimary ? trainingItems.filter((i) => String(i?.status || '').toLowerCase() === 'expired').length : 0);
             const trainingTone = trainingRequired == null || trainingCompleted == null
               ? 'gray'
               : (trainingExpired > 0 ? 'red' : (trainingCompleted < trainingRequired || trainingExpiring > 0 ? 'amber' : 'green'));
 
-            const agreementItems = agreementsSectionRows.length > 0 ? agreementsSectionRows : asArray(agreementsCategory?.items);
+            const agreementItems = agreementsSectionRows.length > 0
+              ? agreementsSectionRows.filter((row) => row?.latest_active !== false)
+              : (!useComplianceSectionsAsPrimary ? asArray(agreementsCategory?.items) : []);
             const selectLatestAgreement = (matcher) => {
               const scoped = agreementItems.filter((item) =>
                 matcher(String(item?.id || item?.requirement_id || item?.agreement_type || ''))
@@ -4444,8 +4452,12 @@ export default function EmployeeProfilePage() {
                   return row?.is_verified === true || row?.verified === true || ['verified', 'complete', 'completed', 'accepted', 'approved', 'recorded'].includes(s);
                 }).length
               : null;
-            const inductionCompleted = inductionSectionCompleted ?? (Number.isFinite(inductionCategory?.completed) ? inductionCategory.completed : null);
-            const inductionRequired = inductionSectionRequired ?? (Number.isFinite(inductionCategory?.total) ? inductionCategory.total : null);
+            const inductionCompleted = inductionSectionCompleted ?? (
+              !useComplianceSectionsAsPrimary && Number.isFinite(inductionCategory?.completed) ? inductionCategory.completed : null
+            );
+            const inductionRequired = inductionSectionRequired ?? (
+              !useComplianceSectionsAsPrimary && Number.isFinite(inductionCategory?.total) ? inductionCategory.total : null
+            );
             const agreementsTone = tone(`${contractStatus} ${handbookStatus}`, null);
 
             const cardClass = (t) => (quickViewToneClasses[t] || quickViewToneClasses.gray).card;
@@ -5061,6 +5073,7 @@ export default function EmployeeProfilePage() {
           role={employee?.role}
           personStage={employee?.person_stage}
           recruitmentApproved={employee?.recruitment_approved}
+          showQuickActions={false}
           onNavigateToTab={(tab) => {
             setActiveTab(tab === 'compliance' ? 'checklist' : tab);
           }}

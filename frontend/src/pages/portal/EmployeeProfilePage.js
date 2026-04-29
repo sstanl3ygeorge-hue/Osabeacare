@@ -4087,6 +4087,12 @@ export default function EmployeeProfilePage() {
   const sectionRows = Object.values(complianceSections).flatMap((section) => (
     Array.isArray(section?.rows) ? section.rows.filter((r) => r && typeof r === 'object') : []
   ));
+  const sectionRowsByType = sectionRows.reduce((acc, row) => {
+    const t = String(row?.row_type || '').toLowerCase();
+    if (!acc[t]) acc[t] = [];
+    acc[t].push(row);
+    return acc;
+  }, {});
   const sectionTotalRows = sectionRows.length;
   const sectionCompletedRows = sectionRows.filter((row) => {
     const s = String(row?.status || '').toLowerCase();
@@ -4460,8 +4466,11 @@ export default function EmployeeProfilePage() {
             const dbsCheckRow = asArray(complianceSections?.dbs?.rows).find((row) => row?.row_type === 'check') || {};
             const rtwCheckRow = asArray(complianceSections?.right_to_work?.rows).find((row) => row?.row_type === 'check') || {};
             const blockers = asArray(canonicalBlockerObjects).filter((b) => String(b?.severity || '').toLowerCase() !== 'info');
-            const trainingSectionRows = asArray(complianceSections?.training?.rows);
-            const agreementsSectionRows = asArray(complianceSections?.agreements?.rows);
+            const trainingSectionRows = [
+              ...asArray(sectionRowsByType?.training),
+              ...asArray(sectionRowsByType?.training_record)
+            ];
+            const agreementsSectionRows = asArray(sectionRowsByType?.form_acknowledgement).filter((row) => row?.latest_active !== false);
             const inductionSectionRows = asArray(complianceSections?.induction?.rows);
 
             const toDate = (value) => (value ? formatBackendDate(value) : 'Unavailable');

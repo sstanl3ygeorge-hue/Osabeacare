@@ -221,6 +221,16 @@ export default function ConsolidatedStatusPanel({
     return row?.is_verified === true || row?.verified === true || ['verified', 'complete', 'completed', 'accepted', 'approved', 'recorded'].includes(s);
   }).length;
   const sectionProgressAvailable = complianceFile?.serializer_version === 'dual_row_v1' && sectionTotalRows > 0;
+  const rowsByType = sectionRows.reduce((acc, row) => {
+    const t = String(row?.row_type || '').toLowerCase();
+    if (!acc[t]) acc[t] = [];
+    acc[t].push(row);
+    return acc;
+  }, {});
+  const isCompleteRow = (row) => {
+    const s = String(row?.status || '').toLowerCase();
+    return row?.is_verified === true || row?.verified === true || ['verified', 'accepted', 'approved', 'completed', 'complete', 'recorded', 'acknowledged'].includes(s);
+  };
   const progressBlockerDetails = Array.isArray(progress.blocker_details) ? progress.blocker_details : [];
   const progressBlockerStrings = Array.isArray(progress.blockers)
     ? progress.blockers.map((blocker) => (
@@ -245,34 +255,29 @@ export default function ConsolidatedStatusPanel({
   // Use dual-row section breakdown for employee operational view when available.
   const sectionBreakdown = {
     documents: {
-      completed: (complianceSections?.right_to_work?.rows || []).filter((r) => r?.row_type === 'evidence' && (r?.is_verified || r?.verified || ['verified', 'accepted', 'approved'].includes(String(r?.status || '').toLowerCase()))).length
-        + (complianceSections?.identity?.rows || []).filter((r) => r?.row_type === 'evidence' && (r?.is_verified || r?.verified || ['verified', 'accepted', 'approved'].includes(String(r?.status || '').toLowerCase()))).length
-        + (complianceSections?.proof_of_address?.rows || []).filter((r) => r?.row_type === 'evidence' && (r?.is_verified || r?.verified || ['verified', 'accepted', 'approved'].includes(String(r?.status || '').toLowerCase()))).length
-        + (complianceSections?.dbs?.rows || []).filter((r) => r?.row_type === 'evidence' && (r?.is_verified || r?.verified || ['verified', 'accepted', 'approved'].includes(String(r?.status || '').toLowerCase()))).length,
-      total: (complianceSections?.right_to_work?.rows || []).filter((r) => r?.row_type === 'evidence').length
-        + (complianceSections?.identity?.rows || []).filter((r) => r?.row_type === 'evidence').length
-        + (complianceSections?.proof_of_address?.rows || []).filter((r) => r?.row_type === 'evidence').length
-        + (complianceSections?.dbs?.rows || []).filter((r) => r?.row_type === 'evidence').length
+      completed: (rowsByType.evidence || []).filter(isCompleteRow).length,
+      total: (rowsByType.evidence || []).length
     },
     forms: {
-      completed: (complianceSections?.forms?.rows || []).filter((r) => r?.is_verified || r?.verified || ['verified', 'accepted', 'approved', 'completed'].includes(String(r?.status || '').toLowerCase())).length,
-      total: (complianceSections?.forms?.rows || []).length
+      completed: (rowsByType.form || []).filter(isCompleteRow).length,
+      total: (rowsByType.form || []).length
     },
     training: {
-      completed: (complianceSections?.training?.rows || []).filter((r) => r?.is_verified || r?.verified || ['verified', 'accepted', 'approved', 'completed'].includes(String(r?.status || '').toLowerCase())).length,
-      total: (complianceSections?.training?.rows || []).length
+      completed: (rowsByType.training || []).filter(isCompleteRow).length
+        + (rowsByType.training_record || []).filter(isCompleteRow).length,
+      total: (rowsByType.training || []).length + (rowsByType.training_record || []).length
     },
     references: {
-      completed: (complianceSections?.references?.rows || []).filter((r) => r?.is_verified || r?.verified || ['verified', 'accepted', 'approved', 'completed'].includes(String(r?.status || '').toLowerCase())).length,
-      total: (complianceSections?.references?.rows || []).length
+      completed: (rowsByType.reference || []).filter(isCompleteRow).length,
+      total: (rowsByType.reference || []).length
     },
     agreements: {
-      completed: (complianceSections?.agreements?.rows || []).filter((r) => r?.latest_active !== false).filter((r) => r?.is_verified || r?.verified || ['verified', 'accepted', 'approved', 'completed', 'acknowledged'].includes(String(r?.status || '').toLowerCase())).length,
-      total: (complianceSections?.agreements?.rows || []).filter((r) => r?.latest_active !== false).length
+      completed: (rowsByType.form_acknowledgement || []).filter((r) => r?.latest_active !== false).filter(isCompleteRow).length,
+      total: (rowsByType.form_acknowledgement || []).filter((r) => r?.latest_active !== false).length
     },
     induction: {
-      completed: (complianceSections?.induction?.rows || []).filter((r) => r?.is_verified || r?.verified || ['verified', 'accepted', 'approved', 'completed'].includes(String(r?.status || '').toLowerCase())).length,
-      total: (complianceSections?.induction?.rows || []).length
+      completed: (rowsByType.induction || []).filter(isCompleteRow).length,
+      total: (rowsByType.induction || []).length
     }
   };
   const breakdown = sectionProgressAvailable ? sectionBreakdown : (progress.categories || {});

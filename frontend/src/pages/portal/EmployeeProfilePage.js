@@ -4515,7 +4515,11 @@ export default function EmployeeProfilePage() {
               ...asArray(sectionRowsByType?.training),
               ...asArray(sectionRowsByType?.training_record)
             ];
-            const agreementsSectionRows = asArray(sectionRowsByType?.form_acknowledgement).filter((row) => row?.latest_active !== false);
+            const agreementsSectionRows = [
+              ...asArray(sectionRowsByType?.form_acknowledgement),
+              ...asArray(sectionRowsByType?.agreement),
+              ...asArray(complianceSections?.agreements?.rows),
+            ].filter((row) => row?.latest_active !== false);
             const inductionSectionRows = asArray(complianceSections?.induction?.rows);
 
             const toDate = (value) => (value ? formatBackendDate(value) : 'Unavailable');
@@ -4545,9 +4549,9 @@ export default function EmployeeProfilePage() {
               : null;
 
             const trainingItems = asArray(trainingCategory?.items);
-            const trainingSectionRequired = trainingSectionRows.length > 0 ? trainingSectionRows.length : null;
-            const trainingSectionCompleted = trainingSectionRows.length > 0
-              ? trainingSectionRows.filter((row) => {
+            const trainingSectionRequired = trainingOperationalRows.length > 0 ? trainingOperationalRows.length : null;
+            const trainingSectionCompleted = trainingOperationalRows.length > 0
+              ? trainingOperationalRows.filter((row) => {
                   const s = String(row?.status || '').toLowerCase();
                   return row?.is_verified === true || row?.verified === true || ['verified', 'complete', 'completed', 'accepted', 'approved', 'recorded'].includes(s);
                 }).length
@@ -4576,11 +4580,11 @@ export default function EmployeeProfilePage() {
                 ? trainingEvalVerified
                 : (Number.isFinite(trainingCategory?.completed) ? trainingCategory.completed : null)
             );
-            const trainingExpiring = trainingSectionRows.length > 0
-              ? trainingSectionRows.filter((row) => String(row?.status || '').toLowerCase() === 'expiring_soon').length
+            const trainingExpiring = trainingOperationalRows.length > 0
+              ? trainingOperationalRows.filter((row) => String(row?.status || '').toLowerCase() === 'expiring_soon').length
               : (!useComplianceSectionsAsPrimary ? trainingItems.filter((i) => String(i?.status || '').toLowerCase() === 'expiring_soon').length : 0);
-            const trainingExpired = trainingSectionRows.length > 0
-              ? trainingSectionRows.filter((row) => String(row?.status || '').toLowerCase() === 'expired').length
+            const trainingExpired = trainingOperationalRows.length > 0
+              ? trainingOperationalRows.filter((row) => String(row?.status || '').toLowerCase() === 'expired').length
               : (!useComplianceSectionsAsPrimary ? trainingItems.filter((i) => String(i?.status || '').toLowerCase() === 'expired').length : 0);
             const trainingTone = trainingRequired == null || trainingCompleted == null
               ? 'gray'
@@ -10444,4 +10448,5 @@ export default function EmployeeProfilePage() {
     </div>
   );
 }
+
 

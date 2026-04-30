@@ -410,6 +410,7 @@ export default function EmployeeProfilePage() {
   // Training evaluation state (canonical evaluator result)
   const [trainingEvaluation, setTrainingEvaluation] = useState(null);
   const [loadingTrainingEvaluation, setLoadingTrainingEvaluation] = useState(false);
+  const [inductionChecklist, setInductionChecklist] = useState(null);
   
   // Acknowledgement states (for Contract/Handbook acknowledgement flow)
   const [acknowledgementDialogOpen, setAcknowledgementDialogOpen] = useState(false);
@@ -1475,6 +1476,22 @@ export default function EmployeeProfilePage() {
     // Tab-specific optional datasets are lazy-loaded when their tabs are opened.
   };
 
+  const fetchInductionChecklist = async () => {
+    if (!employeeId || !token) return;
+    const shouldFetch = profileMode === 'applicant' || lifecycleStage !== 'active';
+    if (!shouldFetch) return;
+    try {
+      const response = await axios.get(`${API}/employees/${employeeId}/induction-checklist`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (response?.data && typeof response.data === 'object') {
+        setInductionChecklist(response.data);
+      }
+    } catch (err) {
+      console.warn('Failed to fetch induction checklist:', err?.response?.data?.detail || err?.message);
+    }
+  };
+
   const markLazyTabLoaded = (tabKey) => {
     setLazyLoadedTabs((prev) => ({ ...prev, [tabKey]: true }));
   };
@@ -1814,8 +1831,17 @@ export default function EmployeeProfilePage() {
     if (profileMode === 'employee' && activeTab === 'references') {
       setActiveTab('employment');
       setSearchParams({ tab: 'employment' }, { replace: true });
+      return;
     }
-  }, [activeTab, profileMode, setSearchParams]);
+    if ((profileMode !== 'employee' || lifecycleStage !== 'active') && activeTab === 'competencies') {
+      setActiveTab('employment');
+      setSearchParams({ tab: 'employment' }, { replace: true });
+    }
+  }, [activeTab, profileMode, lifecycleStage, setSearchParams]);
+
+  useEffect(() => {
+    fetchInductionChecklist();
+  }, [employeeId, token, profileMode, lifecycleStage]);
 
   // Track email click event
   const trackEmailClick = async (requestId, emailToken) => {
@@ -4313,9 +4339,11 @@ export default function EmployeeProfilePage() {
       : 'Compliance File: unavailable')
     : `${effectiveProgressPct}% Complete`;
   const canonicalReadinessLabel = canonicalIsWorkReady
-    ? (profileMode === 'applicant' ? 'Ready for Recruitment Approval' : 'Ready for Work')
+    ? (profileMode === 'applicant'
+        ? 'Ready for Recruitment Approval'
+        : (lifecycleStage === 'active' ? 'Ready for work' : 'Ready to activate'))
     : canonicalCanPromote
-                        ? (profileMode === 'applicant' ? 'Ready for Recruitment Approval' : 'Activation Eligible')
+                        ? (profileMode === 'applicant' ? 'Ready for Recruitment Approval' : 'Ready to activate')
       : (profileMode === 'applicant' ? 'Not ready for recruitment approval' : 'Not ready for work');
   const canonicalReadinessClass = canonicalIsWorkReady || canonicalCanPromote
     ? 'bg-green-100 text-green-800'
@@ -5441,7 +5469,7 @@ export default function EmployeeProfilePage() {
           showQuickActions={false}
           complianceFile={complianceFile}
           trainingEvaluation={trainingEvaluation}
-          inductionChecklist={employee?.induction_checklist_summary || employee?.induction_summary || null}
+          inductionChecklist={inductionChecklist || employee?.induction_checklist_summary || employee?.induction_summary || null}
           onNavigateToTab={(tab) => {
             setActiveTab(tab === 'compliance' ? 'checklist' : tab);
           }}
@@ -5495,7 +5523,11 @@ export default function EmployeeProfilePage() {
           </TabsTrigger>
           <TabsTrigger value="forms" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
             <FileText className="h-4 w-4 mr-2" />
-            {profileMode === 'applicant' ? 'Application & Interview' : 'Forms'}
+            {profileMode === 'applicant'
+              ? (['new', 'screening', 'interview'].includes(normalizeLifecycleStatus(employee?.status))
+                ? 'Application'
+                : 'Pre-employment Forms')
+              : 'Forms'}
           </TabsTrigger>
           {profileMode === 'applicant' && (
             <TabsTrigger value="references" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
@@ -5517,7 +5549,7 @@ export default function EmployeeProfilePage() {
               Profile Summary
             </TabsTrigger>
           )}
-          {profileMode === 'employee' && (
+          {profileMode === 'employee' && lifecycleStage === 'active' && (
             <TabsTrigger value="competencies" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
               <ClipboardCheck className="h-4 w-4 mr-2" />
               Competencies
@@ -5529,16 +5561,22 @@ export default function EmployeeProfilePage() {
               Spot Checks
             </TabsTrigger>
           )}
-          {profileMode === 'employee' && lifecycleStage === 'active' && !isRecruitmentView && (
+          {profileMode === 'employee' && lifecycleStage === 'active' && (
             <TabsTrigger value="supervisions" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
               <Calendar className="h-4 w-4 mr-2" />
               Supervisions
             </TabsTrigger>
           )}
-          {profileMode === 'employee' && lifecycleStage === 'active' && !isRecruitmentView && (
+          {profileMode === 'employee' && lifecycleStage === 'active' && (
             <TabsTrigger value="appraisals" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
               <CalendarClock className="h-4 w-4 mr-2" />
               Appraisals
+            </TabsTrigger>
+          )}
+          {profileMode === 'employee' && (
+            <TabsTrigger value="policies" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
+              <Shield className="h-4 w-4 mr-2" />
+              Policies
             </TabsTrigger>
           )}
           <TabsTrigger value="audit" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
@@ -7456,7 +7494,7 @@ Direct employment coverage: {Number.isFinite(directCoveragePercent) ? `${directC
         )}
 
         {/* ========== TAB: SUPERVISIONS ========== */}
-        {profileMode === 'employee' && lifecycleStage === 'active' && !isRecruitmentView && (
+        {profileMode === 'employee' && lifecycleStage === 'active' && (
           <TabsContent value="supervisions" data-testid="section-supervisions-root">
             <SupervisionsPanel
               employeeId={employeeId}
@@ -7465,7 +7503,7 @@ Direct employment coverage: {Number.isFinite(directCoveragePercent) ? `${directC
           </TabsContent>
         )}
 
-        {profileMode === 'employee' && lifecycleStage === 'active' && !isRecruitmentView && (
+        {profileMode === 'employee' && lifecycleStage === 'active' && (
           <TabsContent value="appraisals" data-testid="section-appraisals-root">
             <AppraisalsPanel
               employeeId={employeeId}

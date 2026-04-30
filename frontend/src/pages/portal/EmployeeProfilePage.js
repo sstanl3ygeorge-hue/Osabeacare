@@ -1531,6 +1531,7 @@ export default function EmployeeProfilePage() {
       if (tabKey === 'employment') {
         await Promise.allSettled([
           fetchEmploymentReview(),
+          fetchFormSubmissions(),
           fetchRecruitmentStatus(),
           fetchReferenceStatus(),
           fetchEmploymentMismatch(),
@@ -1538,8 +1539,8 @@ export default function EmployeeProfilePage() {
           axios.get(`${API}/employee-documents?employee_id=${employeeId}`, { headers, timeout: OPTIONAL_TIMEOUT_MS }),
           axios.get(`${API}/document-types`, { headers, timeout: OPTIONAL_TIMEOUT_MS }),
         ]).then((results) => {
-          const docsRes = results[5];
-          const typesRes = results[6];
+          const docsRes = results[6];
+          const typesRes = results[7];
           if (docsRes?.status === 'fulfilled') setDocuments(asArray(docsRes.value.data, ['items', 'records', 'documents']));
           if (typesRes?.status === 'fulfilled') setDocumentTypes(asArray(typesRes.value.data, ['items', 'records']));
         });
@@ -3845,9 +3846,15 @@ export default function EmployeeProfilePage() {
   const applicationSubmission =
     formSubmissions.find((submission) => {
       const requirementId = String(submission?.requirement_id || '').toLowerCase();
+      const templateId = String(submission?.template_id || '').toLowerCase();
       const formType = String(submission?.form_type || '').toLowerCase();
       const key = String(submission?.key || '').toLowerCase();
-      return requirementId === 'application_form' || formType === 'application_form' || key === 'application_form';
+      return (
+        requirementId === 'application_form'
+        || templateId === 'structured_application_form'
+        || formType === 'application_form'
+        || key === 'application_form'
+      );
     }) || null;
   const applicationPdfDocument = documents.find((document) => {
     const requirementId = String(document?.requirement_id || '').toLowerCase();
@@ -6868,7 +6875,7 @@ Direct employment coverage: {Number.isFinite(directCoveragePercent) ? `${directC
                             <p className="text-xs text-text-muted">Submitted</p>
                             <p className="text-sm font-medium text-gray-800">
                               {applicationSubmission?.submitted_at || applicationSubmission?.updated_at
-                                ? formatBackendDateTime(applicationSubmission?.submitted_at || applicationSubmission?.updated_at)
+                                ? formatBackendDateTime(applicationSubmission?.submitted_at || applicationSubmission?.created_at || applicationSubmission?.updated_at)
                                 : 'Date unavailable'}
                             </p>
                           </div>

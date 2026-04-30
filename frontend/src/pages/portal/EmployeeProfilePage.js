@@ -1807,6 +1807,11 @@ export default function EmployeeProfilePage() {
       setSearchParams({ tab: 'employment' }, { replace: true });
       return;
     }
+    if (profileMode === 'applicant' && activeTab === 'work_readiness') {
+      setActiveTab('employment');
+      setSearchParams({ tab: 'employment' }, { replace: true });
+      return;
+    }
     if (profileMode === 'employee' && activeTab === 'references') {
       setActiveTab('employment');
       setSearchParams({ tab: 'employment' }, { replace: true });
@@ -4647,6 +4652,13 @@ export default function EmployeeProfilePage() {
             const trainingEvalSummary = (trainingEvaluation && typeof trainingEvaluation === 'object')
               ? (trainingEvaluation.summary || trainingEvaluation.top_summary || trainingEvaluation)
               : {};
+            const trainingEvalItems = asArray(trainingEvaluation?.items);
+            const trainingEvalItemsRequired = trainingEvalItems.length;
+            const trainingEvalItemsVerified = trainingEvalItems.filter((item) => String(item?.status || '').toLowerCase() === 'verified').length;
+            const trainingEvalItemsExpiring = trainingEvalItems.filter((item) => String(item?.status || '').toLowerCase() === 'due_soon').length;
+            const trainingEvalItemsExpired = trainingEvalItems.filter((item) => String(item?.status || '').toLowerCase() === 'expired').length;
+            const trainingEvalItemsAwaitingReview = trainingEvalItems.filter((item) => String(item?.status || '').toLowerCase() === 'awaiting_review').length;
+            const trainingEvalItemsMissing = trainingEvalItems.filter((item) => String(item?.status || '').toLowerCase() === 'missing').length;
             const trainingEvalRequired = Number(
               trainingEvalSummary?.required_total
               ?? trainingEvalSummary?.mandatory_total
@@ -4669,21 +4681,37 @@ export default function EmployeeProfilePage() {
               ?? canonicalProgress?.categories?.training?.total
             );
             const trainingRequired = trainingSectionRequired ?? (
+              trainingEvalItemsRequired > 0
+                ? trainingEvalItemsRequired
+                : (
               Number.isFinite(trainingEvalRequired)
                 ? trainingEvalRequired
                 : (Number.isFinite(canonicalTrainingRequired) ? canonicalTrainingRequired : null)
+                )
             );
             const trainingCompleted = trainingSectionCompleted ?? (
+              trainingEvalItemsRequired > 0
+                ? trainingEvalItemsVerified
+                : (
               Number.isFinite(trainingEvalVerified)
                 ? trainingEvalVerified
                 : (Number.isFinite(canonicalTrainingCompleted) ? canonicalTrainingCompleted : null)
+                )
             );
             const trainingExpiring = trainingOperationalRows.length > 0
               ? trainingOperationalRows.filter((row) => String(row?.status || '').toLowerCase() === 'expiring_soon').length
-              : (!useComplianceSectionsAsPrimary ? trainingItems.filter((i) => String(i?.status || '').toLowerCase() === 'expiring_soon').length : 0);
+              : (
+                  trainingEvalItemsRequired > 0
+                    ? trainingEvalItemsExpiring
+                    : (!useComplianceSectionsAsPrimary ? trainingItems.filter((i) => String(i?.status || '').toLowerCase() === 'expiring_soon').length : 0)
+                );
             const trainingExpired = trainingOperationalRows.length > 0
               ? trainingOperationalRows.filter((row) => String(row?.status || '').toLowerCase() === 'expired').length
-              : (!useComplianceSectionsAsPrimary ? trainingItems.filter((i) => String(i?.status || '').toLowerCase() === 'expired').length : 0);
+              : (
+                  trainingEvalItemsRequired > 0
+                    ? trainingEvalItemsExpired
+                    : (!useComplianceSectionsAsPrimary ? trainingItems.filter((i) => String(i?.status || '').toLowerCase() === 'expired').length : 0)
+                );
             const trainingTone = trainingRequired == null || trainingCompleted == null
               ? 'gray'
               : (trainingExpired > 0 ? 'red' : (trainingCompleted < trainingRequired || trainingExpiring > 0 ? 'amber' : 'green'));
@@ -5432,10 +5460,12 @@ export default function EmployeeProfilePage() {
             <GraduationCap className="h-4 w-4 mr-2" />
             Training
           </TabsTrigger>
-          <TabsTrigger value="work_readiness" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
-            <User className="h-4 w-4 mr-2" />
-            Profile Summary
-          </TabsTrigger>
+          {profileMode === 'employee' && (
+            <TabsTrigger value="work_readiness" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
+              <User className="h-4 w-4 mr-2" />
+              Profile Summary
+            </TabsTrigger>
+          )}
           {profileMode === 'employee' && (
             <TabsTrigger value="competencies" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
               <ClipboardCheck className="h-4 w-4 mr-2" />
@@ -5468,6 +5498,7 @@ export default function EmployeeProfilePage() {
 
         {/* ========== TAB 1: PROFILE SUMMARY ========== */}
         {/* Stable profile / core-record tab. Readiness logic lives above the tabs only. */}
+        {profileMode === 'employee' && (
         <TabsContent value="work_readiness">
           <div className="space-y-6">
             {canRecordWorkApproval() && employee?.person_stage === 'employee' && (
@@ -5829,18 +5860,46 @@ export default function EmployeeProfilePage() {
               <CardContent>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {[1, 2].map((n) => {
-                    const ref = employee?.[`reference_${n}`] || employee?.references?.[n - 1];
-                    const status = employee?.[`reference_${n}_status`]
-                      || (employee?.references?.[n - 1]?.verified ? 'Verified' : 'In progress');
-                    const isVerified = status === 'verified' || status === 'Verified';
+                    const canonicalRefFromStatus = asArray(referenceStatus, ['items', 'records', 'references']).find((r) => {
+                      const refNum = String(r?.reference_num || r?.reference_number || '').trim();
+                      const reqId = String(r?.requirement_id || r?.id || '').toLowerCase();
+                      return refNum === String(n) || reqId === `reference_${n}`;
+                    });
+                    const canonicalRefFromCompliance = asArray(complianceSections?.references?.rows).find((r) => {
+                      const reqId = String(r?.requirement_id || r?.id || r?.key || '').toLowerCase();
+                      const label = String(r?.label || r?.title || '').toLowerCase();
+                      return reqId === `reference_${n}` || label.includes(`reference ${n}`);
+                    });
+                    const arrayFallbackRef = employee?.references?.[n - 1];
+                    const legacyInlineRef = employee?.[`reference_${n}`];
+                    const ref = canonicalRefFromStatus || canonicalRefFromCompliance || arrayFallbackRef || legacyInlineRef;
+
+                    const status = String(
+                      canonicalRefFromStatus?.verification_status
+                      || canonicalRefFromStatus?.status
+                      || canonicalRefFromCompliance?.verification_status
+                      || canonicalRefFromCompliance?.status
+                      || employee?.[`reference_${n}_status`]
+                      || (arrayFallbackRef?.verified ? 'verified' : '')
+                      || (legacyInlineRef?.verified ? 'verified' : '')
+                      || ''
+                    );
+                    const isVerified = status.toLowerCase() === 'verified';
+                    const name = ref?.name || ref?.referee_name || ref?.full_name || 'Name not recorded';
+                    const email = ref?.email || ref?.referee_email || null;
+                    const phone = ref?.phone || ref?.referee_phone || null;
+                    const company = ref?.company || ref?.organisation || ref?.employer || ref?.referee_organisation || null;
+                    const relationship = ref?.relationship || ref?.referee_relationship || null;
                     return (
                       <div key={n} className="p-3 bg-gray-50 rounded-lg">
                         <p className="text-xs text-gray-500 mb-1">Reference {n}</p>
                         {ref ? (
                           <>
-                            <p className="font-medium text-sm">{ref.name || 'Name not recorded'}</p>
-                            {ref.email && <p className="text-xs text-gray-500">{ref.email}</p>}
-                            {ref.company && <p className="text-xs text-gray-500">{ref.company}</p>}
+                            <p className="font-medium text-sm">{name}</p>
+                            {email && <p className="text-xs text-gray-500">{email}</p>}
+                            {phone && <p className="text-xs text-gray-500">{phone}</p>}
+                            {company && <p className="text-xs text-gray-500">{company}</p>}
+                            {relationship && <p className="text-xs text-gray-500">{relationship}</p>}
                             <Badge className={isVerified ? 'bg-green-100 text-green-700 mt-1' : 'bg-amber-100 text-amber-700 mt-1'}>
                               {isVerified ? 'Verified' : 'Awaiting verification'}
                             </Badge>
@@ -5876,6 +5935,7 @@ export default function EmployeeProfilePage() {
 
           </div>
         </TabsContent>
+        )}
         {/* Interview record + worker onboarding forms (health, personal, HMRC, declarations) */}
         <TabsContent value="forms">
           {/* ── Top-level Forms & Interview Summary ── */}

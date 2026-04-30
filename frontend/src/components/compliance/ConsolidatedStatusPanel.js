@@ -268,6 +268,7 @@ export default function ConsolidatedStatusPanel({
     : progressCountAvailable
       ? `${progressCompleted} of ${progressTotal} items submitted (${progressPercentage}%) [estimated]`
       : `item count unavailable (${progressPercentage}%) [estimated]`;
+  const isApplicant = personStage === 'applicant';
   
   // Use dual-row section breakdown for employee operational view when available.
   const sectionBreakdown = {
@@ -276,8 +277,36 @@ export default function ConsolidatedStatusPanel({
       total: (rowsByType.evidence || []).length
     },
     forms: {
-      completed: (rowsByType.form || []).filter(isCompleteRow).length,
-      total: (rowsByType.form || []).length
+      completed: (() => {
+        const recruitmentFormKeys = new Set(['interview_record', 'application_form', 'recruitment_checklist']);
+        const formRows = (rowsByType.form || []).filter((row) => {
+          if (isApplicant) return true;
+          const key = String(
+            row?.requirement_id
+            || row?.requirement_key
+            || row?.id
+            || row?.key
+            || ''
+          ).toLowerCase();
+          return !recruitmentFormKeys.has(key);
+        });
+        return formRows.filter(isCompleteRow).length;
+      })(),
+      total: (() => {
+        const recruitmentFormKeys = new Set(['interview_record', 'application_form', 'recruitment_checklist']);
+        const formRows = (rowsByType.form || []).filter((row) => {
+          if (isApplicant) return true;
+          const key = String(
+            row?.requirement_id
+            || row?.requirement_key
+            || row?.id
+            || row?.key
+            || ''
+          ).toLowerCase();
+          return !recruitmentFormKeys.has(key);
+        });
+        return formRows.length;
+      })()
     },
     training: {
       completed: (rowsByType.training || []).filter(isCompleteRow).length
@@ -300,7 +329,6 @@ export default function ConsolidatedStatusPanel({
   const breakdown = sectionProgressAvailable ? sectionBreakdown : (progress.categories || {});
 
   // Determine overall status
-  const isApplicant = personStage === 'applicant';
 
   // Gate-derived approval readiness (canonical â€” overrides old isBlocked for the approve CTA)
   const gateAllowed = gateResult?.allowed === true;

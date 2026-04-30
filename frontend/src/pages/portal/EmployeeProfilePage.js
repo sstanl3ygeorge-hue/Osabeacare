@@ -3794,6 +3794,17 @@ export default function EmployeeProfilePage() {
       submission?.requirement_id === 'application_form' || submission?.form_type === 'application_form'
     ) || null;
   const applicationPdfDocument = documents.find((document) => document?.requirement_id === 'application_form_pdf') || null;
+  const recruitmentSectionRows = asArray(complianceFile?.sections?.recruitment_record?.rows);
+  const applicationEvidenceRow = recruitmentSectionRows.find((row) => {
+    const key = String(row?.requirement_id || row?.requirement_key || row?.key || row?.id || '').toLowerCase();
+    const label = String(row?.title || row?.name || row?.label || '').toLowerCase();
+    return key.includes('application_form') || label.includes('application form');
+  }) || null;
+  const cvEvidenceRow = recruitmentSectionRows.find((row) => {
+    const key = String(row?.requirement_id || row?.requirement_key || row?.key || row?.id || '').toLowerCase();
+    const label = String(row?.title || row?.name || row?.label || '').toLowerCase();
+    return key === 'cv' || key.includes('resume') || label.includes('cv') || label.includes('resume');
+  }) || null;
   const rtwSummary = complianceRequirements?.rtw_summary || {};
   const isPdfLikeDocument = (document) => {
     const fileName = document?.original_filename || document?.file_name || document?.file_url || '';
@@ -3927,8 +3938,27 @@ export default function EmployeeProfilePage() {
         gap_analysis_error: employmentReview?.diagnostics?.analysis_error,
       }
     : complianceEmploymentHistoryGapRow;
-  const applicationAvailable = Boolean(applicationSubmission || applicationPdfDocument);
-  const cvFileExists = Boolean(cvDocument);
+  const applicationAvailable = Boolean(
+    applicationSubmission ||
+    applicationPdfDocument ||
+    applicationEvidenceRow?.is_verified === true ||
+    applicationEvidenceRow?.verified === true ||
+    ['verified', 'approved', 'complete', 'completed', 'submitted', 'on_file', 'recorded'].includes(
+      String(applicationEvidenceRow?.status || '').toLowerCase()
+    ) ||
+    applicationEvidenceRow?.file_url ||
+    applicationEvidenceRow?.document_url
+  );
+  const cvFileExists = Boolean(
+    cvDocument ||
+    cvEvidenceRow?.is_verified === true ||
+    cvEvidenceRow?.verified === true ||
+    ['verified', 'approved', 'complete', 'completed', 'submitted', 'on_file', 'recorded'].includes(
+      String(cvEvidenceRow?.status || '').toLowerCase()
+    ) ||
+    cvEvidenceRow?.file_url ||
+    cvEvidenceRow?.document_url
+  );
   const cvDocumentName = cvDocument?.original_filename || cvDocument?.file_name || cvDocument?.file_url || '';
   const cvDocumentMimeType = (cvDocument?.mime_type || cvDocument?.content_type || cvDocument?.file_type || '').toLowerCase();
   const cvIsPdf = Boolean(

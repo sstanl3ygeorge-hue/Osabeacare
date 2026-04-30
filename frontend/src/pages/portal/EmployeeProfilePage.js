@@ -1845,7 +1845,8 @@ export default function EmployeeProfilePage() {
     if (!employee) {
       return;
     }
-    const applicantHiddenTabs = ['competencies', 'spot_checks', 'supervisions', 'appraisals'];
+    const applicantHiddenTabs = ['competencies', 'spot_checks', 'supervisions', 'appraisals', 'policies'];
+    const activeOnlyTabs = ['competencies', 'spot_checks', 'supervisions', 'appraisals'];
     if (profileMode === 'applicant' && applicantHiddenTabs.includes(activeTab)) {
       setActiveTab('employment');
       setSearchParams({ tab: 'employment' }, { replace: true });
@@ -1861,7 +1862,7 @@ export default function EmployeeProfilePage() {
       setSearchParams({ tab: 'employment' }, { replace: true });
       return;
     }
-    if ((profileMode !== 'employee' || lifecycleStage !== 'active') && activeTab === 'competencies') {
+    if ((profileMode !== 'employee' || lifecycleStage !== 'active') && activeOnlyTabs.includes(activeTab)) {
       setActiveTab('employment');
       setSearchParams({ tab: 'employment' }, { replace: true });
     }
@@ -7561,6 +7562,7 @@ Direct employment coverage: {Number.isFinite(directCoveragePercent) ? `${directC
         </TabsContent>
 
         {/* Policies Tab - Extracted to PoliciesTabContent */}
+        {profileMode === 'employee' && (
         <TabsContent value="policies">
           <PoliciesTabContent
             policies={policies}
@@ -7570,6 +7572,7 @@ Direct employment coverage: {Number.isFinite(directCoveragePercent) ? `${directC
             onRefresh={fetchData}
           />
         </TabsContent>
+        )}
 
         {/* Training Tab */}
         <TabsContent value="training" ref={trainingSectionRef} data-testid="section-training-root">
@@ -7612,7 +7615,7 @@ Direct employment coverage: {Number.isFinite(directCoveragePercent) ? `${directC
         </TabsContent>
 
         {/* ========== TAB: COMPETENCIES ========== */}
-        {profileMode === 'employee' && (
+        {profileMode === 'employee' && lifecycleStage === 'active' && (
         <TabsContent value="competencies" data-testid="section-competencies-root">
           <CompetencyAssessmentsPanel
             employeeId={employeeId}

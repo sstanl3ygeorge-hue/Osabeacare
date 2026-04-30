@@ -284,24 +284,54 @@ export default function ConsolidatedStatusPanel({
   // Use dual-row section breakdown for employee operational view when available.
   const checkRows = rowsByType.check || [];
   const evidenceRows = rowsByType.evidence || [];
-  const coreDocumentSectionKeys = ['right_to_work', 'dbs', 'identity', 'proof_of_address'];
-  const coreDocumentSectionProgress = coreDocumentSectionKeys
-    .map((sectionKey) => {
-      const sectionRows = Array.isArray(complianceSections?.[sectionKey]?.rows)
-        ? complianceSections[sectionKey].rows
-        : [];
-      const checkRow = sectionRows.find((row) => row?.row_type === 'check') || null;
-      const evidenceRow = sectionRows.find((row) => row?.row_type === 'evidence') || null;
-      const hasSection = Boolean(checkRow || evidenceRow);
-      const isRowComplete = (row) => {
-        const s = String(row?.status || '').toLowerCase();
-        return row?.is_verified === true
-          || row?.verified === true
-          || ['verified', 'current', 'complete', 'completed', 'accepted', 'approved', 'recorded'].includes(s);
-      };
-      const isComplete = isRowComplete(checkRow) || isRowComplete(evidenceRow);
-      return { hasSection, isComplete };
-    });
+  const documentCompleteStatuses = new Set([
+    'verified',
+    'current',
+    'complete',
+    'completed',
+    'accepted',
+    'approved',
+    'recorded',
+    'on_file',
+    'copy_verified'
+  ]);
+  const isDocumentStatusComplete = (value) => documentCompleteStatuses.has(String(value || '').toLowerCase());
+  const isDocumentRowComplete = (row) => {
+    if (!row || typeof row !== 'object') return false;
+    return row?.is_verified === true
+      || row?.verified === true
+      || isDocumentStatusComplete(row?.status)
+      || isDocumentStatusComplete(row?.status_summary)
+      || isDocumentStatusComplete(row?.final_status);
+  };
+  const findSectionByAliases = (aliases) =>
+    aliases
+      .map((alias) => complianceSections?.[alias])
+      .find((section) => section && typeof section === 'object') || null;
+  const coreDocumentGroups = [
+    { key: 'right_to_work', aliases: ['right_to_work'] },
+    { key: 'dbs', aliases: ['dbs', 'dbs_certificate'] },
+    { key: 'identity', aliases: ['identity'] },
+    { key: 'proof_of_address', aliases: ['proof_of_address', 'address'] }
+  ];
+  const coreDocumentSectionProgress = coreDocumentGroups.map((group) => {
+    const section = findSectionByAliases(group.aliases);
+    const sectionRows = Array.isArray(section?.rows)
+      ? section.rows.filter((row) => row && typeof row === 'object')
+      : [];
+    const checkRow = sectionRows.find((row) => String(row?.row_type || '').toLowerCase() === 'check') || null;
+    const evidenceRow = sectionRows.find((row) => String(row?.row_type || '').toLowerCase() === 'evidence') || null;
+    const sectionLooksPresent = Boolean(section)
+      || sectionRows.length > 0
+      || section?.evaluation != null;
+    const rowBasedComplete = sectionRows.some((row) => isDocumentRowComplete(row));
+    const sectionBasedComplete = Boolean(section?.is_verified === true || section?.verified === true)
+      || isDocumentStatusComplete(section?.status)
+      || isDocumentStatusComplete(section?.overall_status)
+      || isDocumentStatusComplete(section?.final_status);
+    const isComplete = sectionBasedComplete || isDocumentRowComplete(checkRow) || isDocumentRowComplete(evidenceRow) || rowBasedComplete;
+    return { groupKey: group.key, hasSection: sectionLooksPresent, isComplete };
+  });
   const documentsCompletedFromChecks = coreDocumentSectionProgress.filter((s) => s.hasSection && s.isComplete).length;
   const documentsTotalFromChecks = coreDocumentSectionProgress.filter((s) => s.hasSection).length;
   const trainingEvalItems = Array.isArray(trainingEvaluation?.items)

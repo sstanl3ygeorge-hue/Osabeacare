@@ -2227,25 +2227,59 @@ async def worker_upload_document(
     
     # Special handling for CV uploads
     if requirement_id.lower() in ["cv", "resume", "curriculum_vitae"]:
-        # Check if employee already has a CV - prevent duplicates
-        existing_cv = await db.employees.find_one({"id": employee_id, "cv_document_id": {"$exists": True, "$ne": None}})
-        if existing_cv:
-            # Mark the new upload as superseded since they already have a CV
+        employee_with_cv = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+        existing_cv_document_id = employee_with_cv.get("cv_document_id") if employee_with_cv else None
+        cv_status_value = str((employee_with_cv or {}).get("cv_status") or "").lower()
+        replacement_allowed_statuses = {"rejected", "replacement_requested", "replacement_required", "missing"}
+        replacement_allowed = cv_status_value in replacement_allowed_statuses
+
+        if existing_cv_document_id and not replacement_allowed:
+            # Mark the new upload as superseded since they already have a CV and replacement was not requested
             await db.employee_documents.update_one(
                 {"id": doc_id},
-                {"$set": {"status": "superseded", "supersede_reason": "CV already exists"}}
+                {"$set": {"status": "superseded", "is_active": False, "latest_active": False, "supersede_reason": "CV replacement not requested"}}
             )
             raise HTTPException(
-                status_code=400, 
-                detail="You have already uploaded a CV. Please contact admin if you need to replace it."
+                status_code=400,
+                detail="You already have a CV on file. Admin must request a replacement before you can upload a new CV."
             )
-        
-        # Set cv_document_id on employee record so cv-extraction-status returns has_cv: true
+
+        if existing_cv_document_id and replacement_allowed:
+            # Preserve history by superseding existing active CV documents before linking the replacement.
+            cv_requirement_aliases = ["cv", "resume", "curriculum_vitae"]
+            await db.employee_documents.update_many(
+                {
+                    "employee_id": employee_id,
+                    "id": {"$ne": doc_id},
+                    "$or": [
+                        {"id": existing_cv_document_id},
+                        {"requirement_id": {"$in": cv_requirement_aliases}},
+                        {"document_type": {"$in": cv_requirement_aliases}},
+                        {"document_type_id": {"$in": cv_requirement_aliases}},
+                    ],
+                    "status": {"$nin": ["superseded", "archived", "deleted"]},
+                },
+                {
+                    "$set": {
+                        "status": "superseded",
+                        "is_active": False,
+                        "latest_active": False,
+                        "superseded_at": now,
+                        "supersede_reason": "Worker uploaded replacement CV",
+                    }
+                }
+            )
+
+        # Set the new CV as active canonical record.
+        await db.employee_documents.update_one(
+            {"id": doc_id},
+            {"$set": {"is_active": True, "latest_active": True, "status": "uploaded", "verified": False}}
+        )
         await db.employees.update_one(
             {"id": employee_id},
-            {"$set": {"cv_document_id": doc_id}}
+            {"$set": {"cv_document_id": doc_id, "cv_status": "uploaded", "updated_at": now}}
         )
-        logger.info(f"CV uploaded by worker {employee_id}, set cv_document_id: {doc_id}")
+        logger.info(f"CV uploaded by worker {employee_id}, set cv_document_id: {doc_id}, replacement_allowed={replacement_allowed}")
     
     await log_audit_action(f"worker_{employee_id}", "worker_document_upload", "employee", employee_id, {
         "requirement_id": requirement_id,

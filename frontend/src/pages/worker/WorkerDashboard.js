@@ -1328,9 +1328,15 @@ export default function WorkerDashboard() {
 
   // Trigger CV file input
   const triggerCvFileInput = () => {
-    // Double-check that user doesn't already have a CV
-    if (cvStatus?.has_cv) {
-      toast.error('You have already uploaded a CV. Please contact admin if you need to replace it.');
+    const cvStatusValue = String(cvStatus?.cv_status || '').toLowerCase();
+    const replacementAllowed =
+      cvStatus?.can_upload_cv === true ||
+      cvStatus?.replacement_required === true ||
+      ['rejected', 'replacement_requested', 'replacement_required', 'missing'].includes(cvStatusValue);
+
+    // Double-check replacement rules client-side to avoid opening a flow that backend will reject.
+    if (cvStatus?.has_cv && !replacementAllowed) {
+      toast.error('Your CV is already on file. Wait for admin to request a replacement before uploading a new CV.');
       return;
     }
     
@@ -2635,14 +2641,16 @@ export default function WorkerDashboard() {
                           <Eye className="mr-2 h-4 w-4" />
                           View CV
                         </Button>
-                        <Button
-                          className="w-full sm:w-auto"
-                          onClick={triggerCvFileInput}
-                          disabled={uploading === 'cv'}
-                        >
-                          {uploading === 'cv' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
-                          Update CV
-                        </Button>
+                        {(cvStatus?.can_upload_cv === true || cvStatus?.replacement_required === true || ['rejected', 'replacement_requested', 'replacement_required', 'missing'].includes(String(cvStatus?.cv_status || '').toLowerCase())) && (
+                          <Button
+                            className="w-full sm:w-auto"
+                            onClick={triggerCvFileInput}
+                            disabled={uploading === 'cv'}
+                          >
+                            {uploading === 'cv' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
+                            Upload replacement CV
+                          </Button>
+                        )}
                       </>
                     ) : cvDisplay.canUpload ? (
                       <Button className="w-full sm:w-auto" onClick={triggerCvFileInput} disabled={uploading === 'cv'}>

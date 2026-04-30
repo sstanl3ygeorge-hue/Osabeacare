@@ -1354,6 +1354,7 @@ async def _resolve_employee_agreement_state_core(
             "canonical_contract": canonical_contract,
             "render_issue": render_issue_contract,
             "has_acknowledgement": bool(agreement),
+            "latest_active": bool(agreement),
         }
 
     acknowledged = bool(agreement and agreement.get("acknowledged") and verification_status != "rejected")

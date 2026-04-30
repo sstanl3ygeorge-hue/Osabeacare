@@ -69,16 +69,21 @@ export default function DualRowComplianceSection({
   onRecordCheck,
   onReissueContract,
   isAuditor = false,
-  onRefresh
+  onRefresh,
+  parentManagesFetch = false
 }) {
   const [complianceFile, setComplianceFile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const externalSections = normalizeComplianceSections(externalComplianceFile?.sections);
+  const externalSections = normalizeComplianceSections(
+    externalComplianceFile?.sections
+    || externalComplianceFile?.compliance_sections
+    || externalComplianceFile?.data?.sections
+  );
   const hasExternalDualRowSections =
     externalComplianceFile?.serializer_version === 'dual_row_v1' &&
     Object.keys(externalSections).length > 0;
-  const effectiveComplianceFile = hasExternalDualRowSections ? {
+  const effectiveComplianceFile = (parentManagesFetch || hasExternalDualRowSections) ? {
     ...externalComplianceFile,
     sections: externalSections
   } : complianceFile;
@@ -188,7 +193,7 @@ export default function DualRowComplianceSection({
 
   // Fetch compliance file data
   const fetchComplianceFile = async () => {
-    if (hasExternalDualRowSections) {
+    if (parentManagesFetch || hasExternalDualRowSections) {
       // Parent has authoritative dual_row_v1 payload; avoid split state/fetch drift.
       return;
     }
@@ -271,18 +276,18 @@ export default function DualRowComplianceSection({
   };
 
   useEffect(() => {
-    if (!hasExternalDualRowSections) {
+    if (!parentManagesFetch && !hasExternalDualRowSections) {
       fetchComplianceFile();
     } else {
       setLoading(false);
       setError(null);
     }
-  }, [employeeId, token, hasExternalDualRowSections]);
+  }, [employeeId, token, hasExternalDualRowSections, parentManagesFetch]);
 
   // Refresh handler
   const handleRefresh = () => {
     if (onRefresh) onRefresh();
-    if (!hasExternalDualRowSections) fetchComplianceFile();
+    if (!parentManagesFetch && !hasExternalDualRowSections) fetchComplianceFile();
   };
 
   // Toggle section expansion
@@ -903,17 +908,28 @@ export default function DualRowComplianceSection({
     );
   };
 
-  const normalizedEffectiveSections = normalizeComplianceSections(effectiveComplianceFile?.sections);
+  const normalizedEffectiveSections = normalizeComplianceSections(
+    effectiveComplianceFile?.sections
+    || effectiveComplianceFile?.compliance_sections
+    || effectiveComplianceFile?.data?.sections
+  );
   const hasAnySections = Object.keys(normalizedEffectiveSections).length > 0;
   const hasRenderableSectionData = Object.values(normalizedEffectiveSections).some((section) => {
     if (!section || typeof section !== 'object') return false;
     if (Array.isArray(section.rows) && section.rows.length > 0) return true;
-    return Boolean(section.evaluation && typeof section.evaluation === 'object');
+    if (section.evaluation && typeof section.evaluation === 'object') return true;
+    if (Array.isArray(section.checks) && section.checks.length > 0) return true;
+    if (Array.isArray(section.evidence) && section.evidence.length > 0) return true;
+    if (Array.isArray(section.agreements) && section.agreements.length > 0) return true;
+    if (Array.isArray(section.references) && section.references.length > 0) return true;
+    const nonMetaKeys = Object.keys(section).filter((k) => !['title', 'status_unavailable', 'warnings'].includes(k));
+    return nonMetaKeys.length > 0;
   });
   const hasUsableSections = hasAnySections && hasRenderableSectionData;
 
   // Loading state
-  if (loading && !hasAnySections) {
+  const parentLoadingWithoutData = parentManagesFetch && !effectiveComplianceFile && !hasAnySections;
+  if ((loading && !hasAnySections) || parentLoadingWithoutData) {
     return (
       <div className="flex items-center justify-center py-12">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -923,7 +939,7 @@ export default function DualRowComplianceSection({
   }
 
   // Error state
-  if (error && !hasUsableSections) {
+  if (error && !hasUsableSections && !parentManagesFetch) {
     return (
       <div className="text-center py-12">
         <AlertTriangle className="h-12 w-12 mx-auto text-red-400 mb-4" />
@@ -942,7 +958,7 @@ export default function DualRowComplianceSection({
     return null;
   }
 
-  if (effectiveComplianceFile?.status_unavailable && !hasUsableSections) {
+  if (!loading && effectiveComplianceFile?.status_unavailable && !hasUsableSections) {
     return (
       <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
         <p className="font-medium">Compliance temporarily unavailable</p>

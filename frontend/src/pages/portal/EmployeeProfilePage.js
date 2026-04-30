@@ -1817,6 +1817,9 @@ export default function EmployeeProfilePage() {
   }, [activeTab, employee, isActiveEmployee, setSearchParams]);
 
   useEffect(() => {
+    if (!employee) {
+      return;
+    }
     const applicantHiddenTabs = ['competencies', 'spot_checks', 'supervisions', 'appraisals'];
     if (profileMode === 'applicant' && applicantHiddenTabs.includes(activeTab)) {
       setActiveTab('employment');
@@ -1837,7 +1840,7 @@ export default function EmployeeProfilePage() {
       setActiveTab('employment');
       setSearchParams({ tab: 'employment' }, { replace: true });
     }
-  }, [activeTab, profileMode, lifecycleStage, setSearchParams]);
+  }, [activeTab, employee, profileMode, lifecycleStage, setSearchParams]);
 
   useEffect(() => {
     fetchInductionChecklist();
@@ -3816,10 +3819,28 @@ export default function EmployeeProfilePage() {
     return acc;
   }, {});
   const applicationSubmission =
-    formSubmissions.find((submission) =>
-      submission?.requirement_id === 'application_form' || submission?.form_type === 'application_form'
-    ) || null;
-  const applicationPdfDocument = documents.find((document) => document?.requirement_id === 'application_form_pdf') || null;
+    formSubmissions.find((submission) => {
+      const requirementId = String(submission?.requirement_id || '').toLowerCase();
+      const formType = String(submission?.form_type || '').toLowerCase();
+      const key = String(submission?.key || '').toLowerCase();
+      return requirementId === 'application_form' || formType === 'application_form' || key === 'application_form';
+    }) || null;
+  const applicationPdfDocument = documents.find((document) => {
+    const requirementId = String(document?.requirement_id || '').toLowerCase();
+    const documentType = String(document?.document_type || document?.document_type_name || '').toLowerCase();
+    const label = String(document?.title || document?.file_name || document?.original_filename || '').toLowerCase();
+    return (
+      requirementId === 'application_form_pdf' ||
+      documentType === 'application_form' ||
+      (label.includes('application') && label.includes('.pdf'))
+    );
+  }) || null;
+  const applicationEmbeddedRecord = employee?.application_pdf_url
+    || employee?.application_form_url
+    || employee?.application_submission_id
+    || employee?.application_id
+    ? employee
+    : null;
   const recruitmentSectionRows = asArray(complianceFile?.sections?.recruitment_record?.rows);
   const applicationEvidenceRow = recruitmentSectionRows.find((row) => {
     const key = String(row?.requirement_id || row?.requirement_key || row?.key || row?.id || '').toLowerCase();
@@ -3829,7 +3850,7 @@ export default function EmployeeProfilePage() {
   const cvEvidenceRow = recruitmentSectionRows.find((row) => {
     const key = String(row?.requirement_id || row?.requirement_key || row?.key || row?.id || '').toLowerCase();
     const label = String(row?.title || row?.name || row?.label || '').toLowerCase();
-    return key === 'cv' || key.includes('resume') || label.includes('cv') || label.includes('resume');
+    return key === 'cv' || key.includes('resume') || key.includes('curriculum_vitae') || label.includes('cv') || label.includes('resume');
   }) || null;
   const rtwSummary = complianceRequirements?.rtw_summary || {};
   const isPdfLikeDocument = (document) => {
@@ -3861,8 +3882,11 @@ export default function EmployeeProfilePage() {
       document?.file_name
     ].filter(Boolean).join(' ').toLowerCase();
 
+    const requirementId = String(document?.requirement_id || '').toLowerCase();
+    const documentType = String(document?.document_type || document?.document_type_name || '').toLowerCase();
     return (
-      cvRequirementIds.includes(document?.requirement_id) ||
+      cvRequirementIds.includes(requirementId) ||
+      ['cv', 'resume'].includes(documentType) ||
       isLinkedActiveCvDocument(document) ||
       /\b(cv|resume|curriculum vitae)\b/.test(label)
     );
@@ -3967,6 +3991,7 @@ export default function EmployeeProfilePage() {
   const applicationAvailable = Boolean(
     applicationSubmission ||
     applicationPdfDocument ||
+    applicationEmbeddedRecord ||
     applicationEvidenceRow?.is_verified === true ||
     applicationEvidenceRow?.verified === true ||
     ['verified', 'approved', 'complete', 'completed', 'submitted', 'on_file', 'recorded'].includes(
@@ -3977,6 +4002,9 @@ export default function EmployeeProfilePage() {
   );
   const cvFileExists = Boolean(
     cvDocument ||
+    employee?.cv_url ||
+    employee?.cv_file_url ||
+    employee?.resume_url ||
     cvEvidenceRow?.is_verified === true ||
     cvEvidenceRow?.verified === true ||
     ['verified', 'approved', 'complete', 'completed', 'submitted', 'on_file', 'recorded'].includes(
@@ -3994,6 +4022,9 @@ export default function EmployeeProfilePage() {
   const cvReviewReady = Boolean(cvLinkedForReview && activeCvDocument && cvIsPdf);
   const cvLinkRecoveryAvailable = Boolean(fallbackPdfCvDocument && !cvReviewReady);
   const cvLegacyNonPdfOnly = Boolean(!cvReviewReady && !cvLinkRecoveryAvailable && activeNonPdfCvCandidates.length > 0);
+  const cvEvidenceUrl = cvEvidenceRow?.file_url || cvEvidenceRow?.download_url || cvEvidenceRow?.view_url || cvEvidenceRow?.document_url || null;
+  const cvHasCanonicalEvidence = Boolean(cvFileExists && (cvEvidenceUrl || cvEvidenceRow?.is_verified || cvEvidenceRow?.verified));
+  const cvCanViewFromFallback = !cvReviewReady && Boolean(cvEvidenceUrl);
   // Display-only: surface the admin-requested replacement state alongside the
   // "On file" badge so the admin view does not silently contradict the
   // readiness blocker ("CV was rejected — please upload a replacement") and
@@ -4006,6 +4037,8 @@ export default function EmployeeProfilePage() {
     ? 'Replacement requested'
     : cvReviewReady
       ? 'On file'
+      : cvHasCanonicalEvidence
+        ? 'On file'
       : cvLinkRecoveryAvailable
         ? 'Link existing PDF'
         : cvLegacyNonPdfOnly
@@ -4015,6 +4048,8 @@ export default function EmployeeProfilePage() {
     ? 'bg-amber-100 text-amber-700 border-amber-200'
     : cvReviewReady
       ? 'bg-green-100 text-green-700 border-green-200'
+      : cvHasCanonicalEvidence
+        ? 'bg-green-100 text-green-700 border-green-200'
       : cvLinkRecoveryAvailable
         ? 'bg-blue-100 text-blue-700 border-blue-200'
         : cvLegacyNonPdfOnly
@@ -4731,7 +4766,10 @@ export default function EmployeeProfilePage() {
               : {};
             const trainingEvalItems = asArray(trainingEvaluation?.items);
             const trainingEvalItemsRequired = trainingEvalItems.length;
-            const trainingEvalItemsVerified = trainingEvalItems.filter((item) => String(item?.status || '').toLowerCase() === 'verified').length;
+            const trainingEvalItemsVerified = trainingEvalItems.filter((item) => {
+              const status = String(item?.status || '').toLowerCase();
+              return item?.verified === true || ['verified', 'current', 'complete', 'completed'].includes(status);
+            }).length;
             const trainingEvalItemsExpiring = trainingEvalItems.filter((item) => String(item?.status || '').toLowerCase() === 'due_soon').length;
             const trainingEvalItemsExpired = trainingEvalItems.filter((item) => String(item?.status || '').toLowerCase() === 'expired').length;
             const trainingEvalItemsAwaitingReview = trainingEvalItems.filter((item) => String(item?.status || '').toLowerCase() === 'awaiting_review').length;
@@ -6801,7 +6839,15 @@ Direct employment coverage: {Number.isFinite(directCoveragePercent) ? `${directC
                           <div>
                             <p className="text-xs text-text-muted">Source</p>
                             <p className="text-sm font-medium text-gray-800">
-                              {applicationSubmission ? 'Online application' : applicationPdfDocument ? 'Uploaded PDF' : 'Unavailable'}
+                              {applicationSubmission
+                                ? 'Online application'
+                                : applicationPdfDocument
+                                  ? 'Uploaded PDF'
+                                  : applicationEvidenceRow
+                                    ? 'Compliance record'
+                                    : applicationEmbeddedRecord
+                                      ? 'Employee record'
+                                      : 'Unavailable'}
                             </p>
                           </div>
                         </div>
@@ -6820,6 +6866,35 @@ Direct employment coverage: {Number.isFinite(directCoveragePercent) ? `${directC
                               size="sm"
                               variant="outline"
                               onClick={() => handleDownloadFormPDF(applicationSubmission.id)}
+                            >
+                              <Download className="h-4 w-4 mr-1" />
+                              Download PDF
+                            </Button>
+                          </div>
+                        ) : applicationEvidenceRow?.file_url || applicationEvidenceRow?.document_url || applicationEvidenceRow?.download_url || applicationEvidenceRow?.view_url ? (
+                          <div className="flex flex-wrap gap-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                const rawUrl = applicationEvidenceRow?.file_url || applicationEvidenceRow?.view_url || applicationEvidenceRow?.download_url || applicationEvidenceRow?.document_url;
+                                if (!rawUrl) return;
+                                const resolvedUrl = rawUrl.startsWith('/api/') ? `${API}${rawUrl.substring(4)}` : rawUrl;
+                                window.open(resolvedUrl, '_blank', 'noopener,noreferrer');
+                              }}
+                            >
+                              <Eye className="h-4 w-4 mr-1" />
+                              View Application
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                const rawUrl = applicationEvidenceRow?.download_url || applicationEvidenceRow?.file_url || applicationEvidenceRow?.document_url || applicationEvidenceRow?.view_url;
+                                if (!rawUrl) return;
+                                const resolvedUrl = rawUrl.startsWith('/api/') ? `${API}${rawUrl.substring(4)}` : rawUrl;
+                                window.open(resolvedUrl, '_blank', 'noopener,noreferrer');
+                              }}
                             >
                               <Download className="h-4 w-4 mr-1" />
                               Download PDF
@@ -6926,6 +7001,21 @@ Direct employment coverage: {Number.isFinite(directCoveragePercent) ? `${directC
                         </Button>
                         <p className="text-xs text-text-muted mt-2">
                           Compare the CV against the structured employment history from the application form to verify accuracy.
+                        </p>
+                      </div>
+                    ) : cvCanViewFromFallback ? (
+                      <div className="mt-4">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => window.open(cvEvidenceUrl, '_blank', 'noopener,noreferrer')}
+                          data-testid="view-cv-fallback-btn"
+                        >
+                          <Eye className="h-4 w-4 mr-1" />
+                          View CV
+                        </Button>
+                        <p className="text-xs text-text-muted mt-2">
+                          CV evidence is on file in the compliance record. Use the linked file for review.
                         </p>
                       </div>
                     ) : cvLinkRecoveryAvailable ? (
@@ -7350,6 +7440,7 @@ Direct employment coverage: {Number.isFinite(directCoveragePercent) ? `${directC
                         employeeEmail={employee?.email}
                         employeeName={employee ? `${employee.first_name} ${employee.last_name}` : ''}
                         complianceFile={complianceFile}
+                        parentManagesFetch={true}
                         onUpload={(key) => {
                           setSelectedRequirement(key);
                           setUploadDialogOpen(true);

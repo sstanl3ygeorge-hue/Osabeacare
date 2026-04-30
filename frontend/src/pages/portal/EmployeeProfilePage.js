@@ -4534,7 +4534,7 @@ export default function EmployeeProfilePage() {
               ...asArray(sectionRowsByType?.form_acknowledgement),
               ...asArray(sectionRowsByType?.agreement),
               ...asArray(complianceSections?.agreements?.rows),
-            ].filter((row) => row?.latest_active !== false);
+            ];
             const inductionSectionRows = asArray(complianceSections?.induction?.rows);
 
             const toDate = (value) => (value ? formatBackendDate(value) : 'Unavailable');
@@ -4606,7 +4606,7 @@ export default function EmployeeProfilePage() {
               : (trainingExpired > 0 ? 'red' : (trainingCompleted < trainingRequired || trainingExpiring > 0 ? 'amber' : 'green'));
 
             const agreementItems = agreementsSectionRows.length > 0
-              ? agreementsSectionRows.filter((row) => row?.latest_active !== false)
+              ? agreementsSectionRows
               : asArray(agreementsCategory?.items);
             const selectLatestAgreement = (matcher) => {
               const scoped = agreementItems.filter((item) =>
@@ -4614,7 +4614,19 @@ export default function EmployeeProfilePage() {
               );
               if (!scoped.length) return null;
               const preferred = scoped.find((item) => item?.latest_active === true);
-              return preferred || scoped[0];
+              if (preferred) return preferred;
+              const byState = [...scoped].sort((a, b) => {
+                const rank = (val) => {
+                  const s = String(val || '').toLowerCase();
+                  if (s.includes('fully_executed') || s.includes('verified')) return 4;
+                  if (s.includes('awaiting_company_countersignature') || s.includes('signed')) return 3;
+                  if (s.includes('pending') || s.includes('awaiting')) return 2;
+                  if (s.includes('rejected') || s.includes('unavailable')) return 0;
+                  return 1;
+                };
+                return rank(b?.status) - rank(a?.status);
+              });
+              return byState[0];
             };
             const contractStatus = selectLatestAgreement((id) => id.includes('contract'))?.status || 'Unavailable';
             const handbookStatus = selectLatestAgreement((id) => id.includes('handbook'))?.status || 'Unavailable';

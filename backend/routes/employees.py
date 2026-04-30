@@ -396,6 +396,11 @@ async def update_employee_simple(
         allowed, reason = guard_cross_gate_status_transition(current_status, requested_status)
         if not allowed:
             raise HTTPException(status_code=400, detail=reason)
+        if requested_status == EmployeeStatus.ACTIVE:
+            raise HTTPException(
+                status_code=400,
+                detail="Use Promote to Active (auto-promote or force-promote) for this transition.",
+            )
     update_doc["updated_at"] = now
     update_doc["updated_by"] = user.get("user_id")
     

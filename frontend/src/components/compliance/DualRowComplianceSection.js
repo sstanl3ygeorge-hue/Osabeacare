@@ -536,7 +536,25 @@ export default function DualRowComplianceSection({
       ? section.rows
           .filter((row) => row?.row_type === 'form_acknowledgement')
           .filter((row) => row?.latest_active !== false)
-          .filter((row, idx, arr) => arr.findIndex((x) => x?.id === row?.id) === idx)
+          .filter((row, idx, arr) => {
+            const stableKey = [
+              row?.source_record_id,
+              row?.id,
+              row?.key,
+              row?.agreement_type,
+              row?.title,
+            ].find((value) => value !== undefined && value !== null && String(value).trim() !== '') || `agreement_${idx}`;
+            return arr.findIndex((x, i) => {
+              const candidateKey = [
+                x?.source_record_id,
+                x?.id,
+                x?.key,
+                x?.agreement_type,
+                x?.title,
+              ].find((value) => value !== undefined && value !== null && String(value).trim() !== '') || `agreement_${i}`;
+              return String(candidateKey) === String(stableKey);
+            }) === idx;
+          })
       : [];
     const agreementSatisfiedCount = agreementRows.filter((row) => row.is_verified).length;
     const agreementPendingReviewCount = agreementRows.filter((row) => (

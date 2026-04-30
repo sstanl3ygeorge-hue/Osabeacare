@@ -4181,28 +4181,40 @@ export default function EmployeeProfilePage() {
   const requirementsSummaryAvailable = Number.isFinite(requirementsSummaryTotal) && requirementsSummaryTotal > 0;
 
   let summarySource = profileMode === 'employee'
-    ? 'employee_list_canonical_readiness_fallback'
+    ? 'canonical_uce'
     : 'unified_progress';
   let effectiveCompletedRequirements = canonicalCompletedRequirements ?? 0;
   let effectiveTotalRequirements = canonicalTotalRequirements ?? 0;
   let effectiveProgressPct = canonicalProgressPct;
+  const canonicalUCEApplicable = canonicalProgress?.not_applicable !== true;
+  const canonicalUCECountAvailable = Number.isFinite(canonicalTotalRequirements) && canonicalTotalRequirements > 0;
+  const complianceFileCountAvailable = sectionProgressAvailable
+    || complianceSummaryAvailable
+    || requirementsSummaryAvailable;
 
-  if (sectionProgressAvailable) {
-    summarySource = 'compliance_file_sections';
-    effectiveCompletedRequirements = sectionCompletedRows;
-    effectiveTotalRequirements = sectionTotalRows;
-    effectiveProgressPct = Math.round((sectionCompletedRows / sectionTotalRows) * 100);
-  } else if (profileMode === 'employee') {
-    if (complianceSummaryAvailable) {
-      summarySource = 'compliance_file_summary';
-      effectiveCompletedRequirements = complianceSummaryCompleted;
-      effectiveTotalRequirements = complianceSummaryTotal;
-      effectiveProgressPct = Number.isFinite(complianceSummaryPct) ? complianceSummaryPct : 0;
-    } else if (requirementsSummaryAvailable) {
-      summarySource = 'compliance_requirements_summary';
-      effectiveCompletedRequirements = requirementsSummaryCompleted;
-      effectiveTotalRequirements = requirementsSummaryTotal;
-      effectiveProgressPct = Number.isFinite(requirementsSummaryPct) ? requirementsSummaryPct : 0;
+  if (profileMode === 'employee') {
+    if (!canonicalUCEApplicable) {
+      if (sectionProgressAvailable) {
+        summarySource = 'compliance_file_sections_fallback';
+        effectiveCompletedRequirements = sectionCompletedRows;
+        effectiveTotalRequirements = sectionTotalRows;
+        effectiveProgressPct = Math.round((sectionCompletedRows / sectionTotalRows) * 100);
+      } else if (complianceSummaryAvailable) {
+        summarySource = 'compliance_file_summary_fallback';
+        effectiveCompletedRequirements = complianceSummaryCompleted;
+        effectiveTotalRequirements = complianceSummaryTotal;
+        effectiveProgressPct = Number.isFinite(complianceSummaryPct) ? complianceSummaryPct : 0;
+      } else if (requirementsSummaryAvailable) {
+        summarySource = 'compliance_requirements_summary_fallback';
+        effectiveCompletedRequirements = requirementsSummaryCompleted;
+        effectiveTotalRequirements = requirementsSummaryTotal;
+        effectiveProgressPct = Number.isFinite(requirementsSummaryPct) ? requirementsSummaryPct : 0;
+      } else {
+        summarySource = 'canonical_uce_not_applicable_unavailable';
+        effectiveCompletedRequirements = 0;
+        effectiveTotalRequirements = 0;
+        effectiveProgressPct = 0;
+      }
     }
   } else if (profileMode === 'applicant' && requirementsSummaryAvailable && !canonicalRequirementCountAvailable) {
     summarySource = 'compliance_requirements_summary';
@@ -4212,7 +4224,14 @@ export default function EmployeeProfilePage() {
   }
 
   const isSectionUnavailable = Boolean(complianceFile?.status_unavailable);
-  const requirementCountUnavailable = !sectionProgressAvailable && !canonicalRequirementCountAvailable;
+  const requirementCountUnavailable = profileMode === 'employee'
+    ? (!(canonicalUCECountAvailable || complianceFileCountAvailable))
+    : (!sectionProgressAvailable && !canonicalRequirementCountAvailable);
+  const completionHeadline = (profileMode === 'employee' && !canonicalUCEApplicable)
+    ? (complianceFileCountAvailable
+      ? `Compliance File: ${effectiveCompletedRequirements}/${effectiveTotalRequirements} verified`
+      : 'Compliance File: unavailable')
+    : `${effectiveProgressPct}% Complete`;
   const canonicalReadinessLabel = canonicalIsWorkReady
     ? 'Ready for Work'
     : canonicalCanPromote
@@ -4426,7 +4445,7 @@ export default function EmployeeProfilePage() {
                 <div className="text-right">
                   <p className="text-sm text-text-muted">Compliance File Completion</p>
                   <p className="text-3xl font-heading font-bold text-text-primary">
-                    {effectiveProgressPct}% Complete
+                    {completionHeadline}
                   </p>
                   <p className="text-xs text-text-muted mt-0.5">
                     {requirementCountUnavailable

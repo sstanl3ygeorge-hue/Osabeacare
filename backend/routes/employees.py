@@ -30,6 +30,7 @@ from .dependencies import (
     UserRole,
     log_audit_action,
 )
+from lifecycle_transition_guard import guard_cross_gate_status_transition
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +70,15 @@ EMPLOYEE_STATUSES = [
     EmployeeStatus.ACTIVE,
     EmployeeStatus.INACTIVE
 ]
+
+
+def normalize_lifecycle_status(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    normalized = str(value).strip().lower()
+    if normalized == "active_employee":
+        return "active"
+    return normalized
 
 # Statuses excluded from all active lists (recruitment pipeline, dashboards)
 TERMINAL_STATUSES = [
@@ -378,6 +388,14 @@ async def update_employee_simple(
     update_doc = {
         k: v for k, v in update_data.model_dump().items() if v is not None
     }
+    current_status = normalize_lifecycle_status(employee.get("status"))
+    requested_status = normalize_lifecycle_status(update_doc.get("status")) if update_doc.get("status") else None
+    if requested_status:
+        update_doc["status"] = requested_status
+    if requested_status and requested_status != current_status:
+        allowed, reason = guard_cross_gate_status_transition(current_status, requested_status)
+        if not allowed:
+            raise HTTPException(status_code=400, detail=reason)
     update_doc["updated_at"] = now
     update_doc["updated_by"] = user.get("user_id")
     

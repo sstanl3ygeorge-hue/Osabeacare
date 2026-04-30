@@ -153,6 +153,7 @@ from routes.feedback_complaints import router as feedback_complaints_router
 from routes.policies import router as policies_router
 from routes.referee_outreach import router as referee_outreach_router
 from routes.induction import router as induction_router, DEFAULT_INDUCTION_ITEMS, INDUCTION_TRAINING_MAP
+from lifecycle_transition_guard import guard_cross_gate_status_transition
 from routes.induction_worker import router as induction_worker_router
 from routes.competency import router as competency_router
 from routes.spot_checks import router as spot_checks_router
@@ -10015,6 +10016,10 @@ async def update_employee(employee_id: str, update: EmployeeUpdate, user: dict =
     if requested_status:
         update_data["status"] = requested_status
     if requested_status and requested_status != current_status:
+        allowed, reason = guard_cross_gate_status_transition(current_status, requested_status)
+        if not allowed:
+            raise HTTPException(status_code=400, detail=reason)
+    if requested_status and requested_status != current_status:
         lifecycle_statuses = {"onboarding", "active", "inactive"}
         if current_status in lifecycle_statuses and requested_status in lifecycle_statuses:
             # Canonical promotion remains /auto-promote; block direct onboarding->active edits.
@@ -11021,6 +11026,11 @@ async def try_auto_promote_worker(employee_id: str):
             return
         
         current_status = employee.get("status", "applicant")
+        current_status_norm = normalize_lifecycle_status(current_status)
+
+        # Auto-promotion only applies to onboarding employees (Gate 2).
+        if current_status_norm != "onboarding":
+            return
         
         # Don't promote if already active.
         if current_status in (EmployeeStatus.ACTIVE, "active_employee"):

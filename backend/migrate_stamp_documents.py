@@ -14,7 +14,7 @@ Requirements:
 """
 
 import os
-import sys
+import argparse
 import asyncio
 from datetime import datetime, timezone
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -78,7 +78,14 @@ results = {
     "errors": []
 }
 
-async def process_document(db, doc: dict, *, force_restamp: bool = False) -> bool:
+async def process_document(
+    db,
+    doc: dict,
+    *,
+    force_restamp: bool = False,
+    dry_run: bool = False,
+    run_at: str = None,
+) -> bool:
     """Process a single document - download, stamp, upload, update."""
     doc_id = doc.get("id")
     employee_id = doc.get("employee_id")
@@ -152,7 +159,19 @@ async def process_document(db, doc: dict, *, force_restamp: bool = False) -> boo
             original_filename = original_filename.rsplit('.', 1)[0] + '_stamped.pdf'
         else:
             original_filename = original_filename.rsplit('.', 1)[0] + '_stamped.pdf'
-        
+
+        intended_path = f"stamped/{employee_id}/{original_filename}"
+        if dry_run:
+            print("    [DRY-RUN] Would process document:")
+            print(f"      doc_id={doc_id}")
+            print(f"      employee_id={employee_id}")
+            print(f"      requirement_id={requirement_id}")
+            print(f"      old_stamped_file_url={doc.get('stamped_file_url')}")
+            print(f"      intended_action={'restamp' if force_restamp else 'backfill'}")
+            print(f"      intended_storage_path={intended_path}")
+            results["stamped_successfully"] += 1
+            return True
+
         print(f"    ↑ Uploading to Supabase as: {original_filename}")
         stamped_url = await upload_file_to_storage(
             file_content=stamped_bytes,
@@ -162,9 +181,10 @@ async def process_document(db, doc: dict, *, force_restamp: bool = False) -> boo
         if not stamped_url:
             raise Exception("Shared storage helper returned no stamped_file_url")
         print(f"    ✓ Uploaded: {stamped_url[:60]}...")
-        
+
         # Update database record — always persist the stamp dict we actually used
         stamp_data_for_pdf["migrated_backfill"] = True
+        stamp_data_for_pdf["stamped_renderer"] = "branded_evidence_stamp_v1"
         await db.employee_documents.update_one(
             {"id": doc_id},
             {
@@ -175,11 +195,29 @@ async def process_document(db, doc: dict, *, force_restamp: bool = False) -> boo
                     "verification_stamp_at": verified_at,
                     "verification_stamp_label": "Verified copy",
                     "stamp_applied_at": datetime.now(timezone.utc).isoformat(),
-                    "stamp_migration": True
+                    "stamp_migration": True,
+                    "stamped_renderer": "branded_evidence_stamp_v1",
+                    "restamped_at": datetime.now(timezone.utc).isoformat(),
+                    "stamp_migration_run_at": run_at or datetime.now(timezone.utc).isoformat(),
+                    "previous_stamped_file_url": doc.get("stamped_file_url"),
+                    "previous_verification_stamp": doc.get("verification_stamp"),
                 }
             }
         )
-        print(f"    ✓ Database updated")
+        await db.audit_logs.insert_one({
+            "id": f"audit-restamp-{doc_id}-{int(datetime.now(timezone.utc).timestamp())}",
+            "action": "document_restamped_migration",
+            "actor": "stamp_migration_cli",
+            "entity_type": "employee_document",
+            "entity_id": doc_id,
+            "employee_id": employee_id,
+            "mode": "restamp" if force_restamp else "backfill",
+            "old_stamped_url": doc.get("stamped_file_url"),
+            "new_stamped_url": stamped_url,
+            "dry_run": False,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+        print(f"    ✓ Database + audit log updated")
         
         results["stamped_successfully"] += 1
         return True
@@ -192,7 +230,15 @@ async def process_document(db, doc: dict, *, force_restamp: bool = False) -> boo
         return False
 
 
-async def run_migration(force_restamp: bool = False):
+async def run_migration(
+    force_restamp: bool = False,
+    dry_run: bool = False,
+    limit: int = 500,
+    employee_id: str = None,
+    document_id: str = None,
+    skip_pass_2: bool = False,
+    skip_pass_3: bool = False,
+):
     """Main migration function."""
     print("=" * 60)
     print("STAMP MIGRATION SCRIPT")
@@ -233,8 +279,12 @@ async def run_migration(force_restamp: bool = False):
         print("\n⚠ RE-STAMP mode: targeting documents from previous migration runs")
     else:
         query = build_missing_stamp_backfill_query()
+    if employee_id:
+        query.setdefault("$and", []).append({"employee_id": employee_id})
+    if document_id:
+        query.setdefault("$and", []).append({"id": document_id})
 
-    docs = await db.employee_documents.find(query, {"_id": 0}).to_list(length=500)
+    docs = await db.employee_documents.find(query, {"_id": 0}).to_list(length=limit)
     results["total_found"] = len(docs)
     
     print(f"\n📋 Found {len(docs)} documents to stamp")
@@ -266,17 +316,24 @@ async def run_migration(force_restamp: bool = False):
     
     for i, doc in enumerate(docs, 1):
         print(f"\n[{i}/{len(docs)}]", end="")
-        await process_document(db, doc, force_restamp=force_restamp)
+        await process_document(
+            db,
+            doc,
+            force_restamp=force_restamp,
+            dry_run=dry_run,
+            run_at=datetime.now(timezone.utc).isoformat(),
+        )
 
     # -------------------------------------------------------
     # PASS 2: Backfill flat stamp fields for docs that already
     # have stamped_file_url but are missing verification_stamp_by_name
     # -------------------------------------------------------
-    print("\n" + "-" * 60)
-    print("PASS 2: BACKFILL FLAT STAMP FIELDS")
-    print("-" * 60)
+    if not skip_pass_2:
+        print("\n" + "-" * 60)
+        print("PASS 2: BACKFILL FLAT STAMP FIELDS")
+        print("-" * 60)
 
-    backfill_query = {
+        backfill_query = {
         "$and": [
             # Has a stamped URL already (this pass only fills in the flat metadata)
             {"stamped_file_url": {"$exists": True}},
@@ -295,116 +352,161 @@ async def run_migration(force_restamp: bool = False):
             {"verification_stamp": {"$nin": [None, "", "not_verified"]}}
         ]
     }
-    backfill_docs = await db.employee_documents.find(backfill_query, {"_id": 0}).to_list(length=2000)
-    print(f"Found {len(backfill_docs)} documents needing flat-field backfill")
+        if employee_id:
+            backfill_query.setdefault("$and", []).append({"employee_id": employee_id})
+        if document_id:
+            backfill_query.setdefault("$and", []).append({"id": document_id})
+        backfill_docs = await db.employee_documents.find(backfill_query, {"_id": 0}).to_list(length=2000)
+        print(f"Found {len(backfill_docs)} documents needing flat-field backfill")
 
-    backfill_count = 0
-    for doc in backfill_docs:
-        doc_id = doc.get("id")
-        verification_stamp = doc.get("verification_stamp", {})
-        if isinstance(verification_stamp, str):
-            admin_name = "System Admin"
-            verified_at = doc.get("verified_at", doc.get("updated_at", datetime.now(timezone.utc).isoformat()))
-        else:
-            admin_name = verification_stamp.get("verified_by_name", "System Admin")
-            verified_at = verification_stamp.get("verified_at", doc.get("verified_at", doc.get("updated_at")))
-        await db.employee_documents.update_one(
-            {"id": doc_id},
-            {"$set": {
-                "verification_stamp_by_name": admin_name,
-                "verification_stamp_at": verified_at,
-                "verification_stamp_label": "Verified copy"
-            }}
-        )
-        backfill_count += 1
+        backfill_count = 0
+        for doc in backfill_docs:
+            doc_id = doc.get("id")
+            verification_stamp = doc.get("verification_stamp", {})
+            if isinstance(verification_stamp, str):
+                admin_name = "System Admin"
+                verified_at = doc.get("verified_at", doc.get("updated_at", datetime.now(timezone.utc).isoformat()))
+            else:
+                admin_name = verification_stamp.get("verified_by_name", "System Admin")
+                verified_at = verification_stamp.get("verified_at", doc.get("verified_at", doc.get("updated_at")))
+            if dry_run:
+                print(f"  [DRY-RUN] Pass 2 would backfill doc_id={doc_id} employee_id={doc.get('employee_id')}")
+                backfill_count += 1
+                continue
+            await db.employee_documents.update_one(
+                {"id": doc_id},
+                {"$set": {
+                    "verification_stamp_by_name": admin_name,
+                    "verification_stamp_at": verified_at,
+                    "verification_stamp_label": "Verified copy",
+                    "stamp_migration_run_at": datetime.now(timezone.utc).isoformat(),
+                }}
+            )
+            await db.audit_logs.insert_one({
+                "id": f"audit-backfill-{doc_id}-{int(datetime.now(timezone.utc).timestamp())}",
+                "action": "document_restamped_migration",
+                "actor": "stamp_migration_cli",
+                "entity_type": "employee_document",
+                "entity_id": doc_id,
+                "employee_id": doc.get("employee_id"),
+                "mode": "backfill",
+                "old_stamped_url": doc.get("stamped_file_url"),
+                "new_stamped_url": doc.get("stamped_file_url"),
+                "dry_run": False,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            })
+            backfill_count += 1
 
-    print(f"✓ Backfilled flat stamp fields on {backfill_count} documents")
+        print(f"✓ Backfilled flat stamp fields on {backfill_count} documents")
+    else:
+        print("\nPASS 2 skipped via --skip-pass-2")
 
     # -----------------------------------------------------------------------
     # PASS 3: Backfill requirement-slot verified=True for all employees
     # that have verified documents but whose slot still has verified=False.
     # This fixes the gate vs compliance-file mismatch for historical records.
     # -----------------------------------------------------------------------
-    print("\n" + "-" * 60)
-    print("PASS 3: Backfill requirement slot verified flags")
-    print("-" * 60)
+    if not skip_pass_3:
+        print("\n" + "-" * 60)
+        print("PASS 3: Backfill requirement slot verified flags")
+        print("-" * 60)
 
-    SLOT_KEY_ALIASES = {
-        "identity": [
-            "identity", "id_document", "passport", "driving_licence",
-            "driving_license", "identity_documents", "identity_evidence",
-            "identity_rtw", "proof_of_identity", "identity_document",
-            "identity_evidence_2", "identity_evidence_3", "identity_upload",
-        ],
-        "right_to_work": [
-            "right_to_work", "rtw", "right-to-work", "right_to_work_documents",
-            "right_to_work_evidence",
-        ],
-        "proof_of_address": [
-            "proof_of_address", "poa", "proof_of_address_1", "proof_of_address_2",
-            "address_document",
-        ],
-        "dbs": [
-            "dbs", "dbs_certificate", "dbs_check",
-        ],
-    }
+        SLOT_KEY_ALIASES = {
+            "identity": [
+                "identity", "id_document", "passport", "driving_licence",
+                "driving_license", "identity_documents", "identity_evidence",
+                "identity_rtw", "proof_of_identity", "identity_document",
+                "identity_evidence_2", "identity_evidence_3", "identity_upload",
+            ],
+            "right_to_work": [
+                "right_to_work", "rtw", "right-to-work", "right_to_work_documents",
+                "right_to_work_evidence",
+            ],
+            "proof_of_address": [
+                "proof_of_address", "poa", "proof_of_address_1", "proof_of_address_2",
+                "address_document",
+            ],
+            "dbs": [
+                "dbs", "dbs_certificate", "dbs_check",
+            ],
+        }
 
-    slot_backfill_count = 0
-    for req_key, aliases in SLOT_KEY_ALIASES.items():
-        _dead = frozenset((
-            "rejected", "amendment_requested", "invalidated",
-            "deleted", "superseded", "uploaded_in_error",
-        ))
-        # Find all verified documents (by any alias) not already feeding a verified slot
-        verified_docs = await db.employee_documents.find(
-            {
-                "$and": [
-                    {"requirement_id": {"$in": aliases}},
-                    {"status": {"$nin": list(_dead)}},
-                    {
-                        "$or": [
-                            {"verified": True},
-                            {"status": {"$in": ["verified", "approved"]}},
-                            {"review_status": {"$in": ["verified", "approved"]}},
-                            {"verification_stamp": {"$nin": [None, "", "not_verified"]}},
-                        ]
-                    },
-                ]
-            },
-            {"_id": 0, "employee_id": 1, "verified_at": 1, "verified_by_name": 1,
-             "verification_stamp": 1},
-        ).to_list(5000)
-
-        # Group by employee_id
-        from collections import defaultdict
-        by_employee: dict = defaultdict(list)
-        for d in verified_docs:
-            by_employee[d["employee_id"]].append(d)
-
-        for employee_id, emp_docs in by_employee.items():
-            # Pick verified_at / verified_by_name from the best doc
-            best = sorted(
-                emp_docs,
-                key=lambda x: x.get("verified_at") or x.get("verification_stamp", {}).get("verified_at") or "",
-                reverse=True,
-            )[0]
-            stamp = best.get("verification_stamp") or {}
-            va = best.get("verified_at") or (stamp.get("verified_at") if isinstance(stamp, dict) else None)
-            vn = best.get("verified_by_name") or (stamp.get("verified_by_name") if isinstance(stamp, dict) else "System Admin")
-
-            result = await db.employee_documents.update_one(
+        slot_backfill_count = 0
+        for req_key, aliases in SLOT_KEY_ALIASES.items():
+            _dead = frozenset((
+                "rejected", "amendment_requested", "invalidated",
+                "deleted", "superseded", "uploaded_in_error",
+            ))
+            # Find all verified documents (by any alias) not already feeding a verified slot
+            verified_docs = await db.employee_documents.find(
                 {
-                    "employee_id": employee_id,
-                    "requirement_key": req_key,
-                    "$or": [{"verified": {"$ne": True}}, {"verified": {"$exists": False}}],
+                    "$and": [
+                        {"requirement_id": {"$in": aliases}},
+                        {"status": {"$nin": list(_dead)}},
+                        {
+                            "$or": [
+                                {"verified": True},
+                                {"status": {"$in": ["verified", "approved"]}},
+                                {"review_status": {"$in": ["verified", "approved"]}},
+                                {"verification_stamp": {"$nin": [None, "", "not_verified"]}},
+                            ]
+                        },
+                    ]
                 },
-                {"$set": {"verified": True, "verified_at": va, "verified_by_name": vn,
-                          "updated_at": datetime.now(timezone.utc).isoformat()}},
-            )
-            if result.modified_count:
-                slot_backfill_count += 1
+                {"_id": 0, "employee_id": 1, "verified_at": 1, "verified_by_name": 1,
+                 "verification_stamp": 1},
+            ).to_list(5000)
 
-    print(f"✓ Backfilled verified=True on {slot_backfill_count} requirement slots")
+            # Group by employee_id
+            from collections import defaultdict
+            by_employee: dict = defaultdict(list)
+            for d in verified_docs:
+                by_employee[d["employee_id"]].append(d)
+
+            for employee_id_item, emp_docs in by_employee.items():
+                if employee_id and employee_id_item != employee_id:
+                    continue
+                # Pick verified_at / verified_by_name from the best doc
+                best = sorted(
+                    emp_docs,
+                    key=lambda x: x.get("verified_at") or x.get("verification_stamp", {}).get("verified_at") or "",
+                    reverse=True,
+                )[0]
+                stamp = best.get("verification_stamp") or {}
+                va = best.get("verified_at") or (stamp.get("verified_at") if isinstance(stamp, dict) else None)
+                vn = best.get("verified_by_name") or (stamp.get("verified_by_name") if isinstance(stamp, dict) else "System Admin")
+                if dry_run:
+                    print(f"  [DRY-RUN] Pass 3 would backfill slot employee_id={employee_id_item} requirement_key={req_key}")
+                    slot_backfill_count += 1
+                    continue
+                result = await db.employee_documents.update_one(
+                    {
+                        "employee_id": employee_id_item,
+                        "requirement_key": req_key,
+                        "$or": [{"verified": {"$ne": True}}, {"verified": {"$exists": False}}],
+                    },
+                    {"$set": {"verified": True, "verified_at": va, "verified_by_name": vn,
+                              "updated_at": datetime.now(timezone.utc).isoformat()}},
+                )
+                if result.modified_count:
+                    await db.audit_logs.insert_one({
+                        "id": f"audit-slot-backfill-{employee_id_item}-{req_key}-{int(datetime.now(timezone.utc).timestamp())}",
+                        "action": "document_restamped_migration",
+                        "actor": "stamp_migration_cli",
+                        "entity_type": "employee_document",
+                        "entity_id": f"{employee_id_item}:{req_key}",
+                        "employee_id": employee_id_item,
+                        "mode": "backfill",
+                        "old_stamped_url": None,
+                        "new_stamped_url": None,
+                        "dry_run": False,
+                        "created_at": datetime.now(timezone.utc).isoformat(),
+                    })
+                    slot_backfill_count += 1
+
+        print(f"✓ Backfilled verified=True on {slot_backfill_count} requirement slots")
+    else:
+        print("\nPASS 3 skipped via --skip-pass-3")
 
     # Print summary
     print("\n" + "=" * 60)
@@ -428,5 +530,23 @@ async def run_migration(force_restamp: bool = False):
 
 
 if __name__ == "__main__":
-    force_restamp = "--restamp" in sys.argv
-    asyncio.run(run_migration(force_restamp=force_restamp))
+    parser = argparse.ArgumentParser(description="Backfill/restamp document verification stamps safely.")
+    parser.add_argument("--restamp", action="store_true", help="Restamp documents previously stamped by migration.")
+    parser.add_argument("--dry-run", action="store_true", help="Show intended actions without writing/uploading.")
+    parser.add_argument("--limit", type=int, default=500, help="Pass 1 max documents to process (default: 500).")
+    parser.add_argument("--employee-id", type=str, help="Restrict run to one employee_id.")
+    parser.add_argument("--document-id", type=str, help="Restrict run to one employee_documents.id.")
+    parser.add_argument("--skip-pass-2", action="store_true", help="Skip flat stamp field backfill pass.")
+    parser.add_argument("--skip-pass-3", action="store_true", help="Skip requirement slot verified backfill pass.")
+    args = parser.parse_args()
+    asyncio.run(
+        run_migration(
+            force_restamp=args.restamp,
+            dry_run=args.dry_run,
+            limit=args.limit,
+            employee_id=args.employee_id,
+            document_id=args.document_id,
+            skip_pass_2=args.skip_pass_2,
+            skip_pass_3=args.skip_pass_3,
+        )
+    )

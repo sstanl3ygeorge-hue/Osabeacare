@@ -3984,7 +3984,14 @@ export default function EmployeeProfilePage() {
     ?? employmentCoverage?.coverage_accounted_percent
     ?? employmentCoverage?.percent_accounted
   );
-  const displayCoveragePercent = Number.isFinite(accountedPercent) ? accountedPercent : coveragePercent;
+  const legacyPercent = Number(employmentCoverage?.percent);
+  const displayCoveragePercentRaw = Number.isFinite(accountedPercent)
+    ? accountedPercent
+    : (Number.isFinite(coveragePercent) ? coveragePercent : legacyPercent);
+  const displayCoveragePercent = Number.isFinite(displayCoveragePercentRaw)
+    ? Math.min(displayCoveragePercentRaw, 100)
+    : displayCoveragePercentRaw;
+  const directCoveragePercent = Number.isFinite(coveragePercent) ? Math.min(coveragePercent, 100) : coveragePercent;
   const coverageHasNumericPercent = Number.isFinite(displayCoveragePercent);
   const coverageTotalDaysRequired = Number(employmentCoverage?.total_days_required);
   const coverageTotalDaysCovered = Number(employmentCoverage?.total_days_covered);
@@ -5403,6 +5410,8 @@ export default function EmployeeProfilePage() {
           recruitmentApproved={employee?.recruitment_approved}
           showQuickActions={false}
           complianceFile={complianceFile}
+          trainingEvaluation={trainingEvaluation}
+          inductionChecklist={employee?.induction_checklist_summary || employee?.induction_summary || null}
           onNavigateToTab={(tab) => {
             setActiveTab(tab === 'compliance' ? 'checklist' : tab);
           }}
@@ -6671,7 +6680,7 @@ export default function EmployeeProfilePage() {
                         <p className="text-xs text-slate-500">{coverageInfoMessage}</p>
                       )}
                       <p className="text-xs text-slate-500">
-                        Direct employment coverage: {Number.isFinite(coveragePercent) ? `${coveragePercent}%` : 'Unavailable'}
+Direct employment coverage: {Number.isFinite(directCoveragePercent) ? `${directCoveragePercent}%` : 'Unavailable'}
                       </p>
                       {Number.isFinite(coverageTotalDaysExplained) && coverageTotalDaysExplained > 0 && (
                         <p className="text-xs text-slate-500">

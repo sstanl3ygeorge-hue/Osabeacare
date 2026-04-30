@@ -708,7 +708,8 @@ def compute_coverage_summary(
         else:
             merged_gap_acc.append((_s, _e))
     total_days_explained = sum((_e - _s).days for _s, _e in merged_gap_acc)
-    total_days_accounted = total_covered + total_days_explained
+    total_days_accounted_raw = total_covered + total_days_explained
+    total_days_accounted = min(total_days_required, total_days_accounted_raw)
     accounted_pct = round((total_days_accounted / total_days_required) * 100, 1) if total_days_required > 0 else 0.0
 
     # Determine if requirement is met: check for any unresolved gaps.
@@ -739,6 +740,7 @@ def compute_coverage_summary(
         "total_days_covered": total_covered,
         "coverage_percent": coverage_pct,
         "total_days_explained": total_days_explained,
+        "total_days_accounted_raw": total_days_accounted_raw,
         "total_days_accounted": total_days_accounted,
         "accounted_percent": accounted_pct,
         "earliest_entry_date": earliest_date.strftime("%Y-%m-%d") if earliest_date else None,

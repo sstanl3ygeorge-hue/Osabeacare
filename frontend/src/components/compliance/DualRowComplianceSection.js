@@ -903,8 +903,17 @@ export default function DualRowComplianceSection({
     );
   };
 
+  const normalizedEffectiveSections = normalizeComplianceSections(effectiveComplianceFile?.sections);
+  const hasAnySections = Object.keys(normalizedEffectiveSections).length > 0;
+  const hasRenderableSectionData = Object.values(normalizedEffectiveSections).some((section) => {
+    if (!section || typeof section !== 'object') return false;
+    if (Array.isArray(section.rows) && section.rows.length > 0) return true;
+    return Boolean(section.evaluation && typeof section.evaluation === 'object');
+  });
+  const hasUsableSections = hasAnySections && hasRenderableSectionData;
+
   // Loading state
-  if (loading) {
+  if (loading && !hasAnySections) {
     return (
       <div className="flex items-center justify-center py-12">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -914,7 +923,7 @@ export default function DualRowComplianceSection({
   }
 
   // Error state
-  if (error) {
+  if (error && !hasUsableSections) {
     return (
       <div className="text-center py-12">
         <AlertTriangle className="h-12 w-12 mx-auto text-red-400 mb-4" />
@@ -933,12 +942,7 @@ export default function DualRowComplianceSection({
     return null;
   }
 
-  const hasAnySections =
-    effectiveComplianceFile?.sections &&
-    typeof effectiveComplianceFile.sections === 'object' &&
-    Object.keys(effectiveComplianceFile.sections).length > 0;
-
-  if (effectiveComplianceFile?.status_unavailable && !hasAnySections) {
+  if (effectiveComplianceFile?.status_unavailable && !hasUsableSections) {
     return (
       <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
         <p className="font-medium">Compliance temporarily unavailable</p>
@@ -951,9 +955,9 @@ export default function DualRowComplianceSection({
   const { summary } = effectiveComplianceFile || {};
   // Deep clone sections to avoid mutating original
   const filteredSections = (() => {
-    if (!effectiveComplianceFile?.sections || typeof effectiveComplianceFile.sections !== 'object') return {};
+    if (!hasAnySections) return {};
     const clone = {};
-    for (const [sectionKey, section] of Object.entries(effectiveComplianceFile.sections)) {
+    for (const [sectionKey, section] of Object.entries(normalizedEffectiveSections)) {
       if (!section || !Array.isArray(section.rows)) {
         clone[sectionKey] = section;
         continue;
@@ -1044,6 +1048,11 @@ export default function DualRowComplianceSection({
 
   return (
     <div className="space-y-6" data-testid="dual-row-compliance-section">
+      {error && hasUsableSections && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+          Some compliance data could not be refreshed. Showing last available checklist data.
+        </div>
+      )}
       {/* Refresh Button */}
       <div className="flex justify-end">
         <Button 

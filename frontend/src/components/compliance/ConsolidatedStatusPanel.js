@@ -43,7 +43,9 @@ export default function ConsolidatedStatusPanel({
   recruitmentApproved,
   onRefresh,
   showQuickActions = true,
-  complianceFile = null
+  complianceFile = null,
+  trainingEvaluation = null,
+  inductionChecklist = null
 }) {
   const { token } = useAuth();
   const [loading, setLoading] = useState(true);
@@ -282,11 +284,28 @@ export default function ConsolidatedStatusPanel({
   // Use dual-row section breakdown for employee operational view when available.
   const checkRows = rowsByType.check || [];
   const evidenceRows = rowsByType.evidence || [];
-  const documentsFromChecks = checkRows.filter((row) => ['dbs', 'right_to_work', 'identity', 'proof_of_address'].includes(String(row?.requirement_id || row?.id || '').toLowerCase()));
-  const documentsCompletedFromChecks = documentsFromChecks.filter(isCompleteRow).length;
+  const documentsFromChecks = checkRows.filter((row) => {
+    const key = String(
+      row?.requirement_id || row?.requirement_key || row?.key || row?.id || row?.check_type || ''
+    ).toLowerCase();
+    return key.includes('dbs')
+      || key.includes('right_to_work')
+      || key.includes('identity')
+      || key.includes('proof_of_address')
+      || key.includes('address');
+  });
+  const documentsCompletedFromChecks = documentsFromChecks.filter((row) => {
+    const s = String(row?.status || '').toLowerCase();
+    return row?.is_verified === true || row?.verified === true || ['verified', 'approved', 'complete', 'completed'].includes(s);
+  }).length;
   const documentsTotalFromChecks = documentsFromChecks.length;
-  const trainingEvalItems = Array.isArray(complianceSections?.training?.evaluation?.items)
-    ? complianceSections.training.evaluation.items
+  const trainingEvalItems = Array.isArray(trainingEvaluation?.items)
+    ? trainingEvaluation.items
+    : (Array.isArray(complianceSections?.training?.evaluation?.items)
+      ? complianceSections.training.evaluation.items
+      : []);
+  const inductionChecklistItems = Array.isArray(inductionChecklist?.items)
+    ? inductionChecklist.items
     : [];
   const trainingItemsCompleted = trainingEvalItems.filter((item) => {
     const s = String(item?.status || '').toLowerCase();
@@ -296,6 +315,8 @@ export default function ConsolidatedStatusPanel({
   const inductionUnifiedCompleted = Number(inductionUnified?.completed);
   const inductionUnifiedTotal = Number(inductionUnified?.total);
   const activeNoInductionRequired = !isApplicant && (inductionUnified?.required === false || inductionUnified?.not_required === true);
+  const inductionChecklistCompleted = inductionChecklistItems.filter((item) => String(item?.status || '').toLowerCase() === 'completed').length;
+  const inductionChecklistTotal = inductionChecklistItems.length;
 
   const sectionBreakdown = {
     documents: {
@@ -351,12 +372,16 @@ export default function ConsolidatedStatusPanel({
       total: (rowsByType.form_acknowledgement || []).filter((r) => r?.latest_active !== false).length
     },
     induction: {
-      completed: Number.isFinite(inductionUnifiedCompleted)
+      completed: inductionChecklistTotal > 0
+        ? inductionChecklistCompleted
+        : (Number.isFinite(inductionUnifiedCompleted)
         ? inductionUnifiedCompleted
-        : ((rowsByType.induction || []).filter(isCompleteRow).length),
-      total: Number.isFinite(inductionUnifiedTotal)
+        : ((rowsByType.induction || []).filter(isCompleteRow).length)),
+      total: inductionChecklistTotal > 0
+        ? inductionChecklistTotal
+        : (Number.isFinite(inductionUnifiedTotal)
         ? inductionUnifiedTotal
-        : (activeNoInductionRequired ? 0 : (rowsByType.induction || []).length)
+        : (activeNoInductionRequired ? 0 : (rowsByType.induction || []).length))
     }
   };
   const breakdown = sectionProgressAvailable ? sectionBreakdown : (progress.categories || {});

@@ -285,21 +285,25 @@ export default function ConsolidatedStatusPanel({
   const checkRows = rowsByType.check || [];
   const evidenceRows = rowsByType.evidence || [];
   const coreDocumentSectionKeys = ['right_to_work', 'dbs', 'identity', 'proof_of_address'];
-  const coreDocumentCheckRows = coreDocumentSectionKeys
+  const coreDocumentSectionProgress = coreDocumentSectionKeys
     .map((sectionKey) => {
       const sectionRows = Array.isArray(complianceSections?.[sectionKey]?.rows)
         ? complianceSections[sectionKey].rows
         : [];
-      return sectionRows.find((row) => row?.row_type === 'check') || null;
-    })
-    .filter((row) => row && typeof row === 'object');
-  const documentsCompletedFromChecks = coreDocumentCheckRows.filter((row) => {
-    const s = String(row?.status || '').toLowerCase();
-    return row?.is_verified === true
-      || row?.verified === true
-      || ['verified', 'current', 'complete', 'completed', 'accepted', 'approved', 'recorded'].includes(s);
-  }).length;
-  const documentsTotalFromChecks = coreDocumentCheckRows.length;
+      const checkRow = sectionRows.find((row) => row?.row_type === 'check') || null;
+      const evidenceRow = sectionRows.find((row) => row?.row_type === 'evidence') || null;
+      const hasSection = Boolean(checkRow || evidenceRow);
+      const isRowComplete = (row) => {
+        const s = String(row?.status || '').toLowerCase();
+        return row?.is_verified === true
+          || row?.verified === true
+          || ['verified', 'current', 'complete', 'completed', 'accepted', 'approved', 'recorded'].includes(s);
+      };
+      const isComplete = isRowComplete(checkRow) || isRowComplete(evidenceRow);
+      return { hasSection, isComplete };
+    });
+  const documentsCompletedFromChecks = coreDocumentSectionProgress.filter((s) => s.hasSection && s.isComplete).length;
+  const documentsTotalFromChecks = coreDocumentSectionProgress.filter((s) => s.hasSection).length;
   const trainingEvalItems = Array.isArray(trainingEvaluation?.items)
     ? trainingEvaluation.items
     : (Array.isArray(complianceSections?.training?.evaluation?.items)
@@ -326,7 +330,7 @@ export default function ConsolidatedStatusPanel({
     },
     forms: {
       completed: (() => {
-        const recruitmentFormKeys = new Set(['interview_record', 'application_form', 'recruitment_checklist']);
+        const recruitmentFormKeys = new Set(['interview_record', 'application_form', 'recruitment_checklist', 'induction']);
         const formRows = (rowsByType.form || []).filter((row) => {
           if (isApplicant) return true;
           const key = String(
@@ -341,7 +345,7 @@ export default function ConsolidatedStatusPanel({
         return formRows.filter(isCompleteRow).length;
       })(),
       total: (() => {
-        const recruitmentFormKeys = new Set(['interview_record', 'application_form', 'recruitment_checklist']);
+        const recruitmentFormKeys = new Set(['interview_record', 'application_form', 'recruitment_checklist', 'induction']);
         const formRows = (rowsByType.form || []).filter((row) => {
           if (isApplicant) return true;
           const key = String(

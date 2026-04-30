@@ -4016,13 +4016,7 @@ export default function EmployeeProfilePage() {
     applicationSubmission ||
     applicationPdfDocument ||
     applicationEmbeddedRecord ||
-    applicationEvidenceRow?.is_verified === true ||
-    applicationEvidenceRow?.verified === true ||
-    ['verified', 'approved', 'complete', 'completed', 'submitted', 'on_file', 'recorded'].includes(
-      String(applicationEvidenceRow?.status || '').toLowerCase()
-    ) ||
-    applicationEvidenceRow?.file_url ||
-    applicationEvidenceRow?.document_url
+    applicationEvidenceRow
   );
   const cvFileExists = Boolean(
     cvDocument ||
@@ -4047,7 +4041,16 @@ export default function EmployeeProfilePage() {
   const cvLinkRecoveryAvailable = Boolean(fallbackPdfCvDocument && !cvReviewReady);
   const cvLegacyNonPdfOnly = Boolean(!cvReviewReady && !cvLinkRecoveryAvailable && activeNonPdfCvCandidates.length > 0);
   const cvEvidenceUrl = cvEvidenceRow?.file_url || cvEvidenceRow?.download_url || cvEvidenceRow?.view_url || cvEvidenceRow?.document_url || null;
-  const cvHasCanonicalEvidence = Boolean(cvFileExists && (cvEvidenceUrl || cvEvidenceRow?.is_verified || cvEvidenceRow?.verified));
+  const cvEvidenceHasStatus = ['verified', 'approved', 'complete', 'completed', 'submitted', 'on_file', 'recorded'].includes(
+    String(cvEvidenceRow?.status || '').toLowerCase()
+  );
+  const cvEmbeddedUrl = employee?.cv_url || employee?.cv_file_url || employee?.resume_url || null;
+  const cvHasCanonicalEvidence = Boolean(
+    activeCvDocument ||
+    cvDocument ||
+    (cvEvidenceRow && (cvEvidenceUrl || cvEvidenceRow?.is_verified === true || cvEvidenceRow?.verified === true || cvEvidenceHasStatus)) ||
+    cvEmbeddedUrl
+  );
   const cvCanViewFromFallback = !cvReviewReady && Boolean(cvEvidenceUrl);
   // Display-only: surface the admin-requested replacement state alongside the
   // "On file" badge so the admin view does not silently contradict the

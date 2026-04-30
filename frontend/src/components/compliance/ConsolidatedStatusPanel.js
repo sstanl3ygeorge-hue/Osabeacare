@@ -284,22 +284,22 @@ export default function ConsolidatedStatusPanel({
   // Use dual-row section breakdown for employee operational view when available.
   const checkRows = rowsByType.check || [];
   const evidenceRows = rowsByType.evidence || [];
-  const documentsFromChecks = checkRows.filter((row) => {
-    const key = String(
-      row?.requirement_id || row?.requirement_key || row?.key || row?.id || row?.check_type || ''
-    ).toLowerCase();
-    return key.includes('dbs')
-      || key.includes('rtw')
-      || key.includes('right_to_work')
-      || key.includes('identity')
-      || key.includes('proof_of_address')
-      || key.includes('address');
-  });
-  const documentsCompletedFromChecks = documentsFromChecks.filter((row) => {
+  const coreDocumentSectionKeys = ['right_to_work', 'dbs', 'identity', 'proof_of_address'];
+  const coreDocumentCheckRows = coreDocumentSectionKeys
+    .map((sectionKey) => {
+      const sectionRows = Array.isArray(complianceSections?.[sectionKey]?.rows)
+        ? complianceSections[sectionKey].rows
+        : [];
+      return sectionRows.find((row) => row?.row_type === 'check') || null;
+    })
+    .filter((row) => row && typeof row === 'object');
+  const documentsCompletedFromChecks = coreDocumentCheckRows.filter((row) => {
     const s = String(row?.status || '').toLowerCase();
-    return row?.is_verified === true || row?.verified === true || ['verified', 'approved', 'complete', 'completed'].includes(s);
+    return row?.is_verified === true
+      || row?.verified === true
+      || ['verified', 'current', 'complete', 'completed', 'accepted', 'approved', 'recorded'].includes(s);
   }).length;
-  const documentsTotalFromChecks = documentsFromChecks.length;
+  const documentsTotalFromChecks = coreDocumentCheckRows.length;
   const trainingEvalItems = Array.isArray(trainingEvaluation?.items)
     ? trainingEvaluation.items
     : (Array.isArray(complianceSections?.training?.evaluation?.items)

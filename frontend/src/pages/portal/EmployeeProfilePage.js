@@ -254,9 +254,8 @@ export default function EmployeeProfilePage() {
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   
-  // Route context detection - determines if viewing from recruitment or employee context
-  const isRecruitmentView = location.pathname.startsWith('/portal/recruitment/');
-  const profileMode = isRecruitmentView ? 'applicant' : 'employee';
+  // Route context detection - URL is only an initial hint until canonical stage is loaded
+  const urlIsRecruitmentView = location.pathname.startsWith('/portal/recruitment/');
   
   // Initialize active tab from URL for navigation state persistence
   const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'employment');
@@ -266,6 +265,10 @@ export default function EmployeeProfilePage() {
     isActiveLifecycleStatus(employee?.employee_status) ||
     isActiveLifecycleStatus(employee?.status);
   const canonicalStage = getCanonicalPersonStage(employee);
+  const isRecruitmentView = employee
+    ? (canonicalStage === 'applicant')
+    : urlIsRecruitmentView;
+  const profileMode = isRecruitmentView ? 'applicant' : 'employee';
   const isPreEmploymentEmployee =
     !isActiveEmployee && (
       canonicalStage === 'employee' ||
@@ -562,6 +565,17 @@ export default function EmployeeProfilePage() {
   const [viewerDocument, setViewerDocument] = useState(null);
   
   const { token, isAuditor, isAdmin, user } = useAuth();
+
+  useEffect(() => {
+    if (!employee) return;
+    const targetBase = canonicalStage === 'applicant' ? '/portal/recruitment' : '/portal/employees';
+    const inRecruitmentPath = location.pathname.startsWith('/portal/recruitment/');
+    const inEmployeesPath = location.pathname.startsWith('/portal/employees/');
+    const shouldGoRecruitment = canonicalStage === 'applicant' && !inRecruitmentPath;
+    const shouldGoEmployees = canonicalStage !== 'applicant' && !inEmployeesPath;
+    if (!shouldGoRecruitment && !shouldGoEmployees) return;
+    navigate(`${targetBase}/${employeeId}${location.search || ''}`, { replace: true });
+  }, [employee, canonicalStage, location.pathname, location.search, navigate, employeeId]);
   
   // Document preview modal state
   const [previewOpen, setPreviewOpen] = useState(false);

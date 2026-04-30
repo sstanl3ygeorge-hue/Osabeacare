@@ -4582,14 +4582,28 @@ export default function EmployeeProfilePage() {
               return 'gray';
             };
 
-            const dbsStatus = dbsWorkflow?.label || dbsCheckRow?.status_summary || (complianceSections?.dbs ? 'Awaiting review' : 'Unavailable');
+            const dbsCheckData = dbsCheckRow?.check_data || {};
+            const dbsCheckOutcome = String(dbsCheckData?.outcome || dbsCheckRow?.status || '').toLowerCase();
+            const dbsIsVerified = dbsCheckRow?.is_verified === true
+              || dbsCheckRow?.verified === true
+              || dbsCheckOutcome === 'verified';
+            const dbsStatus = dbsIsVerified
+              ? 'Verified'
+              : (dbsWorkflow?.label || dbsCheckRow?.status_summary || (complianceSections?.dbs ? 'Awaiting review' : 'Unavailable'));
             const dbsChecked = dbsCheckRow?.check_data?.checked_at || dbsCheckRow?.verified_at || null;
             const dbsReview = dbsCheckRow?.check_data?.review_due_at || dbsCheckRow?.check_data?.next_recheck_date || null;
             const dbsDays = Number.isFinite(dbsCheckRow?.check_data?.days_until_review)
               ? dbsCheckRow.check_data.days_until_review
               : null;
 
-            const rtwStatus = rtwWorkflow?.label || rtwCheckRow?.status_summary || (complianceSections?.right_to_work ? 'Awaiting review' : 'Unavailable');
+            const rtwCheckData = rtwCheckRow?.check_data || {};
+            const rtwCheckOutcome = String(rtwCheckData?.outcome || rtwCheckRow?.status || '').toLowerCase();
+            const rtwIsVerified = rtwCheckRow?.is_verified === true
+              || rtwCheckRow?.verified === true
+              || rtwCheckOutcome === 'verified';
+            const rtwStatus = rtwIsVerified
+              ? 'Verified'
+              : (rtwWorkflow?.label || rtwCheckRow?.status_summary || (complianceSections?.right_to_work ? 'Awaiting review' : 'Unavailable'));
             const rtwChecked = rtwCheckRow?.check_data?.checked_at || rtwCheckRow?.verified_at || null;
             const rtwExpiry = rtwCheckRow?.check_data?.permission_end_date || null;
             const rtwDays = Number.isFinite(rtwCheckRow?.check_data?.days_until_expiry)
@@ -4618,15 +4632,25 @@ export default function EmployeeProfilePage() {
               ?? trainingEvalSummary?.verified
               ?? trainingEvalSummary?.completed
             );
+            const canonicalTrainingCompleted = Number(
+              trainingCategory?.completed
+              ?? trainingCategory?.verified
+              ?? canonicalProgress?.categories?.training?.completed
+            );
+            const canonicalTrainingRequired = Number(
+              trainingCategory?.total
+              ?? trainingCategory?.required
+              ?? canonicalProgress?.categories?.training?.total
+            );
             const trainingRequired = trainingSectionRequired ?? (
               Number.isFinite(trainingEvalRequired)
                 ? trainingEvalRequired
-                : (Number.isFinite(trainingCategory?.total) ? trainingCategory.total : null)
+                : (Number.isFinite(canonicalTrainingRequired) ? canonicalTrainingRequired : null)
             );
             const trainingCompleted = trainingSectionCompleted ?? (
               Number.isFinite(trainingEvalVerified)
                 ? trainingEvalVerified
-                : (Number.isFinite(trainingCategory?.completed) ? trainingCategory.completed : null)
+                : (Number.isFinite(canonicalTrainingCompleted) ? canonicalTrainingCompleted : null)
             );
             const trainingExpiring = trainingOperationalRows.length > 0
               ? trainingOperationalRows.filter((row) => String(row?.status || '').toLowerCase() === 'expiring_soon').length
@@ -4641,8 +4665,9 @@ export default function EmployeeProfilePage() {
             const agreementItems = agreementsSectionRows.length > 0
               ? agreementsSectionRows
               : asArray(agreementsCategory?.items);
+            const canonicalAgreementRows = asArray(complianceSections?.agreements?.rows).filter((row) => row?.row_type === 'form_acknowledgement');
             const selectLatestAgreement = (matcher) => {
-              const scoped = agreementItems.filter((item) =>
+              const scoped = (canonicalAgreementRows.length > 0 ? canonicalAgreementRows : agreementItems).filter((item) =>
                 matcher(String(item?.id || item?.requirement_id || item?.agreement_type || ''))
               );
               if (!scoped.length) return null;
@@ -4661,8 +4686,10 @@ export default function EmployeeProfilePage() {
               });
               return byState[0];
             };
-            const contractStatus = selectLatestAgreement((id) => id.includes('contract'))?.status || 'Unavailable';
-            const handbookStatus = selectLatestAgreement((id) => id.includes('handbook'))?.status || 'Unavailable';
+            const contractAgreement = selectLatestAgreement((id) => id.includes('contract'));
+            const handbookAgreement = selectLatestAgreement((id) => id.includes('handbook'));
+            const contractStatus = contractAgreement?.state_label || contractAgreement?.status || 'Unavailable';
+            const handbookStatus = handbookAgreement?.state_label || handbookAgreement?.status || 'Unavailable';
             const inductionSectionRequired = inductionSectionRows.length > 0 ? inductionSectionRows.length : null;
             const inductionSectionCompleted = inductionSectionRows.length > 0
               ? inductionSectionRows.filter((row) => {
@@ -4747,7 +4774,9 @@ export default function EmployeeProfilePage() {
                     <p className={`text-sm font-semibold mt-1 ${textClass(agreementsTone)}`}>Contract: {contractStatus}</p>
                     <p className="text-xs text-text-muted mt-1">Handbook: {handbookStatus}</p>
                     <p className="text-xs text-text-muted">
-                      Induction: {inductionCompleted == null || inductionRequired == null ? 'Unavailable' : `${inductionCompleted}/${inductionRequired}`}
+                      Induction: {inductionCompleted == null || inductionRequired == null
+                        ? (String(employee?.status || '').toLowerCase() === 'active' ? 'Not required' : 'Unavailable')
+                        : `${inductionCompleted}/${inductionRequired}`}
                     </p>
                   </div>
                 </div>

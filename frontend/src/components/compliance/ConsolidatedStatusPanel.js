@@ -231,6 +231,24 @@ export default function ConsolidatedStatusPanel({
     const s = String(row?.status || '').toLowerCase();
     return row?.is_verified === true || row?.verified === true || ['verified', 'accepted', 'approved', 'completed', 'complete', 'recorded', 'acknowledged'].includes(s);
   };
+  const isAgreementCompleteRow = (row) => {
+    const s = String(row?.status || row?.contract_state || '').toLowerCase();
+    return (
+      row?.is_verified === true ||
+      row?.verified === true ||
+      [
+        'verified',
+        'complete',
+        'completed',
+        'accepted',
+        'approved',
+        'recorded',
+        'acknowledged',
+        'signed',
+        'fully_executed',
+      ].includes(s)
+    );
+  };
   const progressBlockerDetails = Array.isArray(progress.blocker_details) ? progress.blocker_details : [];
   const progressBlockerStrings = Array.isArray(progress.blockers)
     ? progress.blockers.map((blocker) => (
@@ -259,22 +277,30 @@ export default function ConsolidatedStatusPanel({
     ? Math.round((sectionCompletedRows / sectionTotalRows) * 100)
     : Number(progress?.overall_percentage ?? 0);
 
-  const progressCompleted = canonicalProgressAvailable ? canonicalCompleted : fallbackCompleted;
-  const progressTotal = canonicalProgressAvailable ? canonicalTotal : fallbackTotal;
-  const progressCountAvailable = canonicalProgressAvailable ? true : fallbackCountAvailable;
-  const progressPercentage = canonicalProgressAvailable ? canonicalPercentage : fallbackPercentage;
-  const progressHeadlineLabel = canonicalProgressAvailable
-    ? `${progressCompleted} of ${progressTotal} items submitted (${progressPercentage}%)`
-    : progressCountAvailable
-      ? `${progressCompleted} of ${progressTotal} items submitted (${progressPercentage}%) [estimated]`
-      : `item count unavailable (${progressPercentage}%) [estimated]`;
   const isApplicant = personStage === 'applicant';
   
   // Use dual-row section breakdown for employee operational view when available.
+  const checkRows = rowsByType.check || [];
+  const evidenceRows = rowsByType.evidence || [];
+  const documentsFromChecks = checkRows.filter((row) => ['dbs', 'right_to_work', 'identity', 'proof_of_address'].includes(String(row?.requirement_id || row?.id || '').toLowerCase()));
+  const documentsCompletedFromChecks = documentsFromChecks.filter(isCompleteRow).length;
+  const documentsTotalFromChecks = documentsFromChecks.length;
+  const trainingEvalItems = Array.isArray(complianceSections?.training?.evaluation?.items)
+    ? complianceSections.training.evaluation.items
+    : [];
+  const trainingItemsCompleted = trainingEvalItems.filter((item) => {
+    const s = String(item?.status || '').toLowerCase();
+    return item?.completed === true || ['verified', 'current', 'complete', 'completed'].includes(s);
+  }).length;
+  const inductionUnified = progress?.categories?.induction || progress?.category_details?.induction || {};
+  const inductionUnifiedCompleted = Number(inductionUnified?.completed);
+  const inductionUnifiedTotal = Number(inductionUnified?.total);
+  const activeNoInductionRequired = !isApplicant && (inductionUnified?.required === false || inductionUnified?.not_required === true);
+
   const sectionBreakdown = {
     documents: {
-      completed: (rowsByType.evidence || []).filter(isCompleteRow).length,
-      total: (rowsByType.evidence || []).length
+      completed: documentsTotalFromChecks > 0 ? documentsCompletedFromChecks : evidenceRows.filter(isCompleteRow).length,
+      total: documentsTotalFromChecks > 0 ? documentsTotalFromChecks : evidenceRows.length
     },
     forms: {
       completed: (() => {
@@ -309,24 +335,48 @@ export default function ConsolidatedStatusPanel({
       })()
     },
     training: {
-      completed: (rowsByType.training || []).filter(isCompleteRow).length
-        + (rowsByType.training_record || []).filter(isCompleteRow).length,
-      total: (rowsByType.training || []).length + (rowsByType.training_record || []).length
+      completed: trainingEvalItems.length > 0
+        ? trainingItemsCompleted
+        : (rowsByType.training || []).filter(isCompleteRow).length + (rowsByType.training_record || []).filter(isCompleteRow).length,
+      total: trainingEvalItems.length > 0
+        ? trainingEvalItems.length
+        : (rowsByType.training || []).length + (rowsByType.training_record || []).length
     },
     references: {
       completed: (rowsByType.reference || []).filter(isCompleteRow).length,
       total: (rowsByType.reference || []).length
     },
     agreements: {
-      completed: (rowsByType.form_acknowledgement || []).filter((r) => r?.latest_active !== false).filter(isCompleteRow).length,
+      completed: (rowsByType.form_acknowledgement || []).filter((r) => r?.latest_active !== false).filter(isAgreementCompleteRow).length,
       total: (rowsByType.form_acknowledgement || []).filter((r) => r?.latest_active !== false).length
     },
     induction: {
-      completed: (rowsByType.induction || []).filter(isCompleteRow).length,
-      total: (rowsByType.induction || []).length
+      completed: Number.isFinite(inductionUnifiedCompleted)
+        ? inductionUnifiedCompleted
+        : ((rowsByType.induction || []).filter(isCompleteRow).length),
+      total: Number.isFinite(inductionUnifiedTotal)
+        ? inductionUnifiedTotal
+        : (activeNoInductionRequired ? 0 : (rowsByType.induction || []).length)
     }
   };
   const breakdown = sectionProgressAvailable ? sectionBreakdown : (progress.categories || {});
+  const tileKeys = ['documents', 'forms', 'training', 'references', 'agreements', 'induction'];
+  const tileTotals = tileKeys.reduce((acc, key) => {
+    const d = breakdown[key] || { completed: 0, total: 0 };
+    const total = Number(d.total) || 0;
+    const completed = Math.min(Number(d.completed) || 0, total);
+    acc.completed += completed;
+    acc.total += total;
+    return acc;
+  }, { completed: 0, total: 0 });
+  const progressCompleted = tileTotals.completed;
+  const progressTotal = tileTotals.total;
+  const progressCountAvailable = progressTotal > 0;
+  const progressPercentage = progressCountAvailable ? Math.round((progressCompleted / progressTotal) * 100) : (canonicalProgressAvailable ? canonicalPercentage : fallbackPercentage);
+  const usesEstimated = !(sectionProgressAvailable || canonicalProgressAvailable);
+  const progressHeadlineLabel = progressCountAvailable
+    ? `${progressCompleted} of ${progressTotal} items submitted (${progressPercentage}%)${usesEstimated ? ' [estimated]' : ''}`
+    : `item count unavailable (${progressPercentage}%)${usesEstimated ? ' [estimated]' : ''}`;
 
   // Determine overall status
 

@@ -3310,15 +3310,19 @@ async def _create_required_stamped_file_for_document(doc: dict, stamp_data: dict
     file_ext = "pdf"
 
     try:
-        if "pdf" in content_type or file_url.lower().endswith(".pdf") or is_image:
-            from services.pdf_service import stamp_evidence_document
-            stamped_bytes = stamp_evidence_document(
-                document_bytes=original_bytes,
-                admin_name=stamp_data.get("verified_by_name", "Admin"),
-                verified_at=stamp_data.get("verified_at", ""),
-                verification_id=stamp_data.get("verification_id", ""),
-                is_image=is_image,
-            )
+        if "pdf" in content_type or file_url.lower().endswith(".pdf"):
+            stamped_bytes = add_verification_stamp_to_pdf(original_bytes, stamp_data)
+        elif is_image:
+            original_format = "PNG"
+            if "jpeg" in content_type or "jpg" in content_type:
+                original_format = "JPEG"
+            elif "webp" in content_type:
+                original_format = "WEBP"
+            elif "bmp" in content_type:
+                original_format = "BMP"
+            elif "tiff" in content_type:
+                original_format = "TIFF"
+            stamped_bytes = add_verification_stamp_to_image(original_bytes, stamp_data, original_format)
         else:
             converted_pdf = convert_document_to_pdf(original_bytes, content_type, file_url)
             stamped_bytes = add_verification_stamp_to_pdf(converted_pdf, stamp_data) if converted_pdf else None
@@ -3404,8 +3408,10 @@ async def stamp_and_persist_document(
 
     existing_stamp = document.get("verification_stamp")
     existing_stamped_url = document.get("stamped_file_url")
+    existing_stamped_renderer = str(document.get("stamped_renderer") or "").strip().lower()
     already_stamped = bool(
         existing_stamped_url
+        and existing_stamped_renderer == "branded_evidence_stamp_v1"
         and existing_stamp not in (None, "", False)
         and document.get("verification_stamp_at")
         and document.get("verification_stamp_by_name")
@@ -3465,6 +3471,7 @@ async def stamp_and_persist_document(
         "reviewed_by": verifier_id,
         "reviewed_by_name": verifier_name,
         "stamped_file_url": stamped_file_url,
+        "stamped_renderer": "branded_evidence_stamp_v1",
         "stamp_burned_at": now,
         "updated_at": now,
         "rejection_reason": None,

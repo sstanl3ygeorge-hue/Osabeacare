@@ -3980,9 +3980,22 @@ export default function EmployeeProfilePage() {
     ? (employmentReview?.coverage || null)
     : (employmentHistoryGapRow?.employment_coverage || null);
   const coveragePercent = Number(employmentCoverage?.coverage_percent ?? employmentCoverage?.percent);
-  const coverageHasNumericPercent = Number.isFinite(coveragePercent);
+  const accountedPercent = Number(
+    employmentCoverage?.accounted_percent
+    ?? employmentCoverage?.coverage_accounted_percent
+    ?? employmentCoverage?.percent_accounted
+  );
+  const displayCoveragePercent = Number.isFinite(accountedPercent) ? accountedPercent : coveragePercent;
+  const coverageHasNumericPercent = Number.isFinite(displayCoveragePercent);
   const coverageTotalDaysRequired = Number(employmentCoverage?.total_days_required);
   const coverageTotalDaysCovered = Number(employmentCoverage?.total_days_covered);
+  const coverageTotalDaysExplained = Number(
+    employmentCoverage?.total_days_explained
+    ?? employmentCoverage?.days_explained
+    ?? employmentCoverage?.explained_days
+  );
+  const coverageInformationalOnly = Boolean(employmentCoverage?.informational_only);
+  const coverageInfoMessage = employmentCoverage?.message || employmentCoverage?.note || null;
   const coverageHasUsableSummary = Boolean(
     employmentCoverage &&
     coverageHasNumericPercent &&
@@ -3990,12 +4003,12 @@ export default function EmployeeProfilePage() {
     coverageTotalDaysRequired > 0 &&
     Number.isFinite(coverageTotalDaysCovered)
   );
-  const coverageDisplayPercent = coverageHasUsableSummary ? coveragePercent : 0;
+  const coverageDisplayPercent = coverageHasUsableSummary ? displayCoveragePercent : 0;
   const coverageLooksStaleOrUnusable = Boolean(
     employmentCoverage &&
     employmentHistoryHasDatedRows &&
     coverageHasNumericPercent &&
-    coveragePercent === 0 &&
+    displayCoveragePercent === 0 &&
     !employmentCoverage?.earliest_entry_date &&
     !employmentCoverage?.latest_entry_date
   );
@@ -6610,8 +6623,8 @@ export default function EmployeeProfilePage() {
               {employmentGapEvaluation?.is_complete !== undefined && (
                 <div className="rounded-xl border border-[#E4E8EB] bg-white p-3 shadow-sm">
                   <p className="text-xs text-text-muted">10-year coverage</p>
-                  <Badge variant="outline" className={`mt-2 ${gapAnalysisRun && employmentGapEvaluation.is_complete && coverageMet && (employmentCoverage?.coverage_percent ?? 0) > 0 ? 'bg-green-100 text-green-700 border-green-200' : 'bg-amber-100 text-amber-700 border-amber-200'}`}>
-                    {gapAnalysisRun && employmentGapEvaluation.is_complete && coverageMet && (employmentCoverage?.coverage_percent ?? 0) > 0 ? 'Coverage met' : 'Incomplete'}
+                  <Badge variant="outline" className={`mt-2 ${gapAnalysisRun && employmentGapEvaluation.is_complete && coverageMet && coverageDisplayPercent > 0 ? 'bg-green-100 text-green-700 border-green-200' : 'bg-amber-100 text-amber-700 border-amber-200'}`}>
+                    {gapAnalysisRun && employmentGapEvaluation.is_complete && coverageMet && coverageDisplayPercent > 0 ? 'Coverage met' : 'Incomplete'}
                   </Badge>
                 </div>
               )}
@@ -6643,7 +6656,7 @@ export default function EmployeeProfilePage() {
                     )}
                     <div className="flex-1 space-y-2">
                       <p className={`text-sm font-medium ${coverageMet ? 'text-green-800' : 'text-amber-800'}`}>
-                        10-Year Employment Coverage: {coveragePercent}%
+                        10-Year Employment Coverage: {coverageDisplayPercent}%
                       </p>
                       <p className="text-xs text-slate-600">
                         Required: {employmentCoverage.coverage_start ? new Date(employmentCoverage.coverage_start + 'T00:00:00Z').toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }) : '?'} — Today
@@ -6655,9 +6668,17 @@ export default function EmployeeProfilePage() {
                           style={{ width: `${Math.min(coverageDisplayPercent, 100)}%` }}
                         />
                       </div>
+                      {coverageInformationalOnly && coverageInfoMessage && (
+                        <p className="text-xs text-slate-500">{coverageInfoMessage}</p>
+                      )}
                       <p className="text-xs text-slate-500">
-                        Applicant-submitted explanations do not add dated employment coverage. They explain gaps but do not extend the covered period.
+                        Direct employment coverage: {Number.isFinite(coveragePercent) ? `${coveragePercent}%` : 'Unavailable'}
                       </p>
+                      {Number.isFinite(coverageTotalDaysExplained) && coverageTotalDaysExplained > 0 && (
+                        <p className="text-xs text-slate-500">
+                          Verified gap explanations accounted for {coverageTotalDaysExplained} days
+                        </p>
+                      )}
                       <p className="text-xs text-slate-500">
                         {employmentCoverage.total_days_covered} of {employmentCoverage.total_days_required} days covered
                         {employmentCoverage.earliest_entry_date && ` · Earliest entry: ${new Date(employmentCoverage.earliest_entry_date + 'T00:00:00Z').toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })}`}

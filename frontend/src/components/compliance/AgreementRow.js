@@ -111,6 +111,9 @@ export default function AgreementRow({
   const lifecycleStatus = getLifecycleStatus();
   const contractResolution = resolveLatestContractState(acknowledgement_data, {});
   const normalizedContractStatus = contractResolution.status;
+  const isContractRow =
+    key === 'contract_acceptance' ||
+    String(agreement_type || '').toLowerCase() === 'contract_acceptance';
   const isAwaitingWorkerSignature = contractResolution.isAwaitingWorkerSignature;
   const canonicalLifecycleStatus = String(
     acknowledgement_data?.current_lifecycle?.status ||
@@ -120,12 +123,12 @@ export default function AgreementRow({
   const canonicalLatestActive = acknowledgement_data?.latest_active === true;
   const canonicalStatus = String(acknowledgement_data?.status || '').trim().toLowerCase();
   const contractNeedsReissue =
-    key === 'contract_acceptance' &&
+    isContractRow &&
     canonicalLatestActive &&
     !isAwaitingWorkerSignature &&
     ['rejected', 'rejected_reopen_required', 'action_required', 'superseded'].includes(normalizedContractStatus);
   const shouldShowReissueButton =
-    key === 'contract_acceptance' &&
+    isContractRow &&
     typeof onReissueContract === 'function' &&
     contractNeedsReissue;
   const contractArtifactUrl =
@@ -134,9 +137,25 @@ export default function AgreementRow({
     acknowledgement_data?.rendered_contract_pdf_url ||
     acknowledgement_data?.rendered_file_url;
   const effectiveLifecycleStatus =
-    key === 'contract_acceptance' && isAwaitingWorkerSignature
+    isContractRow && isAwaitingWorkerSignature
       ? 'submitted'
       : (canonicalLifecycleStatus || lifecycleStatus);
+  const contractDateLabel = isContractRow
+    ? (
+        acknowledgement_data?.company_signed_at
+          ? `Executed ${formatBackendDate(acknowledgement_data.company_signed_at, { format: 'medium' })}`
+          : acknowledgement_data?.worker_signed_at
+            ? `Worker signed ${formatBackendDate(acknowledgement_data.worker_signed_at, { format: 'medium' })}`
+            : (acknowledgement_data?.signed_at || acknowledgement_data?.completed_at)
+              ? `Signed ${formatBackendDate(acknowledgement_data?.signed_at || acknowledgement_data?.completed_at, { format: 'medium' })}`
+              : null
+      )
+    : null;
+  const contractCountersignReady = isContractRow && (
+    effectiveLifecycleStatus === 'awaiting_company_countersignature' ||
+    normalizedContractStatus === 'awaiting_company_countersignature' ||
+    canonicalStatus === 'awaiting_company_countersignature'
+  );
 
   // Status colors and icons
   const getStatusConfig = () => {
@@ -460,6 +479,9 @@ export default function AgreementRow({
                 </Badge>
               )}
             </div>
+            {contractDateLabel && (
+              <p className="text-xs text-gray-500 mt-0.5">{contractDateLabel}</p>
+            )}
           </div>
           
           {/* Status Badge */}
@@ -477,13 +499,15 @@ export default function AgreementRow({
                   'Awaiting worker' status badge and no action button. */}
 
               {/* View Submission - for submitted/verified */}
-              {(effectiveLifecycleStatus === 'submitted' || effectiveLifecycleStatus === 'verified' || effectiveLifecycleStatus === 'rejected') && (
+              {(isContractRow
+                ? Boolean(contractArtifactUrl)
+                : (effectiveLifecycleStatus === 'submitted' || effectiveLifecycleStatus === 'verified' || effectiveLifecycleStatus === 'rejected')) && (
                 <Button
                   size="sm"
                   variant="outline"
                   onClick={(e) => { 
                     e.stopPropagation(); 
-                    if (key === 'contract_acceptance' && contractArtifactUrl) {
+                    if (isContractRow && contractArtifactUrl) {
                       window.open(contractArtifactUrl, '_blank', 'noopener,noreferrer');
                     } else if (onViewSubmission) {
                       const submissionId = submission_data?.id || acknowledgement_data?.submission_id;
@@ -537,7 +561,7 @@ export default function AgreementRow({
               )}
 
               {/* Verify / Reject for awaiting review */}
-              {effectiveLifecycleStatus === 'submitted' && (
+              {(effectiveLifecycleStatus === 'submitted' || contractCountersignReady) && (
                 <>
                   <Button
                     size="sm"
@@ -548,7 +572,7 @@ export default function AgreementRow({
                     data-testid={`verify-${key}`}
                   >
                     {isProcessing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle className="h-3.5 w-3.5 mr-1" />}
-                    {key === 'contract_acceptance' ? 'Countersign' : 'Verify'}
+                    {isContractRow ? 'Countersign' : 'Verify'}
                   </Button>
                   <Button
                     size="sm"
@@ -565,7 +589,9 @@ export default function AgreementRow({
               )}
               
               {/* Export PDF for completed */}
-              {(effectiveLifecycleStatus === 'submitted' || effectiveLifecycleStatus === 'verified') && (submission_data?.id || acknowledgement_data?.submission_id) && (
+              {(isContractRow
+                ? Boolean(contractArtifactUrl)
+                : ((effectiveLifecycleStatus === 'submitted' || effectiveLifecycleStatus === 'verified') && (submission_data?.id || acknowledgement_data?.submission_id))) && (
                 <Button
                   size="sm"
                   variant="ghost"

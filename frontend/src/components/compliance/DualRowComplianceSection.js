@@ -532,10 +532,16 @@ export default function DualRowComplianceSection({
     // Count blockers in this section
     const blockers = section.rows.filter(r => r?.blocker_text);
     const isAgreementsSection = sectionKey === 'agreements';
+    const keepAgreementOperational = (row) => {
+      const status = String(row?.status || row?.current_lifecycle?.status || '').toLowerCase();
+      const isCanonicalComplete = row?.is_verified === true || ['fully_executed', 'verified', 'completed', 'complete', 'signed', 'acknowledged'].includes(status);
+      if (isCanonicalComplete) return true;
+      return row?.latest_active !== false;
+    };
     const agreementRows = isAgreementsSection
       ? section.rows
           .filter((row) => row?.row_type === 'form_acknowledgement')
-          .filter((row) => row?.latest_active !== false)
+          .filter((row) => keepAgreementOperational(row))
           .filter((row, idx, arr) => {
             const stableKey = [
               row?.source_record_id,
@@ -572,7 +578,7 @@ export default function DualRowComplianceSection({
     )).length;
     
     const operationalRows = section.rows
-      .filter((row) => row?.latest_active !== false)
+      .filter((row) => !isAgreementsSection || keepAgreementOperational(row))
       .filter((row, idx, arr) => {
         const stableKey = [
           row?.row_type,

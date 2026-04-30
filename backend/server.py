@@ -1016,7 +1016,7 @@ async def get_compliance_requirements_for_employee(employee_id: str, role: str =
     }, {"_id": 0}).to_list(100)
     
     requirements = []
-    from agreement_document_service import resolve_employee_agreement_state, CONTRACT_AGREEMENT_TYPE, HANDBOOK_AGREEMENT_TYPE
+    from agreement_document_service import read_employee_agreement_state, CONTRACT_AGREEMENT_TYPE, HANDBOOK_AGREEMENT_TYPE
     _agreement_resolver_calls = 0
     _agreement_cache = {}
     async def _resolve_agreement_once(agreement_type: str):
@@ -1025,7 +1025,7 @@ async def get_compliance_requirements_for_employee(employee_id: str, role: str =
         if cache_key in _agreement_cache:
             return _agreement_cache[cache_key]
         _agreement_resolver_calls += 1
-        resolved = await resolve_employee_agreement_state(db, db_employee, agreement_type)
+        resolved = await read_employee_agreement_state(db, db_employee, agreement_type)
         _agreement_cache[cache_key] = resolved
         return resolved
     db_employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
@@ -2672,10 +2672,10 @@ async def calculate_work_readiness_3tier(
     from agreement_document_service import (
         CONTRACT_AGREEMENT_TYPE,
         HANDBOOK_AGREEMENT_TYPE,
-        resolve_employee_agreement_state,
+        read_employee_agreement_state,
     )
 
-    contract_state = await resolve_employee_agreement_state(db, employee_data, CONTRACT_AGREEMENT_TYPE)
+    contract_state = await read_employee_agreement_state(db, employee_data, CONTRACT_AGREEMENT_TYPE)
     contract_status = (contract_state.get("status") or "").lower()
     contract_signed = contract_status in {"fully_executed", "signed", "verified", "completed"}
     if not contract_signed:
@@ -2692,7 +2692,7 @@ async def calculate_work_readiness_3tier(
                 "message": "Contract Acceptance required"
             })
 
-    handbook_state = await resolve_employee_agreement_state(db, employee_data, HANDBOOK_AGREEMENT_TYPE)
+    handbook_state = await read_employee_agreement_state(db, employee_data, HANDBOOK_AGREEMENT_TYPE)
     handbook_status = (handbook_state.get("status") or "").lower()
     handbook_done = handbook_status in {"verified", "acknowledged", "signed", "completed"}
     if not handbook_done:
@@ -8975,7 +8975,7 @@ async def sign_contract(
         ContractRenderError,
         create_worker_signed_contract,
         ensure_agreement_rendered,
-        resolve_employee_agreement_state,
+        read_employee_agreement_state,
     )
     from supabase_storage import upload_file_to_storage
 
@@ -8989,7 +8989,7 @@ async def sign_contract(
     if not signature_url:
         raise HTTPException(status_code=500, detail="Failed to persist signature image")
 
-    resolved_contract = await resolve_employee_agreement_state(db, employee, CONTRACT_AGREEMENT_TYPE)
+    resolved_contract = await read_employee_agreement_state(db, employee, CONTRACT_AGREEMENT_TYPE)
     resolved_status = (resolved_contract.get("status") or "").lower()
     if resolved_status == "awaiting_worker_signature":
         resolved_status = "pending_signature"
@@ -9073,7 +9073,7 @@ async def sign_contract(
     if not resolved_contract.get("template_version") or not resolved_contract.get("rendered_file_url"):
         try:
             await ensure_agreement_rendered(db, employee, CONTRACT_AGREEMENT_TYPE)
-            refreshed = await resolve_employee_agreement_state(db, employee, CONTRACT_AGREEMENT_TYPE)
+            refreshed = await read_employee_agreement_state(db, employee, CONTRACT_AGREEMENT_TYPE)
             if refreshed.get("source_record_id"):
                 resolved_contract["source_record_id"] = refreshed.get("source_record_id")
             resolved_contract["template_version"] = resolved_contract.get("template_version") or refreshed.get("template_version")
@@ -9175,7 +9175,7 @@ async def sign_contract(
         "contract_url": contract_record.get("worker_signed_contract_pdf_url") or contract_record.get("rendered_contract_pdf_url"),
         "rendered_file_url": contract_record.get("rendered_contract_pdf_url") or contract_record.get("rendered_file_url"),
         "signed_at": contract_record.get("worker_signed_at") or now.isoformat(),
-        "canonical_contract": await resolve_employee_agreement_state(db, employee, CONTRACT_AGREEMENT_TYPE),
+        "canonical_contract": await read_employee_agreement_state(db, employee, CONTRACT_AGREEMENT_TYPE),
     }
 
 
@@ -18735,7 +18735,7 @@ async def get_requirement_unified_history(
             })
     
     # 5. Get agreement acknowledgements (for agreement-type requirements) via canonical resolver
-    from agreement_document_service import resolve_employee_agreement_state, CONTRACT_AGREEMENT_TYPE, HANDBOOK_AGREEMENT_TYPE
+    from agreement_document_service import read_employee_agreement_state, CONTRACT_AGREEMENT_TYPE, HANDBOOK_AGREEMENT_TYPE
     agreement_types = {
         'contract_acceptance': CONTRACT_AGREEMENT_TYPE,
         'handbook_acknowledgement': HANDBOOK_AGREEMENT_TYPE
@@ -18743,7 +18743,7 @@ async def get_requirement_unified_history(
     if requirement_key in agreement_types:
         db_employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
         if db_employee:
-            resolver = await resolve_employee_agreement_state(db, db_employee, agreement_types[requirement_key])
+            resolver = await read_employee_agreement_state(db, db_employee, agreement_types[requirement_key])
             ack = resolver.get("acknowledgement", {})
             if resolver.get("latest_active"):
                 timeline.append({
@@ -19445,7 +19445,7 @@ async def acknowledge_requirement(
     }
     agreement_type = agreement_types.get(requirement_id)
     if agreement_type:
-        canonical_state = await resolve_employee_agreement_state(db, employee, agreement_type)
+        canonical_state = await read_employee_agreement_state(db, employee, agreement_type)
         requested_source = str(getattr(body, "source_record_id", "") or "").strip()
         canonical_source = str(canonical_state.get("source_record_id") or "").strip()
         if canonical_state.get("status_unavailable") or not canonical_state.get("latest_active"):
@@ -32160,7 +32160,7 @@ class AgreementAcknowledgementService:
         from agreement_document_service import (
             CONTRACT_AGREEMENT_TYPE,
             HANDBOOK_AGREEMENT_TYPE,
-            resolve_employee_agreement_state,
+            read_employee_agreement_state,
         )
 
         acknowledgements = await db.agreement_acknowledgements.find(
@@ -32169,8 +32169,8 @@ class AgreementAcknowledgementService:
         ).sort("created_at", -1).to_list(50)
 
         employee = await db.employees.find_one({"id": employee_id}, {"_id": 0}) or {"id": employee_id}
-        contract_state = await resolve_employee_agreement_state(db, employee, CONTRACT_AGREEMENT_TYPE)
-        handbook_state = await resolve_employee_agreement_state(db, employee, HANDBOOK_AGREEMENT_TYPE)
+        contract_state = await read_employee_agreement_state(db, employee, CONTRACT_AGREEMENT_TYPE)
+        handbook_state = await read_employee_agreement_state(db, employee, HANDBOOK_AGREEMENT_TYPE)
 
         canonical_rows = []
         for state in (contract_state, handbook_state):
@@ -37408,9 +37408,9 @@ async def get_compliance_file(
         cache_key = f"{employee_id}:{agreement_type}"
         if cache_key in _agreement_cache:
             return _agreement_cache[cache_key]
-        from agreement_document_service import resolve_employee_agreement_state
+        from agreement_document_service import read_employee_agreement_state
         _agreement_resolver_calls += 1
-        resolved = await resolve_employee_agreement_state(db, employee, agreement_type)
+        resolved = await read_employee_agreement_state(db, employee, agreement_type)
         _agreement_cache[cache_key] = resolved
         return resolved
     

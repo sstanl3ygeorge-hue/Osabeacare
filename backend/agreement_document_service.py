@@ -998,7 +998,13 @@ def _agreement_rank(row: Dict[str, Any]) -> tuple:
     return (1, timestamp)
 
 
-async def resolve_employee_agreement_state(db, employee: Dict[str, Any], agreement_type: str) -> Dict[str, Any]:
+async def _resolve_employee_agreement_state_core(
+    db,
+    employee: Dict[str, Any],
+    agreement_type: str,
+    *,
+    allow_render_side_effects: bool,
+) -> Dict[str, Any]:
 
     # Normalize legacy alias to canonical handbook agreement type so admin and worker surfaces always resolve the same latest row.
     if agreement_type == "employee_handbook_acknowledgement":
@@ -1006,16 +1012,22 @@ async def resolve_employee_agreement_state(db, employee: Dict[str, Any], agreeme
     employee_id = employee["id"]
     render_error_detail = None
     agreement = None
-    try:
-        agreement = await ensure_agreement_rendered(db, employee, agreement_type)
-    except HandbookRenderError as exc:
-        render_error_detail = str(exc)
-        agreement = await db.agreement_acknowledgements.find_one(
-            {"employee_id": employee_id, "agreement_type": agreement_type},
-            {"_id": 0},
-        ) or {}
-    except Exception as exc:
-        render_error_detail = str(exc)
+    if allow_render_side_effects:
+        try:
+            agreement = await ensure_agreement_rendered(db, employee, agreement_type)
+        except HandbookRenderError as exc:
+            render_error_detail = str(exc)
+            agreement = await db.agreement_acknowledgements.find_one(
+                {"employee_id": employee_id, "agreement_type": agreement_type},
+                {"_id": 0},
+            ) or {}
+        except Exception as exc:
+            render_error_detail = str(exc)
+            agreement = await db.agreement_acknowledgements.find_one(
+                {"employee_id": employee_id, "agreement_type": agreement_type},
+                {"_id": 0},
+            ) or {}
+    else:
         agreement = await db.agreement_acknowledgements.find_one(
             {"employee_id": employee_id, "agreement_type": agreement_type},
             {"_id": 0},
@@ -1396,6 +1408,28 @@ async def resolve_employee_agreement_state(db, employee: Dict[str, Any], agreeme
         "verification_status": verification_status,
         "has_acknowledgement": bool(agreement),
     }
+
+
+async def resolve_employee_agreement_state(db, employee: Dict[str, Any], agreement_type: str) -> Dict[str, Any]:
+    return await _resolve_employee_agreement_state_core(
+        db,
+        employee,
+        agreement_type,
+        allow_render_side_effects=True,
+    )
+
+
+async def read_employee_agreement_state(db, employee: Dict[str, Any], agreement_type: str) -> Dict[str, Any]:
+    """Read-only agreement resolver for GET/status endpoints.
+
+    Guarantees no rendering, uploads, or DB write side effects.
+    """
+    return await _resolve_employee_agreement_state_core(
+        db,
+        employee,
+        agreement_type,
+        allow_render_side_effects=False,
+    )
 
 
 async def build_agreement_rendering(db, employee: Dict[str, Any], agreement_type: str) -> Dict[str, Any]:

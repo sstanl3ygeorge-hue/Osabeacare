@@ -29,6 +29,7 @@ from .dependencies import (
 from agreement_document_service import (
     CONTRACT_AGREEMENT_TYPE,
     HANDBOOK_AGREEMENT_TYPE,
+    read_employee_agreement_state,
     resolve_employee_agreement_state,
 )
 
@@ -61,7 +62,7 @@ async def _guard_acknowledgement_target_is_latest(*, db, employee_id: str, agree
         if agreement_type in {HANDBOOK_AGREEMENT_TYPE, "employee_handbook_acknowledgement"}
         else CONTRACT_AGREEMENT_TYPE
     )
-    resolved = await resolve_employee_agreement_state(db, employee, canonical_type)
+    resolved = await read_employee_agreement_state(db, employee, canonical_type)
     latest_source_id = resolved.get("source_record_id")
     if latest_source_id and acknowledgement_id and acknowledgement_id != latest_source_id:
         raise HTTPException(

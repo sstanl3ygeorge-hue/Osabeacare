@@ -35,6 +35,7 @@ from agreement_document_service import (
     HANDBOOK_AGREEMENT_TYPE,
     _employee_name,
     ensure_agreement_rendered,
+    read_employee_agreement_state,
     resolve_employee_agreement_state,
 )
 from .recurring_compliance import compute_recurring_status
@@ -568,7 +569,7 @@ async def acknowledge_worker_agreement(
         raise HTTPException(status_code=404, detail={"code": "employee_not_found", "message": "Employee not found"})
 
     # Canonical, validation-first resolution before any writes.
-    resolved = await resolve_employee_agreement_state(db, employee, normalized_agreement_type)
+    resolved = await read_employee_agreement_state(db, employee, normalized_agreement_type)
     resolved_status = str(resolved.get("status") or "").strip().lower()
     if resolved_status in {"signed", "acknowledged", "verified", "fully_executed"}:
         return {
@@ -670,7 +671,7 @@ async def acknowledge_worker_agreement(
     try_auto_promote_worker = get_try_auto_promote_worker_func()
     await try_auto_promote_worker(employee_id)
 
-    refreshed = await resolve_employee_agreement_state(db, employee, normalized_agreement_type)
+    refreshed = await read_employee_agreement_state(db, employee, normalized_agreement_type)
     return {
         "success": True,
         "agreement": refreshed,
@@ -1303,7 +1304,7 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
     agreements_status = []
     employee_min_result = await db.employees.find_one({"id": employee_id}, {"_id": 0})
     employee_min = employee_min_result if employee_min_result is not None else {"id": employee_id}
-    contract_status = await resolve_employee_agreement_state(db, employee_min, CONTRACT_AGREEMENT_TYPE)
+    contract_status = await read_employee_agreement_state(db, employee_min, CONTRACT_AGREEMENT_TYPE)
     contract_status.update({
         "id": "contract_acceptance",
         "name": "Contract Acceptance",
@@ -1311,7 +1312,7 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
     })
     agreements_status.append(contract_status)
     contract_signed = contract_status["contract_state"] == "fully_executed"
-    handbook_status = await resolve_employee_agreement_state(db, employee_min, HANDBOOK_AGREEMENT_TYPE)
+    handbook_status = await read_employee_agreement_state(db, employee_min, HANDBOOK_AGREEMENT_TYPE)
     handbook_status.update({
         "id": "handbook_acknowledgement",
         "name": "Employee Handbook Acknowledgement",

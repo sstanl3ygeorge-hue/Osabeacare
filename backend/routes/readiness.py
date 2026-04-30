@@ -91,11 +91,11 @@ async def get_employee_agreements_data(employee_id: str) -> dict:
         from agreement_document_service import (
             CONTRACT_AGREEMENT_TYPE,
             HANDBOOK_AGREEMENT_TYPE,
-            resolve_employee_agreement_state,
+            read_employee_agreement_state,
         )
 
-        contract_state = await resolve_employee_agreement_state(db, employee, CONTRACT_AGREEMENT_TYPE)
-        handbook_state = await resolve_employee_agreement_state(db, employee, HANDBOOK_AGREEMENT_TYPE)
+        contract_state = await read_employee_agreement_state(db, employee, CONTRACT_AGREEMENT_TYPE)
+        handbook_state = await read_employee_agreement_state(db, employee, HANDBOOK_AGREEMENT_TYPE)
 
         acknowledgements = []
         for state in (contract_state, handbook_state):

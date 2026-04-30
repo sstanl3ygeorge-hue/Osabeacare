@@ -135,8 +135,7 @@ export default function AgreementRow({
   const contractArtifactUrl =
     acknowledgement_data?.executed_contract_pdf_url ||
     acknowledgement_data?.worker_signed_contract_pdf_url ||
-    acknowledgement_data?.rendered_contract_pdf_url ||
-    acknowledgement_data?.rendered_file_url;
+    acknowledgement_data?.rendered_contract_pdf_url;
   const effectiveLifecycleStatus =
     isContractRow && isAwaitingWorkerSignature
       ? 'submitted'

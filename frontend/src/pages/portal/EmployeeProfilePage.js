@@ -6907,7 +6907,11 @@ Direct employment coverage: {Number.isFinite(directCoveragePercent) ? `${directC
                                 const rawUrl = applicationEvidenceRow?.file_url || applicationEvidenceRow?.view_url || applicationEvidenceRow?.download_url || applicationEvidenceRow?.document_url;
                                 if (!rawUrl) return;
                                 const resolvedUrl = rawUrl.startsWith('/api/') ? `${API}${rawUrl.substring(4)}` : rawUrl;
-                                window.open(resolvedUrl, '_blank', 'noopener,noreferrer');
+                                setInlineViewerUrl(resolvedUrl);
+                                setInlineViewerTitle('Application Record');
+                                setInlineViewerFilename('application_form.pdf');
+                                setInlineViewerFallback(null);
+                                setInlineViewerOpen(true);
                               }}
                             >
                               <Eye className="h-4 w-4 mr-1" />
@@ -7035,7 +7039,15 @@ Direct employment coverage: {Number.isFinite(directCoveragePercent) ? `${directC
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() => window.open(cvEvidenceUrl, '_blank', 'noopener,noreferrer')}
+                          onClick={() => {
+                            if (!cvEvidenceUrl) return;
+                            const resolvedUrl = cvEvidenceUrl.startsWith('/api/') ? `${API}${cvEvidenceUrl.substring(4)}` : cvEvidenceUrl;
+                            setInlineViewerUrl(resolvedUrl);
+                            setInlineViewerTitle('CV / Resume');
+                            setInlineViewerFilename('cv_resume.pdf');
+                            setInlineViewerFallback(null);
+                            setInlineViewerOpen(true);
+                          }}
                           data-testid="view-cv-fallback-btn"
                         >
                           <Eye className="h-4 w-4 mr-1" />

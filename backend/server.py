@@ -38416,6 +38416,31 @@ async def get_compliance_file(
             except Exception as exc:
                 resolver_error = exc
                 continue
+
+        # Narrow read-time repair for stale contract rows only.
+        # Do not touch executed contracts; only ensure current rendered contract artifact when stale.
+        if agreement_type == "contract_acceptance" and agreement_state:
+            has_ack = bool(agreement_state.get("has_acknowledgement")) or len(acks) > 0
+            rendered_contract_pdf_url = agreement_state.get("rendered_contract_pdf_url")
+            template_version = agreement_state.get("template_version")
+            executed_contract_pdf_url = agreement_state.get("executed_contract_pdf_url")
+            is_executed = str(agreement_state.get("status") or "").lower() == "fully_executed" or bool(executed_contract_pdf_url)
+            stale_contract_row = has_ack and (not rendered_contract_pdf_url or not template_version)
+            if stale_contract_row and not is_executed:
+                try:
+                    from agreement_document_service import ensure_agreement_rendered, read_employee_agreement_state, CONTRACT_AGREEMENT_TYPE
+                    await ensure_agreement_rendered(db, employee, CONTRACT_AGREEMENT_TYPE)
+                    repaired_state = await read_employee_agreement_state(db, employee, CONTRACT_AGREEMENT_TYPE)
+                    if repaired_state and isinstance(repaired_state, dict):
+                        agreement_state = repaired_state
+                        _agreement_cache[f"{employee_id}:{CONTRACT_AGREEMENT_TYPE}"] = repaired_state
+                except Exception as exc:
+                    logger.warning(
+                        "compliance_file_contract_repair_failed employee_id=%s agreement_type=%s error=%s",
+                        employee_id,
+                        agreement_type,
+                        exc,
+                    )
         if resolver_error and not agreement_state:
             logger.warning(
                 "agreement_resolver_failed endpoint=compliance-file employee_id=%s agreement_type=%s error=%s",

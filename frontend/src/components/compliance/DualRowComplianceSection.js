@@ -556,6 +556,8 @@ export default function DualRowComplianceSection({
     const blockers = section.rows.filter(r => r?.blocker_text);
     const isAgreementsSection = sectionKey === 'agreements';
     const keepAgreementOperational = (row) => {
+      const agreementType = String(row?.agreement_type || row?.agreementType || row?.type || row?.key || '').toLowerCase();
+      if (agreementType === 'contract_acceptance') return true;
       const status = String(row?.status || row?.current_lifecycle?.status || '').toLowerCase();
       const isCanonicalComplete = row?.is_verified === true || ['fully_executed', 'verified', 'completed', 'complete', 'signed', 'acknowledged'].includes(status);
       if (isCanonicalComplete) return true;

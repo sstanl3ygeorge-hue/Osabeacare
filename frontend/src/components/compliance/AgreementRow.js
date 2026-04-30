@@ -111,9 +111,10 @@ export default function AgreementRow({
   const lifecycleStatus = getLifecycleStatus();
   const contractResolution = resolveLatestContractState(acknowledgement_data, {});
   const normalizedContractStatus = contractResolution.status;
+  const rowAgreementType = row?.agreement_type || row?.agreementType || row?.type || row?.key || '';
   const isContractRow =
     key === 'contract_acceptance' ||
-    String(agreement_type || '').toLowerCase() === 'contract_acceptance';
+    String(rowAgreementType || '').toLowerCase() === 'contract_acceptance';
   const isAwaitingWorkerSignature = contractResolution.isAwaitingWorkerSignature;
   const canonicalLifecycleStatus = String(
     acknowledgement_data?.current_lifecycle?.status ||

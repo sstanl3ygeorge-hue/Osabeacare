@@ -178,7 +178,7 @@ export default function ConsolidatedStatusPanel({
                     Readiness status unavailable
                   </p>
                   <p className="text-sm text-gray-600">
-                    {employeeName} • {role} • Canonical readiness could not be loaded
+                    {employeeName} â€¢ {role} â€¢ Canonical readiness could not be loaded
                   </p>
                 </div>
               </div>
@@ -244,13 +244,30 @@ export default function ConsolidatedStatusPanel({
     : progressBlockerStrings.length > 0
       ? progressBlockerStrings
       : [];
-  const progressCompleted = sectionProgressAvailable ? sectionCompletedRows : progress.completed_requirements;
-  const progressTotal = sectionProgressAvailable ? sectionTotalRows : progress.total_requirements;
-  const progressCountAvailable = Number.isFinite(progressTotal) && progressTotal > 0;
-  
-  const progressPercentage = sectionProgressAvailable
+  const canonicalCompleted = Number(progress?.completed);
+  const canonicalTotal = Number(progress?.total);
+  const canonicalPercentage = Number(progress?.percentage);
+  const canonicalProgressAvailable = Number.isFinite(canonicalCompleted)
+    && Number.isFinite(canonicalTotal)
+    && canonicalTotal > 0
+    && Number.isFinite(canonicalPercentage);
+
+  const fallbackCompleted = sectionProgressAvailable ? sectionCompletedRows : Number(progress?.completed_requirements ?? 0);
+  const fallbackTotal = sectionProgressAvailable ? sectionTotalRows : Number(progress?.total_requirements ?? 0);
+  const fallbackCountAvailable = Number.isFinite(fallbackTotal) && fallbackTotal > 0;
+  const fallbackPercentage = sectionProgressAvailable
     ? Math.round((sectionCompletedRows / sectionTotalRows) * 100)
-    : (progress.overall_percentage ?? 0);
+    : Number(progress?.overall_percentage ?? 0);
+
+  const progressCompleted = canonicalProgressAvailable ? canonicalCompleted : fallbackCompleted;
+  const progressTotal = canonicalProgressAvailable ? canonicalTotal : fallbackTotal;
+  const progressCountAvailable = canonicalProgressAvailable ? true : fallbackCountAvailable;
+  const progressPercentage = canonicalProgressAvailable ? canonicalPercentage : fallbackPercentage;
+  const progressHeadlineLabel = canonicalProgressAvailable
+    ? `${progressCompleted} of ${progressTotal} items submitted (${progressPercentage}%)`
+    : progressCountAvailable
+      ? `${progressCompleted} of ${progressTotal} items submitted (${progressPercentage}%) [estimated]`
+      : `item count unavailable (${progressPercentage}%) [estimated]`;
   
   // Use dual-row section breakdown for employee operational view when available.
   const sectionBreakdown = {
@@ -285,10 +302,10 @@ export default function ConsolidatedStatusPanel({
   // Determine overall status
   const isApplicant = personStage === 'applicant';
 
-  // Gate-derived approval readiness (canonical — overrides old isBlocked for the approve CTA)
+  // Gate-derived approval readiness (canonical â€” overrides old isBlocked for the approve CTA)
   const gateAllowed = gateResult?.allowed === true;
   const gateHasData = gateResult !== null;
-  // Approval CTA guard: gate is the ONLY signal — no fallback to legacy isBlocked
+  // Approval CTA guard: gate is the ONLY signal â€” no fallback to legacy isBlocked
   const canApproveRecruitment = gateAllowed;
 
   return (
@@ -298,11 +315,9 @@ export default function ConsolidatedStatusPanel({
         <CardHeader className="py-3 px-4 bg-gray-50/50 border-b border-gray-100">
           <div className="flex items-center justify-between">
             <CardTitle className="text-base font-semibold text-gray-700">
-              Submission Progress — {progressCountAvailable
-                ? `${progressCompleted ?? 0} of ${progressTotal} items submitted (${progressPercentage}%)`
-                : `item count unavailable (${progressPercentage}%)`}
+              Submission Progress — {progressHeadlineLabel}
             </CardTitle>
-            <p className="text-[11px] text-gray-400 mt-0.5">Tracks document and form submission only — not approval readiness</p>
+            <p className="text-[11px] text-gray-400 mt-0.5">Tracks document and form submission only â€” not approval readiness</p>
             <Button variant="ghost" size="sm" onClick={fetchStatus}>
               <RefreshCw className="h-4 w-4" />
             </Button>
@@ -379,7 +394,7 @@ export default function ConsolidatedStatusPanel({
                 onClick={handleApproveRecruitment}
                 disabled={actionLoading === 'approve' || gateLoading || !canApproveRecruitment || gateFetchFailed || (!gateHasData && !gateLoading)}
                 title={
-                  gateFetchFailed ? 'Approval check unavailable — reload to retry' :
+                  gateFetchFailed ? 'Approval check unavailable â€” reload to retry' :
                   !gateHasData ? 'Approval check not yet loaded' :
                   !canApproveRecruitment ? 'Resolve all blockers before approving' :
                   undefined
@@ -399,4 +414,5 @@ export default function ConsolidatedStatusPanel({
     </div>
   );
 }
+
 

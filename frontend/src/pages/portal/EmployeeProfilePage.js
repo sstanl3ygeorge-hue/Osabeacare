@@ -592,6 +592,8 @@ export default function EmployeeProfilePage() {
   const [trainingRequestOpen, setTrainingRequestOpen] = useState(false);
   const [proposedTrainingItems, setProposedTrainingItems] = useState([]);
   const [loadingProposedItems, setLoadingProposedItems] = useState(false);
+  const [lazyLoadedTabs, setLazyLoadedTabs] = useState({});
+  const [lazyLoadingTabs, setLazyLoadingTabs] = useState({});
   
   // Dual-Row Compliance Model State (Step 11)
   const [recordCheckDialogOpen, setRecordCheckDialogOpen] = useState(false);
@@ -1384,7 +1386,6 @@ export default function EmployeeProfilePage() {
   const fetchData = async () => {
     const headers = { Authorization: `Bearer ${token}` };
     const CRITICAL_TIMEOUT_MS = 45000;
-    const OPTIONAL_TIMEOUT_MS = 8000;
     // Throttle request fan-out: fetch critical first, render shell, then optional panels.
     const criticalRequests = [
       axios.get(`${API}/employees/${employeeId}`, { headers, timeout: CRITICAL_TIMEOUT_MS }),
@@ -1471,66 +1472,81 @@ export default function EmployeeProfilePage() {
 
     setLoading(false);
 
-    // Optional panels load after shell render; failures are panel-local only.
-    Promise.allSettled([
-      axios.get(`${API}/employee-documents?employee_id=${employeeId}`, { headers, timeout: OPTIONAL_TIMEOUT_MS }),
-      axios.get(`${API}/document-types`, { headers, timeout: OPTIONAL_TIMEOUT_MS }),
-      axios.get(`${API}/training-records?employee_id=${employeeId}`, { headers, timeout: OPTIONAL_TIMEOUT_MS }),
-      axios.get(`${API}/policy-assignments?employee_id=${employeeId}&include_inactive=true`, { headers, timeout: OPTIONAL_TIMEOUT_MS }),
-      axios.get(`${API}/audit-logs?entity_id=${employeeId}&compliance_only=true`, { headers, timeout: OPTIONAL_TIMEOUT_MS }),
-      axios.get(`${API}/generated-forms?employee_id=${employeeId}`, { headers, timeout: OPTIONAL_TIMEOUT_MS }),
-      axios.get(`${API}/templates`, { headers, timeout: OPTIONAL_TIMEOUT_MS }),
-    ]).then((optionalResults) => {
-      const docsRes = optionalResults[0];
-      const typesRes = optionalResults[1];
-      const trainingRes = optionalResults[2];
-      const policiesRes = optionalResults[3];
-      const logsRes = optionalResults[4];
-      const formsRes = optionalResults[5];
-      const templatesRes = optionalResults[6];
+    // Tab-specific optional datasets are lazy-loaded when their tabs are opened.
+  };
 
-      setDocuments(docsRes.status === 'fulfilled' ? asArray(docsRes.value.data, ['items', 'records', 'documents']) : []);
-      setDocumentTypes(typesRes.status === 'fulfilled' ? asArray(typesRes.value.data, ['items', 'records']) : []);
-      setTraining(trainingRes.status === 'fulfilled' ? asArray(trainingRes.value.data, ['items', 'records']) : []);
-      setPolicies(policiesRes.status === 'fulfilled' ? asArray(policiesRes.value.data, ['items', 'records']) : []);
-      setAuditLogs(logsRes.status === 'fulfilled' ? asArray(logsRes.value.data, ['items', 'records']) : []);
-      setGeneratedForms(formsRes.status === 'fulfilled' ? asArray(formsRes.value.data, ['forms', 'items', 'records']) : []);
-      setTemplates(templatesRes.status === 'fulfilled' ? asArray(templatesRes.value.data, ['items', 'records']) : []);
+  const markLazyTabLoaded = (tabKey) => {
+    setLazyLoadedTabs((prev) => ({ ...prev, [tabKey]: true }));
+  };
 
-      if (empRes.status === 'fulfilled' && docsRes.status === 'fulfilled') {
-        const refreshedEmployee = empRes.value.data || {};
-        const refreshedDocuments = asArray(docsRes.value.data, ['items', 'records', 'documents']);
-        const cvLikeDocuments = refreshedDocuments.filter((document) => {
-          const label = [
-            document?.requirement_name,
-            document?.document_type_name,
-            document?.document_label,
-            document?.original_filename,
-            document?.file_name
-          ].filter(Boolean).join(' ').toLowerCase();
-          return (
-            ['cv', 'resume', 'curriculum_vitae'].includes(document?.requirement_id) ||
-            [document?.id, document?.file_id, document?.document_id].filter(Boolean).includes(refreshedEmployee?.cv_document_id) ||
-            /\b(cv|resume|curriculum vitae)\b/.test(label)
-          );
+  const setLazyTabLoading = (tabKey, value) => {
+    setLazyLoadingTabs((prev) => ({ ...prev, [tabKey]: value }));
+  };
+
+  const loadLazyTabData = async (tabKey) => {
+    if (!employeeId || !token || lazyLoadedTabs[tabKey] || lazyLoadingTabs[tabKey]) return;
+    const headers = { Authorization: `Bearer ${token}` };
+    const OPTIONAL_TIMEOUT_MS = 8000;
+    setLazyTabLoading(tabKey, true);
+    try {
+      if (tabKey === 'employment') {
+        await Promise.allSettled([
+          fetchEmploymentReview(),
+          fetchRecruitmentStatus(),
+          fetchReferenceStatus(),
+          fetchEmploymentMismatch(),
+          fetchNameMismatch(),
+          axios.get(`${API}/employee-documents?employee_id=${employeeId}`, { headers, timeout: OPTIONAL_TIMEOUT_MS }),
+          axios.get(`${API}/document-types`, { headers, timeout: OPTIONAL_TIMEOUT_MS }),
+        ]).then((results) => {
+          const docsRes = results[5];
+          const typesRes = results[6];
+          if (docsRes?.status === 'fulfilled') setDocuments(asArray(docsRes.value.data, ['items', 'records', 'documents']));
+          if (typesRes?.status === 'fulfilled') setDocumentTypes(asArray(typesRes.value.data, ['items', 'records']));
         });
-        console.debug('CV_LINK_DIAGNOSTIC profile_refresh', {
-          employeeId,
-          cv_document_id: refreshedEmployee?.cv_document_id,
-          cv_documents: cvLikeDocuments.map((document) => ({
-            id: document?.id,
-            file_id: document?.file_id,
-            document_id: document?.document_id,
-            requirement_id: document?.requirement_id,
-            document_type_name: document?.document_type_name,
-            requirement_name: document?.requirement_name,
-            status: document?.status
-          }))
+      } else if (tabKey === 'forms') {
+        await Promise.allSettled([
+          fetchFormSubmissions(),
+          axios.get(`${API}/generated-forms?employee_id=${employeeId}`, { headers, timeout: OPTIONAL_TIMEOUT_MS }),
+          axios.get(`${API}/templates`, { headers, timeout: OPTIONAL_TIMEOUT_MS }),
+        ]).then((results) => {
+          const formsRes = results[1];
+          const templatesRes = results[2];
+          if (formsRes?.status === 'fulfilled') setGeneratedForms(asArray(formsRes.value.data, ['forms', 'items', 'records']));
+          if (templatesRes?.status === 'fulfilled') setTemplates(asArray(templatesRes.value.data, ['items', 'records']));
         });
+      } else if (tabKey === 'training') {
+        await Promise.allSettled([
+          fetchTrainingEvaluation(),
+          fetchProposedTrainingItems(),
+          axios.get(`${API}/training-records?employee_id=${employeeId}`, { headers, timeout: OPTIONAL_TIMEOUT_MS }),
+        ]).then((results) => {
+          const trainingRes = results[2];
+          if (trainingRes?.status === 'fulfilled') setTraining(asArray(trainingRes.value.data, ['items', 'records']));
+        });
+      } else if (tabKey === 'references') {
+        await Promise.allSettled([fetchReferenceStatus()]);
+      } else if (tabKey === 'policies') {
+        await Promise.allSettled([
+          axios.get(`${API}/policy-assignments?employee_id=${employeeId}&include_inactive=true`, { headers, timeout: OPTIONAL_TIMEOUT_MS }),
+        ]).then((results) => {
+          const policiesRes = results[0];
+          if (policiesRes?.status === 'fulfilled') setPolicies(asArray(policiesRes.value.data, ['items', 'records']));
+        });
+      } else if (tabKey === 'audit') {
+        await Promise.allSettled([
+          axios.get(`${API}/audit-logs?entity_id=${employeeId}&compliance_only=true`, { headers, timeout: OPTIONAL_TIMEOUT_MS }),
+        ]).then((results) => {
+          const logsRes = results[0];
+          if (logsRes?.status === 'fulfilled') setAuditLogs(asArray(logsRes.value.data, ['items', 'records']));
+        });
+      } else if (tabKey === 'checklist') {
+        await Promise.allSettled([fetchComplianceFile()]);
       }
-    }).catch((optionalErr) => {
-      console.warn('EmployeeProfile optional panel batch failed:', optionalErr);
-    });
+      markLazyTabLoaded(tabKey);
+    } finally {
+      setLazyTabLoading(tabKey, false);
+    }
   };
 
   const fetchCompliance = async () => {
@@ -1715,15 +1731,12 @@ export default function EmployeeProfilePage() {
     fetchData();
     fetchCompliance();
     fetchComplianceFile();
-    fetchEmploymentReview();
-    fetchRecruitmentStatus();
-    fetchReferenceStatus();
-    fetchEmploymentMismatch();
-    fetchNameMismatch();
-    fetchTrainingEvaluation();
-    fetchProposedTrainingItems();
-    fetchFormSubmissions();
   }, [employeeId, token]);
+
+  useEffect(() => {
+    if (!employeeId || !token) return;
+    loadLazyTabData(activeTab);
+  }, [activeTab, employeeId, token]);
   
   // Fetch form submissions for the Forms tab
   const fetchFormSubmissions = async () => {

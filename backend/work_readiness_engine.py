@@ -477,9 +477,9 @@ async def can_sign_contract(db, employee_id: str) -> dict:
     try:
         from agreement_document_service import (
             HANDBOOK_AGREEMENT_TYPE,
-            resolve_employee_agreement_state,
+            read_employee_agreement_state,
         )
-        handbook_state = await resolve_employee_agreement_state(
+        handbook_state = await read_employee_agreement_state(
             db,
             employee,
             HANDBOOK_AGREEMENT_TYPE,
@@ -581,10 +581,10 @@ async def can_promote_to_active(db, employee_id: str) -> dict:
     try:
         from agreement_document_service import (
             CONTRACT_AGREEMENT_TYPE,
-            resolve_employee_agreement_state,
+            read_employee_agreement_state,
         )
         employee = await db.employees.find_one({"id": employee_id}, {"_id": 0}) or {"id": employee_id}
-        contract_state = await resolve_employee_agreement_state(
+        contract_state = await read_employee_agreement_state(
             db,
             employee,
             CONTRACT_AGREEMENT_TYPE,

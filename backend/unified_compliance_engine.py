@@ -42,7 +42,7 @@ from induction_definitions import (
 )
 from agreement_document_service import (
     HANDBOOK_AGREEMENT_TYPE,
-    resolve_employee_agreement_state,
+    read_employee_agreement_state,
 )
 
 logger = logging.getLogger(__name__)
@@ -1546,7 +1546,7 @@ async def get_unified_employee_status(
     checks["contract"] = contract_fully_executed
     
     # Handbook
-    handbook_state = await resolve_employee_agreement_state(db, employee, HANDBOOK_AGREEMENT_TYPE)
+    handbook_state = await read_employee_agreement_state(db, employee, HANDBOOK_AGREEMENT_TYPE)
     handbook_ack = handbook_state.get("acknowledgement") or {}
     handbook_render_issue = handbook_state.get("render_issue")
     handbook_acknowledged = bool(handbook_state.get("worker_acknowledged"))

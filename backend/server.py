@@ -153,7 +153,6 @@ from routes.feedback_complaints import router as feedback_complaints_router
 from routes.policies import router as policies_router
 from routes.referee_outreach import router as referee_outreach_router
 from routes.induction import router as induction_router, DEFAULT_INDUCTION_ITEMS, INDUCTION_TRAINING_MAP
-from lifecycle_transition_guard import guard_cross_gate_status_transition
 from routes.induction_worker import router as induction_worker_router
 from routes.competency import router as competency_router
 from routes.spot_checks import router as spot_checks_router
@@ -929,6 +928,37 @@ EMPLOYEE_STATUSES = [
     EmployeeStatus.ACTIVE,
     EmployeeStatus.INACTIVE
 ]
+TERMINAL_STATUSES_SET = {"archived", "withdrawn", "superseded"}
+
+
+def assert_lifecycle_transition_allowed(current_status: str, requested_status: str) -> None:
+    """Block cross-gate applicant<->employee lifecycle transitions on generic update routes."""
+    current = normalize_lifecycle_status(current_status)
+    requested = normalize_lifecycle_status(requested_status)
+    if not current or not requested or current == requested:
+        return
+
+    applicant_set = {"new", "screening", "interview", "compliance_review"}
+    employee_set = {"onboarding", "active", "inactive"}
+
+    # Terminal flows are handled by dedicated archive/withdraw/supersede/restore routes.
+    if current in TERMINAL_STATUSES_SET or requested in TERMINAL_STATUSES_SET:
+        return
+
+    if current in applicant_set and requested in applicant_set:
+        return
+    if current in employee_set and requested in employee_set:
+        return
+    if current in applicant_set and requested in employee_set:
+        raise HTTPException(
+            status_code=400,
+            detail="Use Approve to Onboarding (POST /employees/{id}/approve-recruitment) to move applicants into employee onboarding.",
+        )
+    if current in employee_set and requested in applicant_set:
+        raise HTTPException(
+            status_code=400,
+            detail="Employees cannot be moved back into applicant statuses. Use archive/inactive/withdraw flows where appropriate.",
+        )
 
 class PersonStage:
     """Derived from status - not stored, computed at runtime"""
@@ -10016,9 +10046,7 @@ async def update_employee(employee_id: str, update: EmployeeUpdate, user: dict =
     if requested_status:
         update_data["status"] = requested_status
     if requested_status and requested_status != current_status:
-        allowed, reason = guard_cross_gate_status_transition(current_status, requested_status)
-        if not allowed:
-            raise HTTPException(status_code=400, detail=reason)
+        assert_lifecycle_transition_allowed(current_status, requested_status)
     if requested_status and requested_status != current_status:
         lifecycle_statuses = {"onboarding", "active", "inactive"}
         if current_status in lifecycle_statuses and requested_status in lifecycle_statuses:
@@ -11030,6 +11058,11 @@ async def try_auto_promote_worker(employee_id: str):
 
         # Auto-promotion only applies to onboarding employees (Gate 2).
         if current_status_norm != "onboarding":
+            logger.info(
+                "Auto-promote skipped for %s because lifecycle status is %s (requires onboarding)",
+                employee_id,
+                current_status_norm,
+            )
             return
         
         # Don't promote if already active.

@@ -1800,6 +1800,19 @@ export default function EmployeeProfilePage() {
     setSearchParams({ tab: 'employment' }, { replace: true });
   }, [activeTab, employee, isActiveEmployee, setSearchParams]);
 
+  useEffect(() => {
+    const applicantHiddenTabs = ['competencies', 'spot_checks', 'supervisions', 'appraisals'];
+    if (profileMode === 'applicant' && applicantHiddenTabs.includes(activeTab)) {
+      setActiveTab('employment');
+      setSearchParams({ tab: 'employment' }, { replace: true });
+      return;
+    }
+    if (profileMode === 'employee' && activeTab === 'references') {
+      setActiveTab('employment');
+      setSearchParams({ tab: 'employment' }, { replace: true });
+    }
+  }, [activeTab, profileMode, setSearchParams]);
+
   // Track email click event
   const trackEmailClick = async (requestId, emailToken) => {
     try {
@@ -4246,10 +4259,10 @@ export default function EmployeeProfilePage() {
       : 'Compliance File: unavailable')
     : `${effectiveProgressPct}% Complete`;
   const canonicalReadinessLabel = canonicalIsWorkReady
-    ? 'Ready for Work'
+    ? (profileMode === 'applicant' ? 'Ready for Recruitment Approval' : 'Ready for Work')
     : canonicalCanPromote
-                        ? 'Activation Eligible'
-      : 'Not ready for work';
+                        ? (profileMode === 'applicant' ? 'Ready for Recruitment Approval' : 'Activation Eligible')
+      : (profileMode === 'applicant' ? 'Not ready for recruitment approval' : 'Not ready for work');
   const canonicalReadinessClass = canonicalIsWorkReady || canonicalCanPromote
     ? 'bg-green-100 text-green-800'
     : 'bg-red-100 text-red-800';
@@ -4456,7 +4469,7 @@ export default function EmployeeProfilePage() {
             <div className="flex flex-col items-end gap-4">
               <div className="flex items-center gap-3">
                 <div className="text-right">
-                  <p className="text-sm text-text-muted">Compliance File Completion</p>
+                  <p className="text-sm text-text-muted">{profileMode === 'applicant' ? 'Recruitment Readiness' : 'Compliance File Completion'}</p>
                   <p className="text-3xl font-heading font-bold text-text-primary">
                     {completionHeadline}
                   </p>
@@ -5399,19 +5412,21 @@ export default function EmployeeProfilePage() {
         <TabsList className="bg-white border border-[#E4E8EB] p-1 rounded-xl flex-wrap">
           <TabsTrigger value="employment" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
             <Briefcase className="h-4 w-4 mr-2" />
-            Employment Review
+            {profileMode === 'applicant' ? 'Recruitment Review' : 'Employment Review'}
           </TabsTrigger>
           <TabsTrigger value="forms" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
             <FileText className="h-4 w-4 mr-2" />
-            Forms & Interview
+            {profileMode === 'applicant' ? 'Application & Interview' : 'Forms'}
           </TabsTrigger>
-          <TabsTrigger value="references" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
-            <UserCheck className="h-4 w-4 mr-2" />
-            References
-          </TabsTrigger>
+          {profileMode === 'applicant' && (
+            <TabsTrigger value="references" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
+              <UserCheck className="h-4 w-4 mr-2" />
+              References
+            </TabsTrigger>
+          )}
           <TabsTrigger value="checklist" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
             <CheckCircle className="h-4 w-4 mr-2" />
-            Checks & Evidence
+            {profileMode === 'applicant' ? 'Recruitment Checks' : 'Checks & Evidence'}
           </TabsTrigger>
           <TabsTrigger value="training" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
             <GraduationCap className="h-4 w-4 mr-2" />
@@ -5421,23 +5436,25 @@ export default function EmployeeProfilePage() {
             <User className="h-4 w-4 mr-2" />
             Profile Summary
           </TabsTrigger>
-          <TabsTrigger value="competencies" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
-            <ClipboardCheck className="h-4 w-4 mr-2" />
-            Competencies
-          </TabsTrigger>
-          {lifecycleStage === 'active' && (
+          {profileMode === 'employee' && (
+            <TabsTrigger value="competencies" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
+              <ClipboardCheck className="h-4 w-4 mr-2" />
+              Competencies
+            </TabsTrigger>
+          )}
+          {profileMode === 'employee' && lifecycleStage === 'active' && (
             <TabsTrigger value="spot_checks" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
               <Eye className="h-4 w-4 mr-2" />
               Spot Checks
             </TabsTrigger>
           )}
-          {lifecycleStage === 'active' && !isRecruitmentView && (
+          {profileMode === 'employee' && lifecycleStage === 'active' && !isRecruitmentView && (
             <TabsTrigger value="supervisions" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
               <Calendar className="h-4 w-4 mr-2" />
               Supervisions
             </TabsTrigger>
           )}
-          {lifecycleStage === 'active' && !isRecruitmentView && (
+          {profileMode === 'employee' && lifecycleStage === 'active' && !isRecruitmentView && (
             <TabsTrigger value="appraisals" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
               <CalendarClock className="h-4 w-4 mr-2" />
               Appraisals
@@ -7329,6 +7346,7 @@ export default function EmployeeProfilePage() {
         </TabsContent>
 
         {/* ========== TAB: COMPETENCIES ========== */}
+        {profileMode === 'employee' && (
         <TabsContent value="competencies" data-testid="section-competencies-root">
           <CompetencyAssessmentsPanel
             employeeId={employeeId}
@@ -7339,9 +7357,10 @@ export default function EmployeeProfilePage() {
             }}
           />
         </TabsContent>
+        )}
 
         {/* ========== TAB: SPOT CHECKS ========== */}
-        {lifecycleStage === 'active' && (
+        {profileMode === 'employee' && lifecycleStage === 'active' && (
           <TabsContent value="spot_checks" data-testid="section-spot-checks-root">
             <SpotChecksPanel
               employeeId={employeeId}
@@ -7355,7 +7374,7 @@ export default function EmployeeProfilePage() {
         )}
 
         {/* ========== TAB: SUPERVISIONS ========== */}
-        {lifecycleStage === 'active' && !isRecruitmentView && (
+        {profileMode === 'employee' && lifecycleStage === 'active' && !isRecruitmentView && (
           <TabsContent value="supervisions" data-testid="section-supervisions-root">
             <SupervisionsPanel
               employeeId={employeeId}
@@ -7364,7 +7383,7 @@ export default function EmployeeProfilePage() {
           </TabsContent>
         )}
 
-        {lifecycleStage === 'active' && !isRecruitmentView && (
+        {profileMode === 'employee' && lifecycleStage === 'active' && !isRecruitmentView && (
           <TabsContent value="appraisals" data-testid="section-appraisals-root">
             <AppraisalsPanel
               employeeId={employeeId}
@@ -7374,6 +7393,7 @@ export default function EmployeeProfilePage() {
         )}
 
         {/* References Tab - Extracted to ReferencesTabContent */}
+        {profileMode === 'applicant' && (
         <TabsContent value="references" data-testid="section-references-root">
           <ReferencesTabContent 
             key={`references-${employeeId}-${referencesTabRefreshKey}`}
@@ -7398,6 +7418,7 @@ export default function EmployeeProfilePage() {
             }}
           />
         </TabsContent>
+        )}
       </Tabs>
 
       {/* Edit Employee Dialog */}

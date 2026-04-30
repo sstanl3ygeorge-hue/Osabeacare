@@ -1606,7 +1606,6 @@ export default function EmployeeProfilePage() {
         const nextHasSections = Object.keys(normalizedSections).length > 0;
         const prevHasSections = Object.keys(prevSections).length > 0;
         const shouldStickyPreserve =
-          profileMode === 'employee' &&
           prevHasSections &&
           (!nextHasSections || payload?.status_unavailable === true);
         if (payload?.serializer_version === 'dual_row_v1' && !nextHasSections && prevHasSections) {
@@ -1650,7 +1649,7 @@ export default function EmployeeProfilePage() {
       setComplianceFile((prev) => {
         const prevSections = normalizeComplianceSections(prev?.sections);
         const prevHasSections = Object.keys(prevSections).length > 0;
-        if (profileMode === 'employee' && prevHasSections) {
+        if (prevHasSections) {
           return {
             ...(prev || {}),
             employee_id: employeeId,

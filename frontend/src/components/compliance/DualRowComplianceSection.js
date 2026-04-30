@@ -239,12 +239,30 @@ export default function DualRowComplianceSection({
     } catch (err) {
       const message = err?.response?.data?.message || err?.response?.data?.detail || err?.message || 'Failed to load compliance file';
       setError(message);
-      setComplianceFile({
-        employee_id: employeeId,
-        status_unavailable: true,
-        message: 'Compliance temporarily unavailable',
-        sections: {},
-        summary: { status_unavailable: true, overall_status: 'unavailable', ready_for_work: false },
+      setComplianceFile((prev) => {
+        const prevSections = normalizeComplianceSections(prev?.sections);
+        const prevHasSections = Object.keys(prevSections).length > 0;
+        if (prevHasSections) {
+          return {
+            ...(prev || {}),
+            employee_id: employeeId,
+            status_unavailable: true,
+            stale_data_preserved: true,
+            stale_data_message: 'Latest refresh failed; showing last valid compliance data.',
+            sections: prevSections,
+            errors: [{
+              code: 'compliance_file_fetch_failed',
+              message
+            }]
+          };
+        }
+        return {
+          employee_id: employeeId,
+          status_unavailable: true,
+          message: 'Compliance temporarily unavailable',
+          sections: {},
+          summary: { status_unavailable: true, overall_status: 'unavailable', ready_for_work: false },
+        };
       });
       toast.error('Compliance temporarily unavailable');
     } finally {

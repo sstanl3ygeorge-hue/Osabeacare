@@ -985,36 +985,40 @@ export default function DualRowComplianceSection({
     }
     return clone;
   })();
-  const sectionRows = Object.values(filteredSections || {}).flatMap((section) => Array.isArray(section?.rows) ? section.rows : []);
+  const sectionRows = Object.values(filteredSections || {})
+    .flatMap((section) => Array.isArray(section?.rows) ? section.rows : [])
+    .filter((r) => r && typeof r === 'object');
   const sectionUnavailableCount = Object.values(filteredSections || {}).filter(
     (section) => Boolean(section?.status_unavailable) || !Array.isArray(section?.rows)
   ).length;
-  const blockerCount = sectionRows.filter((row) => row.blocker_text).length;
+  const blockerCount = sectionRows.filter((row) => row?.blocker_text).length;
   const pendingReviewCount = sectionRows.filter((row) => (
-    row.status === 'submitted' ||
-    row.status === 'awaiting_review' ||
-    row.status === 'pending' ||
-    row.status === 'response_received' ||
-    row.requires_admin_review
+    row?.status === 'submitted' ||
+    row?.status === 'awaiting_review' ||
+    row?.status === 'pending' ||
+    row?.status === 'response_received' ||
+    row?.requires_admin_review
   )).length;
   const coreRequirementKeys = ['right_to_work', 'dbs', 'identity', 'proof_of_address'];
   const presentCoreRequirementKeys = coreRequirementKeys.filter((key) => filteredSections?.[key]);
   const coreSatisfiedCount = presentCoreRequirementKeys.filter((key) => {
-    const rows = filteredSections[key]?.rows || [];
-    const evidenceRow = rows.find((row) => row.row_type === 'evidence');
-    const checkRow = rows.find((row) => row.row_type === 'check');
-    const evidenceDocs = evidenceRow?.documents_preview || [];
+    const rows = Array.isArray(filteredSections?.[key]?.rows)
+      ? filteredSections[key].rows.filter((row) => row && typeof row === 'object')
+      : [];
+    const evidenceRow = rows.find((row) => row?.row_type === 'evidence') || {};
+    const checkRow = rows.find((row) => row?.row_type === 'check') || null;
+    const evidenceDocs = Array.isArray(evidenceRow?.documents_preview) ? evidenceRow.documents_preview : [];
     const hasAcceptedEvidence =
       evidenceRow?.is_verified ||
       evidenceRow?.status === 'verified' ||
       evidenceRow?.status === 'accepted' ||
       evidenceDocs.some((doc) => (
-        doc.verified ||
-        doc.status === 'verified' ||
-        doc.status === 'accepted' ||
-        doc.status === 'approved'
+        doc?.verified ||
+        doc?.status === 'verified' ||
+        doc?.status === 'accepted' ||
+        doc?.status === 'approved'
       ));
-    const checkData = checkRow?.check_data || {};
+    const checkData = (checkRow?.check_data && typeof checkRow.check_data === 'object') ? checkRow.check_data : {};
     const hasVerifiedCheck =
       checkRow?.is_verified ||
       checkData.outcome === 'verified' ||
@@ -1027,10 +1031,10 @@ export default function DualRowComplianceSection({
     return hasAcceptedEvidence && hasVerifiedCheck && (!proofRequired || hasProof);
   }).length;
   const agreementRowsForSummary = Array.isArray(filteredSections?.agreements?.rows)
-    ? filteredSections.agreements.rows.filter((row) => row.row_type === 'form_acknowledgement')
+    ? filteredSections.agreements.rows.filter((row) => row && typeof row === 'object' && row.row_type === 'form_acknowledgement')
     : [];
-  const agreementSatisfiedCount = agreementRowsForSummary.filter((row) => row.is_verified).length;
-  const agreementBlockingCount = agreementRowsForSummary.filter((row) => row.blocker_text).length;
+  const agreementSatisfiedCount = agreementRowsForSummary.filter((row) => row?.is_verified).length;
+  const agreementBlockingCount = agreementRowsForSummary.filter((row) => row?.blocker_text).length;
   const satisfiedRequirementCount = coreSatisfiedCount + agreementSatisfiedCount;
   const totalRequirementCount = presentCoreRequirementKeys.length + agreementRowsForSummary.length;
 

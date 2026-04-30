@@ -77,15 +77,16 @@ const API = API_BASE;
 class ComplianceTabErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
-    this.state = { hasError: false };
+    this.state = { hasError: false, error: null, info: null };
   }
 
-  static getDerivedStateFromError() {
-    return { hasError: true };
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
   }
 
-  componentDidCatch(error) {
-    console.error('Checks & Compliance tab render failure:', error);
+  componentDidCatch(error, info) {
+    console.error('Checks & Compliance tab render failure:', error, info);
+    this.setState({ error, info });
   }
 
   render() {
@@ -94,6 +95,23 @@ class ComplianceTabErrorBoundary extends React.Component {
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
           <p className="font-medium">Compliance temporarily unavailable</p>
           <p className="mt-1">Checks & Compliance data could not be rendered right now. Please retry.</p>
+          {this.state.error?.message && (
+            <p className="mt-2 text-xs text-amber-700">Error: {this.state.error.message}</p>
+          )}
+          <details className="mt-3 text-xs text-amber-700 whitespace-pre-wrap">
+            <summary className="cursor-pointer font-medium">Technical details</summary>
+            {this.state.error?.stack ? `\n${this.state.error.stack}\n` : ''}
+            {this.state.info?.componentStack ? `\n${this.state.info.componentStack}` : ''}
+          </details>
+          <Button
+            className="mt-3"
+            variant="outline"
+            size="sm"
+            data-testid="compliance-tab-retry"
+            onClick={() => this.setState({ hasError: false, error: null, info: null })}
+          >
+            Retry render
+          </Button>
         </div>
       );
     }

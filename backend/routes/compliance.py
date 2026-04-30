@@ -16,6 +16,8 @@ import logging
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Query, Response
+from fastapi.responses import StreamingResponse
+import io
 from pydantic import BaseModel, ConfigDict
 
 from .dependencies import (
@@ -890,30 +892,40 @@ async def update_org_policy(
 
 @router.get("/compliance/policies/{policy_id}/file")
 async def get_policy_file_url(policy_id: str, user: dict = Depends(get_current_user)):
-    """Get the file URL for a policy"""
+    """Stream policy file bytes inline for preview."""
     db = get_db()
     policy = await db.org_policies.find_one({"id": policy_id}, {"_id": 0, "file_url": 1, "original_filename": 1})
     if not policy:
         raise HTTPException(status_code=404, detail="Policy not found")
-    return {
-        "file_url": policy.get("file_url"),
-        "filename": policy.get("original_filename")
-    }
+    if not policy.get("file_url"):
+        raise HTTPException(status_code=404, detail="No file uploaded for this policy")
+    from server import retrieve_file_bytes
+    file_bytes, content_type = await retrieve_file_bytes(policy.get("file_url"))
+    filename = policy.get("original_filename") or f"policy_{policy_id}.pdf"
+    return StreamingResponse(
+        io.BytesIO(file_bytes),
+        media_type=content_type or "application/octet-stream",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
 
 
 @router.get("/compliance/policies/{policy_id}/download")
 async def download_policy_file(policy_id: str, user: dict = Depends(get_current_user)):
-    """Get download URL for a policy file"""
+    """Stream policy file bytes as attachment."""
     db = get_db()
-    policy = await db.org_policies.find_one({"id": policy_id}, {"_id": 0})
+    policy = await db.org_policies.find_one({"id": policy_id}, {"_id": 0, "file_url": 1, "original_filename": 1})
     if not policy:
         raise HTTPException(status_code=404, detail="Policy not found")
     if not policy.get("file_url"):
         raise HTTPException(status_code=404, detail="No file uploaded for this policy")
-    return {
-        "download_url": policy.get("file_url"),
-        "filename": policy.get("original_filename")
-    }
+    from server import retrieve_file_bytes
+    file_bytes, content_type = await retrieve_file_bytes(policy.get("file_url"))
+    filename = policy.get("original_filename") or f"policy_{policy_id}.pdf"
+    return StreamingResponse(
+        io.BytesIO(file_bytes),
+        media_type=content_type or "application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.post("/compliance/policies/{policy_id}/replace")
@@ -1446,30 +1458,40 @@ async def get_insurance_history(insurance_id: str, user: dict = Depends(require_
 
 @router.get("/compliance/insurance/{insurance_id}/file")
 async def get_insurance_file_url(insurance_id: str, user: dict = Depends(require_admin)):
-    """Get the file URL for an insurance document"""
+    """Stream insurance file bytes inline for preview."""
     db = get_db()
     doc = await db.insurance_docs.find_one({"id": insurance_id}, {"_id": 0, "file_url": 1, "original_filename": 1})
     if not doc:
         raise HTTPException(status_code=404, detail="Insurance document not found")
-    return {
-        "file_url": doc.get("file_url"),
-        "filename": doc.get("original_filename")
-    }
+    if not doc.get("file_url"):
+        raise HTTPException(status_code=404, detail="No file uploaded")
+    from server import retrieve_file_bytes
+    file_bytes, content_type = await retrieve_file_bytes(doc.get("file_url"))
+    filename = doc.get("original_filename") or f"insurance_{insurance_id}.pdf"
+    return StreamingResponse(
+        io.BytesIO(file_bytes),
+        media_type=content_type or "application/octet-stream",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
 
 
 @router.get("/compliance/insurance/{insurance_id}/download")
 async def download_insurance_file(insurance_id: str, user: dict = Depends(require_admin)):
-    """Get download URL for an insurance file"""
+    """Stream insurance file bytes as attachment."""
     db = get_db()
-    doc = await db.insurance_docs.find_one({"id": insurance_id}, {"_id": 0})
+    doc = await db.insurance_docs.find_one({"id": insurance_id}, {"_id": 0, "file_url": 1, "original_filename": 1})
     if not doc:
         raise HTTPException(status_code=404, detail="Insurance document not found")
     if not doc.get("file_url"):
         raise HTTPException(status_code=404, detail="No file uploaded")
-    return {
-        "download_url": doc.get("file_url"),
-        "filename": doc.get("original_filename")
-    }
+    from server import retrieve_file_bytes
+    file_bytes, content_type = await retrieve_file_bytes(doc.get("file_url"))
+    filename = doc.get("original_filename") or f"insurance_{insurance_id}.pdf"
+    return StreamingResponse(
+        io.BytesIO(file_bytes),
+        media_type=content_type or "application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 # ==================== INCIDENT ROUTES ====================

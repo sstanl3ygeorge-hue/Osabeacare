@@ -4018,6 +4018,17 @@ export default function EmployeeProfilePage() {
     applicationEmbeddedRecord ||
     applicationEvidenceRow
   );
+  const cvEvidenceUrl =
+    cvEvidenceRow?.file_url
+    || cvEvidenceRow?.download_url
+    || cvEvidenceRow?.view_url
+    || cvEvidenceRow?.document_url
+    || cvEvidenceRow?.files?.[0]?.file_url
+    || cvEvidenceRow?.files?.find((f) => f?.file_url)?.file_url
+    || null;
+  const cvEvidenceHasStatus = ['verified', 'approved', 'complete', 'completed', 'submitted', 'on_file', 'recorded', 'awaiting_review', 'uploaded'].includes(
+    String(cvEvidenceRow?.status || '').toLowerCase()
+  );
   const cvFileExists = Boolean(
     cvDocument ||
     employee?.cv_url ||
@@ -4025,9 +4036,11 @@ export default function EmployeeProfilePage() {
     employee?.resume_url ||
     cvEvidenceRow?.is_verified === true ||
     cvEvidenceRow?.verified === true ||
-    ['verified', 'approved', 'complete', 'completed', 'submitted', 'on_file', 'recorded'].includes(
-      String(cvEvidenceRow?.status || '').toLowerCase()
-    ) ||
+    cvEvidenceHasStatus ||
+    cvEvidenceRow?.has_files === true ||
+    Number(cvEvidenceRow?.file_count) > 0 ||
+    cvEvidenceRow?.files?.[0]?.file_url ||
+    cvEvidenceUrl ||
     cvEvidenceRow?.file_url ||
     cvEvidenceRow?.document_url
   );
@@ -4040,10 +4053,6 @@ export default function EmployeeProfilePage() {
   const cvReviewReady = Boolean(cvLinkedForReview && activeCvDocument && cvIsPdf);
   const cvLinkRecoveryAvailable = Boolean(fallbackPdfCvDocument && !cvReviewReady);
   const cvLegacyNonPdfOnly = Boolean(!cvReviewReady && !cvLinkRecoveryAvailable && activeNonPdfCvCandidates.length > 0);
-  const cvEvidenceUrl = cvEvidenceRow?.file_url || cvEvidenceRow?.download_url || cvEvidenceRow?.view_url || cvEvidenceRow?.document_url || null;
-  const cvEvidenceHasStatus = ['verified', 'approved', 'complete', 'completed', 'submitted', 'on_file', 'recorded'].includes(
-    String(cvEvidenceRow?.status || '').toLowerCase()
-  );
   const cvEmbeddedUrl = employee?.cv_url || employee?.cv_file_url || employee?.resume_url || null;
   const cvHasCanonicalEvidence = Boolean(
     activeCvDocument ||

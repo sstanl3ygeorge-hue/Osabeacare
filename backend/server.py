@@ -38474,6 +38474,17 @@ async def get_compliance_file(
         latest_ack = agreement_state.get("acknowledgement") or (acks[0] if len(acks) > 0 else None)
         resolved_ack = agreement_state.get("acknowledgement") or {}
         has_acknowledgement = bool(agreement_state.get("has_acknowledgement")) or submission is not None
+        if agreement_type == "contract_acceptance":
+            # Treat canonical/generated-contract source as acknowledgement evidence so
+            # valid contracts do not render as "missing" when legacy ack rows are absent.
+            has_acknowledgement = bool(
+                has_acknowledgement
+                or agreement_state.get("source_record_id")
+                or agreement_state.get("acknowledgement")
+                or agreement_state.get("rendered_contract_pdf_url")
+                or agreement_state.get("worker_signed_contract_pdf_url")
+                or agreement_state.get("executed_contract_pdf_url")
+            )
         
         # Determine verification status (prefer new submission over old ack)
         if submission:

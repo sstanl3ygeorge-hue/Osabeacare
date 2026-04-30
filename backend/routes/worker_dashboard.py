@@ -1305,6 +1305,28 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
     employee_min_result = await db.employees.find_one({"id": employee_id}, {"_id": 0})
     employee_min = employee_min_result if employee_min_result is not None else {"id": employee_id}
     contract_status = await read_employee_agreement_state(db, employee_min, CONTRACT_AGREEMENT_TYPE)
+    # Parity with admin compliance-file read path: repair stale contract rows on read.
+    try:
+        contract_state = str(contract_status.get("contract_state") or contract_status.get("status") or "").strip().lower()
+        has_contract_source = bool(contract_status.get("has_acknowledgement") or contract_status.get("source_record_id"))
+        has_executed_artifact = bool(contract_status.get("executed_contract_pdf_url"))
+        stale_contract_row = (
+            has_contract_source
+            and contract_state != "fully_executed"
+            and not has_executed_artifact
+            and (
+                not contract_status.get("rendered_contract_pdf_url")
+                or not contract_status.get("template_version")
+            )
+        )
+        if stale_contract_row:
+            contract_status = await resolve_employee_agreement_state(db, employee_min, CONTRACT_AGREEMENT_TYPE)
+    except Exception as exc:
+        logger.warning(
+            "worker_dashboard_contract_repair_failed employee_id=%s error=%s",
+            employee_id,
+            exc,
+        )
     contract_status.update({
         "id": "contract_acceptance",
         "name": "Contract Acceptance",

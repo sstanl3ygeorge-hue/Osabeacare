@@ -971,7 +971,12 @@ def current_contract_artifact(agreement: Dict[str, Any]) -> Optional[str]:
         return agreement.get("executed_contract_pdf_url") or agreement.get("worker_signed_contract_pdf_url") or agreement.get("rendered_contract_pdf_url")
     if state == "awaiting_company_countersignature":
         return agreement.get("worker_signed_contract_pdf_url") or agreement.get("rendered_contract_pdf_url")
-    return agreement.get("rendered_contract_pdf_url") or agreement.get("rendered_file_url")
+    # Never use legacy rendered_file_url as the primary contract artifact.
+    # Only expose rendered_contract_pdf_url when the template version is canonical/current.
+    template_version = agreement.get("template_version")
+    if _is_canonical_contract_template_version(template_version):
+        return agreement.get("rendered_contract_pdf_url")
+    return None
 
 
 def _agreement_rank(row: Dict[str, Any]) -> tuple:

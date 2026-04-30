@@ -6615,43 +6615,6 @@ export default function EmployeeProfilePage() {
                 </div>
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-4" data-testid="section-employment-summary-strip">
-              <div className="rounded-xl border border-[#E4E8EB] bg-white p-3 shadow-sm">
-                <p className="text-xs text-text-muted">Application form</p>
-                <Badge variant="outline" className={`mt-2 ${applicationAvailable ? 'bg-green-100 text-green-700 border-green-200' : 'bg-gray-100 text-gray-600 border-gray-200'}`}>
-                  {applicationAvailable ? 'Evidence on file' : 'Missing'}
-                </Badge>
-              </div>
-              <div className="rounded-xl border border-[#E4E8EB] bg-white p-3 shadow-sm">
-                <p className="text-xs text-text-muted">CV file</p>
-                <Badge variant="outline" className={`mt-2 ${cvStatusBadgeClass}`}>
-                  {cvStatusLabel}
-                </Badge>
-              </div>
-              {employmentGapEvaluation?.is_complete !== undefined && (
-                <div className="rounded-xl border border-[#E4E8EB] bg-white p-3 shadow-sm">
-                  <p className="text-xs text-text-muted">10-year coverage</p>
-                  <Badge variant="outline" className={`mt-2 ${gapAnalysisRun && employmentGapEvaluation.is_complete && coverageMet && coverageDisplayPercent > 0 ? 'bg-green-100 text-green-700 border-green-200' : 'bg-amber-100 text-amber-700 border-amber-200'}`}>
-                    {gapAnalysisRun && employmentGapEvaluation.is_complete && coverageMet && coverageDisplayPercent > 0 ? 'Coverage met' : 'Incomplete'}
-                  </Badge>
-                </div>
-              )}
-              {gapAnalysisRun && gapVerifiedCount !== undefined && gapNeedsReviewCount !== null && (
-                <div className="rounded-xl border border-[#E4E8EB] bg-white p-3 shadow-sm">
-                  <p className="text-xs text-text-muted">Gap review</p>
-                  <p className="mt-2 text-sm font-medium text-gray-800">
-                    {gapVerifiedCount} verified / {gapNeedsReviewCount} needs review
-                  </p>
-                </div>
-              )}
-              <div className="rounded-xl border border-[#E4E8EB] bg-white p-3 shadow-sm">
-                <p className="text-xs text-text-muted">Items needing attention</p>
-                <p className="mt-2 text-sm font-medium text-gray-800">
-                  {employmentDecisionState === 'Cannot assess' ? 'Cannot assess' : employmentStatusBlockers.length}
-                </p>
-              </div>
-            </div>
-
             {/* 10-Year Coverage Card */}
             {employmentCoverage && coverageAssessed && (
               <Card className={`shadow-sm ${coverageMet ? 'border-green-200 bg-green-50' : 'border-amber-200 bg-amber-50'}`}>

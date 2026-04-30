@@ -289,6 +289,7 @@ export default function ConsolidatedStatusPanel({
       row?.requirement_id || row?.requirement_key || row?.key || row?.id || row?.check_type || ''
     ).toLowerCase();
     return key.includes('dbs')
+      || key.includes('rtw')
       || key.includes('right_to_work')
       || key.includes('identity')
       || key.includes('proof_of_address')

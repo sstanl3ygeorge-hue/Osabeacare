@@ -428,6 +428,7 @@ export default function EmployeeProfilePage() {
   // Training evaluation state (canonical evaluator result)
   const [trainingEvaluation, setTrainingEvaluation] = useState(null);
   const [loadingTrainingEvaluation, setLoadingTrainingEvaluation] = useState(false);
+  const trainingEvaluationLoadedRef = useRef(false);
   const [inductionChecklist, setInductionChecklist] = useState(null);
   
   // Acknowledgement states (for Contract/Handbook acknowledgement flow)
@@ -1062,14 +1063,17 @@ export default function EmployeeProfilePage() {
   };
   
   // Fetch training evaluation (canonical evaluator)
-  const fetchTrainingEvaluation = async () => {
+  const fetchTrainingEvaluation = async (options = {}) => {
+    const { force = false } = options;
     if (!employeeId) return;
+    if (!force && (loadingTrainingEvaluation || trainingEvaluationLoadedRef.current)) return;
     setLoadingTrainingEvaluation(true);
     try {
       const response = await axios.get(`${API}/employees/${employeeId}/training`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setTrainingEvaluation(response.data);
+      trainingEvaluationLoadedRef.current = true;
     } catch (err) {
       console.error('Failed to fetch training evaluation:', err);
     } finally {
@@ -1762,9 +1766,11 @@ export default function EmployeeProfilePage() {
       return;
     }
 
+    trainingEvaluationLoadedRef.current = false;
     fetchData();
     fetchCompliance();
     fetchComplianceFile();
+    fetchTrainingEvaluation();
   }, [employeeId, token]);
 
   useEffect(() => {

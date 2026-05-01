@@ -1323,6 +1323,23 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             employee_id,
             exc,
         )
+    # Align worker agreement signability with the same gate used by admin and
+    # /employees/{id}/can-sign-contract so UI states cannot diverge.
+    try:
+        contract_gate = await can_sign_contract(db, employee_id)
+    except Exception as exc:
+        logger.warning(
+            "worker_dashboard_contract_gate_failed employee_id=%s error=%s",
+            employee_id,
+            exc,
+        )
+        contract_gate = {}
+
+    if isinstance(contract_status, dict):
+        contract_status["can_sign"] = bool((contract_gate or {}).get("can_sign"))
+        contract_status["signing_gate_reason"] = (contract_gate or {}).get("reason")
+        contract_status["signing_gate_blockers"] = list((contract_gate or {}).get("blockers") or [])
+
     contract_status.update({
         "id": "contract_acceptance",
         "name": "Contract Acceptance",

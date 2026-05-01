@@ -38513,6 +38513,20 @@ async def get_compliance_file(
             or (submission or {}).get("template_version")
         )
         canonical_status = agreement_state.get("status")
+        has_worker_signed_artifact = bool(
+            agreement_state.get("worker_signed_contract_pdf_url")
+            or agreement_state.get("signed_document_url")
+            or resolved_ack.get("worker_signed_contract_pdf_url")
+            or resolved_ack.get("signed_document_url")
+            or ((latest_ack or {}).get("worker_signed_contract_pdf_url") if latest_ack else None)
+            or ((latest_ack or {}).get("signed_document_url") if latest_ack else None)
+        )
+        if (
+            agreement_type == "contract_acceptance"
+            and canonical_status == "awaiting_company_countersignature"
+            and not has_worker_signed_artifact
+        ):
+            canonical_status = "awaiting_worker_signature"
         if canonical_status in {"fully_executed", "verified"}:
             has_acknowledgement = True
             is_verified = True

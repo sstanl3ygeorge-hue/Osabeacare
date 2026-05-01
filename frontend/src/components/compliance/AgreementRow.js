@@ -151,7 +151,11 @@ export default function AgreementRow({
               : null
       )
     : null;
-  const contractCountersignReady = isContractRow && (
+  const hasWorkerSignedArtifact = Boolean(
+    acknowledgement_data?.worker_signed_contract_pdf_url ||
+    acknowledgement_data?.signed_document_url
+  );
+  const contractCountersignReady = isContractRow && hasWorkerSignedArtifact && (
     effectiveLifecycleStatus === 'awaiting_company_countersignature' ||
     normalizedContractStatus === 'awaiting_company_countersignature' ||
     canonicalStatus === 'awaiting_company_countersignature'
@@ -561,7 +565,7 @@ export default function AgreementRow({
               )}
 
               {/* Verify / Reject for awaiting review */}
-              {(effectiveLifecycleStatus === 'submitted' || contractCountersignReady) && (
+              {((!isContractRow && effectiveLifecycleStatus === 'submitted') || contractCountersignReady) && (
                 <>
                   <Button
                     size="sm"

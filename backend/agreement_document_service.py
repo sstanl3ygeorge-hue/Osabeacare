@@ -1071,6 +1071,50 @@ async def _resolve_employee_agreement_state_core(
                         break
         agreement = canonical
 
+    # Contract-only fallback: if acknowledgement rows are missing but a generated
+    # contract exists, synthesize an in-memory agreement so downstream generated
+    # contract enrichment can map canonical state/URLs without returning the
+    # empty "No contract record found" template.
+    if not agreement and agreement_type == CONTRACT_AGREEMENT_TYPE:
+        generated_contract_rows = await db.generated_contracts.find(
+            {
+                "employee_id": employee_id,
+                "status": {"$ne": "superseded"},
+                "$or": [
+                    {"superseded_by_contract_id": {"$exists": False}},
+                    {"superseded_by_contract_id": None},
+                    {"superseded_by_contract_id": ""},
+                ],
+            },
+            {"_id": 0},
+        ).to_list(20)
+        if generated_contract_rows:
+            generated_contract_rows.sort(
+                key=lambda row: (
+                    str(row.get("generated_at") or ""),
+                    str(row.get("created_at") or ""),
+                    str(row.get("id") or ""),
+                ),
+                reverse=True,
+            )
+            latest_generated_contract = generated_contract_rows[0]
+            agreement = {
+                "id": f"agr_{CONTRACT_AGREEMENT_TYPE}_{employee_id}",
+                "employee_id": employee_id,
+                "agreement_type": CONTRACT_AGREEMENT_TYPE,
+                "template_version": latest_generated_contract.get("template_version"),
+                "rendered_contract_pdf_url": (
+                    latest_generated_contract.get("rendered_contract_pdf_url")
+                    or latest_generated_contract.get("file_url")
+                ),
+                "worker_signed_contract_pdf_url": latest_generated_contract.get("worker_signed_contract_pdf_url"),
+                "executed_contract_pdf_url": latest_generated_contract.get("executed_contract_pdf_url"),
+                "rendered_at": latest_generated_contract.get("generated_at") or latest_generated_contract.get("created_at"),
+                "created_at": latest_generated_contract.get("created_at"),
+                "updated_at": latest_generated_contract.get("updated_at"),
+                "source_record_id": latest_generated_contract.get("id"),
+            }
+
     # If no agreement found, ensure all required fields are present and set latest_active: False
     if not agreement:
         # Safe defaults for all required fields

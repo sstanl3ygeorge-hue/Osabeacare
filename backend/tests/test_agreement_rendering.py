@@ -72,6 +72,7 @@ from agreement_document_service import (  # noqa: E402
     CONTRACT_TEMPLATE_DOCX_PATH,
     ContractRenderError,
     REQUIRED_CONTRACT_FIELDS,
+    read_employee_agreement_state,
 )
 
 # ---------------------------------------------------------------------------
@@ -257,6 +258,59 @@ def _coro(value):
 
     async def _inner(*_args, **_kwargs):
         return value
+
+
+class _FakeCursor:
+    def __init__(self, rows):
+        self._rows = rows
+
+    async def to_list(self, _length):
+        return list(self._rows)
+
+
+class _FakeCollection:
+    def __init__(self, rows=None, one=None):
+        self._rows = rows or []
+        self._one = one
+
+    def find(self, *_args, **_kwargs):
+        return _FakeCursor(self._rows)
+
+    async def find_one(self, *_args, **_kwargs):
+        return self._one
+
+
+@pytest.mark.asyncio
+async def test_contract_resolver_uses_generated_contract_when_ack_missing():
+    employee_id = "emp_contract_001"
+    generated_contract_rows = [
+        {
+            "id": "gc_1",
+            "employee_id": employee_id,
+            "status": "pending_signature",
+            "template_version": "contract_acceptance_v_1",
+            "rendered_contract_pdf_url": "contracts/emp_contract_001/current.pdf",
+            "generated_at": "2026-05-01T12:00:00Z",
+            "created_at": "2026-05-01T12:00:00Z",
+        }
+    ]
+
+    class _FakeDb:
+        agreement_acknowledgements = _FakeCollection(rows=[])
+        generated_contracts = _FakeCollection(rows=generated_contract_rows)
+        agreement_submissions = _FakeCollection(rows=[], one=None)
+        org_settings = _FakeCollection(rows=[], one={})
+
+    result = await read_employee_agreement_state(
+        _FakeDb(),
+        {"id": employee_id, "name": "Test Employee"},
+        CONTRACT_AGREEMENT_TYPE,
+    )
+
+    assert result.get("state_label") != "No contract record found"
+    assert result.get("contract_state") in {"pending_signature", "awaiting_worker_signature"}
+    assert result.get("rendered_file_url") == "contracts/emp_contract_001/current.pdf"
+    assert result.get("file_url") == "contracts/emp_contract_001/current.pdf"
 
     # Return a fresh coroutine object each time the mock is called.
     # We return the coroutine itself; the caller must await it, which is

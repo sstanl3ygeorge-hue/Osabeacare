@@ -9248,18 +9248,65 @@ async def get_contract_status(
             "message": "Contract has not been signed yet"
         }
     
+    from agreement_document_service import (
+        CONTRACT_AGREEMENT_TYPE,
+        current_contract_artifact,
+        ensure_agreement_rendered,
+        get_current_contract_template_version,
+        needs_unsigned_contract_render_repair,
+        read_employee_agreement_state,
+    )
+
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0}) or {"id": employee_id}
+    current_template_version = await get_current_contract_template_version(db)
+
+    # Unsigned stale-render repair parity with modular contracts route.
+    # Preserve legal artifacts (worker-signed/executed) untouched.
+    contract_state = str(contract_ack.get("contract_state") or contract_ack.get("status") or "").strip().lower()
+    is_unsigned_pending = contract_state in {"", "pending_signature", "awaiting_worker_signature"}
+    has_legal_artifact = bool(
+        contract_ack.get("executed_contract_pdf_url")
+        or contract_ack.get("worker_signed_contract_pdf_url")
+    )
+    if is_unsigned_pending and not has_legal_artifact:
+        if needs_unsigned_contract_render_repair(contract_ack, current_template_version):
+            try:
+                await ensure_agreement_rendered(db, employee, CONTRACT_AGREEMENT_TYPE)
+                contract_ack = await db.agreement_acknowledgements.find_one(
+                    {"employee_id": employee_id, "agreement_type": "contract_acceptance"},
+                    {"_id": 0},
+                ) or contract_ack
+            except Exception as exc:
+                logger.warning(
+                    "legacy_contract_status_repair_failed employee_id=%s error=%s",
+                    employee_id,
+                    exc,
+                )
+            # If still stale after attempted repair, do not leak old unsigned rendered URL.
+            if needs_unsigned_contract_render_repair(contract_ack, current_template_version):
+                contract_ack = dict(contract_ack)
+                contract_ack["rendered_contract_pdf_url"] = None
+
+    canonical = await read_employee_agreement_state(db, employee, CONTRACT_AGREEMENT_TYPE)
+    contract_url = (
+        contract_ack.get("executed_contract_pdf_url")
+        or contract_ack.get("worker_signed_contract_pdf_url")
+        or current_contract_artifact(contract_ack, current_template_version)
+    )
+
     return {
         "signed": contract_ack.get("contract_state") in ["awaiting_company_countersignature", "fully_executed"],
         "status": contract_ack.get("contract_state") or contract_ack.get("status", "unknown"),
         "signed_at": contract_ack.get("worker_signed_at") or contract_ack.get("signed_at"),
         "signer_name": contract_ack.get("worker_signer_name") or contract_ack.get("signer_name"),
-        "contract_url": contract_ack.get("executed_contract_pdf_url") or contract_ack.get("worker_signed_contract_pdf_url") or contract_ack.get("rendered_contract_pdf_url") or contract_ack.get("signed_document_url"),
+        "contract_url": contract_url,
         "verification_status": contract_ack.get("verification_status"),
         "completion_mode": contract_ack.get("completion_mode"),
         "contract_state": contract_ack.get("contract_state"),
         "rendered_contract_pdf_url": contract_ack.get("rendered_contract_pdf_url"),
         "worker_signed_contract_pdf_url": contract_ack.get("worker_signed_contract_pdf_url"),
         "executed_contract_pdf_url": contract_ack.get("executed_contract_pdf_url"),
+        "canonical_contract": canonical,
     }
 
 

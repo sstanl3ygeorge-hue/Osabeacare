@@ -38506,6 +38506,23 @@ async def get_compliance_file(
         else:
             is_verified = bool(agreement_state.get("verified"))
         can_worker_sign = bool(agreement_state.get("can_sign"))
+        contract_signing_unlocked = None
+        contract_signing_blockers = []
+        contract_signing_lock_reason = None
+        if agreement_type == "contract_acceptance":
+            try:
+                from work_readiness_engine import can_sign_contract as compute_can_sign_contract
+                eligibility = await compute_can_sign_contract(db, employee_id)
+                contract_signing_unlocked = bool((eligibility or {}).get("can_sign"))
+                contract_signing_blockers = list((eligibility or {}).get("blockers") or [])
+                contract_signing_lock_reason = (eligibility or {}).get("reason")
+            except Exception as exc:
+                logger.warning(
+                    "agreement_contract_signing_gate_lookup_failed employee_id=%s agreement_type=%s error=%s",
+                    employee_id,
+                    agreement_type,
+                    exc,
+                )
         resolved_template_version = (
             agreement_state.get("template_version")
             or resolved_ack.get("template_version")
@@ -38596,6 +38613,9 @@ async def get_compliance_file(
             "template_version": resolved_template_version,
             "can_sign": can_worker_sign if agreement_type == "contract_acceptance" else None,
             "can_acknowledge": can_worker_sign if agreement_type == "handbook_acknowledgement" else None,
+            "contract_signing_unlocked": contract_signing_unlocked if agreement_type == "contract_acceptance" else None,
+            "contract_signing_blockers": contract_signing_blockers if agreement_type == "contract_acceptance" else [],
+            "contract_signing_lock_reason": contract_signing_lock_reason if agreement_type == "contract_acceptance" else None,
             "latest_active": bool(agreement_state.get("latest_active")),
             "source_record_id": (
                 agreement_state.get("source_record_id")

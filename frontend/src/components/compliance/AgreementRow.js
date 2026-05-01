@@ -193,7 +193,11 @@ export default function AgreementRow({
   const displaySummary = contractNeedsReissue
     ? 'Worker cannot sign this version.'
     : (key === 'contract_acceptance' && isAwaitingWorkerSignature
-      ? 'Worker can now sign this contract.'
+      ? (
+          row?.contract_signing_unlocked === false
+            ? (row?.contract_signing_lock_reason || 'Contract generated, but signing is locked until earlier onboarding steps are complete.')
+            : 'Worker can now sign this contract.'
+        )
       : status_summary);
 
   // Completion mode display

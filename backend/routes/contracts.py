@@ -43,6 +43,7 @@ from agreement_document_service import (
     CONTRACT_AGREEMENT_TYPE,
     CANONICAL_CONTRACT_TEMPLATE_PREFIX,
     ensure_agreement_rendered,
+    get_current_contract_template_version,
     resolve_employee_agreement_state,
     ContractRenderError,
 )
@@ -116,6 +117,25 @@ def _extract_missing_contract_fields(render_issue: str) -> list[str]:
         if field.lower() in lower:
             missing.append(field)
     return missing
+
+
+def _needs_unsigned_contract_render_repair(contract: dict, current_template_version: Optional[str]) -> bool:
+    if not contract:
+        return False
+    status = str(contract.get("status") or contract.get("contract_state") or "").strip().lower()
+    if status not in {"pending_signature", "awaiting_worker_signature"}:
+        return False
+    if contract.get("executed_contract_pdf_url"):
+        return False
+    if contract.get("worker_signed_contract_pdf_url") or status == "awaiting_company_countersignature":
+        return False
+    template_version = str(contract.get("template_version") or "")
+    rendered_url = contract.get("rendered_contract_pdf_url")
+    if not rendered_url or not template_version:
+        return True
+    if not current_template_version:
+        return True
+    return template_version != str(current_template_version)
 
 
 def _reissue_error_payload(*, code: str, message: str, **extra) -> dict:
@@ -677,7 +697,21 @@ async def get_contract_status(
         "employee_id": employee_id,
         "status": "pending_signature"
     }, {"_id": 0})
-    
+    if pending_contract:
+        current_template_version = await get_current_contract_template_version(db)
+        if _needs_unsigned_contract_render_repair(pending_contract, current_template_version):
+            try:
+                await ensure_agreement_rendered(db, employee, CONTRACT_AGREEMENT_TYPE)
+            except Exception as exc:
+                logger.warning("contract_status_repair_failed employee_id=%s error=%s", employee_id, exc)
+            pending_contract = await db.generated_contracts.find_one({
+                "employee_id": employee_id,
+                "status": "pending_signature"
+            }, {"_id": 0})
+            if pending_contract and _needs_unsigned_contract_render_repair(pending_contract, current_template_version):
+                pending_contract = dict(pending_contract)
+                pending_contract["rendered_contract_pdf_url"] = None
+
     # Check eligibility
     can_sign_result = await can_sign_contract(db, employee_id)
     
@@ -726,6 +760,18 @@ async def sign_contract_legacy(
         "employee_id": employee_id,
         "status": "pending_signature"
     })
+    if contract:
+        employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+        current_template_version = await get_current_contract_template_version(db)
+        if _needs_unsigned_contract_render_repair(contract, current_template_version):
+            try:
+                await ensure_agreement_rendered(db, employee, CONTRACT_AGREEMENT_TYPE)
+            except Exception as exc:
+                logger.warning("legacy_sign_repair_failed employee_id=%s error=%s", employee_id, exc)
+            contract = await db.generated_contracts.find_one({
+                "employee_id": employee_id,
+                "status": "pending_signature"
+            })
     
     if not contract:
         raise HTTPException(status_code=404, detail="No pending contract found")
@@ -762,6 +808,27 @@ async def sign_employee_contract(
     
     if not contract:
         raise HTTPException(status_code=404, detail="Contract not found or already signed")
+
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    current_template_version = await get_current_contract_template_version(db)
+    if _needs_unsigned_contract_render_repair(contract, current_template_version):
+        try:
+            await ensure_agreement_rendered(db, employee, CONTRACT_AGREEMENT_TYPE)
+        except Exception as exc:
+            logger.warning("sign_contract_repair_failed employee_id=%s contract_id=%s error=%s", employee_id, contract_id, exc)
+        contract = await db.generated_contracts.find_one({
+            "id": contract_id,
+            "employee_id": employee_id,
+            "status": "pending_signature"
+        })
+        if not contract or _needs_unsigned_contract_render_repair(contract, current_template_version):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "status": "action_required",
+                    "render_issue": "Contract preview is stale and could not be refreshed to the current template.",
+                },
+            )
 
     template_version = str(contract.get("template_version") or "")
     is_canonical = template_version.startswith(CANONICAL_CONTRACT_TEMPLATE_PREFIX)

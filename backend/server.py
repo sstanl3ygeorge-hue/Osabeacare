@@ -9011,8 +9011,11 @@ async def sign_contract(
     from agreement_document_service import (
         CONTRACT_AGREEMENT_TYPE,
         ContractRenderError,
+        current_contract_artifact,
         create_worker_signed_contract,
         ensure_agreement_rendered,
+        get_current_contract_template_version,
+        needs_unsigned_contract_render_repair,
         read_employee_agreement_state,
     )
     from supabase_storage import upload_file_to_storage
@@ -9058,12 +9061,17 @@ async def sign_contract(
             },
         )
     if resolved_status in {"awaiting_company_countersignature", "fully_executed"}:
+        current_template_version = await get_current_contract_template_version(db)
+        safe_contract_url = current_contract_artifact(
+            resolved_contract,
+            current_template_version,
+        )
         return {
             "success": True,
             "message": "Contract already signed",
             "contract_state": resolved_status,
-            "contract_url": resolved_contract.get("rendered_file_url"),
-            "rendered_file_url": resolved_contract.get("rendered_file_url"),
+            "contract_url": safe_contract_url,
+            "rendered_file_url": None,
             "signed_at": resolved_contract.get("signed_at"),
             "canonical_contract": resolved_contract,
         }
@@ -9157,6 +9165,17 @@ async def sign_contract(
                 "canonical_contract": resolved_contract,
             },
         )
+    current_template_version = await get_current_contract_template_version(db)
+    if needs_unsigned_contract_render_repair(resolved_contract, current_template_version):
+        return JSONResponse(
+            status_code=409,
+            content={
+                "code": "stale_unsigned_contract",
+                "status": resolved_status,
+                "message": "Contract preview is stale and must be regenerated before signing.",
+                "canonical_contract": resolved_contract,
+            },
+        )
 
     try:
         contract_record = await ensure_agreement_rendered(db, employee, CONTRACT_AGREEMENT_TYPE)
@@ -9211,7 +9230,7 @@ async def sign_contract(
         "message": "Contract signed and sent for company countersignature",
         "contract_state": contract_record.get("contract_state"),
         "contract_url": contract_record.get("worker_signed_contract_pdf_url") or contract_record.get("rendered_contract_pdf_url"),
-        "rendered_file_url": contract_record.get("rendered_contract_pdf_url") or contract_record.get("rendered_file_url"),
+        "rendered_file_url": contract_record.get("worker_signed_contract_pdf_url") or contract_record.get("rendered_contract_pdf_url"),
         "signed_at": contract_record.get("worker_signed_at") or now.isoformat(),
         "canonical_contract": await read_employee_agreement_state(db, employee, CONTRACT_AGREEMENT_TYPE),
     }

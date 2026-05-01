@@ -712,6 +712,32 @@ async def get_contract_status(
                 pending_contract = dict(pending_contract)
                 pending_contract["rendered_contract_pdf_url"] = None
 
+    if pending_contract:
+        pending_contract = dict(pending_contract)
+        current_template_version = await get_current_contract_template_version(db)
+        is_stale_unsigned = _needs_unsigned_contract_render_repair(
+            pending_contract,
+            current_template_version,
+        )
+        if is_stale_unsigned:
+            for key in [
+                "rendered_contract_pdf_url",
+                "rendered_file_url",
+                "file_url",
+                "download_url",
+                "contract_url",
+                "signed_document_url",
+            ]:
+                pending_contract[key] = None
+        else:
+            trusted_unsigned_url = pending_contract.get("rendered_contract_pdf_url")
+            pending_contract["rendered_contract_pdf_url"] = trusted_unsigned_url
+            # Never expose legacy aliases as primary unsigned contract artifact URLs.
+            pending_contract["rendered_file_url"] = None
+            pending_contract["file_url"] = None
+            pending_contract["download_url"] = None
+            pending_contract["contract_url"] = None
+
     # Check eligibility
     can_sign_result = await can_sign_contract(db, employee_id)
     

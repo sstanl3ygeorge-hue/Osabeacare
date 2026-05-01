@@ -36,6 +36,7 @@ from agreement_document_service import (
     _employee_name,
     ensure_agreement_rendered,
     get_current_contract_template_version,
+    needs_unsigned_contract_render_repair,
     read_employee_agreement_state,
     resolve_employee_agreement_state,
 )
@@ -1308,26 +1309,11 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
     contract_status = await read_employee_agreement_state(db, employee_min, CONTRACT_AGREEMENT_TYPE)
     # Parity with admin compliance-file read path: repair stale contract rows on read.
     try:
-        contract_state = str(contract_status.get("contract_state") or contract_status.get("status") or "").strip().lower()
         has_contract_source = bool(contract_status.get("has_acknowledgement") or contract_status.get("source_record_id"))
-        has_executed_artifact = bool(contract_status.get("executed_contract_pdf_url"))
         current_contract_template_version = await get_current_contract_template_version(db)
-        stale_contract_row = (
-            has_contract_source
-            and contract_state != "fully_executed"
-            and not has_executed_artifact
-            and not (
-                contract_state == "awaiting_company_countersignature"
-                or bool(contract_status.get("worker_signed_contract_pdf_url"))
-            )
-            and (
-                not contract_status.get("rendered_contract_pdf_url")
-                or not contract_status.get("template_version")
-                or (
-                    current_contract_template_version
-                    and str(contract_status.get("template_version") or "") != str(current_contract_template_version)
-                )
-            )
+        stale_contract_row = has_contract_source and needs_unsigned_contract_render_repair(
+            contract_status,
+            current_contract_template_version,
         )
         if stale_contract_row:
             contract_status = await resolve_employee_agreement_state(db, employee_min, CONTRACT_AGREEMENT_TYPE)

@@ -393,6 +393,53 @@ def _is_canonical_contract_template_version(value: Any) -> bool:
     return bool(version) and version.startswith(CANONICAL_CONTRACT_TEMPLATE_PREFIX)
 
 
+def is_current_contract_template_version(
+    template_version: Any,
+    current_template_version: Optional[str],
+) -> bool:
+    if not current_template_version:
+        return False
+    if not _is_canonical_contract_template_version(template_version):
+        return False
+    return str(template_version or "") == str(current_template_version)
+
+
+def needs_unsigned_contract_render_repair(
+    agreement: Dict[str, Any],
+    current_template_version: Optional[str],
+) -> bool:
+    contract_state = str(
+        (agreement or {}).get("contract_state")
+        or (agreement or {}).get("status")
+        or ""
+    ).strip().lower()
+    # Only repair unsigned, worker-signable rows.
+    if contract_state not in {"", "pending_signature", "awaiting_worker_signature"}:
+        return False
+
+    if (agreement or {}).get("executed_contract_pdf_url"):
+        return False
+
+    if (
+        contract_state == "awaiting_company_countersignature"
+        or (agreement or {}).get("worker_signed_contract_pdf_url")
+    ):
+        return False
+
+    rendered_contract_pdf_url = (
+        (agreement or {}).get("rendered_contract_pdf_url")
+        or (agreement or {}).get("rendered_file_url")
+    )
+    template_version = (agreement or {}).get("template_version")
+    if not rendered_contract_pdf_url or not template_version:
+        return True
+
+    return not is_current_contract_template_version(
+        template_version,
+        current_template_version,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Handbook field resolution and validation
 # ---------------------------------------------------------------------------
@@ -993,11 +1040,7 @@ def current_contract_artifact(agreement: Dict[str, Any], current_template_versio
     # Never use legacy rendered_file_url as the primary contract artifact.
     # Only expose rendered_contract_pdf_url when the template version is canonical/current.
     template_version = agreement.get("template_version")
-    if (
-        _is_canonical_contract_template_version(template_version)
-        and current_template_version
-        and str(template_version) == str(current_template_version)
-    ):
+    if is_current_contract_template_version(template_version, current_template_version):
         return agreement.get("rendered_contract_pdf_url")
     return None
 
@@ -1122,14 +1165,23 @@ async def _resolve_employee_agreement_state_core(
                 reverse=True,
             )
             latest_generated_contract = generated_contract_rows[0]
+            generated_template_version = latest_generated_contract.get("template_version")
+            generated_template_is_current = is_current_contract_template_version(
+                generated_template_version,
+                current_contract_template_version,
+            )
             agreement = {
                 "id": f"agr_{CONTRACT_AGREEMENT_TYPE}_{employee_id}",
                 "employee_id": employee_id,
                 "agreement_type": CONTRACT_AGREEMENT_TYPE,
-                "template_version": latest_generated_contract.get("template_version"),
+                "template_version": generated_template_version if generated_template_is_current else None,
                 "rendered_contract_pdf_url": (
-                    latest_generated_contract.get("rendered_contract_pdf_url")
-                    or latest_generated_contract.get("file_url")
+                    (
+                        latest_generated_contract.get("rendered_contract_pdf_url")
+                        or latest_generated_contract.get("file_url")
+                    )
+                    if generated_template_is_current
+                    else None
                 ),
                 "worker_signed_contract_pdf_url": latest_generated_contract.get("worker_signed_contract_pdf_url"),
                 "executed_contract_pdf_url": latest_generated_contract.get("executed_contract_pdf_url"),
@@ -1320,10 +1372,9 @@ async def _resolve_employee_agreement_state_core(
         if latest_generated_contract:
             latest_status = str(latest_generated_contract.get("status") or "").strip().lower()
             generated_template_version = latest_generated_contract.get("template_version")
-            generated_template_is_current = bool(
-                generated_template_version
-                and current_contract_template_version
-                and str(generated_template_version) == str(current_contract_template_version)
+            generated_template_is_current = is_current_contract_template_version(
+                generated_template_version,
+                current_contract_template_version,
             )
             generated_to_state = {
                 "pending_signature": "pending_signature",
@@ -1383,7 +1434,10 @@ async def _resolve_employee_agreement_state_core(
             else contract_state
         )
         verification_status = str((agreement or {}).get("verification_status") or "").strip().lower()
-        canonical_contract = _is_canonical_contract_template_version(agreement.get("template_version"))
+        canonical_contract = is_current_contract_template_version(
+            agreement.get("template_version"),
+            current_contract_template_version,
+        )
         contract_file_url = current_contract_artifact(agreement, current_contract_template_version)
         render_issue_contract = render_error_detail if not canonical_contract else None
         worker_signed = bool(

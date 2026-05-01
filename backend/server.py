@@ -38431,20 +38431,16 @@ async def get_compliance_file(
         # Do not touch executed contracts; only ensure current rendered contract artifact when stale.
         if agreement_type == "contract_acceptance" and agreement_state:
             has_ack = bool(agreement_state.get("has_acknowledgement")) or len(acks) > 0
-            rendered_contract_pdf_url = agreement_state.get("rendered_contract_pdf_url")
-            template_version = agreement_state.get("template_version")
-            executed_contract_pdf_url = agreement_state.get("executed_contract_pdf_url")
-            is_executed = str(agreement_state.get("status") or "").lower() == "fully_executed" or bool(executed_contract_pdf_url)
-            contract_state_value = str(agreement_state.get("contract_state") or agreement_state.get("status") or "").strip().lower()
-            is_worker_signed_state = contract_state_value == "awaiting_company_countersignature" or bool(agreement_state.get("worker_signed_contract_pdf_url"))
-            from agreement_document_service import get_current_contract_template_version
-            current_template_version = await get_current_contract_template_version(db)
-            stale_contract_row = has_ack and (
-                not rendered_contract_pdf_url
-                or not template_version
-                or (current_template_version and str(template_version) != str(current_template_version))
+            from agreement_document_service import (
+                get_current_contract_template_version,
+                needs_unsigned_contract_render_repair,
             )
-            if stale_contract_row and not is_executed and not is_worker_signed_state:
+            current_template_version = await get_current_contract_template_version(db)
+            stale_contract_row = has_ack and needs_unsigned_contract_render_repair(
+                agreement_state,
+                current_template_version,
+            )
+            if stale_contract_row:
                 try:
                     from agreement_document_service import ensure_agreement_rendered, read_employee_agreement_state, CONTRACT_AGREEMENT_TYPE
                     await ensure_agreement_rendered(db, employee, CONTRACT_AGREEMENT_TYPE)

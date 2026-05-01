@@ -363,9 +363,9 @@ export default function ConsolidatedStatusPanel({
     },
     forms: {
       completed: (() => {
+        const applicantExcludedFormKeys = new Set(['interview_record', 'recruitment_checklist', 'induction']);
         const recruitmentFormKeys = new Set(['interview_record', 'application_form', 'recruitment_checklist', 'induction']);
         const formRows = (rowsByType.form || []).filter((row) => {
-          if (isApplicant) return true;
           const key = String(
             row?.requirement_id
             || row?.requirement_key
@@ -373,14 +373,15 @@ export default function ConsolidatedStatusPanel({
             || row?.key
             || ''
           ).toLowerCase();
+          if (isApplicant) return !applicantExcludedFormKeys.has(key);
           return !recruitmentFormKeys.has(key);
         });
         return formRows.filter(isCompleteRow).length;
       })(),
       total: (() => {
+        const applicantExcludedFormKeys = new Set(['interview_record', 'recruitment_checklist', 'induction']);
         const recruitmentFormKeys = new Set(['interview_record', 'application_form', 'recruitment_checklist', 'induction']);
         const formRows = (rowsByType.form || []).filter((row) => {
-          if (isApplicant) return true;
           const key = String(
             row?.requirement_id
             || row?.requirement_key
@@ -388,6 +389,7 @@ export default function ConsolidatedStatusPanel({
             || row?.key
             || ''
           ).toLowerCase();
+          if (isApplicant) return !applicantExcludedFormKeys.has(key);
           return !recruitmentFormKeys.has(key);
         });
         return formRows.length;

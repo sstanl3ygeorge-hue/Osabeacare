@@ -38595,6 +38595,41 @@ async def get_compliance_file(
             or (latest_ack or {}).get("template_version")
             or (submission or {}).get("template_version")
         )
+        safe_rendered_contract_pdf_url = (
+            agreement_state.get("rendered_contract_pdf_url")
+            or resolved_ack.get("rendered_contract_pdf_url")
+            or ((latest_ack or {}).get("rendered_contract_pdf_url")
+               if latest_ack else None)
+        )
+        safe_rendered_file_url = (
+            agreement_state.get("rendered_file_url")
+            or resolved_ack.get("rendered_file_url")
+            or ((latest_ack or {}).get("rendered_file_url")
+               if latest_ack else None)
+        )
+        if agreement_type == "contract_acceptance":
+            from agreement_document_service import current_contract_artifact
+            contract_artifact_url = current_contract_artifact(
+                agreement_state,
+                current_template_version,
+            )
+            contract_state_for_safety = str(
+                agreement_state.get("contract_state")
+                or agreement_state.get("status")
+                or ""
+            ).strip().lower()
+            is_unsigned_contract = contract_state_for_safety in {
+                "",
+                "pending_signature",
+                "awaiting_worker_signature",
+            }
+            if is_unsigned_contract:
+                # Never leak stale unsigned rendered artifacts into admin row actions.
+                if contract_artifact_url:
+                    safe_rendered_contract_pdf_url = contract_artifact_url
+                else:
+                    safe_rendered_contract_pdf_url = None
+                safe_rendered_file_url = None
         canonical_status = agreement_state.get("status")
         has_worker_signed_artifact = bool(
             agreement_state.get("worker_signed_contract_pdf_url")
@@ -38710,8 +38745,8 @@ async def get_compliance_file(
                 "verified_at": resolved_ack.get("verified_at") or (latest_ack.get("verified_at") if latest_ack else None),
                 "verified_by": resolved_ack.get("verified_by") or (latest_ack.get("verified_by") if latest_ack else None),
                 "verified_by_name": resolved_ack.get("verified_by_name") or (latest_ack.get("verified_by_name") if latest_ack else None),
-                "rendered_file_url": resolved_ack.get("rendered_file_url") or (latest_ack.get("rendered_file_url") if latest_ack else None),
-                "rendered_contract_pdf_url": resolved_ack.get("rendered_contract_pdf_url") or (latest_ack.get("rendered_contract_pdf_url") if latest_ack else None),
+                "rendered_file_url": safe_rendered_file_url,
+                "rendered_contract_pdf_url": safe_rendered_contract_pdf_url,
                 "worker_signed_contract_pdf_url": resolved_ack.get("worker_signed_contract_pdf_url") or (latest_ack.get("worker_signed_contract_pdf_url") if latest_ack else None),
                 "executed_contract_pdf_url": resolved_ack.get("executed_contract_pdf_url") or (latest_ack.get("executed_contract_pdf_url") if latest_ack else None),
                 "signed_document_url": resolved_ack.get("signed_document_url") or (latest_ack.get("signed_document_url") if latest_ack else None),

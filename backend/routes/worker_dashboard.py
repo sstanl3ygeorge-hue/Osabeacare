@@ -1335,6 +1335,31 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
         )
         contract_gate = {}
 
+    # If worker is eligible to sign but the unsigned contract artifact is still
+    # missing from read-only state, force canonical side-effect resolver once
+    # so dashboard can expose current PDF/sign route.
+    try:
+        gate_can_sign = bool((contract_gate or {}).get("can_sign"))
+        has_contract_artifact = bool(
+            (contract_status or {}).get("file_url")
+            or (contract_status or {}).get("download_url")
+            or (contract_status or {}).get("rendered_contract_pdf_url")
+            or (contract_status or {}).get("worker_signed_contract_pdf_url")
+            or (contract_status or {}).get("executed_contract_pdf_url")
+        )
+        if gate_can_sign and not has_contract_artifact:
+            contract_status = await resolve_employee_agreement_state(
+                db,
+                employee_min,
+                CONTRACT_AGREEMENT_TYPE,
+            )
+    except Exception as exc:
+        logger.warning(
+            "worker_dashboard_contract_render_hydration_failed employee_id=%s error=%s",
+            employee_id,
+            exc,
+        )
+
     if isinstance(contract_status, dict):
         contract_status["can_sign"] = bool((contract_gate or {}).get("can_sign"))
         contract_status["signing_gate_reason"] = (contract_gate or {}).get("reason")

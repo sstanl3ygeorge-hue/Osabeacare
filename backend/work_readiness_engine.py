@@ -524,10 +524,46 @@ async def can_sign_contract(db, employee_id: str) -> dict:
 
     # Contract can only be signed when progress is 100%
     can_sign = progress_percentage >= 100
+
+    # Final contract artifact readiness gate: avoid reporting can_sign=true when
+    # the pending unsigned contract cannot be rendered to the current template.
+    contract_render_ready = True
+    contract_render_reason = None
+    if can_sign:
+        try:
+            from agreement_document_service import (
+                CONTRACT_AGREEMENT_TYPE,
+                get_current_contract_template_version,
+                needs_unsigned_contract_render_repair,
+                read_employee_agreement_state,
+            )
+            contract_state = await read_employee_agreement_state(
+                db,
+                employee,
+                CONTRACT_AGREEMENT_TYPE,
+            )
+            current_template_version = await get_current_contract_template_version(db)
+            if needs_unsigned_contract_render_repair(contract_state, current_template_version):
+                contract_render_ready = False
+                contract_render_reason = (
+                    contract_state.get("render_issue")
+                    or "Contract preview is stale or missing and must be regenerated."
+                )
+                blockers.append(contract_render_reason)
+                can_sign = False
+        except Exception:
+            contract_render_ready = False
+            contract_render_reason = "Contract render readiness cannot be assessed"
+            blockers.append(contract_render_reason)
+            can_sign = False
     
     return {
         "can_sign": can_sign,
-        "reason": None if can_sign else f"{len(blockers)} requirements remaining before contract can be signed",
+        "reason": None if can_sign else (
+            contract_render_reason
+            if contract_render_reason
+            else f"{len(blockers)} requirements remaining before contract can be signed"
+        ),
         "blockers": blockers,
         "completed": completed,
         "total_requirements": total_requirements,
@@ -551,6 +587,8 @@ async def can_sign_contract(db, employee_id: str) -> dict:
             "agreements": {
                 "handbook_satisfied": handbook_ok,
                 "contract_excluded_from_pre_sign_gate": True,
+                "contract_render_ready": contract_render_ready,
+                "contract_render_reason": contract_render_reason,
                 "blocking": [] if handbook_ok else (
                     ["Employee Handbook unavailable due to system render issue"]
                     if handbook_system_issue

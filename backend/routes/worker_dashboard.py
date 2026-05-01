@@ -35,6 +35,7 @@ from agreement_document_service import (
     HANDBOOK_AGREEMENT_TYPE,
     _employee_name,
     ensure_agreement_rendered,
+    get_current_contract_template_version,
     read_employee_agreement_state,
     resolve_employee_agreement_state,
 )
@@ -1314,9 +1315,17 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             has_contract_source
             and contract_state != "fully_executed"
             and not has_executed_artifact
+            and not (
+                contract_state == "awaiting_company_countersignature"
+                or bool(contract_status.get("worker_signed_contract_pdf_url"))
+            )
             and (
                 not contract_status.get("rendered_contract_pdf_url")
                 or not contract_status.get("template_version")
+                or (
+                    (await get_current_contract_template_version(db))
+                    and str(contract_status.get("template_version") or "") != str(await get_current_contract_template_version(db))
+                )
             )
         )
         if stale_contract_row:

@@ -38435,8 +38435,16 @@ async def get_compliance_file(
             template_version = agreement_state.get("template_version")
             executed_contract_pdf_url = agreement_state.get("executed_contract_pdf_url")
             is_executed = str(agreement_state.get("status") or "").lower() == "fully_executed" or bool(executed_contract_pdf_url)
-            stale_contract_row = has_ack and (not rendered_contract_pdf_url or not template_version)
-            if stale_contract_row and not is_executed:
+            contract_state_value = str(agreement_state.get("contract_state") or agreement_state.get("status") or "").strip().lower()
+            is_worker_signed_state = contract_state_value == "awaiting_company_countersignature" or bool(agreement_state.get("worker_signed_contract_pdf_url"))
+            from agreement_document_service import get_current_contract_template_version
+            current_template_version = await get_current_contract_template_version(db)
+            stale_contract_row = has_ack and (
+                not rendered_contract_pdf_url
+                or not template_version
+                or (current_template_version and str(template_version) != str(current_template_version))
+            )
+            if stale_contract_row and not is_executed and not is_worker_signed_state:
                 try:
                     from agreement_document_service import ensure_agreement_rendered, read_employee_agreement_state, CONTRACT_AGREEMENT_TYPE
                     await ensure_agreement_rendered(db, employee, CONTRACT_AGREEMENT_TYPE)

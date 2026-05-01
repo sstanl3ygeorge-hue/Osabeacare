@@ -12,6 +12,7 @@ import hashlib
 import io
 import os
 import re
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -45,6 +46,8 @@ HANDBOOK_TEMPLATE_ID = "EMPLOYEE_HANDBOOK_FULL_V1"
 CONTRACT_AGREEMENT_TYPE = "contract_acceptance"
 HANDBOOK_AGREEMENT_TYPE = "handbook_acknowledgement"
 CANONICAL_CONTRACT_TEMPLATE_PREFIX = f"{CONTRACT_AGREEMENT_TYPE}_v_"
+_CONTRACT_TEMPLATE_VERSION_CACHE: Dict[str, Any] = {"value": None, "ts": 0.0}
+_CONTRACT_TEMPLATE_VERSION_TTL_SECONDS = 60.0
 
 
 def _utcnow() -> datetime:
@@ -762,6 +765,22 @@ def _template_version(template_bytes: bytes, agreement_type: str) -> str:
     return f"{agreement_type}_v_{digest}"
 
 
+async def get_current_contract_template_version(db) -> Optional[str]:
+    now = time.time()
+    cached_value = _CONTRACT_TEMPLATE_VERSION_CACHE.get("value")
+    cached_ts = float(_CONTRACT_TEMPLATE_VERSION_CACHE.get("ts") or 0.0)
+    if cached_value and (now - cached_ts) < _CONTRACT_TEMPLATE_VERSION_TTL_SECONDS:
+        return str(cached_value)
+    try:
+        template_bytes, _, _ = await _load_template_bytes(db, CONTRACT_AGREEMENT_TYPE)
+        version = _template_version(template_bytes, CONTRACT_AGREEMENT_TYPE)
+        _CONTRACT_TEMPLATE_VERSION_CACHE["value"] = version
+        _CONTRACT_TEMPLATE_VERSION_CACHE["ts"] = now
+        return version
+    except Exception:
+        return None
+
+
 def _create_styles():
     styles = getSampleStyleSheet()
     styles.add(ParagraphStyle(
@@ -965,7 +984,7 @@ def _apply_contract_signatures(
     return _merge_overlay(base_pdf_bytes, {last_page_idx: signature_page})
 
 
-def current_contract_artifact(agreement: Dict[str, Any]) -> Optional[str]:
+def current_contract_artifact(agreement: Dict[str, Any], current_template_version: Optional[str] = None) -> Optional[str]:
     state = (agreement or {}).get("contract_state")
     if state == "fully_executed":
         return agreement.get("executed_contract_pdf_url") or agreement.get("worker_signed_contract_pdf_url") or agreement.get("rendered_contract_pdf_url")
@@ -974,7 +993,11 @@ def current_contract_artifact(agreement: Dict[str, Any]) -> Optional[str]:
     # Never use legacy rendered_file_url as the primary contract artifact.
     # Only expose rendered_contract_pdf_url when the template version is canonical/current.
     template_version = agreement.get("template_version")
-    if _is_canonical_contract_template_version(template_version):
+    if (
+        _is_canonical_contract_template_version(template_version)
+        and current_template_version
+        and str(template_version) == str(current_template_version)
+    ):
         return agreement.get("rendered_contract_pdf_url")
     return None
 
@@ -1015,6 +1038,7 @@ async def _resolve_employee_agreement_state_core(
     if agreement_type == "employee_handbook_acknowledgement":
         agreement_type = HANDBOOK_AGREEMENT_TYPE
     employee_id = employee["id"]
+    current_contract_template_version = await get_current_contract_template_version(db) if agreement_type == CONTRACT_AGREEMENT_TYPE else None
     render_error_detail = None
     agreement = None
     if allow_render_side_effects:
@@ -1295,6 +1319,12 @@ async def _resolve_employee_agreement_state_core(
 
         if latest_generated_contract:
             latest_status = str(latest_generated_contract.get("status") or "").strip().lower()
+            generated_template_version = latest_generated_contract.get("template_version")
+            generated_template_is_current = bool(
+                generated_template_version
+                and current_contract_template_version
+                and str(generated_template_version) == str(current_contract_template_version)
+            )
             generated_to_state = {
                 "pending_signature": "pending_signature",
                 "awaiting_worker_signature": "awaiting_worker_signature",
@@ -1311,14 +1341,18 @@ async def _resolve_employee_agreement_state_core(
                 agreement["generated_contract_id"] = latest_generated_contract.get("id")
                 agreement["active_contract_id"] = latest_generated_contract.get("id")
                 agreement["template_version"] = (
-                    latest_generated_contract.get("template_version")
-                    or agreement.get("template_version")
+                    generated_template_version if generated_template_is_current else agreement.get("template_version")
                 )
                 agreement["rendered_contract_pdf_url"] = (
-                    latest_generated_contract.get("rendered_contract_pdf_url")
-                    or latest_generated_contract.get("file_url")
-                    or agreement.get("rendered_contract_pdf_url")
-                    or agreement.get("rendered_file_url")
+                    (
+                        latest_generated_contract.get("rendered_contract_pdf_url")
+                        or latest_generated_contract.get("file_url")
+                    )
+                    if generated_template_is_current
+                    else (
+                        agreement.get("rendered_contract_pdf_url")
+                        or agreement.get("rendered_file_url")
+                    )
                 )
                 agreement["rendered_file_url"] = (
                     agreement.get("rendered_contract_pdf_url")
@@ -1350,7 +1384,7 @@ async def _resolve_employee_agreement_state_core(
         )
         verification_status = str((agreement or {}).get("verification_status") or "").strip().lower()
         canonical_contract = _is_canonical_contract_template_version(agreement.get("template_version"))
-        contract_file_url = current_contract_artifact(agreement)
+        contract_file_url = current_contract_artifact(agreement, current_contract_template_version)
         render_issue_contract = render_error_detail if not canonical_contract else None
         worker_signed = bool(
             contract_state in ("awaiting_company_countersignature", "fully_executed")

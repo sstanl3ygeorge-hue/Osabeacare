@@ -1311,6 +1311,7 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
         contract_state = str(contract_status.get("contract_state") or contract_status.get("status") or "").strip().lower()
         has_contract_source = bool(contract_status.get("has_acknowledgement") or contract_status.get("source_record_id"))
         has_executed_artifact = bool(contract_status.get("executed_contract_pdf_url"))
+        current_contract_template_version = await get_current_contract_template_version(db)
         stale_contract_row = (
             has_contract_source
             and contract_state != "fully_executed"
@@ -1323,8 +1324,8 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
                 not contract_status.get("rendered_contract_pdf_url")
                 or not contract_status.get("template_version")
                 or (
-                    (await get_current_contract_template_version(db))
-                    and str(contract_status.get("template_version") or "") != str(await get_current_contract_template_version(db))
+                    current_contract_template_version
+                    and str(contract_status.get("template_version") or "") != str(current_contract_template_version)
                 )
             )
         )

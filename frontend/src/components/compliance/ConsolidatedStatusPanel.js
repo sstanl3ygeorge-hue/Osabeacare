@@ -298,6 +298,9 @@ export default function ConsolidatedStatusPanel({
   const isDocumentStatusComplete = (value) => documentCompleteStatuses.has(String(value || '').toLowerCase());
   const isDocumentRowComplete = (row) => {
     if (!row || typeof row !== 'object') return false;
+    if (String(row?.row_type || '').toLowerCase() === 'evidence' && Number(row?.counts?.verified) > 0) {
+      return true;
+    }
     return row?.is_verified === true
       || row?.verified === true
       || isDocumentStatusComplete(row?.status)

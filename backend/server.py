@@ -37590,10 +37590,20 @@ async def get_compliance_file(
         if not isinstance(agreements.get("pending_requests"), list):
             agreements["pending_requests"] = []
 
-    # Index submissions by template_id for quick lookup
+    # Index submissions by template_id for quick lookup.
+    # Verified submissions should win when multiple submissions exist.
     submissions_by_template = {}
     for sub in agreement_submissions_list:
         tid = sub.get("template_id", "")
+        if not tid:
+            continue
+        verification_status = str(sub.get("verification_status") or "").lower()
+        if verification_status == "verified" and tid not in submissions_by_template:
+            submissions_by_template[tid] = sub
+    for sub in agreement_submissions_list:
+        tid = sub.get("template_id", "")
+        if not tid:
+            continue
         if tid not in submissions_by_template:
             submissions_by_template[tid] = sub
     

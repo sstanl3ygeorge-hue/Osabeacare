@@ -139,6 +139,7 @@ from routes.employment_gaps import router as employment_gaps_router
 from routes.recurring_compliance import router as recurring_compliance_router
 from routes.supervisions import router as supervisions_router
 from routes.agreements import router as agreements_router
+from routes.legacy_stamps import router as legacy_stamps_router
 from routes.dbs import router as dbs_router
 from routes.verifications import router as verifications_router
 from routes.migrations import router as migrations_router
@@ -44967,6 +44968,9 @@ api_router.include_router(supervisions_router)
 
 # Include agreements routes (refactored from server.py)
 api_router.include_router(agreements_router)
+
+# Include legacy stamp identification + bulk re-stamp routes
+api_router.include_router(legacy_stamps_router)
 
 # Include DBS routes (refactored from server.py)
 api_router.include_router(dbs_router)

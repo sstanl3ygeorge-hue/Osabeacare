@@ -118,17 +118,50 @@ async def update_org_settings(
     settings: OrgSettingsUpdate,
     user: dict = Depends(require_admin)
 ):
-    """Update organization settings. Admin only."""
+    """Update organization settings. Admin only.
+
+    Required-field guard: refuses any update that would CLEAR a field the
+    contract/handbook renderer relies on. The renderer raises
+    ContractRenderError if `company_name`, `company_address`, or
+    `default_hourly_rate` are unresolved, which silently blocks every new
+    contract render. Saving an empty string to one of those fields would
+    reproduce the production incident from Feb 2026, so we reject the write
+    here with a 422 instead of letting it through.
+    """
     db = get_db()
-    
+
     now = datetime.now(timezone.utc).isoformat()
-    
-    update_data = {
-        k: v for k, v in settings.model_dump().items() if v is not None
-    }
+
+    submitted = settings.model_dump()
+
+    # Treat empty/whitespace strings as explicit clears for required fields.
+    REQUIRED_FIELDS = ("company_name", "company_address", "default_hourly_rate")
+    cleared = []
+    for field in REQUIRED_FIELDS:
+        value = submitted.get(field)
+        if value is None:
+            continue  # not being changed — leave existing value alone
+        if isinstance(value, str) and not value.strip():
+            cleared.append(field)
+    if cleared:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "required_field_clear_blocked",
+                "message": (
+                    "These fields are required for contract rendering and "
+                    "cannot be cleared: " + ", ".join(cleared) + ". "
+                    "Provide a non-empty value, or omit the field to keep "
+                    "the existing value."
+                ),
+                "fields": cleared,
+            },
+        )
+
+    update_data = {k: v for k, v in submitted.items() if v is not None}
     update_data["updated_at"] = now
     update_data["updated_by"] = user.get("user_id")
-    
+
     result = await db.org_settings.update_one(
         {"id": "default"},
         {
@@ -137,9 +170,9 @@ async def update_org_settings(
         },
         upsert=True
     )
-    
+
     _ = result  # Acknowledge update result
-    
+
     await log_audit_action(
         user.get("user_id"),
         "update_org_settings",

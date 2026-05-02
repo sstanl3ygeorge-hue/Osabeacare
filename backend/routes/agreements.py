@@ -507,6 +507,7 @@ async def recover_agreement(
             )
 
         from .contracts import reissue_employee_contract
+        from fastapi import HTTPException as FastAPIHTTPException
         # Reuse hardened reissue flow (idempotency, race-guard, compensation).
 
         class _InlineRequest:
@@ -516,17 +517,57 @@ async def recover_agreement(
             async def json(self):
                 return self._payload
 
-        reissue_result = await reissue_employee_contract(
-            employee_id=employee_id,
-            request=_InlineRequest(
-                {
-                    "reason": reason,
-                    "source_contract_id": (data.render_fields or {}).get("source_contract_id"),
-                    "idempotency_key": (data.render_fields or {}).get("idempotency_key"),
-                }
-            ),
-            user=user,
-        )
+        reissue_payload = {
+            "reason": reason,
+            "source_contract_id": (data.render_fields or {}).get("source_contract_id"),
+            "idempotency_key": (data.render_fields or {}).get("idempotency_key"),
+        }
+
+        try:
+            reissue_result = await reissue_employee_contract(
+                employee_id=employee_id,
+                request=_InlineRequest(reissue_payload),
+                user=user,
+            )
+        except FastAPIHTTPException as exc:
+            detail = exc.detail
+            detail_text = str(detail)
+            # Recovery fallback for legacy/mixed states:
+            # - no contract row to reissue
+            # - awaiting_worker_signature with null contract ids
+            # In both cases, force canonical render path so admin/worker can align.
+            if (
+                "No contract available to reissue" in detail_text
+                or "already_has_active_contract" in detail_text
+                or "awaiting_worker_signature" in detail_text
+            ):
+                from agreement_document_service import (
+                    CONTRACT_AGREEMENT_TYPE,
+                    ensure_agreement_rendered,
+                    read_employee_agreement_state,
+                )
+                try:
+                    await ensure_agreement_rendered(db, employee, CONTRACT_AGREEMENT_TYPE)
+                    normalized = await read_employee_agreement_state(db, employee, CONTRACT_AGREEMENT_TYPE)
+                    return {
+                        "success": True,
+                        "agreement_type": agreement_type,
+                        "message": "Contract recovered via canonical render fallback.",
+                        "result": {
+                            "mode": "canonical_render_fallback",
+                            "state": normalized,
+                        },
+                    }
+                except Exception as render_exc:
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "status": "action_required",
+                            "render_issue": str(render_exc),
+                            "source_error": detail,
+                        },
+                    ) from render_exc
+            raise
         return {
             "success": True,
             "agreement_type": agreement_type,

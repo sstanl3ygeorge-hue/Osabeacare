@@ -38566,9 +38566,13 @@ async def get_compliance_file(
                 or agreement_state.get("executed_contract_pdf_url")
             )
         
-        # Determine verification status (prefer new submission over old ack)
-        if submission:
-            is_verified = submission.get("verification_status") == "verified"
+        # Determine verification status.
+        # Canonical resolver state must win to avoid admin/worker mismatches
+        # when multiple handbook submissions exist (e.g. verified + stale pending row).
+        if str(agreement_state.get("status") or "").strip().lower() == "verified":
+            is_verified = True
+        elif submission:
+            is_verified = str(submission.get("verification_status") or "").strip().lower() == "verified"
         else:
             is_verified = bool(agreement_state.get("verified"))
         can_worker_sign = bool(agreement_state.get("can_sign"))
@@ -38668,7 +38672,11 @@ async def get_compliance_file(
             mode = (submission.get("completion_mode", "") or "").replace("_", " ").title()
             status_summary = f"Verified • {version} • {mode} on {completed_at}"
             status = "verified"
-        elif submission and submission.get("verification_status") == "awaiting_review":
+        elif (
+            submission
+            and str(submission.get("verification_status") or "").strip().lower() == "awaiting_review"
+            and str(agreement_state.get("status") or "").strip().lower() != "verified"
+        ):
             status_summary = "Awaiting Review"
             status = "awaiting_review"
         elif submission:

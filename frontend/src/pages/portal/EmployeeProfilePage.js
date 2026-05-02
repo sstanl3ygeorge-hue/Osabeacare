@@ -4758,7 +4758,27 @@ export default function EmployeeProfilePage() {
             const inductionSectionRows = asArray(complianceSections?.induction?.rows);
 
             const toDate = (value) => (value ? formatBackendDate(value) : 'Unavailable');
-            const toDays = (value) => (typeof value === 'number' ? `${value}d` : 'Unavailable');
+            // Day-count formatter. Adds qualifier text so the audit value is
+            // unambiguous: "(due in)", "(overdue by)", "today".
+            const toDays = (value) => {
+              if (typeof value !== 'number' || !Number.isFinite(value)) return 'Unavailable';
+              if (value === 0) return '0d (due today)';
+              if (value < 0) return `${Math.abs(value)}d (overdue)`;
+              return `${value}d`;
+            };
+            // Fallback: when backend doesn't precompute days_until_*, derive
+            // from the date itself so the Audit Quick View never shows
+            // "Unavailable" for a verified check that has a known
+            // expiry/review date. Returns null only when there is no date.
+            const daysUntil = (dateValue) => {
+              if (!dateValue) return null;
+              const target = new Date(dateValue);
+              if (Number.isNaN(target.getTime())) return null;
+              const today = new Date();
+              today.setHours(0, 0, 0, 0);
+              target.setHours(0, 0, 0, 0);
+              return Math.round((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+            };
             const tone = (status, daysRemaining) => {
               const s = String(status || '').toLowerCase();
               if (s.includes('expired') || s.includes('missing') || s.includes('rejected')) return 'red';
@@ -4781,7 +4801,7 @@ export default function EmployeeProfilePage() {
             const dbsReview = dbsCheckRow?.check_data?.review_due_at || dbsCheckRow?.check_data?.next_recheck_date || null;
             const dbsDays = Number.isFinite(dbsCheckRow?.check_data?.days_until_review)
               ? dbsCheckRow.check_data.days_until_review
-              : null;
+              : daysUntil(dbsReview);
 
             const rtwCheckData = rtwCheckRow?.check_data || {};
             const rtwCheckOutcome = String(rtwCheckData?.outcome || rtwCheckRow?.status || '').toLowerCase();
@@ -4795,7 +4815,7 @@ export default function EmployeeProfilePage() {
             const rtwExpiry = rtwCheckRow?.check_data?.permission_end_date || null;
             const rtwDays = Number.isFinite(rtwCheckRow?.check_data?.days_until_expiry)
               ? rtwCheckRow.check_data.days_until_expiry
-              : null;
+              : daysUntil(rtwExpiry);
 
             const trainingItems = asArray(trainingCategory?.items);
             const trainingSectionRequired = trainingOperationalRows.length > 0 ? trainingOperationalRows.length : null;

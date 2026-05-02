@@ -38777,8 +38777,13 @@ async def get_compliance_file(
                 "download_url": agreement_state.get("download_url"),
                 "render_issue": agreement_state.get("render_issue"),
                 "system_issue": agreement_state.get("system_issue"),
-                # Link to new-style submission if available
-                "submission_id": str(submission.get("_id")) if submission else None
+                # Link to new-style submission if available.
+                # IMPORTANT: frontend fetches /agreement-submissions/{id}, which
+                # expects the public `id` field, not Mongo `_id`.
+                "submission_id": (
+                    submission.get("id")
+                    or (str(submission.get("_id")) if submission and submission.get("_id") is not None else None)
+                )
             } if latest_ack or submission or agreement_state.get("has_acknowledgement") else None,
             
             # New-style template submission data

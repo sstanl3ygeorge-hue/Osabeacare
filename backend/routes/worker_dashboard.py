@@ -17,7 +17,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Header
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .dependencies import (
     get_db,
@@ -3399,6 +3399,15 @@ class ProvideNewRefereeRequest(BaseModel):
     organisation: Optional[str] = None
     position: Optional[str] = None
     relationship: Optional[str] = None
+    # CQC: when a worker self-replaces a referee (e.g. former employer
+    # unreachable, original referee declined, etc.) the reason must be
+    # captured for the audit trail. Min 10 chars matches the admin-side
+    # EditReasonDialog rule.
+    change_reason: str = Field(
+        ...,
+        min_length=10,
+        description="Why the referee is being changed (≥10 chars). Required for CQC audit."
+    )
 
 
 @router.post("/worker/references/{ref_num}/provide-new")
@@ -3471,6 +3480,10 @@ async def worker_provide_new_referee(
         f"{prefix}replacement_requested_at": None,
         f"{prefix}replacement_requested_by": None,
         f"{prefix}replacement_reason": None,
+        # CQC audit: why the worker chose to (re)provide this referee.
+        f"{prefix}change_reason": request.change_reason,
+        f"{prefix}change_reason_at": now,
+        f"{prefix}change_reason_by": "worker_self",
         "updated_at": now,
     }
     await db.employees.update_one({"id": employee_id}, {"$set": emp_update})
@@ -3529,6 +3542,7 @@ async def worker_provide_new_referee(
             "reference_number": ref_num,
             "referee_name": request.name,
             "referee_email": request.email,
+            "change_reason": request.change_reason,
         }
     )
 

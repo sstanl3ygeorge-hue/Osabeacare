@@ -835,6 +835,18 @@ class StageGateService:
         employment_history = await self._get_employment_history(employee_id, employee)
         most_recent_norm = identify_most_recent_employer(employment_history)
 
+        # CQC-aligned rule (replaces "both refs must match"):
+        #   * At least ONE referee must match the worker's most-recent employer.
+        #   * The other referee may match an earlier employer OR be a
+        #     character/personal referee, PROVIDED an override_reason is
+        #     recorded explaining why the referee does not match the
+        #     declared employment history.
+        #   * If NEITHER referee matches the most-recent employer, the gate
+        #     blocks once at the references level until a matching referee is
+        #     supplied — silent overrides are not enough on their own.
+        any_matched_most_recent = False
+        ref_summary: list[dict] = []
+
         for ref_num in [1, 2]:
             ref_key = f"reference_{ref_num}"
             ref_slot = await self._resolve_reference_slot(employee_id, ref_num)
@@ -863,6 +875,15 @@ class StageGateService:
             )
             override_reason = employee.get(f"reference_{ref_num}_override_reason") or None
 
+            ref_state = {
+                "key": ref_key,
+                "ref_num": ref_num,
+                "company": ref_company,
+                "matched": False,
+                "is_most_recent": False,
+                "has_override_reason": bool(override_reason),
+            }
+
             if ref_company:
                 matched, matching_employer, match_reason = match_employers(ref_company, employment_history)
 
@@ -871,45 +892,66 @@ class StageGateService:
                     emp_norm = normalize_employer(matching_employer.get("employer_name") or "")
                     is_most_recent = (emp_norm == most_recent_norm)
 
-                cross_status = compliance_status_for_match(
-                    matched=matched,
-                    matching_employer=matching_employer,
-                    is_most_recent=is_most_recent,
-                    override_reason=override_reason,
-                )
+                ref_state["matched"] = matched
+                ref_state["is_most_recent"] = is_most_recent
+                if is_most_recent:
+                    any_matched_most_recent = True
+
                 reason_label = MATCH_REASON_LABELS.get(match_reason, match_reason)
 
-                if cross_status == "alert":
+                if not matched and not override_reason:
+                    # No employer match AND no documented reason — must be
+                    # resolved per CQC. Per-ref block message is fine here.
                     _block(
                         ref_key,
                         f"Reference employer '{ref_company}' not found in declared employment history — "
                         "discrepancy must be documented and investigated before approval (NHS guidance)"
                     )
-                elif cross_status == "warning":
+                elif matched and not is_most_recent:
                     matched_name = (matching_employer or {}).get("employer_name", "")
-                    if is_most_recent is False and matched:
-                        _warn(
-                            ref_key,
-                            f"Reference employer '{ref_company}' matches an earlier employer "
-                            f"('{matched_name}', {reason_label}), not the most-recent — "
-                            "verify and record explanation per NHS guidance"
-                        )
-                    else:
-                        # override_reason present
-                        _warn(
-                            ref_key,
-                            f"Reference employer '{ref_company}' has no employment-history match, "
-                            f"but an explanation has been recorded: {override_reason}"
-                        )
+                    _warn(
+                        ref_key,
+                        f"Reference employer '{ref_company}' matches an earlier employer "
+                        f"('{matched_name}', {reason_label}), not the most-recent — "
+                        "verify and record explanation per NHS guidance"
+                    )
+                elif not matched and override_reason:
+                    _warn(
+                        ref_key,
+                        f"Reference employer '{ref_company}' has no employment-history match, "
+                        f"but an explanation has been recorded: {override_reason}"
+                    )
                 else:
-                    # cross_status == "ok" — matched to most-recent employer
-                    # Only add a passed item if Layer A also passed (not already blocked)
+                    # matched AND is_most_recent — pass if Layer A also passed
                     if verified and not any(b["key"] == ref_key for b in blocking_items):
                         _pass(ref_key)
             else:
                 # No company declared — can't run cross-check; if verified, accept it
                 if verified and not any(b["key"] == ref_key for b in blocking_items):
                     _pass(ref_key)
+
+            ref_summary.append(ref_state)
+
+        # CQC cross-reference rule: if at least one referee was declared but
+        # NONE matched the most-recent declared employer, block at the
+        # references level. We only enforce this when employment history is
+        # known and at least one referee has a company declared, so an
+        # empty-state employee doesn't get a confusing message.
+        any_company_declared = any(r["company"] for r in ref_summary)
+        if (
+            employment_history
+            and most_recent_norm
+            and any_company_declared
+            and not any_matched_most_recent
+            and not any(b["key"] == "references_most_recent_employer" for b in blocking_items)
+        ):
+            _block(
+                "references_most_recent_employer",
+                "At least one reference must come from the most-recent declared "
+                "employer (NHS Employment Check Standards). Replace one of the "
+                "referees or document why no referee from that employer can be "
+                "obtained before approval."
+            )
 
         # ------------------------------------------------------------------
         # 4. Interview (canonical interview_record source)

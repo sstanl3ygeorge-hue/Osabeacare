@@ -10445,7 +10445,11 @@ class ReferenceUpdate(BaseModel):
     period_of_supervision: Optional[str] = None
     is_direct_supervisor: Optional[bool] = None
     can_contact_before_offer: Optional[bool] = None
-    edit_reason: str  # Required
+    edit_reason: str = Field(
+        ...,
+        min_length=10,
+        description="Required CQC audit reason (≥10 chars) explaining why the referee is being changed."
+    )
 
 
 async def _monitor_legacy_reference_write_usage(

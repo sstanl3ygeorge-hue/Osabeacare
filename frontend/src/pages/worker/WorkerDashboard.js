@@ -742,7 +742,7 @@ export default function WorkerDashboard() {
   const [showMismatchExplanationModal, setShowMismatchExplanationModal] = useState(false);
   const [selectedMismatch, setSelectedMismatch] = useState(null);
     const [provideNewRefNum, setProvideNewRefNum] = useState(null);
-    const [provideNewForm, setProvideNewForm] = useState({ name: '', email: '', phone: '', organisation: '', position: '', relationship: '' });
+    const [provideNewForm, setProvideNewForm] = useState({ name: '', email: '', phone: '', organisation: '', position: '', relationship: '', change_reason: '' });
     const [provideNewLoading, setProvideNewLoading] = useState(false);
   const [mismatchExplanationType, setMismatchExplanationType] = useState('');
   const [mismatchExplanationText, setMismatchExplanationText] = useState('');
@@ -1229,6 +1229,10 @@ export default function WorkerDashboard() {
         toast.error('Name and email are required');
         return;
       }
+      if (!provideNewForm.change_reason || provideNewForm.change_reason.trim().length < 10) {
+        toast.error('Please explain why you are providing a new referee (at least 10 characters)');
+        return;
+      }
       setProvideNewLoading(true);
       try {
         await axios.post(
@@ -1238,7 +1242,7 @@ export default function WorkerDashboard() {
         );
         toast.success('Referee details submitted. Your manager will be in touch shortly.');
         setProvideNewRefNum(null);
-        setProvideNewForm({ name: '', email: '', phone: '', organisation: '', position: '', relationship: '' });
+        setProvideNewForm({ name: '', email: '', phone: '', organisation: '', position: '', relationship: '', change_reason: '' });
         fetchDashboard();
       } catch (err) {
         const detail = err.response?.data?.detail;
@@ -3438,9 +3442,25 @@ export default function WorkerDashboard() {
                                   />
                                 </div>
                               </div>
+                              <div className="mt-3">
+                                <label className="text-xs text-slate-500">
+                                  Reason for providing a new referee <span className="text-red-500">*</span>
+                                </label>
+                                <textarea
+                                  rows={3}
+                                  className="w-full mt-1 px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/30"
+                                  placeholder="e.g. Original referee no longer at the company / unreachable / declined to provide a reference."
+                                  value={provideNewForm.change_reason}
+                                  onChange={e => setProvideNewForm(f => ({ ...f, change_reason: e.target.value }))}
+                                  data-testid={`provide-new-reason-${ref.reference_number}`}
+                                />
+                                <p className="text-[10px] text-slate-500 mt-1">
+                                  At least 10 characters. Required for CQC audit.
+                                </p>
+                              </div>
                               <Button
                                 size="sm"
-                                disabled={provideNewLoading || !provideNewForm.name || !provideNewForm.email}
+                                disabled={provideNewLoading || !provideNewForm.name || !provideNewForm.email || (provideNewForm.change_reason || '').trim().length < 10}
                                 onClick={() => handleProvideNewSubmit(ref.reference_number)}
                                 className="mt-2"
                               >

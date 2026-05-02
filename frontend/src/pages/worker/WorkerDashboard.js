@@ -2670,7 +2670,24 @@ export default function WorkerDashboard() {
         )}
 
         {/* ========== REFERENCE-EMPLOYMENT MISMATCH ALERT ========== */}
-        {!isActiveEmployee && referenceMismatches?.has_mismatches && (
+        {/* CQC: filter out mismatches for references that admin has already
+            requested replacement for. Once admin clicks "Request new
+            referee" the worker no longer needs to re-explain the previous
+            mismatch — they just need to provide fresh details. Cross-check
+            against the references list below where can_provide_new=true
+            indicates the slot is awaiting a new referee. */}
+        {(() => {
+          const replacementRefNums = new Set(
+            (references || [])
+              .filter(r => r?.can_provide_new === true)
+              .map(r => r.reference_number)
+          );
+          const activeMismatches = (referenceMismatches?.mismatches || []).filter(
+            m => !replacementRefNums.has(m.reference_number)
+          );
+          const hasActiveMismatches = !isActiveEmployee && activeMismatches.length > 0;
+          if (!hasActiveMismatches) return null;
+          return (
           <Card className="shadow-md border-0 border-l-4 border-l-amber-500 bg-amber-50/50" data-testid="reference-mismatch-alert">
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between">
@@ -2680,7 +2697,7 @@ export default function WorkerDashboard() {
                     Reference-Employment Mismatch
                   </CardTitle>
                   <p className="text-xs text-amber-700 mt-1">
-                    {referenceMismatches.mismatch_count} reference(s) don't match your declared employment history
+                    {activeMismatches.length} reference(s) don't match your declared employment history
                   </p>
                 </div>
                 <Badge className="bg-amber-100 text-amber-700">
@@ -2690,7 +2707,7 @@ export default function WorkerDashboard() {
             </CardHeader>
             <CardContent>
               <div className="space-y-3">
-                {referenceMismatches.mismatches.map((mismatch, idx) => (
+                {activeMismatches.map((mismatch, idx) => (
                   <div 
                     key={idx}
                     className={`p-4 rounded-xl border ${
@@ -2817,7 +2834,8 @@ export default function WorkerDashboard() {
               </p>
             </CardContent>
           </Card>
-        )}
+          );
+        })()}
 
         {/* Professional Registration Status - if applicable */}
         {professional_registration && (

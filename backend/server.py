@@ -35191,6 +35191,16 @@ async def request_reference_replacement(
             f"{prefix}request_status": None,
             f"{prefix}response_data": None,
             f"{prefix}response_received_at": None,
+            # CQC: clear mismatch state too. Once admin asks for a fresh
+            # referee, the worker should not be re-explaining the previous
+            # mismatch — that's superseded by the replacement request. The
+            # superseded explanation is preserved in the audit log.
+            f"{prefix}mismatch_explanation": None,
+            f"{prefix}mismatch_explanation_type": None,
+            f"{prefix}mismatch_explanation_at": None,
+            f"{prefix}mismatch_admin_decision": None,
+            f"{prefix}mismatch_admin_notes": None,
+            f"{prefix}mismatch_admin_decision_at": None,
         }}
     )
     

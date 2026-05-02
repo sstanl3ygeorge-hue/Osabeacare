@@ -890,8 +890,14 @@ export default function ReferencesPanel({ employeeId, employee, onRefresh, onEdi
                           );
                         })()}
 
-                        {/* ── Mismatch panel ── */}
-                        {ref?.integrity?.mismatch_detected && (
+                        {/* ── Mismatch panel ──
+                            Suppressed when admin has already requested a
+                            replacement referee for this slot — the previous
+                            mismatch is no longer the action item; the
+                            action item is "provide new referee details".
+                            Avoids contradictory UI like "Re-explain"
+                            alongside "Provide New Referee". */}
+                        {ref?.integrity?.mismatch_detected && !ref?.replacement_requested_at && (
                           <div className="mt-3 space-y-2">
                             <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
                               <p className="text-xs font-semibold text-amber-800 flex items-center gap-1 mb-1">

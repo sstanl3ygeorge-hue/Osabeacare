@@ -423,9 +423,8 @@ async def check_can_sign_contract(
     
     result = await can_sign_contract(db, employee_id)
 
-    # Hard override: when there is an active pending-signature contract, the
-    # worker must be allowed to sign it even if other readiness gates are still
-    # pending. Contract signing itself is the actionable step in this state.
+    # Safe override: only unlock signing from an active pending contract when
+    # the unsigned artifact is current and render-ready.
     pending_contract = await db.generated_contracts.find_one(
         {
             "employee_id": employee_id,
@@ -440,12 +439,32 @@ async def check_can_sign_contract(
     )
     if pending_contract:
         result = dict(result or {})
-        result["can_sign"] = True
-        result["reason"] = "Pending contract available for worker signature"
-        result["contract_override"] = {
-            "active_pending_contract_id": pending_contract.get("id"),
-            "status": pending_contract.get("status"),
-        }
+        try:
+            current_template_version = await get_current_contract_template_version(db)
+            stale_or_missing_unsigned = needs_unsigned_contract_render_repair(
+                pending_contract,
+                current_template_version,
+            )
+        except Exception:
+            stale_or_missing_unsigned = True
+
+        if not stale_or_missing_unsigned:
+            result["can_sign"] = True
+            result["reason"] = "Pending contract available for worker signature"
+            result["contract_override"] = {
+                "active_pending_contract_id": pending_contract.get("id"),
+                "status": pending_contract.get("status"),
+            }
+        else:
+            result["can_sign"] = False
+            result["reason"] = (
+                "Contract preview is stale or missing and must be regenerated."
+            )
+            blockers = list(result.get("blockers", []) or [])
+            lock_reason = "Contract preview is stale or missing and must be regenerated."
+            if lock_reason not in blockers:
+                blockers.append(lock_reason)
+            result["blockers"] = blockers
 
     return {
         "employee_id": employee_id,

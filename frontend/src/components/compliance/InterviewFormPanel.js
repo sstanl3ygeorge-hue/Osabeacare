@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
+import { useAuth } from '../../context/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
@@ -169,6 +170,10 @@ const QuestionCard = ({ question, score, onChange, notes, onNotesChange, disable
 };
 
 export default function InterviewFormPanel({ employeeId, employeeName, employeeRole }) {
+  const { user } = useAuth();
+  // Role-aware: only admin/super_admin/branch_manager may record or edit
+  // interviews. Auditors and other roles see records read-only.
+  const canRecordInterview = ['admin', 'super_admin', 'branch_manager'].includes(user?.role || '');
   const [interviews, setInterviews] = useState([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState(null);
@@ -501,6 +506,26 @@ export default function InterviewFormPanel({ employeeId, employeeName, employeeR
   const passScore = getPassScore();
   const isPassing = totalScore >= passScore;
 
+  // ---- Multi-attempt context (informs the "Record Interview" dialog) ----
+  // When admin re-opens "Record Interview" after a failed/rejected attempt,
+  // make the lifecycle obvious so they know this is a NEW attempt with a
+  // blank scorecard, not an edit of the previous one.
+  const sortedInterviews = [...interviews].sort((a, b) => {
+    const da = new Date(a?.submitted_at || a?.created_at || 0).getTime();
+    const db = new Date(b?.submitted_at || b?.created_at || 0).getTime();
+    return db - da;
+  });
+  const submittedInterviews = sortedInterviews.filter((iv) => (iv?.status || '').toLowerCase() !== 'draft');
+  const previousAttempt = !editingId ? submittedInterviews[0] : null;
+  const previousAttemptData = previousAttempt?.form_data || previousAttempt?.data || {};
+  const previousDecision = previousAttemptData?.decision || previousAttemptData?.overall_decision || null;
+  const previousScore = previousAttemptData?.total_score ?? null;
+  const previousMax = previousAttemptData?.max_score ?? 24;
+  const previousFailed = previousDecision
+    ? ['Reject', 'Not Suitable'].includes(previousDecision)
+    : (previousScore !== null ? Number(previousScore) < (previousAttemptData?.pass_score || 11) : false);
+  const upcomingAttemptNumber = submittedInterviews.length + (editingId ? 0 : 1);
+
   if (loading) {
     return (
       <Card className="border-[#E4E8EB] shadow-sm">
@@ -530,14 +555,16 @@ export default function InterviewFormPanel({ employeeId, employeeName, employeeR
             >
               <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
             </Button>
-            <Button 
-              size="sm" 
+            <Button
+              size="sm"
               onClick={() => { resetForm(); setShowCreateDialog(true); fetchWorkerPreInterview(); }}
               className="rounded-xl bg-primary hover:bg-primary/90"
               data-testid="create-interview-btn"
+              disabled={!canRecordInterview}
+              title={canRecordInterview ? 'Record a new interview assessment' : 'Your role does not have permission to record interviews'}
             >
               <Plus className="h-4 w-4 mr-1" />
-              Record Interview
+              {submittedInterviews.length > 0 ? `Record New Interview (Attempt ${upcomingAttemptNumber})` : 'Record Interview'}
             </Button>
           </div>
         </CardTitle>
@@ -717,7 +744,7 @@ export default function InterviewFormPanel({ employeeId, employeeName, employeeR
 
                       <div className="text-xs text-gray-400 pt-2 border-t flex items-center justify-between">
                         <span>Recorded: {formatBackendDate(interview.submitted_at || interview.created_at)}</span>
-                        {interview.status === 'draft' && (
+                        {interview.status === 'draft' && canRecordInterview && (
                           <Button
                             variant="outline"
                             size="sm"
@@ -751,6 +778,29 @@ export default function InterviewFormPanel({ employeeId, employeeName, employeeR
             Osabea Interview Questions – Support Workers | Minimum Score Required: 11 points
           </DialogDescription>
         </DialogHeader>
+
+        {/* Multi-attempt banner — shown when admin opens "Record Interview"
+            and a previous attempt exists. Makes it explicit that this is a
+            NEW attempt with a blank scorecard, addressing the user concern
+            that the form looked like it was loading old answers. */}
+        {!editingId && previousAttempt && (
+          <div className={`rounded-lg border px-4 py-3 mb-2 ${previousFailed ? 'bg-red-50 border-red-200' : 'bg-amber-50 border-amber-200'}`}>
+            <div className="flex items-start gap-2">
+              <AlertTriangle className={`h-4 w-4 shrink-0 mt-0.5 ${previousFailed ? 'text-red-600' : 'text-amber-600'}`} />
+              <div className="text-sm">
+                <p className={`font-medium ${previousFailed ? 'text-red-800' : 'text-amber-800'}`}>
+                  Recording Interview Attempt #{upcomingAttemptNumber}
+                  {previousFailed && ' — previous attempt failed'}
+                </p>
+                <p className={`text-xs mt-0.5 ${previousFailed ? 'text-red-700' : 'text-amber-700'}`}>
+                  Previous attempt: <span className="font-medium">{previousDecision || (previousScore !== null && Number(previousScore) >= 11 ? 'Passed' : 'Failed')}</span>
+                  {previousScore !== null && ` (score ${previousScore}/${previousMax})`}.
+                  This new record starts with a blank scorecard. Worker pre-interview answers are reference material from their own questionnaire — they are not previous admin scores.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Prefill indicator banner */}
         {prefilled && !editingId && (

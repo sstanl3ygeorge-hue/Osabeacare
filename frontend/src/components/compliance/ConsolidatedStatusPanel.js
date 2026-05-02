@@ -363,34 +363,36 @@ export default function ConsolidatedStatusPanel({
     },
     forms: {
       completed: (() => {
-        const applicantExcludedFormKeys = new Set(['interview_record', 'recruitment_checklist', 'induction']);
-        const recruitmentFormKeys = new Set(['interview_record', 'application_form', 'recruitment_checklist', 'induction']);
+        // CQC: exclude these from the onboarding-forms tracker because they
+        // are either separate decision records (interview_record), summaries
+        // (recruitment_checklist, induction), or already-completed
+        // pre-onboarding artefacts (application_form). Same exclusion list
+        // for both applicants and active employees so the counter stays
+        // consistent across the whole employee lifecycle.
+        const excludedFormKeys = new Set(['interview_record', 'recruitment_checklist', 'induction', 'application_form']);
         const formRows = (rowsByType.form || []).filter((row) => {
           const key = String(
             row?.requirement_id
-            || row?.requirement_key
-            || row?.id
+            || row?.form_type
+            || row?.template_id
             || row?.key
             || ''
           ).toLowerCase();
-          if (isApplicant) return !applicantExcludedFormKeys.has(key);
-          return !recruitmentFormKeys.has(key);
+          return !excludedFormKeys.has(key);
         });
         return formRows.filter(isCompleteRow).length;
       })(),
       total: (() => {
-        const applicantExcludedFormKeys = new Set(['interview_record', 'recruitment_checklist', 'induction']);
-        const recruitmentFormKeys = new Set(['interview_record', 'application_form', 'recruitment_checklist', 'induction']);
+        const excludedFormKeys = new Set(['interview_record', 'recruitment_checklist', 'induction', 'application_form']);
         const formRows = (rowsByType.form || []).filter((row) => {
           const key = String(
             row?.requirement_id
-            || row?.requirement_key
-            || row?.id
+            || row?.form_type
+            || row?.template_id
             || row?.key
             || ''
           ).toLowerCase();
-          if (isApplicant) return !applicantExcludedFormKeys.has(key);
-          return !recruitmentFormKeys.has(key);
+          return !excludedFormKeys.has(key);
         });
         return formRows.length;
       })()

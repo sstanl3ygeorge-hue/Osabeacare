@@ -178,7 +178,27 @@ export default function AgreementRow({
     acknowledgement_data?.worker_signed_contract_pdf_url ||
     acknowledgement_data?.signed_document_url
   );
-  const contractCountersignReady = isContractRow && hasWorkerSignedArtifact && (
+  // Lawrence-style edge case:
+  // Worker signed a PREVIOUS template version and a newer canonical template
+  // now exists. The signature is preserved — admin must reissue before it can
+  // be countersigned. We expose this explicitly so admins don't see
+  // contradictory phrases like "No contract record found" + "Awaiting company
+  // countersignature". Backend marks the ack row with render_issue
+  // "legacy_template_signed" via POST /admin/agreements/repair.
+  const ackRenderIssue = String(
+    acknowledgement_data?.render_issue || row?.render_issue || ''
+  ).toLowerCase();
+  const ackTemplateVersion = acknowledgement_data?.template_version;
+  const ackCanonical = acknowledgement_data?.canonical_contract;
+  const workerSignedLegacyTemplate =
+    isContractRow &&
+    hasWorkerSignedArtifact &&
+    (
+      ackRenderIssue === 'legacy_template_signed' ||
+      // Fallback detection when the repair flag has not been written yet.
+      (ackTemplateVersion && ackCanonical === false)
+    );
+  const contractCountersignReady = isContractRow && hasWorkerSignedArtifact && !workerSignedLegacyTemplate && (
     effectiveLifecycleStatus === 'awaiting_company_countersignature' ||
     normalizedContractStatus === 'awaiting_company_countersignature' ||
     canonicalStatus === 'awaiting_company_countersignature'
@@ -186,6 +206,15 @@ export default function AgreementRow({
 
   // Status colors and icons
   const getStatusConfig = () => {
+    if (workerSignedLegacyTemplate) {
+      return {
+        color: 'amber',
+        bgColor: 'bg-amber-100',
+        textColor: 'text-amber-800',
+        icon: AlertTriangle,
+        label: 'Worker signed previous version — admin must reissue'
+      };
+    }
     if (key === 'contract_acceptance' && isAwaitingWorkerSignature) {
       return { color: 'blue', bgColor: 'bg-blue-100', textColor: 'text-blue-700', icon: Clock, label: 'Awaiting worker signature' };
     }
@@ -213,15 +242,17 @@ export default function AgreementRow({
 
   const statusConfig = getStatusConfig();
   const StatusIcon = statusConfig.icon;
-  const displaySummary = contractNeedsReissue
-    ? 'Worker cannot sign this version.'
-    : (key === 'contract_acceptance' && isAwaitingWorkerSignature
-      ? (
-          row?.contract_signing_unlocked === false
-            ? (row?.contract_signing_lock_reason || 'Contract generated, but signing is locked until earlier onboarding steps are complete.')
-            : 'Worker can now sign this contract.'
-        )
-      : status_summary);
+  const displaySummary = workerSignedLegacyTemplate
+    ? 'Worker signature from a previous template is preserved. Reissue this contract so the worker can sign the current version.'
+    : (contractNeedsReissue
+      ? 'Worker cannot sign this version.'
+      : (key === 'contract_acceptance' && isAwaitingWorkerSignature
+        ? (
+            row?.contract_signing_unlocked === false
+              ? (row?.contract_signing_lock_reason || 'Contract generated, but signing is locked until earlier onboarding steps are complete.')
+              : 'Worker can now sign this contract.'
+          )
+        : status_summary));
 
   // Completion mode display
   const getCompletionModeDisplay = (mode) => {

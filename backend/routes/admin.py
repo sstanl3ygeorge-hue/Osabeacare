@@ -57,6 +57,13 @@ class OrgSettingsUpdate(BaseModel):
     main_office_contact: Optional[str] = None
     registered_manager_name: Optional[str] = None
     on_call_contact: Optional[str] = None
+    # Org-wide defaults used by the contract renderer when an employee record
+    # has no value of its own. Admin sets these once per org; per-employee
+    # values still take precedence.
+    default_hourly_rate: Optional[str] = None
+    default_sleep_in_rate: Optional[str] = None
+    default_contract_start_date: Optional[str] = None
+    default_continuous_service_date: Optional[str] = None
 
 
 @router.get("/org-settings")
@@ -97,6 +104,10 @@ async def get_org_settings():
             "main_office_contact": None,
             "registered_manager_name": None,
             "on_call_contact": None,
+            "default_hourly_rate": None,
+            "default_sleep_in_rate": None,
+            "default_contract_start_date": None,
+            "default_continuous_service_date": None,
         }
     
     return settings

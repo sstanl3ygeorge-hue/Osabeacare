@@ -1096,6 +1096,286 @@ async def repair_all_employees_agreements(
     }
 
 
+# ==================== MISSING CONTRACT FIELDS + BULK FILL ====================
+#
+# Complements the repair endpoints: the repair-all dry-run surfaces employees
+# whose contracts cannot be rendered because required fields are unresolved
+# (contract_start_date, continuous_service_date, hourly_rate, company_address).
+# These two endpoints let an admin:
+#   1. LIST who is blocked and which fields are missing.
+#   2. BULK-FILL those fields from org-wide defaults and/or explicit overrides,
+#      then re-run the repair flow.
+# Values on the employee record always take precedence over org defaults; we
+# only write fields that are currently empty so we never clobber admin edits.
+
+_RESOLVER_REQUIRED_FIELDS = (
+    "contract_start_date",
+    "continuous_service_date",
+    "hourly_rate",
+    "company_address",
+)
+
+
+def _value_missing(value) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return not value.strip() or value.strip().upper() == "TBC"
+    return False
+
+
+async def _diagnose_employee_contract_fields(db, employee: dict) -> dict:
+    """Return per-field resolution status for a single employee.
+
+    Uses the same resolver the renderer uses, so the answer always matches
+    what the PDF pipeline will see.
+    """
+    from agreement_document_service import _resolve_contract_fields
+
+    org_settings = await db.org_settings.find_one({"id": "default"}, {"_id": 0}) or {}
+    resolved = _resolve_contract_fields(employee, org_settings)
+
+    missing = [f for f in _RESOLVER_REQUIRED_FIELDS if _value_missing(resolved.get(f))]
+    # Direct employee-record values (pre-fallback) so the admin can see what
+    # is stored on the employee vs coming from org-wide defaults.
+    raw_employee_fields = {
+        "contract_start_date": employee.get("contract_start_date"),
+        "continuous_service_date": employee.get("continuous_service_date"),
+        "hourly_rate": employee.get("hourly_rate"),
+    }
+    return {
+        "employee_id": employee.get("id"),
+        "employee_name": f"{employee.get('first_name','')} {employee.get('last_name','')}".strip(),
+        "employee_status": employee.get("status"),
+        "missing_fields": missing,
+        "is_blocked": bool(missing),
+        "resolved_preview": {k: resolved.get(k) for k in _RESOLVER_REQUIRED_FIELDS},
+        "raw_employee_fields": raw_employee_fields,
+    }
+
+
+@router.get("/admin/agreements/missing-contract-fields")
+async def list_employees_with_missing_contract_fields(
+    include_active_employees: bool = Query(False),
+    limit: Optional[int] = Query(None),
+    user: dict = Depends(require_admin),
+):
+    """
+    List employees whose contract cannot currently render because one or more
+    required fields are missing. Exactly matches the blockers reported by
+    POST /admin/agreements/repair-all (action=render_blocked).
+
+    Query:
+        include_active_employees (default false) — scope to applicants/onboarding.
+        limit — optional cap on number of employees scanned.
+    """
+    db = get_db()
+
+    query = {}
+    if not include_active_employees:
+        query["status"] = {"$ne": "active"}
+
+    cursor = db.employees.find(query, {"_id": 0})
+    if limit:
+        cursor = cursor.limit(int(limit))
+    employees = await cursor.to_list(length=10000)
+
+    blocked = []
+    for emp in employees:
+        diagnosis = await _diagnose_employee_contract_fields(db, emp)
+        if diagnosis["is_blocked"]:
+            blocked.append(diagnosis)
+
+    # Aggregate: how many employees are missing each field?
+    field_counts = {f: 0 for f in _RESOLVER_REQUIRED_FIELDS}
+    for item in blocked:
+        for f in item["missing_fields"]:
+            field_counts[f] = field_counts.get(f, 0) + 1
+
+    return {
+        "success": True,
+        "scanned": len(employees),
+        "blocked_count": len(blocked),
+        "field_counts": field_counts,
+        "results": blocked,
+    }
+
+
+class BulkFillContractFieldsInput(BaseModel):
+    employee_ids: Optional[List[str]] = None  # None → all blocked employees
+    apply: bool = False
+    only_missing: bool = True  # Never overwrite a value that is already set
+    include_active_employees: bool = False
+    defaults: dict = {}  # hourly_rate, contract_start_date, continuous_service_date, company_address
+    write_org_defaults: bool = False  # Also persist org-wide defaults to org_settings
+
+
+_EMPLOYEE_FILLABLE_FIELDS = {
+    "hourly_rate",
+    "contract_start_date",
+    "continuous_service_date",
+}
+_ORG_FILLABLE_FIELDS = {
+    "default_hourly_rate",
+    "default_contract_start_date",
+    "default_continuous_service_date",
+    "company_address",
+}
+
+
+@router.post("/admin/agreements/bulk-fill-contract-fields")
+async def bulk_fill_contract_fields(
+    data: BulkFillContractFieldsInput = Body(...),
+    user: dict = Depends(require_admin),
+):
+    """
+    Bulk-fill the minimum required contract fields on employee records so the
+    canonical contract template can render. Safe by default:
+
+    - `apply=false` returns a dry-run plan per employee, writes nothing.
+    - `only_missing=true` (default) never overwrites a value that is already set.
+    - Worker-signed artifacts are untouched — this endpoint only patches
+      employee profile data and optionally org_settings. It does NOT regenerate
+      any PDF. Run POST /admin/agreements/repair-all afterwards to re-render.
+
+    Body:
+        {
+          "employee_ids": ["emp_123", ...]  | null  // null = all blocked
+          "apply": false,
+          "only_missing": true,
+          "include_active_employees": false,
+          "defaults": {
+            "hourly_rate": "12.50",
+            "contract_start_date": "2026-02-01",
+            "continuous_service_date": "2026-02-01",
+            "company_address": "1 Example Road, London, E1 1AA"
+          },
+          "write_org_defaults": true          // also persist to org_settings
+        }
+    """
+    db = get_db()
+
+    defaults = dict(data.defaults or {})
+    # Sanitize: strip strings, drop empty values so we never write "" on top of
+    # a real value by accident.
+    clean_defaults: dict = {}
+    for k, v in defaults.items():
+        if isinstance(v, str):
+            v = v.strip()
+        if v in (None, ""):
+            continue
+        clean_defaults[k] = v
+
+    # ---- Org-wide defaults (optional) ----
+    org_updates: dict = {}
+    if data.write_org_defaults:
+        if "hourly_rate" in clean_defaults:
+            org_updates["default_hourly_rate"] = clean_defaults["hourly_rate"]
+        if "contract_start_date" in clean_defaults:
+            org_updates["default_contract_start_date"] = clean_defaults["contract_start_date"]
+        if "continuous_service_date" in clean_defaults:
+            org_updates["default_continuous_service_date"] = clean_defaults["continuous_service_date"]
+        if "company_address" in clean_defaults:
+            org_updates["company_address"] = clean_defaults["company_address"]
+
+    # ---- Figure out target employees ----
+    if data.employee_ids:
+        employees = await db.employees.find(
+            {"id": {"$in": data.employee_ids}}, {"_id": 0}
+        ).to_list(length=10000)
+    else:
+        query = {}
+        if not data.include_active_employees:
+            query["status"] = {"$ne": "active"}
+        employees = await db.employees.find(query, {"_id": 0}).to_list(length=10000)
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    plan: list = []
+    counts = {"scanned": 0, "would_update": 0, "updated": 0, "skipped_no_change": 0}
+
+    for emp in employees:
+        counts["scanned"] += 1
+        updates_for_emp: dict = {}
+        for field in _EMPLOYEE_FILLABLE_FIELDS:
+            new_value = clean_defaults.get(field)
+            if new_value is None:
+                continue
+            current_value = emp.get(field)
+            if data.only_missing and not _value_missing(current_value):
+                continue
+            if str(current_value or "") == str(new_value):
+                continue
+            updates_for_emp[field] = new_value
+
+        before_diag = await _diagnose_employee_contract_fields(db, emp)
+
+        if not updates_for_emp:
+            counts["skipped_no_change"] += 1
+            plan.append({
+                **before_diag,
+                "planned_updates": {},
+                "action": "no_change",
+            })
+            continue
+
+        counts["would_update"] += 1
+        entry = {
+            **before_diag,
+            "planned_updates": updates_for_emp,
+            "action": "fill_fields",
+        }
+
+        if data.apply:
+            updates_for_emp["updated_at"] = now_iso
+            updates_for_emp["contract_fields_filled_by"] = user["user_id"]
+            updates_for_emp["contract_fields_filled_at"] = now_iso
+            await db.employees.update_one(
+                {"id": emp["id"]},
+                {"$set": updates_for_emp},
+            )
+            counts["updated"] += 1
+            refreshed = await db.employees.find_one({"id": emp["id"]}, {"_id": 0})
+            entry["after"] = await _diagnose_employee_contract_fields(db, refreshed or emp)
+
+        plan.append(entry)
+
+    # ---- Apply org-wide updates once ----
+    if data.apply and org_updates:
+        org_updates["updated_at"] = now_iso
+        org_updates["updated_by"] = user["user_id"]
+        await db.org_settings.update_one(
+            {"id": "default"},
+            {
+                "$set": org_updates,
+                "$setOnInsert": {"id": "default", "created_at": now_iso},
+            },
+            upsert=True,
+        )
+
+    if data.apply:
+        await log_audit_action(
+            user["user_id"],
+            "admin_bulk_fill_contract_fields",
+            "employees",
+            "batch_operation",
+            {
+                "counts": counts,
+                "defaults": clean_defaults,
+                "write_org_defaults": data.write_org_defaults,
+                "only_missing": data.only_missing,
+                "target_employee_count": len(employees),
+            },
+        )
+
+    return {
+        "success": True,
+        "dry_run": not data.apply,
+        "counts": counts,
+        "org_defaults_written": org_updates if data.apply else {k: v for k, v in org_updates.items()},
+        "results": plan,
+    }
+
+
 @router.post("/admin/agreements/supersede-admin-contracts")
 async def supersede_admin_signed_contracts(
     user: dict = Depends(require_admin)

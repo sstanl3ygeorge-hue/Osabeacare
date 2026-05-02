@@ -175,6 +175,7 @@ def _resolve_contract_fields(employee: Dict[str, Any], org_settings: Optional[Di
         return None
 
     issue_date = _format_date(_utcnow())
+    settings_early = org_settings or {}
     contract_start = (
         employee.get("contract_start_date")
         or employee.get("start_date")
@@ -182,10 +183,19 @@ def _resolve_contract_fields(employee: Dict[str, Any], org_settings: Optional[Di
         or employee.get("job_start_date")
         or employee.get("onboarding_start_date")
         or employee.get("promoted_at")
+        # Org-wide default (admin-configured in Settings) for applicants whose
+        # individual start date has not been set yet. Intentional: lets an org
+        # unblock bulk contract rendering with a sensible default that the
+        # admin can override per-employee later.
+        or settings_early.get("default_contract_start_date")
+        or employee.get("hired_at")
+        or employee.get("applied_at")
+        or employee.get("created_at")
     )
     continuous_service = (
         employee.get("continuous_service_date")
         or employee.get("service_start_date")
+        or settings_early.get("default_continuous_service_date")
         or contract_start
     )
     job_title_raw = (
@@ -207,7 +217,8 @@ def _resolve_contract_fields(employee: Dict[str, Any], org_settings: Optional[Di
         or None
     )
     org_address = _resolve_company_address(settings, employee_overrides=render_overrides) or None
-    # Hourly rate: try multiple field names used across different data models
+    # Hourly rate: try multiple field names used across different data models,
+    # then fall back to the org-wide default configured in Admin → Settings.
     hourly_rate_raw = _first_non_empty(
         employee.get("hourly_rate"),
         employee.get("pay_rate"),
@@ -224,6 +235,8 @@ def _resolve_contract_fields(employee: Dict[str, Any], org_settings: Optional[Di
         payroll.get("rate"),
         compensation.get("hourly_rate"),
         compensation.get("rate"),
+        settings.get("default_hourly_rate"),
+        settings.get("hourly_rate"),
     )
     commencement_wording = "will commence"
     if contract_start:
@@ -235,6 +248,14 @@ def _resolve_contract_fields(employee: Dict[str, Any], org_settings: Optional[Di
                 commencement_wording = "commenced"
         except Exception:
             pass
+    # Sleep-in rate: employee override → org default → hard-coded fallback.
+    sleep_in_rate_raw = (
+        employee.get("sleep_in_rate")
+        or employee.get("sleepin_rate")
+        or settings.get("default_sleep_in_rate")
+        or settings.get("sleep_in_rate")
+        or "40.00"
+    )
     return {
         "full_name": _employee_name(employee),
         "job_title": _format_job_title(job_title_raw),
@@ -242,7 +263,7 @@ def _resolve_contract_fields(employee: Dict[str, Any], org_settings: Optional[Di
         "contract_start_date": _format_date(contract_start),
         "continuous_service_date": _format_date(continuous_service),
         "hourly_rate": _format_money(hourly_rate_raw),
-        "sleep_in_rate": _format_money(employee.get("sleep_in_rate") or employee.get("sleepin_rate") or "40.00"),
+        "sleep_in_rate": _format_money(sleep_in_rate_raw),
         "company_name": str(org_name).strip() if org_name else "TBC",
         "company_address": org_address or "TBC",
         "commencement_wording": commencement_wording,

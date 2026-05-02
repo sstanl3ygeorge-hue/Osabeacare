@@ -290,3 +290,14 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - Supabase (Storage) - User API Key required
 - Resend (Email) - User API Key required
 - Gemini (AI via emergentintegrations) - Uses Emergent LLM Key
+
+## Agreements — Contract Render Unblock & Lawrence UI Patch (COMPLETED - Feb 2026)
+- [x] `agreement_document_service._resolve_contract_fields` now falls back to `org_settings.default_hourly_rate`, `org_settings.default_contract_start_date`, `org_settings.default_continuous_service_date`, `org_settings.default_sleep_in_rate`, then to `employee.hired_at / applied_at / created_at` for dates. Per-employee values still take precedence.
+- [x] `OrgSettingsUpdate` model accepts the four new `default_*` fields; `GET /api/org-settings` returns them in defaults.
+- [x] New `GET /api/admin/agreements/missing-contract-fields` — lists employees whose contracts cannot render and which specific fields are missing, plus a `field_counts` aggregate.
+- [x] New `POST /api/admin/agreements/bulk-fill-contract-fields` — dry-run by default, writes only missing fields, optionally persists org-wide defaults to `org_settings`. Audit-logged. Never touches worker signatures.
+- [x] `AgreementRow.js` Lawrence-style patch: when a worker's signed artifact is on a non-canonical (legacy) template, row shows amber "Worker signed previous version — admin must reissue (signature preserved)" instead of contradictory "No contract record found" + "Awaiting countersignature". Countersign button is suppressed in this state.
+- [x] Verified end-to-end against seeded fixtures:
+  - Before: `blocked_count = 5` (all missing `company_address`)
+  - After apply with `company_address` + `default_hourly_rate`: `blocked_count = 0`
+  - `repair-all` now reports `contract_render_blocked = 0`, `contract_flagged_legacy = 1` (Lawrence fixture), `contract_rebuild = 2`, `contract_no_change = 2`.

@@ -8579,56 +8579,62 @@ async def request_renewal(
 WORKER_FORM_DEFINITIONS = {
     "staff_health_questionnaire": {
         "name": "Staff Health Questionnaire",
-        "description": "Complete your health and wellbeing declaration",
+        "description": "Medical history and health declarations",
         "required": True,
         "admin_requirement_id": "staff_health_questionnaire"
     },
     "staff_personal_info": {
         "name": "Staff Personal Information",
-        "description": "Your personal details for HR records",
+        "description": "Contact details, NI number, bank details",
         "required": True,
         "admin_requirement_id": "staff_personal_info"
     },
     "hmrc_starter_checklist": {
         "name": "HMRC Starter Checklist",
-        "description": "Tax information for payroll setup",
+        "description": "Tax code and employment status",
         "required": True,
         "admin_requirement_id": "hmrc_starter_checklist"
     },
     "equal_opportunities": {
         "name": "Equal Opportunities Monitoring",
-        "description": "Optional diversity monitoring form",
+        "description": "Equality & diversity monitoring (optional, non-blocking)",
         "required": False,
         "admin_requirement_id": "equal_opportunities"
     },
     "emergency_contacts": {
         "name": "Emergency Contacts",
-        "description": "Who to contact in case of emergency",
+        "description": "Next of kin and emergency contact details",
         "required": True,
         "admin_requirement_id": "emergency_contacts"
     },
-    "pre_interview_questionnaire": {
-        "name": "Interview Questionnaire",
-        "description": "Complete this questionnaire before your interview - your responses will be reviewed during the interview",
-        "required": True,
-        "admin_requirement_id": "interview",
-        "role_aware": True  # Questions vary by role
-    },
-    # ======== NHS COMPLIANCE FORMS ========
     "conflict_of_interest": {
         "name": "Conflict of Interest Declaration",
-        "description": "Declare any conflicts of interest including secondary employment, relationships with colleagues, or financial interests",
+        "description": "Secondary employment, relationships or financial interests (NHS standard)",
         "required": True,
         "admin_requirement_id": "conflict_of_interest",
         "role_aware": False
     },
     "fit_proper_persons": {
         "name": "Fit and Proper Persons Declaration",
-        "description": "CQC Regulation 5 - Declaration for managers and directors confirming fitness to hold position",
+        "description": "CQC Regulation 5 — declaration for managers and directors confirming fitness to hold position",
         "required": True,
         "admin_requirement_id": "fit_proper_persons",
-        "role_aware": True,  # Only for managers/directors
+        "role_aware": True,
         "roles_required": ["manager", "registered_manager", "director", "nursing_director"]
+    },
+    # Pre-interview questionnaire is a separate workflow (interview lifecycle),
+    # NOT an onboarding form. It's still surfaced via its dedicated endpoint
+    # but is intentionally NOT counted in the onboarding-forms tracker, so the
+    # worker dashboard counter matches the canonical list (5 required + 1
+    # optional = 6 forms for non-managers; 6 required + 1 optional = 7 for
+    # managers).
+    "pre_interview_questionnaire": {
+        "name": "Interview Questionnaire",
+        "description": "Complete this questionnaire before your interview - your responses will be reviewed during the interview",
+        "required": True,
+        "admin_requirement_id": "interview",
+        "role_aware": True,
+        "exclude_from_onboarding_forms": True,
     }
 }
 

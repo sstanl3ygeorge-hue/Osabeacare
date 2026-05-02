@@ -1599,9 +1599,13 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             (unified_status or {}).get("category_details", {}).get("forms", {}).get("items", []) or []
         )
     except NameError:
-        _canonical_forms_items = []
+    _canonical_forms_items = []
     _canonical_form_by_id = {item.get("id"): item for item in _canonical_forms_items if item.get("id")}
     for form_id, form_def in WORKER_FORM_DEFINITIONS.items():
+        # Skip forms that don't belong in the onboarding forms tracker
+        # (e.g. pre_interview_questionnaire — interview lifecycle, separate panel).
+        if form_def.get("exclude_from_onboarding_forms"):
+            continue
         # Skip role-aware forms if this worker's role is not in the required list
         if form_def.get("role_aware") and form_def.get("roles_required"):
             if not any(r in _emp_role_for_forms for r in form_def["roles_required"]):
@@ -2856,6 +2860,11 @@ async def get_worker_forms(worker: dict = Depends(get_current_worker)):
     
     forms = []
     for form_id, form_def in WORKER_FORM_DEFINITIONS.items():
+        # Skip forms that don't belong in the onboarding forms tracker
+        # (e.g. pre_interview_questionnaire). Same exclusion as the
+        # dashboard loop above so counts agree.
+        if form_def.get("exclude_from_onboarding_forms"):
+            continue
         # Skip forms restricted to specific roles if worker doesn't match
         roles_required = form_def.get("roles_required")
         if roles_required:

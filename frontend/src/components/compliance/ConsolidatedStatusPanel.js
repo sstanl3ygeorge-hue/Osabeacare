@@ -28,6 +28,7 @@ import {
   Send, Plus, RefreshCw, Loader2, Shield,
   FileCheck, UserCheck, Briefcase, Heart, Calendar
 } from 'lucide-react';
+import LifecycleStagePill from './LifecycleStagePill';
 import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
 import API_BASE from '../../utils/apiBase';
@@ -458,11 +459,17 @@ export default function ConsolidatedStatusPanel({
       {/* PROGRESS SUMMARY - ONE CARD */}
       <Card className="border border-gray-200 shadow-sm">
         <CardHeader className="py-3 px-4 bg-gray-50/50 border-b border-gray-100">
-          <div className="flex items-center justify-between">
-            <CardTitle className="text-base font-semibold text-gray-700">
-              Submission Progress — {progressHeadlineLabel}
-            </CardTitle>
-            <p className="text-[11px] text-gray-400 mt-0.5">Tracks document and form submission only â€” not approval readiness</p>
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-3 flex-wrap">
+              <CardTitle className="text-base font-semibold text-gray-700">
+                Submission Progress — {progressHeadlineLabel}
+              </CardTitle>
+              <LifecycleStagePill
+                status={employee?.status}
+                stage={isApplicant ? 'applicant' : 'employee'}
+              />
+            </div>
+            <p className="text-[11px] text-gray-400 mt-0.5 flex-1">Tracks document and form submission only — not approval readiness</p>
             <Button variant="ghost" size="sm" onClick={fetchStatus}>
               <RefreshCw className="h-4 w-4" />
             </Button>
@@ -473,6 +480,8 @@ export default function ConsolidatedStatusPanel({
           
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
             {[
+              // Standardised ordering across admin + worker (Tier 2 fix #5).
+              // Order: Documents → Forms → Training → References → Agreements → Induction.
               { label: 'Documents', key: 'documents', icon: FileText },
               { label: 'Forms', key: 'forms', icon: ClipboardCheck },
               { label: 'Training', key: 'training', icon: GraduationCap },

@@ -119,16 +119,13 @@ DOC_REQUIREMENT_EXCLUSIONS: frozenset[str] = frozenset({
     "address_check", "address_verification",
 })
 
-# Forms required for ALL roles
-# Source: "admin" = Admin creates/submits, "worker" = Worker fills via portal
-REQUIRED_FORMS = [
-    {"id": "interview_record", "name": "Interview Record", "source": "admin"},
-    {"id": "staff_health_questionnaire", "name": "Staff Health Questionnaire", "source": "worker"},
-    {"id": "staff_personal_info", "name": "Staff Personal Information", "source": "worker"},
-    {"id": "hmrc_starter_checklist", "name": "HMRC Starter Checklist", "source": "worker"},
-    {"id": "emergency_contacts", "name": "Emergency Contacts", "source": "worker"},
-    # Note: equal_opportunities is optional (required: False) - not included in compliance count
-]
+#
+# Canonical onboarding-forms list now lives in `canonical_forms.py` as the
+# single source of truth shared with the worker dashboard. The
+# `interview_record` is NOT an onboarding form — the interview has its own
+# lifecycle and panel. Approval gates that need to check the interview do so
+# via dedicated checks, not the forms category.
+from canonical_forms import CANONICAL_ONBOARDING_FORMS as REQUIRED_FORMS
 
 # Role-specific requirements
 ROLE_SPECIFIC_REQUIREMENTS = {
@@ -1389,13 +1386,25 @@ async def get_unified_employee_status(
         ))
     
     # ==========================================================================
-    # CHECK 5: FORMS (Interview Record, Health Questionnaire)
+    # CHECK 5: FORMS (canonical onboarding forms — see canonical_forms.py)
     # ==========================================================================
-    
+    #
+    # Only forms that apply to this employee's role are evaluated. Optional
+    # forms (e.g. equal_opportunities) still appear in the list but auto-pass
+    # for completion-counter purposes when no submission exists, so they
+    # never block approval.
+    employee_job_role_forms = (employee.get("job_role") or employee.get("role") or "").lower()
+
     for form_req in REQUIRED_FORMS:
         form_id = form_req["id"]
         form_name = form_req["name"]
-        
+        form_required = form_req.get("required", True)
+
+        # Role-aware: skip forms that don't apply to this role.
+        if form_req.get("role_aware") and form_req.get("roles_required"):
+            if not any(r in employee_job_role_forms for r in form_req["roles_required"]):
+                continue
+
         categories["forms"]["total"] += 1
         
         # Find matching form submission - PREFER VERIFIED forms over just submitted
@@ -1454,22 +1463,29 @@ async def get_unified_employee_status(
         else:
             health_reason = None
 
-        checks[form_id] = is_verified
-        
+        checks[form_id] = is_verified or (not form_required)
+
         item_data = {
             "id": form_id,
             "name": get_clear_label(form_id),
             "completed": is_verified,
             "submitted": is_submitted,
             "verified": is_verified,
+            "required": form_required,
             "source": form_req.get("source"),
             "submitted_at": matched_form.get("submitted_at") if matched_form else None,
             "verified_at": matched_form.get("verified_at") if matched_form else None,
         }
-        
+
         categories["forms"]["items"].append(item_data)
-        
+
         if is_verified:
+            categories["forms"]["completed"] += 1
+        elif not form_required:
+            # Optional form (e.g. equal_opportunities): count toward
+            # completion automatically so it doesn't block recruitment.
+            # Worker can still fill it; if filled it will be is_verified=True
+            # and the elif above is skipped.
             categories["forms"]["completed"] += 1
         else:
             # Determine severity based on submission status

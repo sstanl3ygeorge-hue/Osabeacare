@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import SignaturePad from '../../components/worker/SignaturePad';
+import LifecycleStagePill from '../../components/compliance/LifecycleStagePill';
 import { Checkbox } from '../../components/ui/checkbox';
 import { ScrollArea } from '../../components/ui/scroll-area';
 import { Briefcase, GraduationCap, Sparkles, Edit3, Link2, MessageSquare } from 'lucide-react';
@@ -1987,7 +1988,13 @@ export default function WorkerDashboard() {
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <CardTitle className="text-lg text-slate-900">Readiness checklist</CardTitle>
+            <div className="flex items-center gap-2 flex-wrap">
+              <CardTitle className="text-lg text-slate-900">Readiness checklist</CardTitle>
+              <LifecycleStagePill
+                status={isActiveEmployee ? 'active' : 'onboarding'}
+                stage={isActiveEmployee ? 'employee' : 'applicant'}
+              />
+            </div>
             <p className="mt-1 text-sm text-slate-600">
               {progress.completed} of {progress.required} required items complete
             </p>

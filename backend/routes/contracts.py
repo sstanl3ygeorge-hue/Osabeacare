@@ -428,7 +428,7 @@ async def check_can_sign_contract(
     pending_contract = await db.generated_contracts.find_one(
         {
             "employee_id": employee_id,
-            "status": "pending_signature",
+            "status": {"$in": ["pending_signature", "awaiting_worker_signature"]},
             "$or": [
                 {"superseded_by_contract_id": {"$exists": False}},
                 {"superseded_by_contract_id": None},
@@ -712,10 +712,13 @@ async def get_contract_status(
     }, {"_id": 0})
     
     # Check for pending contract
-    pending_contract = await db.generated_contracts.find_one({
-        "employee_id": employee_id,
-        "status": "pending_signature"
-    }, {"_id": 0})
+    pending_contract = await db.generated_contracts.find_one(
+        {
+            "employee_id": employee_id,
+            "status": {"$in": ["pending_signature", "awaiting_worker_signature"]},
+        },
+        {"_id": 0},
+    )
     if pending_contract:
         current_template_version = await get_current_contract_template_version(db)
         if _needs_unsigned_contract_render_repair(pending_contract, current_template_version):
@@ -723,10 +726,13 @@ async def get_contract_status(
                 await ensure_agreement_rendered(db, employee, CONTRACT_AGREEMENT_TYPE)
             except Exception as exc:
                 logger.warning("contract_status_repair_failed employee_id=%s error=%s", employee_id, exc)
-            pending_contract = await db.generated_contracts.find_one({
-                "employee_id": employee_id,
-                "status": "pending_signature"
-            }, {"_id": 0})
+            pending_contract = await db.generated_contracts.find_one(
+                {
+                    "employee_id": employee_id,
+                    "status": {"$in": ["pending_signature", "awaiting_worker_signature"]},
+                },
+                {"_id": 0},
+            )
             if pending_contract and _needs_unsigned_contract_render_repair(pending_contract, current_template_version):
                 pending_contract = dict(pending_contract)
                 pending_contract["rendered_contract_pdf_url"] = None
@@ -801,10 +807,12 @@ async def sign_contract_legacy(
     db = get_db()
     
     # Find pending contract
-    contract = await db.generated_contracts.find_one({
-        "employee_id": employee_id,
-        "status": "pending_signature"
-    })
+    contract = await db.generated_contracts.find_one(
+        {
+            "employee_id": employee_id,
+            "status": {"$in": ["pending_signature", "awaiting_worker_signature"]},
+        }
+    )
     if contract:
         employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
         current_template_version = await get_current_contract_template_version(db)
@@ -813,10 +821,12 @@ async def sign_contract_legacy(
                 await ensure_agreement_rendered(db, employee, CONTRACT_AGREEMENT_TYPE)
             except Exception as exc:
                 logger.warning("legacy_sign_repair_failed employee_id=%s error=%s", employee_id, exc)
-            contract = await db.generated_contracts.find_one({
-                "employee_id": employee_id,
-                "status": "pending_signature"
-            })
+            contract = await db.generated_contracts.find_one(
+                {
+                    "employee_id": employee_id,
+                    "status": {"$in": ["pending_signature", "awaiting_worker_signature"]},
+                }
+            )
     
     if not contract:
         raise HTTPException(status_code=404, detail="No pending contract found")
@@ -845,11 +855,13 @@ async def sign_employee_contract(
     if not is_own_contract and not is_admin:
         raise HTTPException(status_code=403, detail="You can only sign your own contract")
     
-    contract = await db.generated_contracts.find_one({
-        "id": contract_id,
-        "employee_id": employee_id,
-        "status": "pending_signature"
-    })
+    contract = await db.generated_contracts.find_one(
+        {
+            "id": contract_id,
+            "employee_id": employee_id,
+            "status": {"$in": ["pending_signature", "awaiting_worker_signature"]},
+        }
+    )
     
     if not contract:
         raise HTTPException(status_code=404, detail="Contract not found or already signed")
@@ -861,11 +873,13 @@ async def sign_employee_contract(
             await ensure_agreement_rendered(db, employee, CONTRACT_AGREEMENT_TYPE)
         except Exception as exc:
             logger.warning("sign_contract_repair_failed employee_id=%s contract_id=%s error=%s", employee_id, contract_id, exc)
-        contract = await db.generated_contracts.find_one({
-            "id": contract_id,
-            "employee_id": employee_id,
-            "status": "pending_signature"
-        })
+        contract = await db.generated_contracts.find_one(
+            {
+                "id": contract_id,
+                "employee_id": employee_id,
+                "status": {"$in": ["pending_signature", "awaiting_worker_signature"]},
+            }
+        )
         if not contract or _needs_unsigned_contract_render_repair(contract, current_template_version):
             raise HTTPException(
                 status_code=409,

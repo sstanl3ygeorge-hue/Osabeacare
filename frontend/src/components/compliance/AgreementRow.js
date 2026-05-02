@@ -139,7 +139,11 @@ export default function AgreementRow({
   const effectiveLifecycleStatus =
     isContractRow && isAwaitingWorkerSignature
       ? 'submitted'
-      : (canonicalLifecycleStatus || lifecycleStatus);
+      : (
+          !isContractRow && canonicalLifecycleStatus === 'signed' && !is_verified
+            ? 'submitted'
+            : (canonicalLifecycleStatus || lifecycleStatus)
+        );
   const contractDateLabel = isContractRow
     ? (
         acknowledgement_data?.company_signed_at
@@ -551,8 +555,11 @@ export default function AgreementRow({
                 </Button>
               )}
 
-              {((key === 'contract_acceptance' && contractNeedsReissue) ||
-                (key === 'handbook_acknowledgement' && ['rejected', 'submitted', 'not_sent'].includes(lifecycleStatus))) && (
+              {((key === 'contract_acceptance' && (
+                  contractNeedsReissue ||
+                  String(status_summary || '').toLowerCase().includes('stale or missing')
+                )) ||
+                (key === 'handbook_acknowledgement' && ['rejected', 'submitted', 'not_sent'].includes(effectiveLifecycleStatus))) && (
                 <Button
                   size="sm"
                   variant="outline"

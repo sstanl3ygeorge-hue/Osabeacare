@@ -1405,16 +1405,16 @@ async def _resolve_employee_agreement_state_core(
                 agreement["template_version"] = (
                     generated_template_version if generated_template_is_current else agreement.get("template_version")
                 )
+                # Never leak legacy stale rendered_file_url for unsigned contracts.
+                # If generated template is not current, force render URL to None so
+                # callers can trigger canonical repair instead of serving old artifacts.
                 agreement["rendered_contract_pdf_url"] = (
                     (
                         latest_generated_contract.get("rendered_contract_pdf_url")
                         or latest_generated_contract.get("file_url")
                     )
                     if generated_template_is_current
-                    else (
-                        agreement.get("rendered_contract_pdf_url")
-                        or agreement.get("rendered_file_url")
-                    )
+                    else None
                 )
                 agreement["rendered_file_url"] = (
                     agreement.get("rendered_contract_pdf_url")

@@ -107,6 +107,12 @@ class AgreementRecoverInput(BaseModel):
     render_fields: Optional[dict] = None
 
 
+class AgreementRepairInput(BaseModel):
+    employee_id: Optional[str] = None
+    apply: bool = False
+    include_active_employees: bool = False
+
+
 # ==================== LAZY SERVICE IMPORTS ====================
 # Services remain in server.py due to complex dependencies
 
@@ -978,3 +984,127 @@ async def export_agreement_submission_pdf(
         "html_content": html_content,
         "filename": f"{template.get('template_id')}_{submission.get('employee_id')}_{submission.get('completed_at', '')[:10]}.pdf"
     }
+
+
+def _is_applicant_or_onboarding(emp: dict) -> bool:
+    if not emp:
+        return False
+    if emp.get("is_active_employee") is True:
+        return False
+    return True
+
+
+async def _repair_employee_agreements(db, employee: dict, apply_changes: bool) -> dict:
+    from agreement_document_service import (
+        CONTRACT_AGREEMENT_TYPE,
+        HANDBOOK_AGREEMENT_TYPE,
+        ensure_agreement_rendered,
+        get_current_contract_template_version,
+        is_current_contract_template_version,
+        read_employee_agreement_state,
+    )
+
+    eid = employee.get("id")
+    contract_state = await read_employee_agreement_state(db, employee, CONTRACT_AGREEMENT_TYPE)
+    handbook_state = await read_employee_agreement_state(db, employee, HANDBOOK_AGREEMENT_TYPE)
+    current_template_version = await get_current_contract_template_version(db)
+    actions = []
+
+    c_state = str(contract_state.get("contract_state") or contract_state.get("status") or "").strip().lower()
+    c_unsigned = c_state in {"", "pending_signature", "awaiting_worker_signature"}
+    c_worker_signed = bool(contract_state.get("worker_signed_contract_pdf_url"))
+    c_executed = bool(contract_state.get("executed_contract_pdf_url"))
+    c_render = contract_state.get("rendered_contract_pdf_url")
+    c_template = str(contract_state.get("template_version") or "")
+    c_current = is_current_contract_template_version(c_template, current_template_version)
+    needs_contract_repair = c_unsigned and (not c_worker_signed) and (not c_executed) and ((not c_render) or (not c_current))
+    if needs_contract_repair:
+        actions.append("rebuild_unsigned_contract_render")
+        if apply_changes:
+            await ensure_agreement_rendered(db, employee, CONTRACT_AGREEMENT_TYPE)
+
+    verified_sub = await db.agreement_submissions.find_one(
+        {"employee_id": eid, "template_id": AGREEMENT_TEMPLATE_IDS["handbook_acknowledgement"], "verification_status": "verified"},
+        {"_id": 0},
+        sort=[("verified_at", -1), ("completed_at", -1), ("id", -1)],
+    )
+    handbook_ack = await db.agreement_acknowledgements.find_one(
+        {"employee_id": eid, "agreement_type": {"$in": ["handbook_acknowledgement", "employee_handbook_acknowledgement"]}},
+        {"_id": 0},
+        sort=[("updated_at", -1), ("created_at", -1), ("id", -1)],
+    )
+    ack_status = str((handbook_ack or {}).get("verification_status") or (handbook_ack or {}).get("status") or "").strip().lower()
+    if verified_sub and ack_status != "verified":
+        actions.append("normalize_handbook_ack_from_verified_submission")
+        if apply_changes and handbook_ack:
+            await db.agreement_acknowledgements.update_one(
+                {"id": handbook_ack.get("id"), "employee_id": eid},
+                {"$set": {
+                    "verification_status": "verified",
+                    "status": "verified",
+                    "acknowledged": True,
+                    "verified_at": verified_sub.get("verified_at") or verified_sub.get("updated_at") or datetime.now(timezone.utc).isoformat(),
+                    "verified_by": verified_sub.get("verified_by"),
+                    "verified_by_name": verified_sub.get("verified_by_name"),
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }},
+            )
+
+    if not actions:
+        actions = ["no_change"]
+    return {
+        "employee_id": eid,
+        "name": f"{employee.get('first_name','')} {employee.get('last_name','')}".strip(),
+        "status": employee.get("status"),
+        "contract_status": contract_state.get("status"),
+        "contract_template_version": contract_state.get("template_version"),
+        "current_contract_template_version": current_template_version,
+        "handbook_status": handbook_state.get("status"),
+        "actions": actions,
+    }
+
+
+@router.post("/admin/agreements/repair")
+async def repair_agreements_admin(
+    payload: AgreementRepairInput = Body(...),
+    user: dict = Depends(require_admin),
+):
+    db = get_db()
+    if not payload.employee_id:
+        raise HTTPException(status_code=400, detail="employee_id is required")
+    employee = await db.employees.find_one({"id": payload.employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    if (not payload.include_active_employees) and (not _is_applicant_or_onboarding(employee)):
+        raise HTTPException(status_code=400, detail="Employee outside default scope")
+    result = await _repair_employee_agreements(db, employee, payload.apply)
+    return {"dry_run": (not payload.apply), "result": result}
+
+
+@router.post("/admin/agreements/repair-all")
+async def repair_all_agreements_admin(
+    payload: AgreementRepairInput = Body(...),
+    user: dict = Depends(require_admin),
+):
+    db = get_db()
+    query = {} if payload.include_active_employees else {"is_active_employee": {"$ne": True}}
+    employees = await db.employees.find(query, {"_id": 0}).to_list(2000)
+    results = []
+    for emp in employees:
+        if (not payload.include_active_employees) and (not _is_applicant_or_onboarding(emp)):
+            continue
+        try:
+            results.append(await _repair_employee_agreements(db, emp, payload.apply))
+        except Exception as exc:
+            results.append({
+                "employee_id": emp.get("id"),
+                "name": f"{emp.get('first_name','')} {emp.get('last_name','')}".strip(),
+                "status": emp.get("status"),
+                "actions": ["error"],
+                "error": str(exc),
+            })
+    summary = {}
+    for row in results:
+        for a in row.get("actions", []):
+            summary[a] = int(summary.get(a, 0)) + 1
+    return {"dry_run": (not payload.apply), "count": len(results), "summary_counts_by_action": summary, "results": results}

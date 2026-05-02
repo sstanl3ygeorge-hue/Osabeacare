@@ -38743,6 +38743,11 @@ async def get_compliance_file(
             "acknowledgement_data": {
                 "id": resolved_ack.get("id") or (latest_ack.get("id") if latest_ack else None),
                 "agreement_type": agreement_type,
+                "acknowledged": bool(
+                    resolved_ack.get("acknowledged")
+                    or (latest_ack.get("acknowledged") if latest_ack else False)
+                ),
+                "acknowledged_at": resolved_ack.get("acknowledged_at") or (latest_ack.get("acknowledged_at") if latest_ack else None),
                 "version_acknowledged": resolved_ack.get("version_acknowledged") or (latest_ack.get("version_acknowledged") if latest_ack else None),
                 "completion_mode": resolved_ack.get("completion_mode") or (latest_ack.get("completion_mode") if latest_ack else None),
                 "completed_at": resolved_ack.get("completed_at") or (latest_ack.get("completed_at") if latest_ack else None),

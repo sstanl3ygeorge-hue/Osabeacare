@@ -121,6 +121,24 @@ def _clean_text(text: str) -> str:
 
 # Raised when required contract fields are unresolved so we never produce a
 # broken PDF with TBC values.
+async def _load_org_settings(db) -> Dict[str, Any]:
+    """Load organisation settings preferring the canonical `id="default"`
+    document, falling back to any other doc in the collection.
+
+    Production data sometimes has multiple org_settings rows: the canonical
+    one created by `PUT /api/org-settings` (filtered by `id="default"`) and
+    legacy/orphan rows from earlier seeds. A plain `find_one({})` can return
+    the wrong row, leaving company_address unresolved even when the admin
+    has set it. Always read via this helper to keep the render pipeline in
+    sync with what the Settings UI writes.
+    """
+    canonical = await db.org_settings.find_one({"id": "default"}, {"_id": 0})
+    if canonical:
+        return canonical
+    fallback = await db.org_settings.find_one({}, {"_id": 0})
+    return fallback or {}
+
+
 class ContractRenderError(Exception):
     """Required contract fields are missing or unresolved."""
 
@@ -1285,7 +1303,7 @@ async def _resolve_employee_agreement_state_core(
             }
         else:
             # Handbook or other agreement
-            org_settings = await db.org_settings.find_one({}, {"_id": 0}) or {}
+            org_settings = await _load_org_settings(db)
             handbook_fields = _resolve_handbook_fields(org_settings, employee)
             content_needed = _handbook_content_needed(handbook_fields)
             return {
@@ -1567,7 +1585,7 @@ async def _resolve_employee_agreement_state_core(
         state_label = "Handbook acknowledged — awaiting admin verification"
     else:
         state_label = "Action required: please review and acknowledge the handbook"
-    org_settings = await db.org_settings.find_one({}, {"_id": 0}) or {}
+    org_settings = await _load_org_settings(db)
     handbook_fields = _resolve_handbook_fields(org_settings, employee)
     content_needed = _handbook_content_needed(handbook_fields)
     return {
@@ -1628,7 +1646,7 @@ async def read_employee_agreement_state(db, employee: Dict[str, Any], agreement_
 async def build_agreement_rendering(db, employee: Dict[str, Any], agreement_type: str) -> Dict[str, Any]:
     template_bytes, source_name, source_path = await _load_template_bytes(db, agreement_type)
     version = _template_version(template_bytes, agreement_type)
-    org_settings = await db.org_settings.find_one({}, {"_id": 0}) or {}
+    org_settings = await _load_org_settings(db)
     employee_name = _employee_name(employee)
     if agreement_type == CONTRACT_AGREEMENT_TYPE:
         fields = _resolve_contract_fields(employee, org_settings)

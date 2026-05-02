@@ -1388,6 +1388,17 @@ async def _resolve_employee_agreement_state_core(
             resolved_state = generated_to_state.get(latest_status)
             if resolved_state:
                 agreement = dict(agreement or {})
+                generated_worker_signed_artifact = bool(
+                    latest_generated_contract.get("worker_signed_contract_pdf_url")
+                    or latest_generated_contract.get("signed_document_url")
+                    or latest_generated_contract.get("worker_signed_at")
+                )
+                # Defensive normalization: do not surface "awaiting_company_countersignature"
+                # when no worker-signed artifact exists. This mixed legacy state is what
+                # causes admin/worker disagreement ("No contract record found" vs countersignature).
+                if resolved_state == "awaiting_company_countersignature" and not generated_worker_signed_artifact:
+                    resolved_state = "pending_signature"
+                    latest_status = "pending_signature"
                 agreement["id"] = agreement.get("id") or f"agr_{CONTRACT_AGREEMENT_TYPE}_{employee_id}"
                 agreement["generated_contract_id"] = latest_generated_contract.get("id")
                 agreement["active_contract_id"] = latest_generated_contract.get("id")

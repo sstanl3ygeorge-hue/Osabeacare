@@ -687,6 +687,415 @@ async def recover_agreement(
     }
 
 
+class AgreementRepairOneInput(BaseModel):
+    employee_id: str
+    apply: bool = False
+
+
+class AgreementRepairAllInput(BaseModel):
+    apply: bool = False
+    include_active_employees: bool = False
+    limit: Optional[int] = None
+
+
+async def _repair_employee_agreements_core(
+    db,
+    employee: dict,
+    *,
+    apply: bool,
+    actor_user_id: str,
+) -> dict:
+    """
+    Idempotent per-employee repair action.
+
+    Decisions (never silently discard signed artifacts):
+    - CONTRACT:
+        * canonical template + canonical rendered PDF + consistent state → no_change
+        * worker_signed artifact present AND template non-canonical → flag_worker_signed_legacy
+          (set render_issue="legacy_template_signed" on ack row; do NOT regenerate)
+        * no worker signature AND (non-canonical template OR missing rendered PDF)
+          → rebuild_unsigned_contract_render (calls ensure_agreement_rendered,
+          which supersedes/rewrites ack + generated_contract rows)
+    - HANDBOOK:
+        * agreement_submissions.verified present BUT ack row not mirrored
+          → normalize_handbook_ack_from_verified_submission (write verified state back)
+        * ack row non-canonical template_version AND not acknowledged
+          → rebuild_handbook_render
+        * otherwise → no_change
+    """
+    from agreement_document_service import (
+        CONTRACT_AGREEMENT_TYPE,
+        HANDBOOK_AGREEMENT_TYPE,
+        build_agreement_rendering,
+        ensure_agreement_rendered,
+        is_current_contract_template_version,
+        read_employee_agreement_state,
+        _is_canonical_contract_template_version,
+    )
+
+    employee_id = employee["id"]
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    # --- Current canonical template versions (read without side effects) ---
+    try:
+        contract_rendering = await build_agreement_rendering(db, employee, CONTRACT_AGREEMENT_TYPE)
+        current_contract_template_version = contract_rendering.get("template_version")
+    except Exception as exc:
+        current_contract_template_version = None
+        contract_render_failure = str(exc)
+    else:
+        contract_render_failure = None
+
+    try:
+        handbook_rendering = await build_agreement_rendering(db, employee, HANDBOOK_AGREEMENT_TYPE)
+        current_handbook_template_version = handbook_rendering.get("template_version")
+    except Exception as exc:
+        current_handbook_template_version = None
+        handbook_render_failure = str(exc)
+    else:
+        handbook_render_failure = None
+
+    result = {
+        "employee_id": employee_id,
+        "employee_name": f"{employee.get('first_name','')} {employee.get('last_name','')}".strip(),
+        "employee_status": employee.get("status"),
+        "dry_run": not apply,
+        "contract": {"action": "no_change", "before": {}, "after": None, "details": {}},
+        "handbook": {"action": "no_change", "before": {}, "after": None, "details": {}},
+    }
+
+    # ========== CONTRACT ==========
+    contract_ack = await db.agreement_acknowledgements.find_one(
+        {"employee_id": employee_id, "agreement_type": CONTRACT_AGREEMENT_TYPE},
+        {"_id": 0},
+    )
+    generated_contract_rows = await db.generated_contracts.find(
+        {
+            "employee_id": employee_id,
+            "status": {"$ne": "superseded"},
+            "$or": [
+                {"superseded_by_contract_id": {"$exists": False}},
+                {"superseded_by_contract_id": None},
+                {"superseded_by_contract_id": ""},
+            ],
+        },
+        {"_id": 0},
+    ).to_list(50)
+    generated_contract_rows.sort(
+        key=lambda row: (
+            str(row.get("generated_at") or ""),
+            str(row.get("created_at") or ""),
+            str(row.get("id") or ""),
+        ),
+        reverse=True,
+    )
+    latest_generated = generated_contract_rows[0] if generated_contract_rows else None
+
+    contract_ack_template_version = (contract_ack or {}).get("template_version")
+    contract_gen_template_version = (latest_generated or {}).get("template_version")
+    contract_ack_canonical = _is_canonical_contract_template_version(contract_ack_template_version)
+    contract_ack_is_current = is_current_contract_template_version(
+        contract_ack_template_version, current_contract_template_version
+    )
+    contract_gen_is_current = is_current_contract_template_version(
+        contract_gen_template_version, current_contract_template_version
+    )
+    worker_signed_artifact = bool(
+        (contract_ack or {}).get("worker_signed_contract_pdf_url")
+        or (contract_ack or {}).get("executed_contract_pdf_url")
+        or (contract_ack or {}).get("signed_document_url")
+        or (latest_generated or {}).get("worker_signed_contract_pdf_url")
+        or (latest_generated or {}).get("executed_contract_pdf_url")
+        or (latest_generated or {}).get("signed_document_url")
+    )
+    contract_has_usable_pdf = bool(
+        (contract_ack or {}).get("rendered_contract_pdf_url")
+        and contract_ack_is_current
+    ) or bool(
+        (latest_generated or {}).get("rendered_contract_pdf_url")
+        and contract_gen_is_current
+    )
+
+    result["contract"]["before"] = {
+        "ack_id": (contract_ack or {}).get("id"),
+        "ack_template_version": contract_ack_template_version,
+        "ack_is_canonical": contract_ack_canonical,
+        "ack_is_current": contract_ack_is_current,
+        "generated_contract_id": (latest_generated or {}).get("id"),
+        "generated_template_version": contract_gen_template_version,
+        "generated_is_current": contract_gen_is_current,
+        "worker_signed_artifact": worker_signed_artifact,
+        "has_usable_pdf": contract_has_usable_pdf,
+        "current_canonical_template_version": current_contract_template_version,
+        "render_failure": contract_render_failure,
+    }
+
+    if contract_render_failure:
+        result["contract"]["action"] = "render_blocked"
+        result["contract"]["details"]["render_failure"] = contract_render_failure
+    elif not contract_ack and not latest_generated:
+        result["contract"]["action"] = "no_change"
+        result["contract"]["details"]["note"] = "No contract records yet — nothing to repair"
+    elif worker_signed_artifact and not (contract_ack_is_current or contract_gen_is_current):
+        # Preserve the legacy signature — never regenerate silently.
+        result["contract"]["action"] = "flag_worker_signed_legacy"
+        if apply and contract_ack and (contract_ack or {}).get("render_issue") != "legacy_template_signed":
+            await db.agreement_acknowledgements.update_one(
+                {"id": contract_ack["id"]},
+                {"$set": {
+                    "render_issue": "legacy_template_signed",
+                    "render_issue_flagged_at": now_iso,
+                    "render_issue_flagged_by": actor_user_id,
+                    "updated_at": now_iso,
+                }},
+            )
+            result["contract"]["after"] = {"flagged": True}
+    elif not worker_signed_artifact and (not contract_ack_is_current or not contract_has_usable_pdf or not contract_gen_is_current):
+        result["contract"]["action"] = "rebuild_unsigned_contract_render"
+        if apply:
+            for row in generated_contract_rows:
+                row_version = row.get("template_version")
+                if is_current_contract_template_version(row_version, current_contract_template_version):
+                    continue
+                await db.generated_contracts.update_one(
+                    {"id": row.get("id")},
+                    {"$set": {
+                        "status": "superseded",
+                        "contract_state": "superseded",
+                        "superseded_at": now_iso,
+                        "superseded_by": actor_user_id,
+                        "supersede_reason": "admin_repair_non_canonical_template",
+                        "updated_at": now_iso,
+                    }},
+                )
+            fresh = await ensure_agreement_rendered(db, employee, CONTRACT_AGREEMENT_TYPE)
+            result["contract"]["after"] = {
+                "ack_id": (fresh or {}).get("id"),
+                "ack_template_version": (fresh or {}).get("template_version"),
+                "rendered_contract_pdf_url": (fresh or {}).get("rendered_contract_pdf_url"),
+            }
+    else:
+        result["contract"]["action"] = "no_change"
+
+    # ========== HANDBOOK ==========
+    handbook_ack = await db.agreement_acknowledgements.find_one(
+        {"employee_id": employee_id, "agreement_type": HANDBOOK_AGREEMENT_TYPE},
+        {"_id": 0},
+    )
+    handbook_submission = None
+    try:
+        handbook_submission = await db.agreement_submissions.find_one(
+            {
+                "employee_id": employee_id,
+                "template_id": "EMPLOYEE_HANDBOOK_ACKNOWLEDGEMENT_V1",
+                "verification_status": "verified",
+            },
+            {"_id": 0},
+            sort=[("verified_at", -1)],
+        )
+    except Exception:
+        handbook_submission = None
+
+    handbook_ack_verified = (handbook_ack or {}).get("verification_status") == "verified"
+    handbook_ack_acknowledged = bool((handbook_ack or {}).get("acknowledged"))
+    handbook_ack_template_version = (handbook_ack or {}).get("template_version")
+    handbook_ack_is_current = bool(
+        handbook_ack_template_version
+        and current_handbook_template_version
+        and str(handbook_ack_template_version) == str(current_handbook_template_version)
+    )
+
+    result["handbook"]["before"] = {
+        "ack_id": (handbook_ack or {}).get("id"),
+        "ack_acknowledged": handbook_ack_acknowledged,
+        "ack_verification_status": (handbook_ack or {}).get("verification_status"),
+        "ack_template_version": handbook_ack_template_version,
+        "ack_is_current": handbook_ack_is_current,
+        "submission_id": (handbook_submission or {}).get("id"),
+        "submission_verified_at": (handbook_submission or {}).get("verified_at"),
+        "current_canonical_template_version": current_handbook_template_version,
+        "render_failure": handbook_render_failure,
+    }
+
+    if handbook_submission and not handbook_ack_verified:
+        result["handbook"]["action"] = "normalize_handbook_ack_from_verified_submission"
+        if apply:
+            update_fields = {
+                "verification_status": "verified",
+                "acknowledged": True,
+                "status": (handbook_ack or {}).get("status") or "signed",
+                "verified_at": handbook_submission.get("verified_at"),
+                "verified_by": handbook_submission.get("verified_by"),
+                "verified_by_name": handbook_submission.get("verified_by_name"),
+                "acknowledged_at": (
+                    (handbook_ack or {}).get("acknowledged_at")
+                    or handbook_submission.get("completed_at")
+                    or handbook_submission.get("verified_at")
+                ),
+                "submission_id": handbook_submission.get("id"),
+                "updated_at": now_iso,
+                "repaired_at": now_iso,
+                "repaired_by": actor_user_id,
+                "repair_action": "normalize_handbook_ack_from_verified_submission",
+            }
+            if handbook_ack:
+                await db.agreement_acknowledgements.update_one(
+                    {"id": handbook_ack["id"]},
+                    {"$set": update_fields},
+                )
+            else:
+                ack_id = f"agr_{HANDBOOK_AGREEMENT_TYPE}_{employee_id}"
+                await db.agreement_acknowledgements.update_one(
+                    {"id": ack_id},
+                    {
+                        "$set": update_fields,
+                        "$setOnInsert": {
+                            "id": ack_id,
+                            "employee_id": employee_id,
+                            "employee_name": result["employee_name"],
+                            "agreement_type": HANDBOOK_AGREEMENT_TYPE,
+                            "created_at": now_iso,
+                        },
+                    },
+                    upsert=True,
+                )
+            result["handbook"]["after"] = {"verification_status": "verified", "acknowledged": True}
+    elif handbook_ack and not handbook_ack_acknowledged and not handbook_ack_is_current and not handbook_render_failure:
+        result["handbook"]["action"] = "rebuild_handbook_render"
+        if apply:
+            fresh = await ensure_agreement_rendered(db, employee, HANDBOOK_AGREEMENT_TYPE)
+            result["handbook"]["after"] = {
+                "ack_id": (fresh or {}).get("id"),
+                "ack_template_version": (fresh or {}).get("template_version"),
+                "rendered_file_url": (fresh or {}).get("rendered_file_url"),
+            }
+    else:
+        result["handbook"]["action"] = "no_change"
+
+    return result
+
+
+@router.post("/admin/agreements/repair")
+async def repair_single_employee_agreements(
+    data: AgreementRepairOneInput = Body(...),
+    user: dict = Depends(require_admin),
+):
+    """
+    Idempotent repair for a single employee's contract + handbook agreements.
+    Body: { "employee_id": "...", "apply": false }
+    apply=false → dry run, writes nothing.
+    apply=true  → executes safe actions; never discards a worker signature.
+    """
+    db = get_db()
+    employee = await db.employees.find_one({"id": data.employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    result = await _repair_employee_agreements_core(
+        db, employee, apply=data.apply, actor_user_id=user["user_id"]
+    )
+
+    if data.apply:
+        await log_audit_action(
+            user["user_id"],
+            "admin_repair_agreements",
+            "agreement_acknowledgements",
+            data.employee_id,
+            {
+                "employee_id": data.employee_id,
+                "contract_action": result["contract"]["action"],
+                "handbook_action": result["handbook"]["action"],
+            },
+        )
+
+    return {"success": True, "result": result}
+
+
+@router.post("/admin/agreements/repair-all")
+async def repair_all_employees_agreements(
+    data: AgreementRepairAllInput = Body(...),
+    user: dict = Depends(require_admin),
+):
+    """
+    Bulk repair across all employees. Default scope: status != "active".
+    Body: { "apply": false, "include_active_employees": false, "limit": null }
+    """
+    db = get_db()
+
+    query = {}
+    if not data.include_active_employees:
+        query["status"] = {"$ne": "active"}
+
+    cursor = db.employees.find(query, {"_id": 0})
+    if data.limit:
+        cursor = cursor.limit(int(data.limit))
+    employees = await cursor.to_list(length=10000)
+
+    results = []
+    counts = {
+        "scanned": 0,
+        "contract_rebuild": 0,
+        "contract_flagged_legacy": 0,
+        "contract_render_blocked": 0,
+        "contract_no_change": 0,
+        "handbook_normalized": 0,
+        "handbook_rebuild": 0,
+        "handbook_no_change": 0,
+    }
+
+    for employee in employees:
+        try:
+            item = await _repair_employee_agreements_core(
+                db, employee, apply=data.apply, actor_user_id=user["user_id"]
+            )
+        except Exception as exc:
+            logger.exception("Repair failed for employee %s", employee.get("id"))
+            item = {
+                "employee_id": employee.get("id"),
+                "employee_name": f"{employee.get('first_name','')} {employee.get('last_name','')}".strip(),
+                "error": str(exc),
+            }
+        results.append(item)
+        counts["scanned"] += 1
+        contract_action = (item.get("contract") or {}).get("action")
+        handbook_action = (item.get("handbook") or {}).get("action")
+        if contract_action == "rebuild_unsigned_contract_render":
+            counts["contract_rebuild"] += 1
+        elif contract_action == "flag_worker_signed_legacy":
+            counts["contract_flagged_legacy"] += 1
+        elif contract_action == "render_blocked":
+            counts["contract_render_blocked"] += 1
+        else:
+            counts["contract_no_change"] += 1
+        if handbook_action == "normalize_handbook_ack_from_verified_submission":
+            counts["handbook_normalized"] += 1
+        elif handbook_action == "rebuild_handbook_render":
+            counts["handbook_rebuild"] += 1
+        else:
+            counts["handbook_no_change"] += 1
+
+    if data.apply:
+        await log_audit_action(
+            user["user_id"],
+            "admin_repair_agreements_bulk",
+            "agreement_acknowledgements",
+            "batch_operation",
+            {
+                "apply": True,
+                "include_active_employees": data.include_active_employees,
+                "counts": counts,
+            },
+        )
+
+    return {
+        "success": True,
+        "dry_run": not data.apply,
+        "include_active_employees": data.include_active_employees,
+        "counts": counts,
+        "results": results,
+    }
+
+
 @router.post("/admin/agreements/supersede-admin-contracts")
 async def supersede_admin_signed_contracts(
     user: dict = Depends(require_admin)

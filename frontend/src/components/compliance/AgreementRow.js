@@ -100,10 +100,29 @@ export default function AgreementRow({
   const templateId = AGREEMENT_TEMPLATE_MAP[key];
 
   // Determine lifecycle status
+  // CRITICAL: Only mark 'submitted' when there's actual evidence the worker
+  // acted on the agreement. `has_acknowledgement` alone is True even for
+  // stub/legacy rows (e.g. an ack row created by ensure_agreement_rendered
+  // where the PDF was rendered but no one has signed/acknowledged yet).
+  // Trusting it caused admin to show "Awaiting admin review" while the
+  // worker dashboard correctly showed "Action required: please acknowledge"
+  // for the same employee — exact symptom for Olakunle Alonge / Ramon Akinsanya
+  // on the handbook row.
   const getLifecycleStatus = () => {
     if (is_verified) return 'verified';
     if (acknowledgement_data?.latest_active !== false && acknowledgement_data?.verification_status === 'rejected') return 'rejected';
-    if (has_acknowledgement || submission_data) return 'submitted';
+    const workerActed = Boolean(
+      acknowledgement_data?.acknowledged ||
+      acknowledgement_data?.worker_signed_at ||
+      acknowledgement_data?.signed_at ||
+      acknowledgement_data?.completed_at ||
+      acknowledgement_data?.worker_signed_contract_pdf_url ||
+      acknowledgement_data?.executed_contract_pdf_url ||
+      acknowledgement_data?.signed_document_url ||
+      submission_data?.id ||
+      submission_data?.completed_at
+    );
+    if (workerActed) return 'submitted';
     if (pending_requests.length > 0) return 'sent';
     return 'not_sent';
   };
@@ -414,6 +433,52 @@ export default function AgreementRow({
     }
   };
 
+  // Admin-side surgical repair: supersedes non-canonical rows, re-renders
+  // unsigned contracts with canonical template, mirrors verified handbook
+  // submissions into the ack row. Never discards worker signatures.
+  // Calls the dedicated repair endpoint (dry run first, then apply on confirmation).
+  const handleRepairAgreement = async () => {
+    setIsProcessing(true);
+    try {
+      const dryRun = await axios.post(
+        `${API}/admin/agreements/repair`,
+        { employee_id: employeeId, apply: false },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      const contractAction = dryRun.data?.result?.contract?.action || 'no_change';
+      const handbookAction = dryRun.data?.result?.handbook?.action || 'no_change';
+      if (contractAction === 'no_change' && handbookAction === 'no_change') {
+        toast.info('No repair needed — state is already consistent.');
+        return;
+      }
+      const confirmed = window.confirm(
+        `Repair plan for this employee:\n\n` +
+        `  • Contract: ${contractAction}\n` +
+        `  • Handbook: ${handbookAction}\n\n` +
+        `Apply now? (Worker signatures are never discarded.)`
+      );
+      if (!confirmed) return;
+      const applied = await axios.post(
+        `${API}/admin/agreements/repair`,
+        { employee_id: employeeId, apply: true },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      const appliedContract = applied.data?.result?.contract?.action;
+      const appliedHandbook = applied.data?.result?.handbook?.action;
+      toast.success(`Repair applied — contract: ${appliedContract}, handbook: ${appliedHandbook}`);
+      if (onRefresh) onRefresh();
+    } catch (err) {
+      const detail = err.response?.data?.detail;
+      const message =
+        (typeof detail === 'string' && detail) ||
+        detail?.message ||
+        'Failed to repair agreement';
+      toast.error(message);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   // Handle PDF export
   const handleExportPDF = async () => {
     if (key === 'contract_acceptance' && contractArtifactUrl) {
@@ -572,6 +637,28 @@ export default function AgreementRow({
                 >
                   <RotateCcw className="h-3.5 w-3.5 mr-1" />
                   Recover / rebuild agreement
+                </Button>
+              )}
+
+              {/* Surgical admin repair button — appears when the row looks
+                  inconsistent (stale legacy contract, or admin-worker handbook
+                  drift). Dry-runs first, then applies on confirmation. Never
+                  discards worker signatures. */}
+              {(contractNeedsReissue ||
+                (key === 'contract_acceptance' && !contractArtifactUrl && effectiveLifecycleStatus !== 'not_sent') ||
+                (key === 'handbook_acknowledgement' && acknowledgement_data?.verification_status && acknowledgement_data?.verification_status !== (is_verified ? 'verified' : acknowledgement_data?.verification_status))
+              ) && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={(e) => { e.stopPropagation(); handleRepairAgreement(); }}
+                  disabled={isProcessing}
+                  className="h-8 text-xs rounded-lg border-purple-300 text-purple-700 hover:bg-purple-50"
+                  title="Surgical repair — dry-runs first, preserves worker signatures"
+                  data-testid={`repair-agreement-${key}`}
+                >
+                  {isProcessing ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <RotateCcw className="h-3.5 w-3.5 mr-1" />}
+                  Repair agreement
                 </Button>
               )}
 

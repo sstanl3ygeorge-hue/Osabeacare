@@ -1405,23 +1405,26 @@ async def _resolve_employee_agreement_state_core(
                 agreement["template_version"] = (
                     generated_template_version if generated_template_is_current else agreement.get("template_version")
                 )
-                # Never leak legacy stale rendered_file_url for unsigned contracts.
-                # If generated template is not current, force render URL to None so
-                # callers can trigger canonical repair instead of serving old artifacts.
-                agreement["rendered_contract_pdf_url"] = (
-                    (
+                # STALE LEGACY FALLBACK STRIP:
+                # When the generated contract was rendered against a non-canonical
+                # (old April-era) template, DO NOT surface any legacy rendered_file_url
+                # as the contract PDF. That URL is what caused "Insert Employee Name"
+                # placeholder PDFs to leak into admin/worker views for applicants like
+                # Olakunle Alonge. Admin will see no PDF URL and can trigger repair
+                # via POST /api/admin/agreements/repair to generate a canonical render.
+                if generated_template_is_current:
+                    agreement["rendered_contract_pdf_url"] = (
                         latest_generated_contract.get("rendered_contract_pdf_url")
                         or latest_generated_contract.get("file_url")
                     )
-                    if generated_template_is_current
-                    else None
-                )
-                agreement["rendered_file_url"] = (
-                    agreement.get("rendered_contract_pdf_url")
-                    or latest_generated_contract.get("rendered_file_url")
-                    or latest_generated_contract.get("file_url")
-                    or agreement.get("rendered_file_url")
-                )
+                    agreement["rendered_file_url"] = (
+                        agreement.get("rendered_contract_pdf_url")
+                        or latest_generated_contract.get("rendered_file_url")
+                        or latest_generated_contract.get("file_url")
+                    )
+                else:
+                    agreement["rendered_contract_pdf_url"] = None
+                    agreement["rendered_file_url"] = None
                 agreement["worker_signed_contract_pdf_url"] = (
                     latest_generated_contract.get("worker_signed_contract_pdf_url")
                     or agreement.get("worker_signed_contract_pdf_url")
@@ -1451,6 +1454,26 @@ async def _resolve_employee_agreement_state_core(
         )
         contract_file_url = current_contract_artifact(agreement, current_contract_template_version)
         render_issue_contract = render_error_detail if not canonical_contract else None
+        # ----- Self-consistency guard for legacy/stale contract rows -----
+        # Lawrence Egbeni symptom: admin shows "Awaiting company countersignature"
+        # while the PDF URL is None (resolves to "No contract record found").
+        # Prevent that contradiction by flipping the state to "rejected_reopen_required"
+        # whenever the state implies a usable rendered PDF should exist but none does
+        # AND the worker has not yet produced any signed artifact. Admin can then
+        # run POST /api/admin/agreements/repair to regenerate.
+        _worker_has_signed_artifact = bool(
+            (agreement or {}).get("worker_signed_contract_pdf_url")
+            or (agreement or {}).get("executed_contract_pdf_url")
+            or (agreement or {}).get("signed_document_url")
+        )
+        if (
+            canonical_contract_state in {"pending_signature", "awaiting_worker_signature", "awaiting_company_countersignature"}
+            and not contract_file_url
+            and not _worker_has_signed_artifact
+        ):
+            canonical_contract_state = "rejected_reopen_required"
+            contract_state = "rejected_reopen_required"
+            render_issue_contract = render_issue_contract or "Legacy or missing contract PDF — needs reissue"
         worker_signed = bool(
             contract_state in ("awaiting_company_countersignature", "fully_executed")
             or agreement.get("worker_signed_at")

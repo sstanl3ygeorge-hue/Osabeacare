@@ -119,57 +119,46 @@ DOC_REQUIREMENT_EXCLUSIONS: frozenset[str] = frozenset({
     "address_check", "address_verification",
 })
 
+# Canonical onboarding-forms list now lives in `canonical_forms.py` as the
+# single source of truth shared with the worker dashboard. The
+# `interview_record` is NOT an onboarding form — the interview has its own
+# lifecycle and panel. Approval gates that need to check the interview do so
+# via dedicated checks, not the forms category.
 #
-# Defensive import: if the runtime Python path doesn't include /app/backend
-# at module load time we fall back to an inline copy so the backend still
-# boots and auth/dashboards keep working. Either path produces identical data.
+# Production hardening: Railway's working directory is sometimes the repo
+# root rather than /app/backend, so the bare `from canonical_forms import ...`
+# can fail with ImportError on first boot. Try the absolute path first, then
+# fall back to a sys.path-augmented import, then to a minimal inline
+# definition so the engine can still boot if both fail. The inline fallback
+# matches the canonical_forms.py source-of-truth at the time of writing.
 try:
-    from canonical_forms import CANONICAL_ONBOARDING_FORMS as REQUIRED_FORMS
-except ImportError:
+    from backend.canonical_forms import CANONICAL_ONBOARDING_FORMS as REQUIRED_FORMS  # type: ignore
+except Exception:
     try:
-        import sys, os
-        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         from canonical_forms import CANONICAL_ONBOARDING_FORMS as REQUIRED_FORMS
-    except ImportError:
-        REQUIRED_FORMS = [
-            {
-                "id": "staff_health_questionnaire",
-                "name": "Staff Health Questionnaire",
-                "required": True, "source": "worker",
-            },
-            {
-                "id": "staff_personal_info",
-                "name": "Staff Personal Information",
-                "required": True, "source": "worker",
-            },
-            {
-                "id": "hmrc_starter_checklist",
-                "name": "HMRC Starter Checklist",
-                "required": True, "source": "worker",
-            },
-            {
-                "id": "equal_opportunities",
-                "name": "Equal Opportunities Monitoring",
-                "required": False, "source": "worker",
-            },
-            {
-                "id": "emergency_contacts",
-                "name": "Emergency Contacts",
-                "required": True, "source": "worker",
-            },
-            {
-                "id": "conflict_of_interest",
-                "name": "Conflict of Interest Declaration",
-                "required": True, "source": "worker",
-            },
-            {
-                "id": "fit_proper_persons",
-                "name": "Fit and Proper Persons Declaration",
-                "required": True, "source": "worker",
-                "role_aware": True,
-                "roles_required": ["manager", "registered_manager", "director", "nursing_director"],
-            },
-        ]
+    except Exception:
+        import os as _uce_os
+        import sys as _uce_sys
+        _uce_here = _uce_os.path.dirname(_uce_os.path.abspath(__file__))
+        if _uce_here not in _uce_sys.path:
+            _uce_sys.path.insert(0, _uce_here)
+        try:
+            from canonical_forms import CANONICAL_ONBOARDING_FORMS as REQUIRED_FORMS  # type: ignore
+        except Exception as _uce_exc:
+            logger.error(
+                "Failed to import canonical_forms (%s) — falling back to inline definition. "
+                "Check that backend/canonical_forms.py is deployed.",
+                _uce_exc,
+            )
+            REQUIRED_FORMS = [
+                {"id": "staff_health_questionnaire", "name": "Staff Health Questionnaire", "required": True, "sensitive": True, "source": "worker"},
+                {"id": "staff_personal_info", "name": "Staff Personal Information", "required": True, "sensitive": True, "source": "worker"},
+                {"id": "hmrc_starter_checklist", "name": "HMRC Starter Checklist", "required": True, "sensitive": True, "source": "worker"},
+                {"id": "equal_opportunities", "name": "Equal Opportunities Monitoring", "required": False, "sensitive": True, "source": "worker"},
+                {"id": "emergency_contacts", "name": "Emergency Contacts", "required": True, "source": "worker"},
+                {"id": "conflict_of_interest", "name": "Conflict of Interest Declaration", "required": True, "sensitive": True, "source": "worker"},
+                {"id": "fit_proper_persons", "name": "Fit and Proper Persons Declaration", "required": True, "sensitive": True, "source": "worker", "role_aware": True, "roles_required": ["manager", "registered_manager", "director", "nursing_director"]},
+            ]
 
 # Role-specific requirements
 ROLE_SPECIFIC_REQUIREMENTS = {

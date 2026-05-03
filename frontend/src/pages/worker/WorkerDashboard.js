@@ -1922,9 +1922,10 @@ export default function WorkerDashboard() {
   // the next-action surface NEVER tells a lie.
   const synthesizeAgreementNextAction = () => {
     const allAgreements = Array.isArray(operationalAgreements) ? operationalAgreements : [];
+    const agreementKey = (a) => String(a?.id || a?.agreement_type || a?.key || '').toLowerCase();
     // Contract: actionable when the worker can sign right now.
     const pendingContract = allAgreements.find((a) => {
-      if (a?.id !== 'contract_acceptance') return false;
+      if (agreementKey(a) !== 'contract_acceptance') return false;
       const status = String(a?.status || '').toLowerCase();
       // Tier 4 sync fix: same logic as handbook — worker has no further
       // action if the contract is signed/awaiting review/verified.
@@ -1936,7 +1937,8 @@ export default function WorkerDashboard() {
         || status === 'acknowledged'
         || status === 'submitted'
         || status === 'awaiting_review';
-      return !verified && (a?.can_sign === true || a?.lifecycle_status === 'awaiting_worker_signature');
+      const canSignNow = (a?.can_sign === true) || (contractEligibility?.can_sign === true);
+      return !verified && (canSignNow || a?.lifecycle_status === 'awaiting_worker_signature');
     });
     if (pendingContract) {
       return {
@@ -1951,8 +1953,14 @@ export default function WorkerDashboard() {
     // Contract locked: show pre-sign progress so the worker knows what's
     // still outstanding (vs being told "all caught up").
     const lockedContract = allAgreements.find((a) => {
-      if (a?.id !== 'contract_acceptance') return false;
-      return a?.contract_signing_unlocked === false;
+      if (agreementKey(a) !== 'contract_acceptance') return false;
+      const status = String(a?.status || a?.lifecycle_status || '').toLowerCase();
+      const isTerminal = ['verified', 'completed', 'fully_executed', 'signed', 'acknowledged', 'submitted', 'awaiting_review'].includes(status);
+      if (isTerminal) return false;
+      if (a?.contract_signing_unlocked === false) return true;
+      // Safety net: if eligibility explicitly says cannot sign and contract is still pending,
+      // never allow "all caught up" to render.
+      return contractEligibility?.can_sign === false && (status === 'pending_signature' || status === 'awaiting_worker_signature');
     });
     if (lockedContract) {
       const blockerCount = Array.isArray(lockedContract.contract_signing_blockers)
@@ -1971,7 +1979,8 @@ export default function WorkerDashboard() {
     }
     // Handbook: actionable when worker hasn't yet acknowledged it.
     const pendingHandbook = allAgreements.find((a) => {
-      if (a?.id !== 'handbook_acknowledgement' && a?.id !== 'employee_handbook_acknowledgement') return false;
+      const k = agreementKey(a);
+      if (k !== 'handbook_acknowledgement' && k !== 'employee_handbook_acknowledgement') return false;
       const status = String(a?.status || '').toLowerCase();
       // Tier 4 sync fix: treat signed/acknowledged/submitted as "done for
       // the worker" even when admin hasn't yet verified — the worker has

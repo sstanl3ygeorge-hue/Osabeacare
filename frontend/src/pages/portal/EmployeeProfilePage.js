@@ -4798,7 +4798,23 @@ export default function EmployeeProfilePage() {
               ? 'Verified'
               : (dbsWorkflow?.label || dbsCheckRow?.status_summary || (complianceSections?.dbs ? 'Awaiting review' : 'Unavailable'));
             const dbsChecked = dbsCheckRow?.check_data?.checked_at || dbsCheckRow?.verified_at || null;
-            const dbsReview = dbsCheckRow?.check_data?.review_due_at || dbsCheckRow?.check_data?.next_recheck_date || null;
+            // DBS review fallback (Tier 4 fix): when no explicit review date
+            // is captured, use Osabea policy of "1 year after the check
+            // date". Update Service is checked annually, so the operational
+            // review cadence is always 12 months. Without this fallback the
+            // Audit Quick View was showing "Review date: Unavailable" /
+            // "Days remaining: Unavailable" for every verified DBS that
+            // hadn't been hand-stamped with a review date.
+            const addYears = (dateValue, years) => {
+              if (!dateValue) return null;
+              const d = new Date(dateValue);
+              if (Number.isNaN(d.getTime())) return null;
+              d.setFullYear(d.getFullYear() + years);
+              return d.toISOString();
+            };
+            const dbsReview = dbsCheckRow?.check_data?.review_due_at
+              || dbsCheckRow?.check_data?.next_recheck_date
+              || addYears(dbsChecked, 1);
             const dbsDays = Number.isFinite(dbsCheckRow?.check_data?.days_until_review)
               ? dbsCheckRow.check_data.days_until_review
               : daysUntil(dbsReview);
@@ -10860,6 +10876,7 @@ Direct employment coverage: {Number.isFinite(directCoveragePercent) ? `${directC
     </div>
   );
 }
+
 
 
 

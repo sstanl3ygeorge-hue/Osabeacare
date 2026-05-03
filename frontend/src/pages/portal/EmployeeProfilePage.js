@@ -1857,11 +1857,6 @@ export default function EmployeeProfilePage() {
       setSearchParams({ tab: 'employment' }, { replace: true });
       return;
     }
-    if (profileMode === 'employee' && activeTab === 'references') {
-      setActiveTab('employment');
-      setSearchParams({ tab: 'employment' }, { replace: true });
-      return;
-    }
     if ((profileMode !== 'employee' || lifecycleStage !== 'active') && activeOnlyTabs.includes(activeTab)) {
       setActiveTab('employment');
       setSearchParams({ tab: 'employment' }, { replace: true });
@@ -5647,12 +5642,10 @@ export default function EmployeeProfilePage() {
                 : 'Pre-employment Forms')
               : 'Forms'}
           </TabsTrigger>
-          {profileMode === 'applicant' && (
-            <TabsTrigger value="references" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
-              <UserCheck className="h-4 w-4 mr-2" />
-              References
-            </TabsTrigger>
-          )}
+          <TabsTrigger value="references" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
+            <UserCheck className="h-4 w-4 mr-2" />
+            References
+          </TabsTrigger>
           <TabsTrigger value="checklist" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
             <CheckCircle className="h-4 w-4 mr-2" />
             {profileMode === 'applicant' ? 'Recruitment Checks' : 'Checks & Evidence'}
@@ -7698,7 +7691,6 @@ Direct employment coverage: {Number.isFinite(directCoveragePercent) ? `${directC
         )}
 
         {/* References Tab - Extracted to ReferencesTabContent */}
-        {profileMode === 'applicant' && (
         <TabsContent value="references" data-testid="section-references-root">
           <ReferencesTabContent 
             key={`references-${employeeId}-${referencesTabRefreshKey}`}
@@ -7723,7 +7715,6 @@ Direct employment coverage: {Number.isFinite(directCoveragePercent) ? `${directC
             }}
           />
         </TabsContent>
-        )}
       </Tabs>
 
       {/* Edit Employee Dialog */}

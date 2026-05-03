@@ -650,29 +650,52 @@ export default function AgreementRow({
                   When lifecycleStatus === 'not_sent' the admin sees the
                   'Awaiting worker' status badge and no action button. */}
 
-              {/* View Submission - for submitted/verified */}
-              {(isContractRow
-                ? Boolean(contractArtifactUrl)
-                : (effectiveLifecycleStatus === 'submitted' || effectiveLifecycleStatus === 'verified' || effectiveLifecycleStatus === 'rejected')) && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={(e) => { 
-                    e.stopPropagation(); 
-                    if (isContractRow && contractArtifactUrl) {
-                      window.open(contractArtifactUrl, '_blank', 'noopener,noreferrer');
-                    } else if (onViewSubmission) {
-                      const submissionId = submission_data?.id || acknowledgement_data?.submission_id;
-                      onViewSubmission(key, title, templateId, submissionId);
-                    }
-                  }}
-                  className="h-8 text-xs rounded-lg"
-                  data-testid={`view-submission-${key}`}
-                >
-                  <Eye className="h-3.5 w-3.5 mr-1" />
-                  View
-                </Button>
-              )}
+              {/* View Submission — opens the signed PDF directly.
+                  Tier 4 cleanup: the old drawer expected field-by-field
+                  form data the new acknowledgement flow doesn't collect,
+                  so it was rendering empty for every new handbook. The
+                  signed PDF IS the audit record (contains signature, date,
+                  acknowledgement statements the worker ticked), so just
+                  open that in a new tab. Signed By / Verified By lines on
+                  the row stay as the readable audit header. */}
+              {(() => {
+                const handbookPdfUrl = !isContractRow && (
+                  acknowledgement_data?.rendered_file_url
+                  || acknowledgement_data?.rendered_contract_pdf_url
+                  || acknowledgement_data?.signed_document_url
+                  || acknowledgement_data?.file_url
+                  || acknowledgement_data?.download_url
+                );
+                const canView = isContractRow
+                  ? Boolean(contractArtifactUrl)
+                  : Boolean(handbookPdfUrl) || (
+                      effectiveLifecycleStatus === 'submitted'
+                      || effectiveLifecycleStatus === 'verified'
+                      || effectiveLifecycleStatus === 'rejected'
+                      || effectiveLifecycleStatus === 'awaiting_review'
+                    );
+                if (!canView) return null;
+                const targetUrl = isContractRow ? contractArtifactUrl : handbookPdfUrl;
+                return (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (targetUrl) {
+                        window.open(targetUrl, '_blank', 'noopener,noreferrer');
+                      } else {
+                        toast.info('Signed PDF not yet available for this agreement.');
+                      }
+                    }}
+                    className="h-8 text-xs rounded-lg"
+                    data-testid={`view-submission-${key}`}
+                  >
+                    <Eye className="h-3.5 w-3.5 mr-1" />
+                    View PDF
+                  </Button>
+                );
+              })()}
               
               {shouldShowReissueButton && (
                 <Button
@@ -932,6 +955,7 @@ export default function AgreementRow({
     </div>
   );
 }
+
 
 
 

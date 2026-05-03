@@ -35715,6 +35715,38 @@ async def change_referee_details(
                 "Use 'Request replacement referee' to preserve audit trail."
             ),
         )
+
+    # Legal/audit safeguard: once a reference has progressed to response
+    # received and/or verified, do not silently edit referee identity/contact
+    # fields in-place. Require replacement workflow so evidence lineage stays
+    # intact and review rationale is captured consistently.
+    response_received_at = employee.get(f"{prefix}response_received_at")
+    verified_at = employee.get(f"{prefix}verified_at")
+    verified_flag = bool(employee.get(f"{prefix}verified"))
+    status_value = str(employee.get(f"{prefix}status") or "").strip().lower()
+    request_status_value = str(employee.get(f"{prefix}request_status") or "").strip().lower()
+    progressed_statuses = {
+        "response_received",
+        "awaiting_review",
+        "mismatch_detected",
+        "verified",
+        "rejected",
+        "reviewed",
+    }
+    if (
+        response_received_at
+        or verified_at
+        or verified_flag
+        or status_value in progressed_statuses
+        or request_status_value in progressed_statuses
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Reference has already progressed beyond declaration. "
+                "Use 'Request replacement referee' to preserve audit trail."
+            ),
+        )
     
     # Capture old referee for history
     old_referee = {

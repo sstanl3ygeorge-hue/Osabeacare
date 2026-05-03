@@ -448,22 +448,47 @@ async def can_sign_contract(db, employee_id: str) -> dict:
     ref_completed = 0
     has_unified_refs = "references" in unified_checks
     refs_ok = bool(unified_checks.get("references")) if has_unified_refs else False
+    # When unified_checks omits an explicit "references" key, use category
+    # completion (same source powering dashboard counters) before falling back
+    # to legacy employee.references list.
+    if not has_unified_refs:
+        refs_category = unified_categories.get("references") or unified_category_details.get("references") or {}
+        refs_total = int(refs_category.get("total") or 0)
+        refs_completed_count = int(refs_category.get("completed") or 0)
+        if refs_total >= 2:
+            has_unified_refs = True
+            refs_ok = refs_completed_count >= 2
+            ref_completed = min(refs_completed_count, 2)
     if has_unified_refs:
         if refs_ok:
-            ref_completed = 2
+            ref_completed = max(ref_completed, 2)
             completed.extend(["Reference 1 verified", "Reference 2 verified"])
         else:
             blockers.extend(["Reference 1 not verified", "Reference 2 not verified"])
     else:
         references = employee.get("references", [])
-        verified_refs = [r for r in references if r.get("verified") or r.get("status") == "verified"]
-        ref_completed = min(len(verified_refs), 2)
+        verified_refs = [r for r in references if r.get("verified") or str(r.get("status", "")).lower() == "verified"]
+        # Also honour slot-based reference fields used by the modern worker/admin
+        # flows when legacy references[] is absent.
+        ref1_verified = bool(
+            employee.get("reference_1_verified")
+            or str(employee.get("reference_1_status") or "").lower() == "verified"
+        )
+        ref2_verified = bool(
+            employee.get("reference_2_verified")
+            or str(employee.get("reference_2_status") or "").lower() == "verified"
+        )
+        slot_verified_count = (1 if ref1_verified else 0) + (1 if ref2_verified else 0)
+        if slot_verified_count > len(verified_refs):
+            ref_completed = min(slot_verified_count, 2)
+        else:
+            ref_completed = min(len(verified_refs), 2)
         
-        if len(verified_refs) >= 1:
+        if ref_completed >= 1:
             completed.append("Reference 1 verified")
         else:
             blockers.append("Reference 1 not verified")
-        if len(verified_refs) >= 2:
+        if ref_completed >= 2:
             completed.append("Reference 2 verified")
         else:
             blockers.append("Reference 2 not verified")

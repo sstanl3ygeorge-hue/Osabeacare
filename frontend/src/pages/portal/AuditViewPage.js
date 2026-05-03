@@ -107,14 +107,14 @@ export default function AuditViewPage() {
     <div className="space-y-6" data-testid="audit-page">
       {statusUnavailable && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-          Some status checks are temporarily unavailable. Inspection view remains accessible.
+          Some status checks are temporarily unavailable. Audit and inspection view remains accessible.
         </div>
       )}
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="font-heading text-2xl sm:text-3xl font-bold text-text-primary">
-            Inspection View
+            Audit & Inspection
           </h1>
           <p className="text-text-muted mt-1">
             Read-only compliance overview for CQC inspection

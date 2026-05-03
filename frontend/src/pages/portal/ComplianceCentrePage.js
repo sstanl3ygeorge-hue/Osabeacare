@@ -1167,7 +1167,7 @@ export default function ComplianceCentrePage() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="font-heading text-2xl font-bold text-text-primary">Compliance Centre</h1>
+          <h1 className="font-heading text-2xl font-bold text-text-primary">Compliance Hub</h1>
           <p className="text-text-muted">Organisation-level compliance management for CQC readiness</p>
         </div>
         

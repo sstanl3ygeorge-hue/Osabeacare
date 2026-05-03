@@ -34,24 +34,17 @@ import EmployeeProfilePage from "./pages/portal/EmployeeProfilePage";
 // DocumentsPage kept for backward compatibility but route disabled
 import TrainingPage from "./pages/portal/TrainingPage";
 import AuditViewPage from "./pages/portal/AuditViewPage";
-import GlobalAuditLogPage from "./pages/portal/GlobalAuditLogPage";
 import DBSRegisterPage from "./pages/portal/DBSRegisterPage";
 import SettingsPage from "./pages/portal/SettingsPage";
 import TemplatesPage from "./pages/portal/TemplatesPage";
-import BulkImportPage from "./pages/portal/BulkImportPage";
 import FormEditorPage from "./pages/portal/FormEditorPage";
 import ComplianceCentrePage from "./pages/portal/ComplianceCentrePage";
 import ServiceUsersPage from "./pages/portal/ServiceUsersPage";
 import ServiceUserProfilePage from "./pages/portal/ServiceUserProfilePage";
 import RecruitmentPipelinePage from "./pages/portal/RecruitmentPage";
-import ScheduledRequestsPage from "./pages/portal/ScheduledRequestsPage";
 import AdminUsersPage from "./pages/portal/AdminUsersPage";
-import CQCInspectionDashboard from "./pages/portal/CQCInspectionDashboard";
 import ServiceUserFeedbackPage from "./pages/portal/ServiceUserFeedbackPage";
-import ComplaintsHandlingPage from "./pages/portal/ComplaintsHandlingPage";
 import ShiftsPage from "./pages/portal/ShiftsPage";
-import IncidentsPage from "./pages/portal/IncidentsPage";
-import ComplianceAlertsPage from "./pages/portal/ComplianceAlertsPage";
 
 // Auth Context
 import { AuthProvider } from "./context/AuthContext";

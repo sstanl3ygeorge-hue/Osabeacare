@@ -1,5 +1,5 @@
 """
-Phase A Truth Audit — one-off diagnostic endpoint.
+Phase A Truth Audit - one-off diagnostic endpoint.
 
 Returns the raw output of every code path that computes contract /
 handbook state for a single employee, side-by-side, so we can see which
@@ -8,15 +8,15 @@ function is the liar when admin and worker dashboards diverge.
 Usage:
     GET /api/admin/agreement-audit/{employee_id}
 
-Output is a JSON document with 5 top-level sections:
-  1. can_sign_contract_result      — from work_readiness_engine
-  2. read_employee_agreement_state — contract + handbook canonical resolver
-  3. get_employee_agreements       — legacy acknowledgements + pending requests
-  4. worker_dashboard_agreements   — exactly what the worker portal sees
-  5. admin_compliance_file_rows    — exactly what the admin compliance file sees
-  6. divergence_summary            — computed flags highlighting mismatches
+Output is a JSON document with top-level sections:
+  1. can_sign_contract_result      - from work_readiness_engine
+  2. read_employee_agreement_state - contract + handbook canonical resolver
+  3. get_employee_agreements       - legacy acknowledgements + pending requests
+  4. worker_dashboard_agreements   - exactly what the worker portal sees
+  5. admin_compliance_file_rows    - exactly what the admin compliance file sees
+  6. divergence_summary            - computed flags highlighting mismatches
 
-Admin-only. Safe to call repeatedly — read-only, no side effects.
+Admin-only. Safe to call repeatedly - read-only, no side effects.
 """
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -47,14 +47,13 @@ def _coerce_bool(value: Any) -> bool:
 
 @router.get("/admin/agreement-audit/{employee_id}")
 async def agreement_audit(employee_id: str, current_user: dict = Depends(get_current_user)) -> Dict[str, Any]:
-    """Return every code-path's view of this employee's contract + handbook."""
+    """Return every code-path view of this employee contract + handbook."""
     _ensure_admin(current_user)
 
-    # Late imports so this endpoint has no startup impact.
     db = get_db()
     from work_readiness_engine import can_sign_contract
     from agreement_document_service import read_employee_agreement_state
-    import server  # AgreementAcknowledgementService + routes live here
+    import server
 
     employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
     if not employee:
@@ -66,18 +65,17 @@ async def agreement_audit(employee_id: str, current_user: dict = Depends(get_cur
         "person_stage": employee.get("person_stage") or employee.get("lifecycle_stage"),
     }
 
-    # 1. can_sign_contract (work_readiness_engine) ------------------------
+    # 1. can_sign_contract (work_readiness_engine)
     try:
         output["can_sign_contract_result"] = await can_sign_contract(db, employee_id)
     except Exception as exc:
         output["can_sign_contract_result"] = {"error": f"{type(exc).__name__}: {exc}"}
 
-    # 2. read_employee_agreement_state canonical resolver ------------------
+    # 2. read_employee_agreement_state canonical resolver
     output["read_employee_agreement_state"] = {}
     for agreement_type in ("contract_acceptance", "handbook_acknowledgement"):
         try:
             state = await read_employee_agreement_state(db, employee, agreement_type)
-            # Keep only the fields that drive UI decisions.
             output["read_employee_agreement_state"][agreement_type] = {
                 "status": state.get("status"),
                 "verified": state.get("verified"),
@@ -94,7 +92,7 @@ async def agreement_audit(employee_id: str, current_user: dict = Depends(get_cur
         except Exception as exc:
             output["read_employee_agreement_state"][agreement_type] = {"error": f"{type(exc).__name__}: {exc}"}
 
-    # 3. legacy acknowledgements -------------------------------------------
+    # 3. legacy acknowledgements
     try:
         agreements = await server.AgreementAcknowledgementService.get_employee_agreements(employee_id)
         output["get_employee_agreements"] = {
@@ -117,13 +115,12 @@ async def agreement_audit(employee_id: str, current_user: dict = Depends(get_cur
     except Exception as exc:
         output["get_employee_agreements"] = {"error": f"{type(exc).__name__}: {exc}"}
 
-    # 4. worker dashboard agreements ---------------------------------------
+    # 4. worker dashboard agreements
     try:
-        from routes.worker_dashboard import _build_worker_dashboard_payload  # type: ignore
+        from routes.worker_dashboard import _build_worker_dashboard_payload
         wd_payload = await _build_worker_dashboard_payload(employee_id, current_user)
         wd_agreements = wd_payload.get("agreements") or []
     except Exception:
-        # Fallback: read directly via worker_dashboard internals
         wd_agreements = []
         for a in (output.get("get_employee_agreements", {}).get("acknowledgements_summary") or []):
             wd_agreements.append(a)
@@ -144,12 +141,12 @@ async def agreement_audit(employee_id: str, current_user: dict = Depends(get_cur
         or a.get("id") in {"contract_acceptance", "handbook_acknowledgement", "employee_handbook_acknowledgement"}
     ]
 
-    # 5. admin compliance-file rows ----------------------------------------
+    # 5. admin compliance-file rows
     admin_contract_row: Dict[str, Any] = {}
     admin_handbook_row: Dict[str, Any] = {}
     try:
         import server as _server
-        cf = await _server.get_compliance_file(employee_id, current_user)  # type: ignore[arg-type]
+        cf = await _server.get_compliance_file(employee_id, current_user)
         agreements_section = ((cf or {}).get("sections") or {}).get("agreements") or {}
         for r in (agreements_section.get("rows") or []):
             key = r.get("key") or r.get("agreement_type")
@@ -176,7 +173,7 @@ async def agreement_audit(employee_id: str, current_user: dict = Depends(get_cur
         },
     }
 
-    # 6. divergence summary (the whole point) ------------------------------
+    # 6. divergence summary
     contract_state = output["read_employee_agreement_state"].get("contract_acceptance", {}) or {}
     handbook_state = output["read_employee_agreement_state"].get("handbook_acknowledgement", {}) or {}
     can_sign_result = output.get("can_sign_contract_result") or {}
@@ -191,16 +188,14 @@ async def agreement_audit(employee_id: str, current_user: dict = Depends(get_cur
     )
 
     divergences = []
-    # Contract: engine.can_sign vs admin compliance-file unlocked flag
     engine_can_sign = bool(can_sign_result.get("can_sign"))
     admin_unlocked_raw = admin_contract_row.get("contract_signing_unlocked")
-    # After Feb-2026 parity fix, admin row MUST be an explicit bool — never None.
     if admin_unlocked_raw is None and admin_contract_row:
         divergences.append({
             "field": "contract.admin.contract_signing_unlocked",
             "engine_says": f"can_sign={engine_can_sign}",
-            "admin_says": "contract_signing_unlocked=None (indeterminate — this is the old silent-fail bug)",
-            "impact": "Admin UI would fall through to 'Worker can now sign' while worker shows Locked.",
+            "admin_says": "contract_signing_unlocked=None (indeterminate - silent-fail bug)",
+            "impact": "Admin UI would fall through to Worker can now sign while worker shows Locked.",
         })
     elif admin_unlocked_raw is not None and bool(admin_unlocked_raw) != engine_can_sign:
         divergences.append({
@@ -210,8 +205,6 @@ async def agreement_audit(employee_id: str, current_user: dict = Depends(get_cur
             "impact": "Admin and engine disagree on whether worker can sign.",
         })
 
-    # Worker-side payload fallback is legacy acks (no `locked` field) — only
-    # flag when we actually pulled fresh worker data with a bool `locked`.
     worker_locked_raw = worker_contract.get("locked")
     if isinstance(worker_locked_raw, bool):
         worker_can_sign = not worker_locked_raw
@@ -223,7 +216,6 @@ async def agreement_audit(employee_id: str, current_user: dict = Depends(get_cur
                 "impact": "Worker dashboard disagrees with engine.",
             })
 
-    # Handbook: resolver verified vs worker verified
     resolver_hb_verified = _coerce_bool(handbook_state.get("verified")) or handbook_state.get("status") == "verified"
     worker_hb_verified = _coerce_bool(worker_handbook.get("verified"))
     if resolver_hb_verified != worker_hb_verified:
@@ -234,7 +226,6 @@ async def agreement_audit(employee_id: str, current_user: dict = Depends(get_cur
             "impact": "Admin and worker see different handbook verification state.",
         })
 
-    # Contract: resolver status vs worker status
     resolver_contract_status = contract_state.get("status")
     worker_contract_status = worker_contract.get("status") or worker_contract.get("lifecycle_status")
     if resolver_contract_status and worker_contract_status and resolver_contract_status != worker_contract_status:
@@ -248,7 +239,7 @@ async def agreement_audit(employee_id: str, current_user: dict = Depends(get_cur
     output["divergence_summary"] = {
         "divergence_count": len(divergences),
         "divergences": divergences,
-        "verdict": "ALL_AGREE" if not divergences else f"DIVERGENT ({len(divergences)} mismatches — see above)",
+        "verdict": "ALL_AGREE" if not divergences else f"DIVERGENT ({len(divergences)} mismatches - see above)",
     }
 
     logger.info(

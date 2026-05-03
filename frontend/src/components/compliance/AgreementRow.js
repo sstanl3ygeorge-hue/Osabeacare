@@ -738,7 +738,7 @@ export default function AgreementRow({
               )}
 
               {/* Verify / Reject for awaiting review */}
-              {((!isContractRow && effectiveLifecycleStatus === 'submitted') || contractCountersignReady) && (
+              {((!isContractRow && (effectiveLifecycleStatus === 'submitted' || effectiveLifecycleStatus === 'awaiting_review')) || contractCountersignReady) && (
                 <>
                   <Button
                     size="sm"
@@ -921,5 +921,6 @@ export default function AgreementRow({
     </div>
   );
 }
+
 
 

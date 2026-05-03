@@ -38521,16 +38521,34 @@ async def get_compliance_file(
             _summary = f"{title}: awaiting worker"
             if _latest:
                 _vs = str(_latest.get("verification_status") or _latest.get("status") or "").strip().lower()
+                # Tier 4 fallback tightening: only trust an ack row if it
+                # has hard evidence of a real worker action — verified_at,
+                # worker_signed_at, or worker_acknowledged_at. A bare ack
+                # row with no valid verification_status (e.g. leftover from
+                # a rebuild) must not be surfaced as "submitted" — that
+                # produced contradictory badge+subtitle on Lawrence's row.
+                has_worker_action = bool(
+                    _latest.get("verified_at")
+                    or _latest.get("worker_signed_at")
+                    or _latest.get("worker_acknowledged_at")
+                    or _latest.get("acknowledged_at")
+                    or _latest.get("signed_at")
+                )
                 if _vs in {"verified", "approved", "completed", "acknowledged"} or _latest.get("verified_at"):
                     _verified = True
                     _status = "verified"
                     _summary = f"{title}: verified"
-                elif _vs in {"awaiting_review", "signed", "submitted"}:
+                elif _vs in {"awaiting_review", "signed", "submitted"} and has_worker_action:
                     _status = "awaiting_review"
                     _summary = f"{title}: awaiting admin review"
-                else:
+                elif has_worker_action:
                     _status = "recorded"
                     _summary = f"{title}: submitted"
+                else:
+                    # Ack row exists but has no worker action evidence.
+                    # Treat as awaiting worker so admin badge + subtitle agree.
+                    _status = "not_sent"
+                    _summary = f"{title}: awaiting worker"
             elif _sub:
                 _vs = str(_sub.get("verification_status") or "").strip().lower()
                 if _vs == "verified":
@@ -45327,6 +45345,7 @@ async def shutdown_scheduler():
             logger.info("Scheduler shutdown complete")
     except Exception as e:
         logger.error(f"Scheduler shutdown error: {e}")
+
 
 
 

@@ -38692,6 +38692,17 @@ async def get_compliance_file(
                     safe_rendered_contract_pdf_url = None
                 safe_rendered_file_url = None
         canonical_status = agreement_state.get("status")
+        # Tier 4 sync hardening (admin?worker handbook divergence): the
+        # canonical resolver returns a `verified` boolean alongside its
+        # textual `status`, and the two can disagree (resolver returns
+        # `verified=True, status="recorded"` for legacy handbook acks). The
+        # worker dashboard trusts the boolean and shows Verified ?; the
+        # admin cascade below branches only on the textual status and was
+        # rendering the same row as "Awaiting worker / Missing". Promote a
+        # `verified=True` boolean to `status="verified"` so admin and worker
+        # ALWAYS agree once the resolver says the row is verified.
+        if canonical_status not in {"verified", "fully_executed"} and bool(agreement_state.get("verified")):
+            canonical_status = "verified"
         has_worker_signed_artifact = bool(
             agreement_state.get("worker_signed_contract_pdf_url")
             or agreement_state.get("signed_document_url")
@@ -45195,3 +45206,4 @@ async def shutdown_scheduler():
             logger.info("Scheduler shutdown complete")
     except Exception as e:
         logger.error(f"Scheduler shutdown error: {e}")
+

@@ -614,7 +614,18 @@ async def review_reference(
         raise HTTPException(status_code=400, detail="reference_num must be 1 or 2")
 
     # Verify employee exists
-    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "first_name": 1, "last_name": 1})
+    employee = await db.employees.find_one(
+        {"id": employee_id},
+        {
+            "_id": 0,
+            "first_name": 1,
+            "last_name": 1,
+            f"reference_{reference_num}_mismatch_explanation": 1,
+            f"reference_{reference_num}_mismatch_explanation_type": 1,
+            f"reference_{reference_num}_mismatch_override_reason": 1,
+            f"reference_{reference_num}_mismatch_admin_notes": 1,
+        },
+    )
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
 
@@ -1100,6 +1111,31 @@ async def verify_reference_strict(
     mismatch_notes = mismatch_data.get("notes")
     if mismatch_detected and not mismatch_notes:
         raise HTTPException(status_code=400, detail="Mismatch detected but not documented. Review must include mismatch notes.")
+
+    # Legal/CQC tightening: if mismatch exists, applicant explanation is the
+    # primary evidence. Admin can only proceed without it if an explicit
+    # override reason is documented.
+    applicant_explanation = (employee.get(f"reference_{reference_num}_mismatch_explanation") or "").strip()
+    applicant_explanation_type = (employee.get(f"reference_{reference_num}_mismatch_explanation_type") or "").strip()
+    admin_override_reason = (
+        mismatch_data.get("override_reason")
+        or employee.get(f"reference_{reference_num}_mismatch_override_reason")
+        or employee.get(f"reference_{reference_num}_mismatch_admin_notes")
+        or mismatch_notes
+    )
+    if mismatch_detected and not applicant_explanation and not admin_override_reason:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Mismatch explanation required before verification. "
+                "Ask applicant to submit explanation from worker dashboard, "
+                "or record an explicit admin override reason."
+            ),
+        )
+    if mismatch_detected and applicant_explanation and len(applicant_explanation) < 10:
+        raise HTTPException(status_code=400, detail="Mismatch explanation must be at least 10 characters.")
+    if mismatch_detected and applicant_explanation and not applicant_explanation_type:
+        raise HTTPException(status_code=400, detail="Mismatch explanation type is required.")
 
     now = datetime.now(timezone.utc).isoformat()
 

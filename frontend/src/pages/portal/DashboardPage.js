@@ -14,7 +14,8 @@ import API_BASE from '../../utils/apiBase';
 import {
   Users, UserPlus, AlertTriangle, FileX, Shield, ShieldCheck,
   FileCheck, CalendarClock, ArrowRight, Loader2, Upload, FileText,
-  Clock, AlertCircle, CheckCircle, ExternalLink, ClipboardList, GraduationCap
+  Clock, AlertCircle, CheckCircle, ExternalLink, ClipboardList, GraduationCap,
+  ChevronDown, ChevronUp
 } from 'lucide-react';
 
 const API = API_BASE;
@@ -28,6 +29,8 @@ export default function DashboardPage() {
   const [expiryAlerts, setExpiryAlerts] = useState(null);
   const [recurringCompliance, setRecurringCompliance] = useState(null);
   const [trainingSummary, setTrainingSummary] = useState(null);
+  const [showNeedsAttentionDetails, setShowNeedsAttentionDetails] = useState(false);
+  const [showRecentEmployees, setShowRecentEmployees] = useState(false);
   const { token } = useAuth();
   const { orgName } = useOrg();
 
@@ -353,22 +356,34 @@ export default function DashboardPage() {
       {/* PRIMARY: Needs Attention */}
       <Card className={`border-2 ${needsAttentionTotal > 0 ? 'border-red-200 bg-red-50' : 'border-green-200 bg-green-50'} shadow-sm`}>
         <CardHeader className="pb-3">
-          <CardTitle className="font-heading text-lg flex items-center gap-2">
-            {needsAttentionTotal > 0 ? (
-              <>
-                <AlertTriangle className="h-5 w-5 text-red-600" />
-                <span className="text-red-700">Needs Attention Summary</span>
-              </>
-            ) : (
-              <>
-                <CheckCircle className="h-5 w-5 text-green-600" />
-                <span className="text-green-700">All Clear</span>
-              </>
-            )}
-          </CardTitle>
+          <div className="flex items-center justify-between gap-3">
+            <CardTitle className="font-heading text-lg flex items-center gap-2">
+              {needsAttentionTotal > 0 ? (
+                <>
+                  <AlertTriangle className="h-5 w-5 text-red-600" />
+                  <span className="text-red-700">Needs Attention Summary</span>
+                </>
+              ) : (
+                <>
+                  <CheckCircle className="h-5 w-5 text-green-600" />
+                  <span className="text-green-700">All Clear</span>
+                </>
+              )}
+            </CardTitle>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setShowNeedsAttentionDetails((v) => !v)}
+              data-testid="toggle-needs-attention-details"
+            >
+              {showNeedsAttentionDetails ? 'Hide details' : 'Show details'}
+              {showNeedsAttentionDetails ? <ChevronUp className="ml-1 h-4 w-4" /> : <ChevronDown className="ml-1 h-4 w-4" />}
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
-          {needsAttentionTotal > 0 ? (
+          {showNeedsAttentionDetails && needsAttentionTotal > 0 ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               {/* Expired Documents - Critical → Training Matrix filtered to expired */}
               <div 
@@ -470,6 +485,12 @@ export default function DashboardPage() {
                 {policiesNotAcknowledged > 0 && <p className="text-xs text-blue-500 mt-2">Open details →</p>}
               </div>
             </div>
+          ) : !showNeedsAttentionDetails ? (
+            <p className={needsAttentionTotal > 0 ? 'text-red-700' : 'text-green-700'}>
+              {needsAttentionTotal > 0
+                ? `${needsAttentionTotal} summary alert(s). Expand to view details and open the relevant page.`
+                : 'No summary alerts at the moment.'}
+            </p>
           ) : (
             <p className="text-green-700">No summary alerts at the moment.</p>
           )}
@@ -770,12 +791,24 @@ export default function DashboardPage() {
         <Card className="lg:col-span-2 border-[#E4E8EB] shadow-sm">
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle className="font-heading text-lg">Recent Employees</CardTitle>
-            <Link to="/portal/employees">
-              <Button variant="ghost" size="sm" className="text-primary" data-testid="view-all-employees">
-                View all
-                <ArrowRight className="ml-1 h-4 w-4" />
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setShowRecentEmployees((v) => !v)}
+                data-testid="toggle-recent-employees"
+              >
+                {showRecentEmployees ? 'Collapse' : 'Expand'}
+                {showRecentEmployees ? <ChevronUp className="ml-1 h-4 w-4" /> : <ChevronDown className="ml-1 h-4 w-4" />}
               </Button>
-            </Link>
+              <Link to="/portal/employees">
+                <Button variant="ghost" size="sm" className="text-primary" data-testid="view-all-employees">
+                  View all
+                  <ArrowRight className="ml-1 h-4 w-4" />
+                </Button>
+              </Link>
+            </div>
           </CardHeader>
           <CardContent>
             {employees.length === 0 ? (
@@ -788,7 +821,7 @@ export default function DashboardPage() {
                   </Button>
                 </Link>
               </div>
-            ) : (
+            ) : showRecentEmployees ? (
               <div className="space-y-3">
                 {employees.slice(0, 5).map((emp) => {
                   const readiness = emp.canonical_readiness || {};
@@ -845,6 +878,10 @@ export default function DashboardPage() {
                   );
                 })}
               </div>
+            ) : (
+              <p className="text-sm text-text-muted">
+                Employee list collapsed to reduce dashboard noise. Use Expand to review latest staff statuses.
+              </p>
             )}
           </CardContent>
         </Card>

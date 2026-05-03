@@ -738,7 +738,18 @@ export default function AgreementRow({
               )}
 
               {/* Verify / Reject for awaiting review */}
-              {((!isContractRow && (effectiveLifecycleStatus === 'submitted' || effectiveLifecycleStatus === 'awaiting_review')) || contractCountersignReady) && (
+              {(
+                (!isContractRow && (
+                  effectiveLifecycleStatus === 'submitted'
+                  || effectiveLifecycleStatus === 'awaiting_review'
+                  // Tier 4 safety net: if the row has a real acknowledgement
+                  // id and isn't already verified, surface Verify/Reject
+                  // regardless of the effective lifecycle string. Prevents
+                  // admin from being stuck when status normalization drifts.
+                  || (!!(acknowledgement_data?.id || acknowledgement_data?.acknowledgement_id) && !is_verified)
+                ))
+                || contractCountersignReady
+              ) && (
                 <>
                   <Button
                     size="sm"
@@ -921,6 +932,7 @@ export default function AgreementRow({
     </div>
   );
 }
+
 
 
 

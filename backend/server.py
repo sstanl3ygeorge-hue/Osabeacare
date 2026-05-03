@@ -38542,8 +38542,12 @@ async def get_compliance_file(
                     _status = "awaiting_review"
                     _summary = f"{title}: awaiting admin review"
                 elif has_worker_action:
-                    _status = "recorded"
-                    _summary = f"{title}: submitted"
+                    # Worker has acted (acknowledged/signed) but verification
+                    # status is ambiguous. Treat as awaiting admin review so
+                    # the Verify button renders on the admin row — never
+                    # "recorded" (that status has no follow-up action).
+                    _status = "awaiting_review"
+                    _summary = f"{title}: awaiting admin review"
                 else:
                     # Ack row exists but has no worker action evidence.
                     # Treat as awaiting worker so admin badge + subtitle agree.
@@ -45345,6 +45349,7 @@ async def shutdown_scheduler():
             logger.info("Scheduler shutdown complete")
     except Exception as e:
         logger.error(f"Scheduler shutdown error: {e}")
+
 
 
 

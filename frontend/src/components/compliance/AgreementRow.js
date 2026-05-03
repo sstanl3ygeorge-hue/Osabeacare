@@ -33,6 +33,7 @@ import {
 import { formatBackendDate } from '../../lib/dateUtils';
 import { resolveLatestContractState } from '../../lib/contractState';
 import API_BASE from '../../utils/apiBase';
+import AwaitingDaysBadge from './AwaitingDaysBadge';
 
 const API = API_BASE;
 
@@ -596,6 +597,26 @@ export default function AgreementRow({
           <Badge className={`${statusConfig.bgColor} ${statusConfig.textColor} text-xs`}>
             {statusConfig.label}
           </Badge>
+
+          {/* Awaiting-days chase badge — Tier 3 #4. Surfaces how long the
+              agreement has been waiting on a counterparty so admins can
+              triage chases without opening every row. Only shown while
+              the agreement is genuinely awaiting action (not when verified
+              or rejected). */}
+          {(['sent', 'submitted', 'in_progress'].includes(effectiveLifecycleStatus)
+            || (isContractRow && isAwaitingWorkerSignature)
+            || contractCountersignReady) && (
+            <AwaitingDaysBadge
+              sentAt={
+                pending_requests?.[0]?.sent_at
+                || acknowledgement_data?.requested_at
+                || acknowledgement_data?.sent_at
+                || acknowledgement_data?.created_at
+                || acknowledgement_data?.worker_signed_at
+              }
+              testId={`agreement-awaiting-${key}`}
+            />
+          )}
         </div>
         
         {/* Actions */}

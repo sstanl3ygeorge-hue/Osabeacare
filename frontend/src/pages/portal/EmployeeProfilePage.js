@@ -24,7 +24,7 @@ import TrainingIntakeWizard from '../../components/training/TrainingIntakeWizard
 import TrainingRequestDialog from '../../components/training/TrainingRequestDialog';
 import AuditReadyTrainingMatrix from '../../components/training/AuditReadyTrainingMatrix';
 // EnhancedTrainingTab removed - functionality consolidated into AuditReadyTrainingMatrix
-import { DualRowComplianceSection, RecordCheckDialog, WhatsNeededPanel, TrainingSummaryCard, ApplicantStageBanner, ReferencesPanel, AuditTrailPanel, DocumentRequestsPanel, InterviewFormPanel } from '../../components/compliance';
+import { DualRowComplianceSection, RecordCheckDialog, WhatsNeededPanel, TrainingSummaryCard, ApplicantStageBanner, ReferencesPanel, AuditTrailPanel, InterviewFormPanel } from '../../components/compliance';
 import ConsolidatedStatusPanel from '../../components/compliance/ConsolidatedStatusPanel';
 import EmploymentGapPanel from '../../components/compliance/EmploymentGapPanel';
 import CompetencyAssessmentsPanel from '../../components/compliance/CompetencyAssessmentsPanel';
@@ -10860,5 +10860,6 @@ Direct employment coverage: {Number.isFinite(directCoveragePercent) ? `${directC
     </div>
   );
 }
+
 
 

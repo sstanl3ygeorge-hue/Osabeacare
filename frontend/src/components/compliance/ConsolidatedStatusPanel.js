@@ -25,10 +25,11 @@ import { Progress } from '../ui/progress';
 import {
   AlertTriangle,
   FileText, Users, GraduationCap, ClipboardCheck,
-  Send, Plus, RefreshCw, Loader2, Shield,
+  Send, Plus, Loader2, Shield,
   FileCheck, UserCheck, Briefcase, Heart, Calendar
 } from 'lucide-react';
 import LifecycleStagePill from './LifecycleStagePill';
+import RefreshButton from './RefreshButton';
 import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
 import API_BASE from '../../utils/apiBase';
@@ -185,10 +186,12 @@ export default function ConsolidatedStatusPanel({
                   </p>
                 </div>
               </div>
-              <Button variant="outline" size="sm" onClick={fetchStatus}>
-                <RefreshCw className="h-4 w-4 mr-2" />
-                Retry
-              </Button>
+              <RefreshButton
+                onRefresh={fetchStatus}
+                variant="outline"
+                label="Retry"
+                testId="consolidated-status-retry"
+              />
             </div>
           </CardContent>
         </Card>
@@ -470,9 +473,7 @@ export default function ConsolidatedStatusPanel({
               />
             </div>
             <p className="text-[11px] text-gray-400 mt-0.5 flex-1">Tracks document and form submission only — not approval readiness</p>
-            <Button variant="ghost" size="sm" onClick={fetchStatus}>
-              <RefreshCw className="h-4 w-4" />
-            </Button>
+            <RefreshButton onRefresh={fetchStatus} testId="consolidated-status-refresh" />
           </div>
         </CardHeader>
         <CardContent className="py-4">

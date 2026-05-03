@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { formatBackendDate } from '../../lib/dateUtils';
 import API_BASE from '../../utils/apiBase';
+import AwaitingDaysBadge from './AwaitingDaysBadge';
 
 const API = API_BASE;
 
@@ -200,6 +201,16 @@ export default function ReferenceRow({
                 <Badge className="text-[10px] px-1.5 py-0 bg-amber-100 text-amber-700 border border-amber-200">
                   Stale ({request_lifecycle.stale_days}d)
                 </Badge>
+              )}
+              {/* Awaiting-days chase badge — Tier 3 #5. Counts up from when
+                  the reference request was sent, so admins can chase
+                  long-pending referees at a glance. Only when truly waiting
+                  on the referee (not when verified or response received). */}
+              {!verified && !has_response && request_sent_at && (
+                <AwaitingDaysBadge
+                  sentAt={request_sent_at}
+                  testId={`reference-awaiting-${reference_num || key}`}
+                />
               )}
             </div>
             <p className="text-sm text-text-muted truncate">{status_summary}</p>

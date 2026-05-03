@@ -61,6 +61,7 @@ import { formatBackendDate } from '../../lib/dateUtils';
 import TrainingDetailDrawer from './TrainingDetailDrawer';
 import TrainingCertificateExtractor from './TrainingCertificateExtractor';
 import EvidenceReviewViewerDialog from '../compliance/EvidenceReviewViewerDialog';
+import DaysRemainingBadge from '../compliance/DaysRemainingBadge';
 import API_BASE from '../../utils/apiBase';
 import {
   getPendingProposedTrainingItems,
@@ -1183,14 +1184,17 @@ export default function AuditReadyTrainingMatrix({
                         </TableCell>
                         <TableCell>
                           {item.expires_at ? (
-                            <span className={cn(
-                              "text-sm",
-                              getDisplayStatus(item) === 'expired' ? 'text-red-600 font-medium' :
-                              getDisplayStatus(item) === 'expiring_soon' ? 'text-amber-600' :
-                              'text-gray-600'
-                            )}>
-                              {formatBackendDate(item.expires_at, { format: 'short' })}
-                            </span>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className={cn(
+                                "text-sm",
+                                getDisplayStatus(item) === 'expired' ? 'text-red-600 font-medium' :
+                                getDisplayStatus(item) === 'expiring_soon' ? 'text-amber-600' :
+                                'text-gray-600'
+                              )}>
+                                {formatBackendDate(item.expires_at, { format: 'short' })}
+                              </span>
+                              <DaysRemainingBadge expiresAt={item.expires_at} />
+                            </div>
                           ) : (
                             <span className="text-sm text-gray-400">-</span>
                           )}
@@ -1572,6 +1576,7 @@ export default function AuditReadyTrainingMatrix({
                       </TableCell>
                       <TableCell>
                         {item.expires_at ? (
+                          <div className="flex items-center gap-1.5 flex-wrap">
                             <span className={cn(
                               "text-sm",
                               getDisplayStatus(item) === 'expired' ? 'text-red-600 font-medium' :
@@ -1580,6 +1585,8 @@ export default function AuditReadyTrainingMatrix({
                             )}>
                               {formatBackendDate(item.expires_at, { format: 'short' })}
                             </span>
+                            <DaysRemainingBadge expiresAt={item.expires_at} />
+                          </div>
                         ) : (
                           <span className="text-sm text-gray-400">N/A</span>
                         )}
@@ -2102,5 +2109,7 @@ export default function AuditReadyTrainingMatrix({
     </div>
   );
 }
+
+
 
 

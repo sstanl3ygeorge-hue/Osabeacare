@@ -67,9 +67,6 @@ export { default as ReferencesPanel } from './ReferencesPanel';
 // Audit Trail Panel (CQC Gap Fix)
 export { default as AuditTrailPanel } from './AuditTrailPanel';
 
-// Document Requests Panel (Request visibility)
-export { default as DocumentRequestsPanel } from './DocumentRequestsPanel';
-
 // Interview Form Panel (Interview records with PDF download)
 export { default as InterviewFormPanel } from './InterviewFormPanel';
 
@@ -89,3 +86,4 @@ export { default as CompetencyAssessmentsPanel } from './CompetencyAssessmentsPa
 
 // Spot Checks Panel (CQC Compliant)
 export { default as SpotChecksPanel } from './SpotChecksPanel';
+

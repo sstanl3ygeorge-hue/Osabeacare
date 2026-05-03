@@ -724,6 +724,10 @@ export default function WorkerDashboard() {
   // Account settings - password setup
   const [accountStatus, setAccountStatus] = useState({ has_password: false });
   const [showSetPasswordModal, setShowSetPasswordModal] = useState(false);
+  // Active-employee dashboard tab toggle (Tier 4). Default to 'today' so
+  // active staff land on a clean live view; pre-employment / applicants
+  // never see the toggle and effectively render with both tabs unioned.
+  const [activeWorkerTab, setActiveWorkerTab] = useState('today');
   const [passwordForm, setPasswordForm] = useState({ new_password: '', confirm_password: '', current_password: '' });
   const [settingPassword, setSettingPassword] = useState(false);
   // Notifications
@@ -1840,6 +1844,14 @@ export default function WorkerDashboard() {
     : isPreEmploymentEmployee
       ? 'pre_employment'
       : 'recruitment';
+  // Active-employee dashboard split — Tier 4. Olumide-style "Ready for
+  // Work" workers have a 30-section onboarding archive that should be
+  // tucked away. The "Today" tab keeps live items (shifts, obligations,
+  // alerts, incidents); the "Staff File" tab holds the historic record
+  // (forms, documents, employment history, training, agreements, etc.).
+  // Applicants and pre-employment workers see everything inline (no tabs).
+  const showFileSections = !isActiveEmployee || activeWorkerTab === 'file';
+  const showTodaySections = !isActiveEmployee || activeWorkerTab === 'today';
   const showOnboardingContractSection = false;
   const handbookAgreement = getLatestActiveAgreementById(operationalAgreements, 'handbook_acknowledgement')
     || getLatestActiveAgreementById(operationalAgreements, 'employee_handbook_acknowledgement')
@@ -2069,8 +2081,30 @@ export default function WorkerDashboard() {
       )}
       nextAction={<NextActionCard action={displayedNextAction} onPrimaryAction={handleNextAction} />}
       readinessChecklist={readinessChecklist}
-      support={supportCard}
     >
+      {/* Tier 4 active-employee tab toggle — only rendered when the worker
+          is fully cleared for work. Applicants/onboarders see the original
+          single-stream layout. Today = live work; Staff File = archive. */}
+      {isActiveEmployee && (
+        <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white p-1 shadow-sm" data-testid="worker-tab-toggle">
+          <button
+            type="button"
+            onClick={() => setActiveWorkerTab('today')}
+            className={`flex-1 rounded-md px-3 py-2 text-sm font-medium transition-colors ${activeWorkerTab === 'today' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'}`}
+            data-testid="worker-tab-today"
+          >
+            Today
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveWorkerTab('file')}
+            className={`flex-1 rounded-md px-3 py-2 text-sm font-medium transition-colors ${activeWorkerTab === 'file' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'}`}
+            data-testid="worker-tab-file"
+          >
+            My Staff File
+          </button>
+        </div>
+      )}
       {pendingWorkerTasks.length > 0 ? (
         <Card className="border border-red-200 bg-red-50/60 shadow-sm" data-testid="worker-action-required-section">
           <CardHeader className="pb-2">
@@ -2254,6 +2288,7 @@ export default function WorkerDashboard() {
           </Card>
         )}
 
+        {showFileSections && (
         <Card className="border border-slate-200 shadow-sm" data-testid="checks-card">
           <CardHeader className="pb-3">
             <CardTitle className="text-lg text-slate-900">Checks</CardTitle>
@@ -2280,6 +2315,7 @@ export default function WorkerDashboard() {
             </div>
           </CardContent>
         </Card>
+        )}
 
         {isActiveEmployee && (
           <Card className="border border-slate-200 shadow-sm" data-testid="active-obligations-card">
@@ -2541,10 +2577,10 @@ export default function WorkerDashboard() {
         )}
 
         {/* Forms Section */}
-        <FormsSection />
+        {showFileSections && <FormsSection />}
 
         {/* Employment History & Gaps — visible during onboarding and for active employees */}
-        <EmploymentGapsSection />
+        {showFileSections && <EmploymentGapsSection />}
 
         {/* ========== CV REJECTION ALERT ========== */}
         {notifications.some(n => n.type === 'cv_rejected' && !n.resolved) && (
@@ -2610,7 +2646,7 @@ export default function WorkerDashboard() {
           </Card>
         )}
 
-        {cvStatus && (
+        {showFileSections && cvStatus && (
           <Card className="shadow-sm border border-slate-200" data-testid="documents-card">
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between gap-3">
@@ -2845,7 +2881,7 @@ export default function WorkerDashboard() {
         })()}
 
         {/* Professional Registration Status - if applicable */}
-        {professional_registration && (
+        {showFileSections && professional_registration && (
           <Card className={`shadow-md border-0 ${
             professional_registration.status === 'verified' ? 'bg-green-50/30' :
             professional_registration.status === 'pending_verification' ? 'bg-amber-50/30' :
@@ -3503,12 +3539,14 @@ export default function WorkerDashboard() {
         )}
 
         {/* ========== INDUCTION CHECKLIST (P1: Worker Dashboard Sync) ========== */}
-        <div data-testid="induction-section">
-          <CareCertificateInductionPanel />
-        </div>
+        {showFileSections && (
+          <div data-testid="induction-section">
+            <CareCertificateInductionPanel />
+          </div>
+        )}
 
         {/* ========== COMPETENCY ASSESSMENTS (P1: Worker Dashboard) ========== */}
-        {isActiveEmployee && competency_assessments && competency_assessments.length > 0 && (
+        {showFileSections && isActiveEmployee && competency_assessments && competency_assessments.length > 0 && (
           <Card className="shadow-md border-0" data-testid="competency-section">
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between">
@@ -3631,7 +3669,7 @@ export default function WorkerDashboard() {
         )}
 
         {/* ========== AGREEMENTS (P0: Contract & Handbook Status) ========== */}
-        {agreements && agreements.length > 0 && (
+        {showFileSections && agreements && agreements.length > 0 && (
           <Card className="shadow-md border-0" data-testid="agreements-section">
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between">
@@ -3909,7 +3947,7 @@ export default function WorkerDashboard() {
         )}
 
         {/* ========== SPOT CHECKS (P1: Worker Dashboard) ========== */}
-        {isActiveEmployee && spot_checks && spot_checks.length > 0 && (
+        {showFileSections && isActiveEmployee && spot_checks && spot_checks.length > 0 && (
           <Card className="shadow-md border-0" data-testid="spot-checks-section">
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between">
@@ -4019,7 +4057,7 @@ export default function WorkerDashboard() {
           </Card>
         )}
 
-        {isActiveEmployee && supervisions && supervisions.length > 0 && (
+        {showFileSections && isActiveEmployee && supervisions && supervisions.length > 0 && (
           <Card className="shadow-md border-0" data-testid="supervisions-section">
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between">
@@ -5285,3 +5323,4 @@ export default function WorkerDashboard() {
     </WorkerDashboardPage>
   );
 }
+

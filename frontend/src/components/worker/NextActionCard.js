@@ -2,6 +2,7 @@ import { AlertCircle, ArrowRight, CheckCircle2, Clock3 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
+import EmptyState from '../compliance/EmptyState';
 
 const ACTION_STYLES = {
   critical: {
@@ -39,7 +40,21 @@ const ACTION_STYLES = {
 };
 
 export default function NextActionCard({ action, onPrimaryAction, secondaryAction }) {
-  if (!action) return null;
+  // Tier 3 #6: when there is no outstanding action for the worker, show
+  // an explicit "all caught up" panel rather than rendering nothing.
+  // Without this, workers were greeted with an empty hero area and
+  // questioned whether the page had loaded correctly.
+  if (!action) {
+    return (
+      <EmptyState
+        icon={CheckCircle2}
+        title="You're all caught up"
+        description="Nothing requires your attention right now. We'll let you know if anything new is needed."
+        className="bg-green-50/60 border-green-200"
+        testId="next-action-card-empty"
+      />
+    );
+  }
   const style = ACTION_STYLES[action.level] || ACTION_STYLES.medium;
   const Icon = style.Icon;
 
@@ -74,3 +89,4 @@ export default function NextActionCard({ action, onPrimaryAction, secondaryActio
     </Card>
   );
 }
+

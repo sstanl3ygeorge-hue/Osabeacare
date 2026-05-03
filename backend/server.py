@@ -38563,6 +38563,31 @@ async def get_compliance_file(
                 elif _vs == "awaiting_review":
                     _status = "awaiting_review"
                     _summary = f"{title}: awaiting admin review"
+            # Phase-B parity fix pt2 (Feb 2026): the fallback MUST also
+            # carry contract_signing_unlocked / blockers / lock_reason,
+            # otherwise the admin row returns None for these fields and
+            # every employee appears indeterminate when the inner
+            # builder crashes (observed on production for all 18
+            # employees after the Phase-B deploy). Compute eligibility
+            # inline here too; on any error, default to locked.
+            _fallback_unlocked = None
+            _fallback_blockers: list = []
+            _fallback_lock_reason = None
+            if agreement_type == "contract_acceptance":
+                _fallback_unlocked = False
+                _fallback_lock_reason = "Eligibility unavailable - treating as locked."
+                try:
+                    from work_readiness_engine import can_sign_contract as _csc
+                    _elig = await _csc(db, employee_id)
+                    _fallback_unlocked = bool((_elig or {}).get("can_sign"))
+                    _fallback_blockers = list((_elig or {}).get("blockers") or [])
+                    _fallback_lock_reason = (_elig or {}).get("reason") or _fallback_lock_reason
+                except Exception as _exc2:
+                    logger.warning(
+                        "compliance_file_fallback_eligibility_failed employee_id=%s error=%s",
+                        employee_id,
+                        _exc2,
+                    )
             return {
                 "key": key,
                 "title": title,
@@ -38577,7 +38602,7 @@ async def get_compliance_file(
                 # Tier 4 fallback key fix: the frontend AgreementRow
                 # destructures `is_verified` (snake case), not `verified`.
                 # Without this alias the badge falls through to the
-                # "submitted" branch even after admin clicks Verify —
+                # "submitted" branch even after admin clicks Verify --
                 # exact symptom for Lawrence's handbook post-verify.
                 "is_verified": _verified,
                 "has_acknowledgement": bool(_latest),
@@ -38592,6 +38617,9 @@ async def get_compliance_file(
                 "is_supporting_evidence": False,
                 "warnings": [f"agreement_row_inner_crash:{exc}"],
                 "_fallback_mode": "inner_crash_reconstructed",
+                "contract_signing_unlocked": _fallback_unlocked,
+                "contract_signing_blockers": _fallback_blockers,
+                "contract_signing_lock_reason": _fallback_lock_reason,
             }
 
     async def _build_agreement_row_inner(
@@ -45368,6 +45396,7 @@ async def shutdown_scheduler():
             logger.info("Scheduler shutdown complete")
     except Exception as e:
         logger.error(f"Scheduler shutdown error: {e}")
+
 
 
 

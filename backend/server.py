@@ -37601,7 +37601,7 @@ async def get_compliance_file(
         _safe_timed_fetch("fetch_address_check", CheckRecordService.get_current_address_check(employee_id), None, timeout_s=2.5),
         _safe_timed_fetch("fetch_rtw_history", CheckRecordService.get_rtw_check_history(employee_id, limit=50), [], timeout_s=2.5),
         _safe_timed_fetch("fetch_dbs_history", CheckRecordService.get_dbs_check_history(employee_id, limit=50), [], timeout_s=2.5),
-        _safe_timed_fetch("fetch_agreements", AgreementAcknowledgementService.get_employee_agreements(employee_id), [], timeout_s=3.0),
+        _safe_timed_fetch("fetch_agreements", AgreementAcknowledgementService.get_employee_agreements(employee_id), {"acknowledgements": [], "pending_requests": []}, timeout_s=3.0),
         _safe_timed_fetch(
             "fetch_agreement_submissions",
             db.agreement_submissions.find({"employee_id": employee_id}).sort("completed_at", -1).to_list(length=100),
@@ -38482,14 +38482,22 @@ async def get_compliance_file(
         agreement_type: str
     ) -> dict:
         """Build an agreement row (form acknowledgement)."""
+        # Tier 4 root-cause fix: `agreements` is the outer _safe_timed_fetch
+        # result for fetch_agreements. If that fetch timed out or the
+        # underlying service returned None, `agreements` is either None or
+        # [] (the default), and both crash on `.get()` with the exact
+        # 'NoneType object has no attribute get' error seen in Railway
+        # logs. Normalize to an empty dict here so the rest of the row
+        # builder never crashes on bad upstream data.
+        nonlocal_agreements = agreements if isinstance(agreements, dict) else {}
         agreement_type_candidates = [agreement_type]
         if agreement_type == "handbook_acknowledgement":
             agreement_type_candidates.append("employee_handbook_acknowledgement")
         # Find acknowledgements for this type (old format)
-        acks = [a for a in agreements.get("acknowledgements", [])
-                if a.get("agreement_type") in agreement_type_candidates]
-        pending_reqs = [r for r in agreements.get("pending_requests", [])
-                       if r.get("agreement_type") in agreement_type_candidates]
+        acks = [a for a in (nonlocal_agreements.get("acknowledgements") or [])
+                if a and a.get("agreement_type") in agreement_type_candidates]
+        pending_reqs = [r for r in (nonlocal_agreements.get("pending_requests") or [])
+                       if r and r.get("agreement_type") in agreement_type_candidates]
 
         # Find new-style submission for this type
         template_id = AGREEMENT_TYPE_TO_TEMPLATE.get(agreement_type)
@@ -45218,4 +45226,5 @@ async def shutdown_scheduler():
             logger.info("Scheduler shutdown complete")
     except Exception as e:
         logger.error(f"Scheduler shutdown error: {e}")
+
 

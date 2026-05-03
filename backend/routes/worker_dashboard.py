@@ -1589,17 +1589,22 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
     # Get form status (state-driven from canonical requirements + completion rows)
     forms_status = []
     _emp_role_for_forms = (employee.get("job_role") or employee.get("role") or "").lower()
-        # Canonical truth for forms (matches admin's UCE rules, including the
-        # CQC tightening that staff_health_questionnaire requires a reviewed
-        # health declaration with fit/conditional outcome — not just a
-        # signed-off submission). Worker must NOT show "Verified" while admin
-        # still sees a pending health declaration review.
-    try:
-        _canonical_forms_items = (
-            (unified_status or {}).get("category_details", {}).get("forms", {}).get("items", []) or []
-        )
-    except NameError:
+    # Canonical truth for forms (matches admin's UCE rules, including the
+    # CQC tightening that staff_health_questionnaire requires a reviewed
+    # health declaration with fit/conditional outcome — not just a
+    # signed-off submission). Worker must NOT show "Verified" while admin
+    # still sees a pending health declaration review.
+    #
+    # Note: `unified_status` is set inside a try/except above, so it may
+    # not exist if that block raised. Use locals().get to read it safely
+    # without re-raising NameError on Railway, which has historically
+    # tripped a stale-bytecode IndentationError on the old try/except form.
     _canonical_forms_items = []
+    _uce_status = locals().get("unified_status")
+    if isinstance(_uce_status, dict):
+        _canonical_forms_items = (
+            _uce_status.get("category_details", {}).get("forms", {}).get("items", []) or []
+        )
     _canonical_form_by_id = {item.get("id"): item for item in _canonical_forms_items if item.get("id")}
     for form_id, form_def in WORKER_FORM_DEFINITIONS.items():
         # Skip forms that don't belong in the onboarding forms tracker

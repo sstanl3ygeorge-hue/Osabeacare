@@ -464,10 +464,7 @@ export default function ConsolidatedStatusPanel({
               <CardTitle className="text-base font-semibold text-gray-700">
                 Submission Progress — {progressHeadlineLabel}
               </CardTitle>
-              <LifecycleStagePill
-                status={employee?.status}
-                stage={isApplicant ? 'applicant' : 'employee'}
-              />
+              <LifecycleStagePill stage={personStage} />
             </div>
             <p className="text-[11px] text-gray-400 mt-0.5 flex-1">Tracks document and form submission only — not approval readiness</p>
             <Button variant="ghost" size="sm" onClick={fetchStatus}>

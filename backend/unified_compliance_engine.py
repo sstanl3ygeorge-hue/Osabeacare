@@ -120,12 +120,6 @@ DOC_REQUIREMENT_EXCLUSIONS: frozenset[str] = frozenset({
 })
 
 #
-# Canonical onboarding-forms list now lives in `canonical_forms.py` as the
-# single source of truth shared with the worker dashboard. The
-# `interview_record` is NOT an onboarding form — the interview has its own
-# lifecycle and panel. Approval gates that need to check the interview do so
-# via dedicated checks, not the forms category.
-#
 # Defensive import: if the runtime Python path doesn't include /app/backend
 # at module load time we fall back to an inline copy so the backend still
 # boots and auth/dashboards keep working. Either path produces identical data.

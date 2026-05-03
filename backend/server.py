@@ -38549,29 +38549,65 @@ async def get_compliance_file(
                 agreement_type,
                 resolver_error,
             )
-            return {
-                "key": key,
-                "title": title,
-                "row_type": "form_acknowledgement",
-                "status": "unavailable",
-                "status_summary": "Temporarily unavailable",
-                "status_unavailable": True,
-                "warnings": [f"agreement_resolver_failed:{resolver_error}"],
-                "agreement_type": agreement_type,
-                "template_version": None,
-                "can_sign": None,
-                "can_acknowledge": None,
-                "latest_active": False,
-                "source_record_id": None,
-                "current_lifecycle": {"status": "unavailable"},
-                "acknowledgement_data": None,
-                "pending_requests": [],
-                "counts": {"history": len(acks)},
-                "allowed_actions": ["view_history"],
-                "affects_readiness": True,
-                "is_supporting_evidence": False,
-                "blocker_text": f"{title} status unavailable",
-            }
+            # Tier 4 sync fix: when the canonical resolver throws but we
+            # have a legacy acknowledgement on file (worker DID submit and
+            # admin DID verify, just on a path the resolver can no longer
+            # parse) reconstruct a minimal state from the legacy `acks`
+            # rather than telling the admin "Temporarily unavailable" — the
+            # admin's compliance file MUST agree with the worker's
+            # dashboard, which already trusts these acknowledgement rows.
+            if acks:
+                latest_legacy_ack = max(
+                    acks,
+                    key=lambda a: a.get("verified_at") or a.get("worker_signed_at") or a.get("created_at") or "",
+                )
+                legacy_status = str(latest_legacy_ack.get("verification_status") or latest_legacy_ack.get("status") or "").strip().lower()
+                legacy_verified = legacy_status in {"verified", "approved", "completed", "acknowledged"} or bool(latest_legacy_ack.get("verified_at"))
+                agreement_state = {
+                    "status": "verified" if legacy_verified else (legacy_status or "submitted"),
+                    "verified": legacy_verified,
+                    "has_acknowledgement": True,
+                    "acknowledgement": latest_legacy_ack,
+                    "source_record_id": latest_legacy_ack.get("id") or latest_legacy_ack.get("acknowledgement_id"),
+                    "template_version": latest_legacy_ack.get("template_version"),
+                    "rendered_file_url": latest_legacy_ack.get("rendered_file_url") or latest_legacy_ack.get("rendered_contract_pdf_url"),
+                    "rendered_contract_pdf_url": latest_legacy_ack.get("rendered_contract_pdf_url"),
+                    "worker_signed_contract_pdf_url": latest_legacy_ack.get("worker_signed_contract_pdf_url"),
+                    "executed_contract_pdf_url": latest_legacy_ack.get("executed_contract_pdf_url"),
+                    "rendered_at": latest_legacy_ack.get("rendered_at"),
+                    "_resolver_error_legacy_fallback": True,
+                }
+                logger.info(
+                    "agreement_resolver_legacy_fallback employee_id=%s agreement_type=%s legacy_status=%s verified=%s",
+                    employee_id,
+                    agreement_type,
+                    legacy_status,
+                    legacy_verified,
+                )
+            else:
+                return {
+                    "key": key,
+                    "title": title,
+                    "row_type": "form_acknowledgement",
+                    "status": "unavailable",
+                    "status_summary": "Temporarily unavailable",
+                    "status_unavailable": True,
+                    "warnings": [f"agreement_resolver_failed:{resolver_error}"],
+                    "agreement_type": agreement_type,
+                    "template_version": None,
+                    "can_sign": None,
+                    "can_acknowledge": None,
+                    "latest_active": False,
+                    "source_record_id": None,
+                    "current_lifecycle": {"status": "unavailable"},
+                    "acknowledgement_data": None,
+                    "pending_requests": [],
+                    "counts": {"history": len(acks)},
+                    "allowed_actions": ["view_history"],
+                    "affects_readiness": True,
+                    "is_supporting_evidence": False,
+                    "blocker_text": f"{title} status unavailable",
+                }
         latest_ack = agreement_state.get("acknowledgement") or (acks[0] if len(acks) > 0 else None)
         resolved_ack = agreement_state.get("acknowledgement") or {}
         has_acknowledgement = bool(agreement_state.get("has_acknowledgement")) or submission is not None

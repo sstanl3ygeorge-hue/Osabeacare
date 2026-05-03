@@ -591,6 +591,29 @@ export default function AgreementRow({
             {contractDateLabel && (
               <p className="text-xs text-gray-500 mt-0.5">{contractDateLabel}</p>
             )}
+            {/* Specific blockers list (Tier 4 fix) — when a contract is locked
+                we MUST show the worker exactly which steps are still
+                outstanding. Generic "complete your earlier onboarding steps"
+                copy was leaving applicants like Olakunle stranded with
+                everything green on screen but the contract still locked. */}
+            {key === 'contract_acceptance'
+              && row?.contract_signing_unlocked === false
+              && Array.isArray(row?.contract_signing_blockers)
+              && row.contract_signing_blockers.length > 0 && (
+              <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 p-2" data-testid="contract-lock-blockers">
+                <p className="text-[11px] font-medium text-amber-800 mb-1">
+                  Still needed before this contract can be signed ({row.contract_signing_blockers.length}):
+                </p>
+                <ul className="text-[11px] text-amber-700 space-y-0.5 list-disc list-inside">
+                  {row.contract_signing_blockers.slice(0, 6).map((blocker, idx) => (
+                    <li key={idx}>{typeof blocker === 'string' ? blocker : (blocker?.title || blocker?.name || JSON.stringify(blocker))}</li>
+                  ))}
+                  {row.contract_signing_blockers.length > 6 && (
+                    <li className="text-amber-600">+ {row.contract_signing_blockers.length - 6} more…</li>
+                  )}
+                </ul>
+              </div>
+            )}
           </div>
           
           {/* Status Badge */}
@@ -898,4 +921,5 @@ export default function AgreementRow({
     </div>
   );
 }
+
 

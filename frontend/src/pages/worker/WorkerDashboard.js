@@ -1915,7 +1915,72 @@ export default function WorkerDashboard() {
       level: task.blocking_readiness ? 'critical' : 'high',
     };
   };
-  const displayedNextAction = mapWorkerTaskToNextAction(pendingWorkerTasks[0]);
+  // Synthesize a fallback NextAction from pending agreements (Tier 4 fix).
+  // Without this the NextActionCard rendered "You're all caught up" for
+  // applicants who still had to sign a contract — contradicting the
+  // Readiness Checklist directly above it. Trust the agreement payload so
+  // the next-action surface NEVER tells a lie.
+  const synthesizeAgreementNextAction = () => {
+    const allAgreements = Array.isArray(operationalAgreements) ? operationalAgreements : [];
+    // Contract: actionable when the worker can sign right now.
+    const pendingContract = allAgreements.find((a) => {
+      if (a?.id !== 'contract_acceptance') return false;
+      const status = String(a?.status || '').toLowerCase();
+      const verified = a?.verified === true || status === 'verified' || status === 'completed';
+      return !verified && (a?.can_sign === true || a?.lifecycle_status === 'awaiting_worker_signature');
+    });
+    if (pendingContract) {
+      return {
+        key: 'sign_contract',
+        title: 'Sign your employment contract',
+        description: 'Review the contract PDF, then add your signature to complete onboarding.',
+        primaryLabel: 'Review & sign contract',
+        route: '#agreements-section',
+        level: 'critical',
+      };
+    }
+    // Contract locked: show pre-sign progress so the worker knows what's
+    // still outstanding (vs being told "all caught up").
+    const lockedContract = allAgreements.find((a) => {
+      if (a?.id !== 'contract_acceptance') return false;
+      return a?.contract_signing_unlocked === false;
+    });
+    if (lockedContract) {
+      const blockerCount = Array.isArray(lockedContract.contract_signing_blockers)
+        ? lockedContract.contract_signing_blockers.length
+        : 0;
+      return {
+        key: 'contract_locked',
+        title: 'Contract awaiting earlier steps',
+        description: blockerCount > 0
+          ? `${blockerCount} item${blockerCount === 1 ? '' : 's'} still needed before your contract can be signed.`
+          : 'Your contract will unlock once the remaining onboarding checks are complete.',
+        primaryLabel: 'See what\'s outstanding',
+        route: '#agreements-section',
+        level: 'high',
+      };
+    }
+    // Handbook: actionable when worker hasn't yet acknowledged it.
+    const pendingHandbook = allAgreements.find((a) => {
+      if (a?.id !== 'handbook_acknowledgement' && a?.id !== 'employee_handbook_acknowledgement') return false;
+      const status = String(a?.status || '').toLowerCase();
+      const verified = a?.verified === true || status === 'verified' || status === 'completed' || status === 'acknowledged';
+      return !verified;
+    });
+    if (pendingHandbook) {
+      return {
+        key: 'acknowledge_handbook',
+        title: 'Acknowledge the Employee Handbook',
+        description: 'Review the handbook PDF, then confirm you have read and understood it.',
+        primaryLabel: 'Review & acknowledge',
+        route: '#agreements-section',
+        level: 'high',
+      };
+    }
+    return null;
+  };
+  const displayedNextAction = mapWorkerTaskToNextAction(pendingWorkerTasks[0])
+    || synthesizeAgreementNextAction();
 
   const scrollToSection = (selector) => {
     const node = document.querySelector(selector);
@@ -4151,7 +4216,7 @@ export default function WorkerDashboard() {
         )}
 
         {/* Completed Items - With Review Status & View Document */}
-        {(completed_documents?.length > 0 || completed_trainings?.length > 0) && (
+        {showFileSections && (completed_documents?.length > 0 || completed_trainings?.length > 0) && (
           <Card className="shadow-md border-0 bg-green-50/30">
             <CardHeader className="pb-2">
               <CardTitle className="text-green-800 flex items-center gap-2 text-lg">
@@ -5323,4 +5388,5 @@ export default function WorkerDashboard() {
     </WorkerDashboardPage>
   );
 }
+
 

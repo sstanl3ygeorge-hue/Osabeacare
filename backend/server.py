@@ -38772,8 +38772,19 @@ async def get_compliance_file(
             status_summary = vs
             status = "recorded"
         elif has_acknowledgement and (latest_ack or agreement_state.get("has_acknowledgement")):
-            status_summary = agreement_state.get("state_label") or ((latest_ack.get("verification_status", "unknown") or "unknown").replace("_", " ").title())
-            status = canonical_status or ("awaiting_review" if latest_ack and latest_ack.get("verification_status") == "awaiting_review" else "recorded")
+            # Tier 4 root-cause fix #2: has_acknowledgement can be True via
+            # agreement_state.get("has_acknowledgement") alone while
+            # latest_ack is still None (canonical resolver set the flag but
+            # no legacy ack row exists). Calling latest_ack.get() in that
+            # case crashed with 'NoneType object has no attribute get',
+            # which is the exact error Railway has been logging on every
+            # compliance-file load. Defensive fallback chain below.
+            latest_ack_safe = latest_ack or {}
+            fallback_vs = (latest_ack_safe.get("verification_status", "unknown") or "unknown").replace("_", " ").title()
+            status_summary = agreement_state.get("state_label") or fallback_vs
+            status = canonical_status or (
+                "awaiting_review" if latest_ack_safe.get("verification_status") == "awaiting_review" else "recorded"
+            )
         elif len(pending_reqs) > 0:
             status_summary = f"Sent, awaiting completion"
             status = "sent"

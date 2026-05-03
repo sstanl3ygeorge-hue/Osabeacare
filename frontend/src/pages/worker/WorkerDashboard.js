@@ -724,6 +724,8 @@ export default function WorkerDashboard() {
   // Account settings - password setup
   const [accountStatus, setAccountStatus] = useState({ has_password: false });
   const [showSetPasswordModal, setShowSetPasswordModal] = useState(false);
+  const [showReferencesDetails, setShowReferencesDetails] = useState(false);
+  const [showAgreementsDetails, setShowAgreementsDetails] = useState(false);
   // Active-employee dashboard tab toggle (Tier 4). Default to 'today' so
   // active staff land on a clean live view; pre-employment / applicants
   // never see the toggle and effectively render with both tabs unioned.
@@ -3459,8 +3461,25 @@ export default function WorkerDashboard() {
                   {completedReferencesCount}/2 Verified
                 </Badge>
               </div>
+              <div className="mt-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setShowReferencesDetails((v) => !v)}
+                  data-testid="toggle-references-details"
+                >
+                  {showReferencesDetails ? 'Hide details' : 'Show details'}
+                  {showReferencesDetails ? <ChevronUp className="ml-1 h-4 w-4" /> : <ChevronDown className="ml-1 h-4 w-4" />}
+                </Button>
+              </div>
             </CardHeader>
             <CardContent>
+              {!showReferencesDetails ? (
+                <p className="text-sm text-slate-600">
+                  References collapsed to reduce noise. Expand to view referee status and required actions.
+                </p>
+              ) : (
               <div className="space-y-2">
                 {references.map((ref, idx) => (
                   <div 
@@ -3631,6 +3650,7 @@ export default function WorkerDashboard() {
                   </div>
                 ))}
               </div>
+              )}
             </CardContent>
           </Card>
         )}
@@ -3790,8 +3810,25 @@ export default function WorkerDashboard() {
                     : `${agreementsCompletedCount} of ${agreements.length} completed`}
                 </Badge>
               </div>
+              <div className="mt-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setShowAgreementsDetails((v) => !v)}
+                  data-testid="toggle-agreements-details"
+                >
+                  {showAgreementsDetails ? 'Hide details' : 'Show details'}
+                  {showAgreementsDetails ? <ChevronUp className="ml-1 h-4 w-4" /> : <ChevronDown className="ml-1 h-4 w-4" />}
+                </Button>
+              </div>
             </CardHeader>
             <CardContent>
+              {!showAgreementsDetails ? (
+                <p className="text-sm text-slate-600">
+                  Agreements collapsed to reduce noise. Expand to review contract and handbook status/actions.
+                </p>
+              ) : (
               <div className="space-y-3">
                 {agreementDisplays.map(({ agreement, display: agreementDisplay }) => {
                   const agreementContractState = resolveLatestContractState(agreement, { contractEligibility: effectiveContractEligibility }).status;
@@ -3941,6 +3978,7 @@ export default function WorkerDashboard() {
                   </div>
                 )})}
               </div>
+              )}
             </CardContent>
           </Card>
         )}

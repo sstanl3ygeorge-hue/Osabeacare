@@ -249,7 +249,13 @@ export default function AgreementRow({
       ? 'Worker cannot sign this version.'
       : (key === 'contract_acceptance' && isAwaitingWorkerSignature
         ? (
-            row?.contract_signing_unlocked === false
+            // Phase-B parity fix (Feb 2026): treat anything other than an
+            // explicit `true` as locked. Previously `=== false` meant a
+            // missing/undefined eligibility flag silently rendered
+            // "Worker can now sign" while the worker dashboard correctly
+            // showed "Locked". Now admin and worker always agree: only
+            // show "can sign" when the backend confirms unlock.
+            row?.contract_signing_unlocked !== true
               ? (row?.contract_signing_lock_reason || 'Contract generated, but signing is locked until earlier onboarding steps are complete.')
               : 'Worker can now sign this contract.'
           )
@@ -955,6 +961,7 @@ export default function AgreementRow({
     </div>
   );
 }
+
 
 
 

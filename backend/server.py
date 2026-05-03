@@ -150,6 +150,7 @@ from routes.worker_dashboard import router as worker_dashboard_router
 from routes.pdf_exports import router as pdf_exports_router
 from routes.generated_forms import router as generated_forms_router
 from routes.audit_email import router as audit_email_router
+from routes.agreement_audit import router as agreement_audit_router
 from routes.feedback_complaints import router as feedback_complaints_router
 from routes.policies import router as policies_router
 from routes.referee_outreach import router as referee_outreach_router
@@ -38762,6 +38763,17 @@ async def get_compliance_file(
         contract_signing_blockers = []
         contract_signing_lock_reason = None
         if agreement_type == "contract_acceptance":
+            # Phase-B parity fix (Feb 2026): worker and admin MUST see the
+            # same lock state. `can_sign_contract` is the single source of
+            # truth. Historically, an exception here left
+            # `contract_signing_unlocked=None` which the admin UI treated
+            # as "unlocked" while the worker dashboard (which catches the
+            # same exception and defaults `can_sign=False`) treated as
+            # "locked". Default to locked here so both surfaces agree and
+            # admins are never shown a false "Worker can now sign" when
+            # eligibility could not be computed.
+            contract_signing_unlocked = False
+            contract_signing_lock_reason = "Eligibility unavailable — treating as locked."
             try:
                 from work_readiness_engine import can_sign_contract as compute_can_sign_contract
                 eligibility = await compute_can_sign_contract(db, employee_id)
@@ -45215,6 +45227,7 @@ api_router.include_router(test_cleanup_router)
 api_router.include_router(reference_comparison_router)
 api_router.include_router(cqc_evidence_router)
 api_router.include_router(inspection_pack_router)
+api_router.include_router(agreement_audit_router)
 api_router.include_router(appraisals_router)
 api_router.include_router(shifts_router)
 api_router.include_router(care_plans_router)
@@ -45355,6 +45368,9 @@ async def shutdown_scheduler():
             logger.info("Scheduler shutdown complete")
     except Exception as e:
         logger.error(f"Scheduler shutdown error: {e}")
+
+
+
 
 
 

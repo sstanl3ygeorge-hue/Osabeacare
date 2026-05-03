@@ -125,7 +125,57 @@ DOC_REQUIREMENT_EXCLUSIONS: frozenset[str] = frozenset({
 # `interview_record` is NOT an onboarding form — the interview has its own
 # lifecycle and panel. Approval gates that need to check the interview do so
 # via dedicated checks, not the forms category.
-from canonical_forms import CANONICAL_ONBOARDING_FORMS as REQUIRED_FORMS
+#
+# Defensive import: if the runtime Python path doesn't include /app/backend
+# at module load time we fall back to an inline copy so the backend still
+# boots and auth/dashboards keep working. Either path produces identical data.
+try:
+    from canonical_forms import CANONICAL_ONBOARDING_FORMS as REQUIRED_FORMS
+except ImportError:
+    try:
+        import sys, os
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from canonical_forms import CANONICAL_ONBOARDING_FORMS as REQUIRED_FORMS
+    except ImportError:
+        REQUIRED_FORMS = [
+            {
+                "id": "staff_health_questionnaire",
+                "name": "Staff Health Questionnaire",
+                "required": True, "source": "worker",
+            },
+            {
+                "id": "staff_personal_info",
+                "name": "Staff Personal Information",
+                "required": True, "source": "worker",
+            },
+            {
+                "id": "hmrc_starter_checklist",
+                "name": "HMRC Starter Checklist",
+                "required": True, "source": "worker",
+            },
+            {
+                "id": "equal_opportunities",
+                "name": "Equal Opportunities Monitoring",
+                "required": False, "source": "worker",
+            },
+            {
+                "id": "emergency_contacts",
+                "name": "Emergency Contacts",
+                "required": True, "source": "worker",
+            },
+            {
+                "id": "conflict_of_interest",
+                "name": "Conflict of Interest Declaration",
+                "required": True, "source": "worker",
+            },
+            {
+                "id": "fit_proper_persons",
+                "name": "Fit and Proper Persons Declaration",
+                "required": True, "source": "worker",
+                "role_aware": True,
+                "roles_required": ["manager", "registered_manager", "director", "nursing_director"],
+            },
+        ]
 
 # Role-specific requirements
 ROLE_SPECIFIC_REQUIREMENTS = {

@@ -1333,7 +1333,15 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             employee_id,
             exc,
         )
-        contract_gate = {}
+        # Critical fail-safe: do not hard-lock worker contract signing just
+        # because the gate computation path failed. Fall back to canonical
+        # agreement-state signability so worker/admin do not diverge.
+        fallback_can_sign = bool((contract_status or {}).get("can_sign"))
+        contract_gate = {
+            "can_sign": fallback_can_sign,
+            "reason": "Eligibility check unavailable (fallback to agreement state)",
+            "blockers": [] if fallback_can_sign else ["Eligibility check unavailable"],
+        }
 
     # If worker is eligible to sign but the unsigned contract artifact is still
     # missing from read-only state, force canonical side-effect resolver once
@@ -1361,7 +1369,17 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
         )
 
     if isinstance(contract_status, dict):
-        contract_status["can_sign"] = bool((contract_gate or {}).get("can_sign"))
+        # If gate returns indeterminate/empty but canonical status is explicitly
+        # awaiting worker signature, keep contract signability truthful.
+        gate_can_sign = (contract_gate or {}).get("can_sign")
+        if gate_can_sign is None:
+            fallback_status = str(
+                contract_status.get("status")
+                or contract_status.get("contract_state")
+                or ""
+            ).strip().lower()
+            gate_can_sign = fallback_status in {"pending_signature", "awaiting_worker_signature"}
+        contract_status["can_sign"] = bool(gate_can_sign)
         contract_status["signing_gate_reason"] = (contract_gate or {}).get("reason")
         contract_status["signing_gate_blockers"] = list((contract_gate or {}).get("blockers") or [])
 

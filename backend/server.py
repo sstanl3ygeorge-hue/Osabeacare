@@ -39671,6 +39671,7 @@ async def get_compliance_file(
                 key,
                 agreement_type,
                 exc,
+                exc_info=True,
             )
             return _unavailable_row_fallback(
                 row_key=key,

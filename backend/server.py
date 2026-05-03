@@ -38573,6 +38573,12 @@ async def get_compliance_file(
                 "can_sign": None,
                 "can_acknowledge": None,
                 "verified": _verified,
+                # Tier 4 fallback key fix: the frontend AgreementRow
+                # destructures `is_verified` (snake case), not `verified`.
+                # Without this alias the badge falls through to the
+                # "submitted" branch even after admin clicks Verify —
+                # exact symptom for Lawrence's handbook post-verify.
+                "is_verified": _verified,
                 "has_acknowledgement": bool(_latest),
                 "latest_active": bool(_latest),
                 "source_record_id": (_latest or {}).get("id") or (_latest or {}).get("acknowledgement_id"),
@@ -45349,6 +45355,7 @@ async def shutdown_scheduler():
             logger.info("Scheduler shutdown complete")
     except Exception as e:
         logger.error(f"Scheduler shutdown error: {e}")
+
 
 
 

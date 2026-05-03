@@ -1,6 +1,16 @@
 import { useState, useEffect } from 'react';
 // UI-only: Hide Staff Health Questionnaire from Checks & Evidence
 const STAFF_HEALTH_KEY = 'staff_health_questionnaire';
+// UI-only: recruitment-stage artefacts that are historic for active
+// employees. Once a person is promoted to "employee" these rows just
+// clutter their live operational checklist — they live in the recruitment
+// record / interview panel instead. Tier 2 fix #3.
+const RECRUITMENT_ONLY_ROW_KEYS = new Set([
+  'application_form',
+  'pre_interview_questionnaire',
+  'recruitment_checklist',
+  'interview_record',
+]);
 import axios from 'axios';
 import { useAuth } from '../../context/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
@@ -975,6 +985,15 @@ export default function DualRowComplianceSection({
   const filteredSections = (() => {
     if (!hasAnySections) return {};
     const clone = {};
+    // Tier 2 fix #3: when the worker is an active employee, hide
+    // recruitment-only artefacts (application form, pre-interview
+    // questionnaire, recruitment checklist, interview record). They are
+    // historic decision records and live in the recruitment record /
+    // interview panel. Applicant view keeps them all.
+    const employeeStage = String(
+      employeeData?.person_stage || employeeData?.lifecycle_stage || ''
+    ).toLowerCase();
+    const isActiveEmployee = employeeStage === 'employee' || employeeStage === 'active';
     for (const [sectionKey, section] of Object.entries(normalizedEffectiveSections)) {
       if (!section || !Array.isArray(section.rows)) {
         clone[sectionKey] = section;
@@ -982,7 +1001,11 @@ export default function DualRowComplianceSection({
       }
       clone[sectionKey] = {
         ...section,
-        rows: section.rows.filter(row => row.key !== STAFF_HEALTH_KEY)
+        rows: section.rows.filter((row) => {
+          if (row.key === STAFF_HEALTH_KEY) return false;
+          if (isActiveEmployee && RECRUITMENT_ONLY_ROW_KEYS.has(row.key)) return false;
+          return true;
+        }),
       };
     }
     return clone;
@@ -1313,3 +1336,4 @@ export default function DualRowComplianceSection({
     </div>
   );
 }
+

@@ -27,6 +27,7 @@ import {
 } from '../../config/requirementCapabilityMap';
 import { useAuth } from '../../context/AuthContext';
 import API_BASE from '../../utils/apiBase';
+import { getStatusLabel, getStatusTone } from '../../utils/statusLabels';
 
 const API = API_BASE;
 
@@ -137,22 +138,20 @@ export default function FormRequirementRow({
     }
   };
   
-  // Status text for badge
+  // Status text for badge — canonicalised via shared statusLabels helper
+  // (Tier 2 fix #4) so admin and worker see the same words for the same
+  // backend state. Keep evidence-row file-count fallback intact.
   const getStatusText = () => {
-    // For evidence rows, show file count based status
     if (isEvidenceRow) {
-      if (is_verified) return 'Verified';
+      if (is_verified) return getStatusLabel('verified', 'admin');
       if (has_files && file_count > 0) return `${file_count} file${file_count !== 1 ? 's' : ''}`;
       return 'No files';
     }
-    // For form rows, show form status
-    switch (status) {
-      case 'verified': return 'Verified';
-      case 'rejected': return 'Rejected';
-      case 'awaiting_review': return 'Awaiting admin review';
-      case 'recorded': return 'Draft';
-      default: return 'Not Started';
-    }
+    // Map row-level status -> canonical key consumed by getStatusLabel.
+    const canonicalKey = (status === 'awaiting_review' || status === 'submitted')
+      ? 'submitted'
+      : (status === 'recorded' ? 'in_progress' : status);
+    return getStatusLabel(canonicalKey || 'not_started', 'admin');
   };
   
   // Delivery mode badge
@@ -616,4 +615,5 @@ export default function FormRequirementRow({
     </div>
   );
 }
+
 

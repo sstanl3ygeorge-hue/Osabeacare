@@ -11,6 +11,8 @@ import {
 } from 'lucide-react';
 import { formatBackendDate } from '../../lib/dateUtils';
 import API_BASE from '../../utils/apiBase';
+import { getStatusLabel } from '../../utils/statusLabels';
+import DaysRemainingBadge from './DaysRemainingBadge';
 
 const API = API_BASE;
 
@@ -82,21 +84,22 @@ export default function CheckRow({
     return methods[method] || method?.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) || 'Unknown';
   };
 
-  // Outcome display name
+  // Outcome display name — canonicalised via shared statusLabels helper
+  // (Tier 2 fix #4). Falls back to the local map for outcomes that are not
+  // generic lifecycle states (e.g. "check_in_progress", "proof_required").
   const getOutcomeDisplay = (outcome) => {
-    const outcomes = {
-      'verified': 'Verified',
-      'failed': 'Failed',
+    const checkSpecific = {
       'follow_up_required': 'Follow-up Required',
-      'awaiting_review': 'Awaiting admin review',
       'check_required': 'Check Required',
       'check_in_progress': 'Check In Progress',
       'proof_required': 'Proof Required',
       'reupload_required': 'Re-upload Required',
       'missing': 'Missing',
-      'not_recorded': 'Not Recorded'
+      'not_recorded': 'Not Recorded',
+      'failed': 'Failed',
     };
-    return outcomes[outcome] || outcome?.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) || 'Unknown';
+    if (checkSpecific[outcome]) return checkSpecific[outcome];
+    return getStatusLabel(outcome || 'not_started', 'admin');
   };
 
   return (
@@ -150,11 +153,14 @@ export default function CheckRow({
             {is_verified ? 'Verified' : has_check ? getOutcomeDisplay(check_data?.outcome) : 'Not Recorded'}
           </Badge>
           
-          {/* Follow-up Warning */}
-          {follow_up_info && (follow_up_info.is_overdue || follow_up_info.is_due_soon) && (
-            <Badge className={`text-xs ${follow_up_info.is_overdue ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
-              {follow_up_info.label}: {follow_up_info.is_overdue ? 'Overdue' : `${follow_up_info.days_until}d`}
-            </Badge>
+          {/* Follow-up countdown — Tier 2 fix #6. Surface days remaining
+              consistently; render even when not overdue/due-soon so admin
+              and worker dashboards always show the same expiry signal. */}
+          {follow_up_info && Number.isFinite(follow_up_info.days_until) && (
+            <DaysRemainingBadge
+              daysUntil={follow_up_info.days_until}
+              label={follow_up_info.label}
+            />
           )}
         </div>
         
@@ -404,4 +410,5 @@ export default function CheckRow({
     </div>
   );
 }
+
 

@@ -28,7 +28,6 @@ export function getAgreementDisplay(agreement, options = {}) {
     canonicalStatus === 'fully_executed' ||
     canonicalStatus === 'verified' ||
     canonicalStatus === 'completed' ||
-    canonicalStatus === 'signed' ||
     agreement.verified
   ) {
     return {
@@ -39,6 +38,30 @@ export function getAgreementDisplay(agreement, options = {}) {
         agreement.id === 'contract_acceptance'
           ? 'Your signed contract is complete and available to view.'
           : 'Your handbook acknowledgement has been recorded and verified.',
+      workerActionable: false,
+      ctaLabel: agreement.file_url || agreement.download_url ? 'View PDF' : null,
+    };
+  }
+
+  // Tier 4 sync fix: worker has acknowledged / signed, admin has NOT yet
+  // verified. Previously the worker saw this as "Verified" which directly
+  // contradicted the admin's view. Now both sides surface it as an
+  // awaiting-admin-review state — truthful on both surfaces, no visual
+  // regression for already-verified rows above.
+  if (
+    canonicalStatus === 'signed' ||
+    canonicalStatus === 'acknowledged' ||
+    rawStatus === 'signed' ||
+    rawStatus === 'acknowledged'
+  ) {
+    return {
+      tone: 'info',
+      badge: 'Awaiting admin review',
+      title: agreement.state_label || (agreement.id === 'contract_acceptance' ? 'Signed — awaiting review' : 'Acknowledgement submitted'),
+      description:
+        agreement.id === 'contract_acceptance'
+          ? 'Your signed contract is with Osabea for countersignature and verification.'
+          : 'Your handbook acknowledgement has been recorded. Osabea will verify it shortly.',
       workerActionable: false,
       ctaLabel: agreement.file_url || agreement.download_url ? 'View PDF' : null,
     };
@@ -374,3 +397,4 @@ export function getNextAction(status) {
     level: 'success',
   };
 }
+

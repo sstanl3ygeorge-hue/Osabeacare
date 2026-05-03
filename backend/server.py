@@ -38734,6 +38734,18 @@ async def get_compliance_file(
         elif canonical_status in {"pending", "pending_acknowledgement"}:
             status_summary = agreement_state.get("state_label") or "Awaiting acknowledgement"
             status = "pending"
+        elif canonical_status in {"signed", "acknowledged", "submitted"}:
+            # Tier 4 sync fix: resolver reports the worker has acted
+            # (signed / acknowledged) but admin has not yet verified. Admin
+            # cascade previously had no branch for this and fell through to
+            # "Missing — agreement has not been submitted", directly
+            # contradicting the worker dashboard. Surface as awaiting admin
+            # review so both sides agree and the Verify button renders.
+            status_summary = (
+                agreement_state.get("state_label")
+                or ("Signed — awaiting review" if agreement_type == "contract_acceptance" else "Awaiting admin review")
+            )
+            status = "awaiting_review"
         elif submission and is_verified:
             version = submission.get("template_version", "")
             completed_at = (submission.get("completed_at", "") or "")[:10] if submission.get("completed_at") else ""

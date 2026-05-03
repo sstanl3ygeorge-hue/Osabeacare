@@ -1926,7 +1926,16 @@ export default function WorkerDashboard() {
     const pendingContract = allAgreements.find((a) => {
       if (a?.id !== 'contract_acceptance') return false;
       const status = String(a?.status || '').toLowerCase();
-      const verified = a?.verified === true || status === 'verified' || status === 'completed';
+      // Tier 4 sync fix: same logic as handbook — worker has no further
+      // action if the contract is signed/awaiting review/verified.
+      const verified = a?.verified === true
+        || status === 'verified'
+        || status === 'completed'
+        || status === 'fully_executed'
+        || status === 'signed'
+        || status === 'acknowledged'
+        || status === 'submitted'
+        || status === 'awaiting_review';
       return !verified && (a?.can_sign === true || a?.lifecycle_status === 'awaiting_worker_signature');
     });
     if (pendingContract) {
@@ -1964,7 +1973,16 @@ export default function WorkerDashboard() {
     const pendingHandbook = allAgreements.find((a) => {
       if (a?.id !== 'handbook_acknowledgement' && a?.id !== 'employee_handbook_acknowledgement') return false;
       const status = String(a?.status || '').toLowerCase();
-      const verified = a?.verified === true || status === 'verified' || status === 'completed' || status === 'acknowledged';
+      // Tier 4 sync fix: treat signed/acknowledged/submitted as "done for
+      // the worker" even when admin hasn't yet verified — the worker has
+      // no further action at that point, admin does.
+      const verified = a?.verified === true
+        || status === 'verified'
+        || status === 'completed'
+        || status === 'acknowledged'
+        || status === 'signed'
+        || status === 'submitted'
+        || status === 'awaiting_review';
       return !verified;
     });
     if (pendingHandbook) {

@@ -16,30 +16,23 @@ import {
 } from '../ui/dropdown-menu';
 import {
   LayoutDashboard, Users, GraduationCap,
-  History, Settings, Menu, LogOut, ChevronDown, Bell, Search, UserPlus, ClipboardList, Building2, FileCheck, Shield, Heart, Eye, UserCheck, Calendar, CalendarClock, UserCog, Upload, MessageSquare, AlertTriangle, ListChecks
+  History, Settings, Menu, LogOut, ChevronDown, Bell, Search, UserPlus, ClipboardList, Building2, FileCheck, Shield, Heart, Eye, UserCheck, Calendar, CalendarClock, UserCog, MessageSquare, AlertTriangle
 } from 'lucide-react';
 
 const navigation = [
   { name: 'Dashboard', href: '/portal/dashboard', icon: LayoutDashboard },
   { name: 'Employees', href: '/portal/employees', icon: Users },
   { name: 'Recruitment', href: '/portal/recruitment', icon: UserCheck },
-  { name: 'Bulk Import', href: '/portal/bulk-import', icon: Upload },
   { name: 'Service Users', href: '/portal/service-users', icon: Heart },
   { name: 'Shifts', href: '/portal/shifts', icon: CalendarClock },
   // Templates hidden for Audit Mode - forms system hidden from UI
   // { name: 'Templates', href: '/portal/templates', icon: ClipboardList },
-  { name: 'Compliance Centre', href: '/portal/compliance-centre', icon: Building2 },
-  { name: 'Compliance Alerts', href: '/portal/compliance-alerts', icon: Bell },
-  { name: 'CQC Dashboard', href: '/portal/cqc-dashboard', icon: Shield },
+  { name: 'Compliance Hub', href: '/portal/compliance-centre', icon: Building2 },
   { name: 'Feedback', href: '/portal/feedback', icon: MessageSquare },
-  { name: 'Complaints', href: '/portal/complaints', icon: AlertTriangle },
-  { name: 'Incidents', href: '/portal/compliance-centre?tab=incidents', icon: AlertTriangle },
   // Policy Assignments removed - consolidated into Compliance Centre
   { name: 'Training', href: '/portal/training', icon: GraduationCap },
   { name: 'DBS Register', href: '/portal/dbs-register', icon: Shield },
-  { name: 'Scheduled Requests', href: '/portal/scheduled-requests', icon: Calendar },
-  { name: 'Audit View', href: '/portal/audit', icon: History },
-  { name: 'Global Audit Log', href: '/portal/global-audit', icon: ListChecks },
+  { name: 'Audit & Inspection', href: '/portal/audit', icon: History },
   { name: 'Admin Users', href: '/portal/admin-users', icon: UserCog },
   { name: 'Settings', href: '/portal/settings', icon: Settings },
 ];
@@ -56,7 +49,7 @@ export default function PortalLayout() {
   };
 
   const filteredNavigation = isAuditor() 
-    ? navigation.filter(item => ['Dashboard', 'Audit View'].includes(item.name))
+    ? navigation.filter(item => ['Dashboard', 'Audit & Inspection'].includes(item.name))
     : navigation;
 
   const NavLinks = ({ onClick }) => (
@@ -64,7 +57,7 @@ export default function PortalLayout() {
       {filteredNavigation.map((item) => {
         const activeTab = new URLSearchParams(location.search).get('tab');
         const isIncidentsNav = item.name === 'Incidents';
-        const isComplianceNav = item.name === 'Compliance Centre';
+        const isComplianceNav = item.name === 'Compliance Hub';
         const isActive =
           (isIncidentsNav && (
             location.pathname === '/portal/incidents' ||

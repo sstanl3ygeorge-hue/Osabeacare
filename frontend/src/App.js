@@ -116,7 +116,7 @@ function AppRouter() {
         <Route path="employees/:employeeId" element={<EmployeeProfilePage />} />
         <Route path="recruitment" element={<RecruitmentPipelinePage />} />
         <Route path="recruitment/:employeeId" element={<EmployeeProfilePage />} />
-        <Route path="bulk-import" element={<BulkImportPage />} />
+        <Route path="bulk-import" element={<Navigate to="/portal/recruitment" replace />} />
         {/* Documents route removed - all document management is now per-employee in Employee Profile → Documents tab */}
         {/* <Route path="documents" element={<DocumentsPage />} /> */}
         {/* Policies route removed - policy management consolidated in Compliance Centre */}
@@ -125,18 +125,18 @@ function AppRouter() {
         <Route path="dbs-register" element={<DBSRegisterPage />} />
         <Route path="templates" element={<TemplatesPage />} />
         <Route path="compliance-centre" element={<ComplianceCentrePage />} />
-        <Route path="cqc-dashboard" element={<CQCInspectionDashboard />} />
+        <Route path="cqc-dashboard" element={<Navigate to="/portal/compliance-centre?tab=insights" replace />} />
         <Route path="feedback" element={<ServiceUserFeedbackPage />} />
-        <Route path="complaints" element={<ComplaintsHandlingPage />} />
-        <Route path="incidents" element={<IncidentsPage />} />
-        <Route path="compliance-alerts" element={<ComplianceAlertsPage />} />
+        <Route path="complaints" element={<Navigate to="/portal/compliance-centre?tab=complaints" replace />} />
+        <Route path="incidents" element={<Navigate to="/portal/compliance-centre?tab=incidents" replace />} />
+        <Route path="compliance-alerts" element={<Navigate to="/portal/compliance-centre?tab=insights" replace />} />
         <Route path="forms/:formId" element={<FormEditorPage />} />
         <Route path="audit" element={<AuditViewPage />} />
-        <Route path="global-audit" element={<GlobalAuditLogPage />} />
+        <Route path="global-audit" element={<Navigate to="/portal/audit" replace />} />
         <Route path="service-users" element={<ServiceUsersPage />} />
         <Route path="service-users/:id" element={<ServiceUserProfilePage />} />
         <Route path="shifts" element={<ShiftsPage />} />
-        <Route path="scheduled-requests" element={<ScheduledRequestsPage />} />
+        <Route path="scheduled-requests" element={<Navigate to="/portal/compliance-centre" replace />} />
         <Route path="admin-users" element={<AdminUsersPage />} />
         <Route path="settings" element={<SettingsPage />} />
       </Route>

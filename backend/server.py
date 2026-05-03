@@ -38773,7 +38773,7 @@ async def get_compliance_file(
             # admins are never shown a false "Worker can now sign" when
             # eligibility could not be computed.
             contract_signing_unlocked = False
-            contract_signing_lock_reason = "Eligibility unavailable — treating as locked."
+            contract_signing_lock_reason = "Eligibility unavailable - treating as locked."
             try:
                 from work_readiness_engine import can_sign_contract as compute_can_sign_contract
                 eligibility = await compute_can_sign_contract(db, employee_id)

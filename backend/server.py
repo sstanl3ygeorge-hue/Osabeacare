@@ -38815,6 +38815,14 @@ async def get_compliance_file(
                     agreement_type,
                     exc,
                 )
+            # Normalize contract gate fields so UI cannot render contradictory
+            # states (e.g. unlocked=true with a lock reason still present).
+            if contract_signing_unlocked is True:
+                contract_signing_blockers = []
+                contract_signing_lock_reason = None
+            else:
+                if not contract_signing_lock_reason:
+                    contract_signing_lock_reason = "Contract generated, but signing is locked until earlier onboarding steps are complete."
         resolved_template_version = (
             agreement_state.get("template_version")
             or resolved_ack.get("template_version")
@@ -38882,6 +38890,15 @@ async def get_compliance_file(
             and not has_worker_signed_artifact
         ):
             canonical_status = "awaiting_worker_signature"
+        # Contract truth sync: only surface "awaiting worker signature" when
+        # the signing gate is explicitly unlocked. Otherwise keep it in a
+        # pre-sign state so worker/admin/next-action cannot disagree.
+        if (
+            agreement_type == "contract_acceptance"
+            and canonical_status in {"pending_signature", "awaiting_worker_signature"}
+            and contract_signing_unlocked is not True
+        ):
+            canonical_status = "not_sent"
         if canonical_status in {"fully_executed", "verified"}:
             has_acknowledgement = True
             is_verified = True

@@ -38481,6 +38481,95 @@ async def get_compliance_file(
         title: str,
         agreement_type: str
     ) -> dict:
+        """Build an agreement row (form acknowledgement).
+
+        Tier 4 defensive wrapper: the inner implementation has an enormous
+        surface area and has repeatedly hit NoneType `.get()` crashes that
+        cascade into "Temporarily unavailable" on the admin compliance file.
+        We wrap the whole thing and, on ANY exception, return a truthful
+        "Awaiting worker"-style row using only the already-fetched `acks`
+        and `submissions_by_template`. This guarantees admin never sees a
+        fake "Missing" row while the worker UI correctly shows acknowledged.
+        """
+        try:
+            return await _build_agreement_row_inner(key, title, agreement_type)
+        except Exception as exc:
+            logger.warning(
+                "compliance_file_row_builder_inner_crash employee_id=%s row_key=%s agreement_type=%s error=%s",
+                employee_id,
+                key,
+                agreement_type,
+                exc,
+                exc_info=True,
+            )
+            # Minimal safe reconstruction from already-loaded collections.
+            # Matches the dict shape `build_agreement_row` would return.
+            _fallback_agreements = agreements if isinstance(agreements, dict) else {}
+            _candidates = [agreement_type]
+            if agreement_type == "handbook_acknowledgement":
+                _candidates.append("employee_handbook_acknowledgement")
+            _acks = [a for a in (_fallback_agreements.get("acknowledgements") or [])
+                     if a and a.get("agreement_type") in _candidates]
+            _latest = max(
+                _acks,
+                key=lambda a: a.get("verified_at") or a.get("worker_signed_at") or a.get("created_at") or "",
+            ) if _acks else None
+            _tid = AGREEMENT_TYPE_TO_TEMPLATE.get(agreement_type)
+            _sub = submissions_by_template.get(_tid) if _tid else None
+            _verified = False
+            _status = "not_sent"
+            _summary = f"{title}: awaiting worker"
+            if _latest:
+                _vs = str(_latest.get("verification_status") or _latest.get("status") or "").strip().lower()
+                if _vs in {"verified", "approved", "completed", "acknowledged"} or _latest.get("verified_at"):
+                    _verified = True
+                    _status = "verified"
+                    _summary = f"{title}: verified"
+                elif _vs in {"awaiting_review", "signed", "submitted"}:
+                    _status = "awaiting_review"
+                    _summary = f"{title}: awaiting admin review"
+                else:
+                    _status = "recorded"
+                    _summary = f"{title}: submitted"
+            elif _sub:
+                _vs = str(_sub.get("verification_status") or "").strip().lower()
+                if _vs == "verified":
+                    _verified = True
+                    _status = "verified"
+                    _summary = f"{title}: verified"
+                elif _vs == "awaiting_review":
+                    _status = "awaiting_review"
+                    _summary = f"{title}: awaiting admin review"
+            return {
+                "key": key,
+                "title": title,
+                "row_type": "form_acknowledgement",
+                "status": _status,
+                "status_summary": _summary,
+                "agreement_type": agreement_type,
+                "template_version": (_latest or {}).get("template_version") or (_sub or {}).get("template_version"),
+                "can_sign": None,
+                "can_acknowledge": None,
+                "verified": _verified,
+                "has_acknowledgement": bool(_latest),
+                "latest_active": bool(_latest),
+                "source_record_id": (_latest or {}).get("id") or (_latest or {}).get("acknowledgement_id"),
+                "current_lifecycle": {"status": _status},
+                "acknowledgement_data": _latest,
+                "pending_requests": [],
+                "counts": {"history": len(_acks)},
+                "allowed_actions": ["verify", "reject"] if _status == "awaiting_review" else (["view_history"] if _latest else []),
+                "affects_readiness": True,
+                "is_supporting_evidence": False,
+                "warnings": [f"agreement_row_inner_crash:{exc}"],
+                "_fallback_mode": "inner_crash_reconstructed",
+            }
+
+    async def _build_agreement_row_inner(
+        key: str,
+        title: str,
+        agreement_type: str
+    ) -> dict:
         """Build an agreement row (form acknowledgement)."""
         # Tier 4 root-cause fix: `agreements` is the outer _safe_timed_fetch
         # result for fetch_agreements. If that fetch timed out or the
@@ -45238,5 +45327,6 @@ async def shutdown_scheduler():
             logger.info("Scheduler shutdown complete")
     except Exception as e:
         logger.error(f"Scheduler shutdown error: {e}")
+
 
 

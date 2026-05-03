@@ -1888,6 +1888,9 @@ export default function WorkerDashboard() {
   });
   const completedReferencesCount = references.filter((reference) => isReferenceComplete(reference?.status)).length;
   const referencesNeedAction = referencesNeedActionFromBlockers || references.some((reference) => !isReferenceComplete(reference?.status));
+  const mismatchByRefNum = new Map(
+    ((referenceMismatches?.mismatches || []).map((m) => [Number(m?.reference_number), m]))
+  );
   const normalizedAgreements = [
     ...operationalAgreements.filter((agreement) => agreement.id !== 'contract_acceptance' && agreement.id !== 'handbook_acknowledgement' && agreement.id !== 'employee_handbook_acknowledgement'),
     ...(handbookAgreement ? [handbookAgreement] : []),
@@ -3533,6 +3536,55 @@ export default function WorkerDashboard() {
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
+                        {/* Worker mismatch explanation action (primary legal evidence path) */}
+                        {(() => {
+                          const refNum = Number(ref.reference_number);
+                          const mismatch = mismatchByRefNum.get(refNum);
+                          const status = String(ref.status || '').toLowerCase();
+                          const refHasMismatchFlag =
+                            ref?.integrity?.mismatch_detected === true ||
+                            ref?.mismatch_detected === true;
+                          const statusImpliesMismatchContext =
+                            status.includes('mismatch') ||
+                            status.includes('response_received') ||
+                            status.includes('awaiting_review') ||
+                            status.includes('pending_admin_review') ||
+                            status.includes('reviewed');
+                          const needsExplanation =
+                            (Boolean(mismatch) || refHasMismatchFlag) &&
+                            statusImpliesMismatchContext &&
+                            !ref.replacement_requested_at;
+                          if (!needsExplanation) return null;
+                          const hasExistingExplanation = Boolean(
+                            mismatch?.existing_explanation?.text || mismatch?.existing_explanation
+                          );
+                          return (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="text-xs border-amber-300 text-amber-700 hover:bg-amber-50"
+                              onClick={() => {
+                                setSelectedMismatch(
+                                  mismatch || {
+                                    reference_number: ref.reference_number,
+                                    referee_name: ref.referee_name,
+                                    referee_company: ref.organisation || ref.company,
+                                    message: 'Please explain why this reference may not match your declared employment history.',
+                                    existing_explanation: hasExistingExplanation
+                                      ? mismatch.existing_explanation
+                                      : undefined,
+                                  }
+                                );
+                                setMismatchExplanationType('');
+                                setMismatchExplanationText('');
+                                setShowMismatchExplanationModal(true);
+                              }}
+                              data-testid={`explain-mismatch-ref-${ref.reference_number}`}
+                            >
+                              {hasExistingExplanation ? 'Update explanation' : 'Explain mismatch'}
+                            </Button>
+                          );
+                        })()}
                         {/* Show "Provide New" button for rejected references */}
                         {ref.can_provide_new && (
                           <Button

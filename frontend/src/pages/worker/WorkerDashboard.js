@@ -1857,8 +1857,13 @@ export default function WorkerDashboard() {
     || getLatestActiveAgreementById(operationalAgreements, 'employee_handbook_acknowledgement')
     || operationalAgreements.find((agreement) => agreement.id === 'handbook_acknowledgement')
     || operationalAgreements.find((agreement) => agreement.id === 'employee_handbook_acknowledgement');
-  const contractDisplay = getAgreementDisplay(contractAgreement, { contractEligibility });
-  const latestContractState = resolveLatestContractState(contractAgreement, { contractEligibility });
+  const effectiveContractEligibility = contractEligibility || {
+    can_sign: Boolean(contractAgreement?.can_sign),
+    blockers: Array.isArray(contractAgreement?.signing_gate_blockers) ? contractAgreement.signing_gate_blockers : [],
+    reason: contractAgreement?.signing_gate_reason || null,
+  };
+  const contractDisplay = getAgreementDisplay(contractAgreement, { contractEligibility: effectiveContractEligibility });
+  const latestContractState = resolveLatestContractState(contractAgreement, { contractEligibility: effectiveContractEligibility });
   const contractLifecycleStatus = latestContractState.status;
   const effectiveContractCanSign = latestContractState.canSign;
   const hasPendingSignableContract = latestContractState.hasPendingSignableContract;
@@ -1888,7 +1893,7 @@ export default function WorkerDashboard() {
   ].filter((agreement, idx, arr) => arr.findIndex((x) => x?.id === agreement?.id) === idx);
   const agreementDisplays = normalizedAgreements.map((agreement) => ({
     agreement,
-    display: getAgreementDisplay(agreement, { contractEligibility }),
+    display: getAgreementDisplay(agreement, { contractEligibility: effectiveContractEligibility }),
   }));
   const agreementsActionRequiredCount = agreementDisplays.filter(({ display }) => display.tone === 'critical').length;
   const agreementsCompletedCount = agreementDisplays.filter(({ display }) => display.tone === 'success').length;
@@ -1937,7 +1942,7 @@ export default function WorkerDashboard() {
         || status === 'acknowledged'
         || status === 'submitted'
         || status === 'awaiting_review';
-      const canSignNow = (a?.can_sign === true) || (contractEligibility?.can_sign === true);
+      const canSignNow = (a?.can_sign === true) || (effectiveContractEligibility?.can_sign === true);
       return !verified && (canSignNow || a?.lifecycle_status === 'awaiting_worker_signature');
     });
     if (pendingContract) {
@@ -1960,7 +1965,7 @@ export default function WorkerDashboard() {
       if (a?.contract_signing_unlocked === false) return true;
       // Safety net: if eligibility explicitly says cannot sign and contract is still pending,
       // never allow "all caught up" to render.
-      return contractEligibility?.can_sign === false && (status === 'pending_signature' || status === 'awaiting_worker_signature');
+      return effectiveContractEligibility?.can_sign === false && (status === 'pending_signature' || status === 'awaiting_worker_signature');
     });
     if (lockedContract) {
       const blockerCount = Array.isArray(lockedContract.contract_signing_blockers)
@@ -3789,7 +3794,7 @@ export default function WorkerDashboard() {
             <CardContent>
               <div className="space-y-3">
                 {agreementDisplays.map(({ agreement, display: agreementDisplay }) => {
-                  const agreementContractState = resolveLatestContractState(agreement, { contractEligibility }).status;
+                  const agreementContractState = resolveLatestContractState(agreement, { contractEligibility: effectiveContractEligibility }).status;
                   const isHistoricalRejectedContract =
                     agreement.id === 'contract_acceptance' &&
                     (
@@ -3976,7 +3981,7 @@ export default function WorkerDashboard() {
                   </div>
                   <Badge className="bg-green-100 text-green-700">Complete</Badge>
                 </div>
-              ) : contractEligibility?.can_sign ? (
+              ) : effectiveContractEligibility?.can_sign ? (
                 <div className="flex items-center justify-between p-4 bg-green-50 rounded-xl border border-green-200">
                   <div>
                     <span className="font-medium text-green-800">Ready to Sign</span>
@@ -4012,21 +4017,21 @@ export default function WorkerDashboard() {
                     </Button>
                   </div>
                   
-                  {contractEligibility?.blockers?.length > 0 && (
+                  {effectiveContractEligibility?.blockers?.length > 0 && (
                     <div className="p-3 bg-gray-50 rounded-lg">
                       <p className="text-xs font-medium text-gray-600 mb-2">
-                        Still needed before you can sign ({contractEligibility.blockers.length}):
+                        Still needed before you can sign ({effectiveContractEligibility.blockers.length}):
                       </p>
                       <ul className="text-xs text-gray-500 space-y-1">
-                        {contractEligibility.blockers.slice(0, 5).map((blocker, idx) => (
+                        {effectiveContractEligibility.blockers.slice(0, 5).map((blocker, idx) => (
                           <li key={idx} className="flex items-center gap-1">
                             <AlertTriangle className="h-3 w-3 text-amber-500" />
                             {blocker}
                           </li>
                         ))}
-                        {contractEligibility.blockers.length > 5 && (
+                        {effectiveContractEligibility.blockers.length > 5 && (
                           <li className="text-gray-400">
-                            + {contractEligibility.blockers.length - 5} more...
+                            + {effectiveContractEligibility.blockers.length - 5} more...
                           </li>
                         )}
                       </ul>

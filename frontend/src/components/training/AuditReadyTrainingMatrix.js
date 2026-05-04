@@ -814,15 +814,49 @@ export default function AuditReadyTrainingMatrix({
     .map(item => item.title || item.training_name || item.code || 'Unnamed training')
     .filter(Boolean);
   const normalizeTrainingKey = (value) => (
-    (value || '').toLowerCase().replace(/&/g, 'and').replace(/[\s_-]+/g, ' ').trim()
+    (value || '')
+      .toLowerCase()
+      .replace(/&/g, 'and')
+      .replace(/[()]/g, ' ')
+      .replace(/[\s_-]+/g, ' ')
+      .trim()
   );
+  const normalizeTrainingAliasKey = (value) => {
+    const base = normalizeTrainingKey(value)
+      .replace(/\bonline training\b/g, '')
+      .replace(/\btraining module\b/g, '')
+      .replace(/\bfor volunteers\b/g, '')
+      .replace(/\bupdated covid ?19\b/g, '')
+      .replace(/\blevel\b/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const aliasMap = {
+      'ils immediate life support': 'immediate life support',
+      'cstf adult immediate life support': 'immediate life support',
+      'cstf paediatric immediate life support': 'immediate life support',
+      'information governance and data security gdpr': 'information governance',
+      'information governance and gdpr': 'information governance',
+      'infection prevention and control': 'infection control',
+      'health safety and infection prevention and control': 'infection control',
+      'basic life support pbls': 'basic life support',
+      'sepsis awareness': 'sepsis awareness',
+      'manual handling': 'manual handling',
+      'fire safety awareness': 'fire safety',
+      'food hygiene safety': 'food hygiene',
+      'equality diversity and human rights': 'equality and diversity',
+      'dignity and privacy': 'privacy and dignity',
+      'news score training': 'news2 clinical observations',
+      'news2 additional guidance': 'news2 clinical observations',
+    };
+    return aliasMap[base] || base;
+  };
   const getPendingExtractedMatch = (mandatoryItem) => {
     const mandatoryCandidates = [
       mandatoryItem?.code,
       mandatoryItem?.title,
       mandatoryItem?.id,
       mandatoryItem?.training_name,
-    ].map(normalizeTrainingKey).filter(Boolean);
+    ].map(normalizeTrainingAliasKey).filter(Boolean);
 
     return proposedItems.find((proposed) => {
       if (proposed.status !== 'proposed') return false;
@@ -832,7 +866,7 @@ export default function AuditReadyTrainingMatrix({
         proposed.raw_course_title,
         proposed.training_name,
         proposed.course_name,
-      ].map(normalizeTrainingKey).filter(Boolean);
+      ].map(normalizeTrainingAliasKey).filter(Boolean);
 
       return mandatoryCandidates.some((mandatoryKey) =>
         proposedCandidates.some((proposedKey) =>
@@ -851,7 +885,29 @@ export default function AuditReadyTrainingMatrix({
     return Boolean(item?.is_required || item?.is_mandatory || item?.required || item?.mandatory || mandatoryKeys.has(key));
   };
   const cannotAssessCount = (sourceErrors.certificates ? 1 : 0) + (sourceErrors.proposedItems ? 1 : 0) + (sourceErrors.trainingRecords ? 1 : 0);
-  const pendingProposedItems = getPendingProposedTrainingItems(proposedItems);
+  const pendingProposedItems = (() => {
+    const raw = getPendingProposedTrainingItems(proposedItems);
+    const deduped = [];
+    const seen = new Set();
+    for (const item of raw) {
+      const key = [
+        item?.source_document_id || 'no-doc',
+        normalizeTrainingAliasKey(item?.mapped_training_code || item?.mapped_training_title || item?.raw_course_title || item?.training_name),
+      ].join('|');
+      if (seen.has(key)) continue;
+      seen.add(key);
+      deduped.push(item);
+    }
+    return deduped.sort((a, b) => {
+      const aMapped = Boolean(a?.mapped_training_code);
+      const bMapped = Boolean(b?.mapped_training_code);
+      if (aMapped !== bMapped) return aMapped ? 1 : -1; // unmapped first
+      const aMandatory = Boolean(a?.is_mandatory);
+      const bMandatory = Boolean(b?.is_mandatory);
+      if (aMandatory !== bMandatory) return aMandatory ? -1 : 1; // required first
+      return String(a?.raw_course_title || '').localeCompare(String(b?.raw_course_title || ''));
+    });
+  })();
   const trainingLibraryBanner = getTrainingLibraryBannerState({
     proposedItems,
     proposedItemsErrored: sourceErrors.proposedItems,

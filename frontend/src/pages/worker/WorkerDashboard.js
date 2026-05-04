@@ -1914,6 +1914,12 @@ export default function WorkerDashboard() {
     (item) => (item?.status || '').toLowerCase() === 'completed'
   ).length;
   const pendingWorkerTasks = worker_tasks.filter((task) => String(task?.status || '').toLowerCase() === 'pending');
+  const hasNonContractCriticalBlockers = (Array.isArray(legalBlockers) ? legalBlockers : []).some((b) => {
+    const gate = String(b?.gate || b?.id || '').toLowerCase();
+    const severity = String(b?.severity || '').toLowerCase();
+    const isContract = gate.includes('contract');
+    return !isContract && severity === 'critical';
+  });
   const mapWorkerTaskToNextAction = (task) => {
     if (!task) return null;
     const taskKey = String(task?.key || task?.type || '').toLowerCase();
@@ -1922,7 +1928,7 @@ export default function WorkerDashboard() {
       taskKey.includes('contract') ||
       taskTitle.includes('contract') ||
       taskTitle.includes('sign new contract');
-    if (looksLikeContractTask && !effectiveContractCanSign) {
+    if (looksLikeContractTask && (!effectiveContractCanSign || hasNonContractCriticalBlockers)) {
       return null;
     }
     return {
@@ -1957,7 +1963,7 @@ export default function WorkerDashboard() {
         || status === 'submitted'
         || status === 'awaiting_review';
       const canSignNow = (a?.can_sign === true) || (effectiveContractEligibility?.can_sign === true);
-      return !verified && (canSignNow || a?.lifecycle_status === 'awaiting_worker_signature');
+      return !verified && !hasNonContractCriticalBlockers && (canSignNow || a?.lifecycle_status === 'awaiting_worker_signature');
     });
     if (pendingContract) {
       return {

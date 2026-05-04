@@ -5679,6 +5679,16 @@ class EmployeeUpdate(BaseModel):
     profile_photo_url: Optional[str] = None
     # Lifecycle audit note for explicit status transitions (e.g. deactivate/reactivate)
     status_change_reason: Optional[str] = None
+
+class RequestCvReuploadPayload(BaseModel):
+    reason: str
+    notify_employee: bool = True
+
+
+class ChangeEmployeeRolePayload(BaseModel):
+    new_role: str
+    reason: str
+
     # Extended profile fields - populated from application form extraction
     address_line_1: Optional[str] = None
     address_line_2: Optional[str] = None
@@ -10163,6 +10173,140 @@ async def update_employee(employee_id: str, update: EmployeeUpdate, user: dict =
     employee['completion_percentage'] = await calculate_completion_percentage(employee_id)
     return EmployeeResponse(**employee)
 
+
+@api_router.post("/employees/{employee_id}/request-cv-reupload")
+async def request_cv_reupload(
+    employee_id: str,
+    payload: RequestCvReuploadPayload,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Request a fresh CV upload while preserving history and audit trail.
+    Does not delete prior documents.
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    reason = (payload.reason or "").strip()
+    if len(reason) < 10:
+        raise HTTPException(status_code=400, detail="Reason is required (minimum 10 characters)")
+
+    now = datetime.now(timezone.utc).isoformat()
+
+    # Mark CV state as reupload-required; keep old CV references for evidence/audit.
+    await db.employees.update_one(
+        {"id": employee_id},
+        {"$set": {
+            "cv_status": "reupload_required",
+            "cv_reupload_required": True,
+            "cv_reupload_reason": reason,
+            "cv_reupload_requested_at": now,
+            "cv_reupload_requested_by": user.get("user_id"),
+            "updated_at": now,
+        }}
+    )
+
+    # Create worker-facing request so portal clearly prompts upload.
+    try:
+        await EmailRequestService.create_request(
+            person_id=employee_id,
+            person_type="employee",
+            requirement_id="cv",
+            request_type=RequestType.UPLOAD_DOCUMENT,
+            due_days=14,
+            context={
+                "is_replacement_request": True,
+                "replacement_reason": reason,
+                "source": "admin_request_cv_reupload",
+            },
+            admin_id=user.get("user_id"),
+        )
+    except Exception as exc:
+        logger.warning("request_cv_reupload email_request failed employee=%s error=%s", employee_id, exc)
+
+    await log_audit_action(
+        user.get("user_id"),
+        "request_cv_reupload",
+        "employee",
+        employee_id,
+        {
+            "reason": reason,
+            "notify_employee": bool(payload.notify_employee),
+        },
+    )
+
+    return {
+        "success": True,
+        "employee_id": employee_id,
+        "cv_status": "reupload_required",
+        "message": "CV reupload requested. Existing records were preserved.",
+    }
+
+
+@api_router.post("/employees/{employee_id}/change-role")
+async def change_employee_role(
+    employee_id: str,
+    payload: ChangeEmployeeRolePayload,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Controlled role change for applicants or employees with explicit audit reason.
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "id": 1, "role": 1, "job_role": 1, "status": 1})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    new_role = (payload.new_role or "").strip()
+    reason = (payload.reason or "").strip()
+    if not new_role:
+        raise HTTPException(status_code=400, detail="new_role is required")
+    if len(reason) < 10:
+        raise HTTPException(status_code=400, detail="Reason is required (minimum 10 characters)")
+
+    old_role = employee.get("job_role") or employee.get("role") or ""
+    if str(old_role).strip().lower() == new_role.lower():
+        return {
+            "success": True,
+            "employee_id": employee_id,
+            "old_role": old_role,
+            "new_role": new_role,
+            "message": "Role unchanged.",
+        }
+
+    now = datetime.now(timezone.utc).isoformat()
+    await db.employees.update_one(
+        {"id": employee_id},
+        {"$set": {
+            "job_role": new_role,
+            "role": new_role,
+            "updated_at": now,
+            "role_changed_at": now,
+            "role_changed_by": user.get("user_id"),
+            "role_change_reason": reason,
+        }}
+    )
+
+    await log_audit_action(
+        user.get("user_id"),
+        "change_employee_role",
+        "employee",
+        employee_id,
+        {
+            "old_role": old_role,
+            "new_role": new_role,
+            "reason": reason,
+            "status": employee.get("status"),
+        },
+    )
+
+    return {
+        "success": True,
+        "employee_id": employee_id,
+        "old_role": old_role,
+        "new_role": new_role,
+        "message": "Role updated. Requirements will refresh on next compliance fetch.",
+    }
 @api_router.delete("/employees/{employee_id}")
 async def delete_employee(employee_id: str, user: dict = Depends(require_admin)):
     result = await db.employees.delete_one({"id": employee_id})
@@ -45709,6 +45853,12 @@ async def shutdown_scheduler():
             logger.info("Scheduler shutdown complete")
     except Exception as e:
         logger.error(f"Scheduler shutdown error: {e}")
+
+
+
+
+
+
 
 
 

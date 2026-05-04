@@ -1498,6 +1498,31 @@ export default function EmployeeProfilePage() {
     // Tab-specific optional datasets are lazy-loaded when their tabs are opened.
   };
 
+  const handleApproveToOnboarding = async () => {
+    try {
+      setIsSavingWorkApproval(true);
+      await axios.post(
+        `${API}/employees/${employeeId}/approve-recruitment`,
+        {
+          notes: workApprovalRationale?.trim() || 'Approved via profile summary'
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success('Applicant approved to onboarding.');
+      setWorkApprovalDialogOpen(false);
+      await fetchData();
+      await fetchComplianceFile();
+    } catch (err) {
+      const detail = err?.response?.data?.detail;
+      const message = typeof detail === 'string'
+        ? detail
+        : (detail?.message || 'Failed to approve applicant to onboarding');
+      toast.error(message);
+    } finally {
+      setIsSavingWorkApproval(false);
+    }
+  };
+
   const fetchInductionChecklist = async () => {
     if (!employeeId || !token) return;
     const shouldFetch = profileMode === 'applicant' || lifecycleStage !== 'active';
@@ -1848,11 +1873,6 @@ export default function EmployeeProfilePage() {
     const applicantHiddenTabs = ['competencies', 'spot_checks', 'supervisions', 'appraisals', 'policies'];
     const activeOnlyTabs = ['competencies', 'spot_checks', 'supervisions', 'appraisals'];
     if (profileMode === 'applicant' && applicantHiddenTabs.includes(activeTab)) {
-      setActiveTab('employment');
-      setSearchParams({ tab: 'employment' }, { replace: true });
-      return;
-    }
-    if (profileMode === 'applicant' && activeTab === 'work_readiness') {
       setActiveTab('employment');
       setSearchParams({ tab: 'employment' }, { replace: true });
       return;
@@ -5654,12 +5674,10 @@ export default function EmployeeProfilePage() {
             <GraduationCap className="h-4 w-4 mr-2" />
             Training
           </TabsTrigger>
-          {profileMode === 'employee' && (
-            <TabsTrigger value="work_readiness" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
-              <User className="h-4 w-4 mr-2" />
-              Profile Summary
-            </TabsTrigger>
-          )}
+          <TabsTrigger value="work_readiness" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
+            <User className="h-4 w-4 mr-2" />
+            Profile Summary
+          </TabsTrigger>
           {profileMode === 'employee' && lifecycleStage === 'active' && (
             <TabsTrigger value="competencies" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
               <ClipboardCheck className="h-4 w-4 mr-2" />
@@ -5698,10 +5716,9 @@ export default function EmployeeProfilePage() {
 
         {/* ========== TAB 1: PROFILE SUMMARY ========== */}
         {/* Stable profile / core-record tab. Readiness logic lives above the tabs only. */}
-        {profileMode === 'employee' && (
         <TabsContent value="work_readiness">
           <div className="space-y-6">
-            {canRecordWorkApproval() && employee?.person_stage === 'employee' && (
+            {canRecordWorkApproval() && (
               <Card className="border-[#E4E8EB] shadow-sm">
                 <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                   <div>
@@ -5710,15 +5727,26 @@ export default function EmployeeProfilePage() {
                       Record the explicit approval decision once the canonical readiness check is clear.
                     </p>
                   </div>
-                  <Button
-                    onClick={openWorkApprovalDialog}
-                    disabled={!canonicalIsWorkReady}
-                    className="w-full sm:w-auto"
-                  >
-                    Approve for Work
-                  </Button>
+                  {profileMode === 'applicant' ? (
+                    <Button
+                      onClick={openWorkApprovalDialog}
+                      disabled={!canonicalIsWorkReady}
+                      className="w-full sm:w-auto"
+                    >
+                      Approve to Onboarding
+                    </Button>
+                  ) : (
+                    <Button
+                      onClick={openWorkApprovalDialog}
+                      disabled={!canonicalIsWorkReady}
+                      className="w-full sm:w-auto"
+                    >
+                      Approve for Work
+                    </Button>
+                  )}
                 </CardHeader>
                 <CardContent className="space-y-4">
+                  {profileMode === 'employee' && (
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <div>
                       <p className="text-xs uppercase tracking-wider text-text-muted">Promotion to active</p>
@@ -5737,6 +5765,7 @@ export default function EmployeeProfilePage() {
                     Activate Employee
                     </Button>
                   </div>
+                  )}
 
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <div>
@@ -6135,7 +6164,6 @@ export default function EmployeeProfilePage() {
 
           </div>
         </TabsContent>
-        )}
         {/* Interview record + worker onboarding forms (health, personal, HMRC, declarations) */}
         <TabsContent value="forms">
           {/* ── Top-level Forms & Interview Summary ── */}
@@ -10569,7 +10597,10 @@ Direct employment coverage: {Number.isFinite(directCoveragePercent) ? `${directC
             <Button variant="outline" onClick={() => setWorkApprovalDialogOpen(false)} disabled={isSavingWorkApproval}>
               Cancel
             </Button>
-            <Button onClick={handleApproveForWork} disabled={!canonicalIsWorkReady || isSavingWorkApproval}>
+            <Button
+              onClick={profileMode === 'applicant' ? handleApproveToOnboarding : handleApproveForWork}
+              disabled={!canonicalIsWorkReady || isSavingWorkApproval}
+            >
               {isSavingWorkApproval ? 'Saving...' : 'Record approval'}
             </Button>
           </DialogFooter>

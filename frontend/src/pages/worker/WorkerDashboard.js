@@ -4514,7 +4514,7 @@ export default function WorkerDashboard() {
 
       {/* Contract Signature Dialog */}
       <Dialog open={showSignaturePad} onOpenChange={setShowSignaturePad}>
-        <DialogContent className="max-w-xl p-0">
+        <DialogContent className="max-w-xl p-0 max-h-[92vh] overflow-y-auto">
             <SignaturePad
               employeeId={employee.id}
               employeeName={employee.name}

@@ -236,6 +236,7 @@ export default function AuditReadyTrainingMatrix({
   const [deletingItem, setDeletingItem] = useState(null);
   const [deleteReason, setDeleteReason] = useState('');
   const [deleting, setDeleting] = useState(false);
+  const [deleteLinkedRecords, setDeleteLinkedRecords] = useState(false);
   const [unverifyDialogOpen, setUnverifyDialogOpen] = useState(false);
   const [unverifyItem, setUnverifyItem] = useState(null);
   const [unverifyReason, setUnverifyReason] = useState('');
@@ -587,26 +588,41 @@ export default function AuditReadyTrainingMatrix({
   // Delete training record - Admin only with audit trail
   const handleDeleteTraining = async () => {
     if (!deletingItem) return;
-    
-    const recordId = deletingItem.record_id || deletingItem.id;
-    if (!recordId) {
-      toast.error('No record ID found for this training');
-      return;
-    }
-    
+
     setDeleting(true);
     try {
-      await axios.delete(
-        `${API}/training-records/${recordId}`,
-        { 
-          headers: { Authorization: `Bearer ${token}` },
-          params: { reason: deleteReason || 'Deleted by admin' }
-        }
+      const linkedBySourceDoc = (Array.isArray(canonicalTrainingRecords) ? canonicalTrainingRecords : [])
+        .filter((row) => row?.source_document_id && row.source_document_id === deletingItem?.source_document_id);
+      const targets = deleteLinkedRecords && linkedBySourceDoc.length > 1
+        ? linkedBySourceDoc
+        : [deletingItem];
+      const targetIds = Array.from(new Set(targets.map((row) => row?.record_id || row?.id).filter(Boolean)));
+      if (targetIds.length === 0) {
+        toast.error('No record ID found for this training selection');
+        return;
+      }
+      const results = await Promise.allSettled(
+        targetIds.map((recordId) => axios.delete(
+          `${API}/training-records/${recordId}`,
+          {
+            headers: { Authorization: `Bearer ${token}` },
+            params: { reason: deleteReason || 'Deleted by admin' }
+          }
+        ))
       );
-      toast.success(`"${deletingItem.title}" deleted successfully`);
+      const deletedCount = results.filter((r) => r.status === 'fulfilled').length;
+      if (deletedCount === 0) {
+        throw new Error('No training records were deleted');
+      }
+      toast.success(
+        deleteLinkedRecords && targetIds.length > 1
+          ? `Deleted ${deletedCount} linked training record(s)`
+          : `"${deletingItem.title}" deleted successfully`
+      );
       setDeleteDialogOpen(false);
       setDeletingItem(null);
       setDeleteReason('');
+      setDeleteLinkedRecords(false);
       fetchTrainingData();
       onRefresh?.();
     } catch (err) {
@@ -620,6 +636,7 @@ export default function AuditReadyTrainingMatrix({
   const openDeleteDialog = (item) => {
     setDeletingItem(item);
     setDeleteReason('');
+    setDeleteLinkedRecords(false);
     setDeleteDialogOpen(true);
   };
 
@@ -2158,6 +2175,19 @@ export default function AuditReadyTrainingMatrix({
                 data-testid="delete-reason-input"
               />
             </div>
+            {deletingItem?.source_document_id && (
+              <label className="flex items-start gap-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={deleteLinkedRecords}
+                  onChange={(e) => setDeleteLinkedRecords(e.target.checked)}
+                />
+                <span>
+                  Remove all approved qualifications linked to the same source certificate.
+                </span>
+              </label>
+            )}
           </div>
           
           <DialogFooter>

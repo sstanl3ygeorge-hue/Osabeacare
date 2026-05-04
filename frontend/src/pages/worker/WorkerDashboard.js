@@ -1916,6 +1916,15 @@ export default function WorkerDashboard() {
   const pendingWorkerTasks = worker_tasks.filter((task) => String(task?.status || '').toLowerCase() === 'pending');
   const mapWorkerTaskToNextAction = (task) => {
     if (!task) return null;
+    const taskKey = String(task?.key || task?.type || '').toLowerCase();
+    const taskTitle = String(task?.title || '').toLowerCase();
+    const looksLikeContractTask =
+      taskKey.includes('contract') ||
+      taskTitle.includes('contract') ||
+      taskTitle.includes('sign new contract');
+    if (looksLikeContractTask && !effectiveContractCanSign) {
+      return null;
+    }
     return {
       key: task.key || task.type || 'task',
       title: task.title || 'Action required',
@@ -3561,37 +3570,49 @@ export default function WorkerDashboard() {
                             mismatchTextHint.includes('mismatch') ||
                             mismatchTextHint.includes('awaiting worker explanation');
                           const needsExplanation =
-                            (Boolean(mismatch) || refHasMismatchFlag) &&
-                            statusImpliesMismatchContext &&
-                            !ref.replacement_requested_at;
+                            (
+                              (Boolean(mismatch) || refHasMismatchFlag) && statusImpliesMismatchContext
+                            ) ||
+                            (
+                              !ref.replacement_requested_at &&
+                              !isReferenceComplete(ref?.status) &&
+                              (status.includes('response_received') || status.includes('pending_admin_review'))
+                            );
+                          const isReplacementFlow = Boolean(ref.replacement_requested_at);
+                          if (isReplacementFlow) return null;
                           if (!needsExplanation) return null;
+                          const fallbackMessage =
+                            status.includes('pending_admin_review')
+                              ? 'Your reference response is awaiting review. If details differ from your declared history, please explain here now to avoid delays.'
+                              : 'Please explain why this reference may not match your declared employment history.';
                           const hasExistingExplanation = Boolean(
                             mismatch?.existing_explanation?.text || mismatch?.existing_explanation
                           );
+                          const mismatchPayload = mismatch || {
+                            reference_number: ref.reference_number,
+                            referee_name: ref.referee_name,
+                            referee_company: ref.organisation || ref.company,
+                            message: fallbackMessage,
+                            existing_explanation: hasExistingExplanation
+                              ? mismatch.existing_explanation
+                              : undefined,
+                          };
+                          const buttonLabel =
+                            hasExistingExplanation ? 'Update explanation' : 'Explain mismatch';
                           return (
                             <Button
                               size="sm"
                               variant="outline"
                               className="text-xs border-amber-300 text-amber-700 hover:bg-amber-50"
                               onClick={() => {
-                                setSelectedMismatch(
-                                  mismatch || {
-                                    reference_number: ref.reference_number,
-                                    referee_name: ref.referee_name,
-                                    referee_company: ref.organisation || ref.company,
-                                    message: 'Please explain why this reference may not match your declared employment history.',
-                                    existing_explanation: hasExistingExplanation
-                                      ? mismatch.existing_explanation
-                                      : undefined,
-                                  }
-                                );
+                                setSelectedMismatch(mismatchPayload);
                                 setMismatchExplanationType('');
                                 setMismatchExplanationText('');
                                 setShowMismatchExplanationModal(true);
                               }}
                               data-testid={`explain-mismatch-ref-${ref.reference_number}`}
                             >
-                              {hasExistingExplanation ? 'Update explanation' : 'Explain mismatch'}
+                              {buttonLabel}
                             </Button>
                           );
                         })()}

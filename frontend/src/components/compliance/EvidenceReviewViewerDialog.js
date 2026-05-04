@@ -25,6 +25,7 @@ import { Label } from '../ui/label';
 import { RadioGroup, RadioGroupItem } from '../ui/radio-group';
 import { Checkbox } from '../ui/checkbox';
 import { Textarea } from '../ui/textarea';
+import { Input } from '../ui/input';
 import { toast } from 'sonner';
 import {
   Eye,
@@ -188,6 +189,11 @@ export default function EvidenceReviewViewerDialog({
   const [showRejectInput, setShowRejectInput] = useState(false);
   const [healthOutcome, setHealthOutcome] = useState('');
   const [trainingReviewNotes, setTrainingReviewNotes] = useState('');
+  const [trainingExtractedTitle, setTrainingExtractedTitle] = useState('');
+  const [trainingMappedCode, setTrainingMappedCode] = useState('');
+  const [trainingMappedTitle, setTrainingMappedTitle] = useState('');
+  const [trainingCompletedAt, setTrainingCompletedAt] = useState('');
+  const [trainingExpiresAt, setTrainingExpiresAt] = useState('');
 
   const isIdentity = requirementType === 'identity';
   const isAddress = requirementType === 'proof_of_address';
@@ -237,6 +243,11 @@ export default function EvidenceReviewViewerDialog({
       setShowRejectInput(false);
       setHealthOutcome('');
       setTrainingReviewNotes('');
+      setTrainingExtractedTitle(trainingItem?.raw_course_title || trainingItem?.training_name || '');
+      setTrainingMappedCode(trainingItem?.mapped_training_code || '');
+      setTrainingMappedTitle(trainingItem?.mapped_training_title || '');
+      setTrainingCompletedAt((trainingItem?.completed_at || '').slice(0, 10));
+      setTrainingExpiresAt((trainingItem?.expires_at || '').slice(0, 10));
       viewStartRef.current = Date.now();
     } else {
       if (timerRef.current) clearInterval(timerRef.current);
@@ -519,7 +530,12 @@ export default function EvidenceReviewViewerDialog({
     setIsSubmitting(true);
     try {
       await onTrainingAccepted?.({
-        notes: trainingReviewNotes.trim() || `Accepted after evidence review (${viewSeconds}s viewing).`
+        notes: trainingReviewNotes.trim() || `Accepted after evidence review (${viewSeconds}s viewing).`,
+        raw_course_title: trainingExtractedTitle?.trim() || undefined,
+        mapped_training_code: trainingMappedCode?.trim() || undefined,
+        mapped_training_title: trainingMappedTitle?.trim() || undefined,
+        completed_at: trainingCompletedAt || undefined,
+        expires_at: trainingExpiresAt || undefined,
       });
       setStep('complete');
     } catch (err) {
@@ -748,6 +764,38 @@ export default function EvidenceReviewViewerDialog({
                         <DetailRow label="Completed" value={trainingItem.completed_at || 'Not found'} />
                         <DetailRow label="Expires" value={trainingItem.expires_at || 'Not applicable / not found'} />
                         <DetailRow label="Certificate" value={fileName} />
+                      </div>
+                      <div className="space-y-2 bg-white p-3 rounded border text-sm">
+                        <Label className="text-xs font-medium">Correct mapping/details before accepting</Label>
+                        <Input
+                          value={trainingExtractedTitle}
+                          onChange={(e) => setTrainingExtractedTitle(e.target.value)}
+                          placeholder="Extracted title"
+                        />
+                        <Input
+                          value={trainingMappedCode}
+                          onChange={(e) => setTrainingMappedCode(e.target.value)}
+                          placeholder="Mapped qualification code (e.g. infection_control)"
+                        />
+                        <Input
+                          value={trainingMappedTitle}
+                          onChange={(e) => setTrainingMappedTitle(e.target.value)}
+                          placeholder="Mapped qualification title"
+                        />
+                        <div className="grid grid-cols-2 gap-2">
+                          <Input
+                            type="date"
+                            value={trainingCompletedAt}
+                            onChange={(e) => setTrainingCompletedAt(e.target.value)}
+                            placeholder="Completed date"
+                          />
+                          <Input
+                            type="date"
+                            value={trainingExpiresAt}
+                            onChange={(e) => setTrainingExpiresAt(e.target.value)}
+                            placeholder="Expiry date"
+                          />
+                        </div>
                       </div>
                     </div>
                   )}

@@ -423,7 +423,7 @@ export default function AuditReadyTrainingMatrix({
   };
 
   // Approve proposed item
-  const handleApproveProposed = async (item, notes) => {
+  const handleApproveProposed = async (item, notes, overrides = {}) => {
     if (sourceErrors.proposedItems) {
       toast.error('Cannot assess pending reviews until training review data loads.');
       return;
@@ -435,10 +435,11 @@ export default function AuditReadyTrainingMatrix({
           items: [{
             item_id: item.id,
             approve: true,
-            mapped_training_code: item.mapped_training_code,
-            mapped_training_title: item.mapped_training_title,
-            completed_at: item.completed_at,
-            expires_at: item.expires_at,
+            raw_course_title: overrides.raw_course_title ?? item.raw_course_title,
+            mapped_training_code: overrides.mapped_training_code ?? item.mapped_training_code,
+            mapped_training_title: overrides.mapped_training_title ?? item.mapped_training_title,
+            completed_at: overrides.completed_at ?? item.completed_at,
+            expires_at: overrides.expires_at ?? item.expires_at,
             notes
           }]
         },
@@ -2124,12 +2125,12 @@ export default function AuditReadyTrainingMatrix({
         trainingCompletionMessage={trainingReviewPurpose === 'verify'
           ? 'Training verification has been recorded after evidence review.'
           : 'The extracted training item decision has been recorded. Verification remains a separate step on the canonical training record.'}
-        onTrainingAccepted={async ({ notes }) => {
+        onTrainingAccepted={async (payload) => {
           if (!trainingReviewItem) return;
           if (trainingReviewPurpose === 'verify') {
             await submitVerifyTraining(trainingReviewItem);
           } else {
-            await handleApproveProposed(trainingReviewItem, notes);
+            await handleApproveProposed(trainingReviewItem, payload?.notes, payload || {});
           }
         }}
         onTrainingRejected={trainingReviewPurpose === 'verify' ? undefined : async ({ notes }) => {

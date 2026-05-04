@@ -125,6 +125,7 @@ export default function EvidenceReviewViewerDialog({
   onFormApproved,
   onFormRejected,
   trainingItem,
+  trainingMappingOptions = [],
   onTrainingAccepted,
   onTrainingRejected,
   trainingAcceptLabel = 'Accept extracted item',
@@ -776,12 +777,23 @@ export default function EvidenceReviewViewerDialog({
                           value={trainingMappedCode}
                           onChange={(e) => setTrainingMappedCode(e.target.value)}
                           placeholder="Mapped qualification code (e.g. infection_control)"
+                          list="training-mapping-options"
                         />
                         <Input
                           value={trainingMappedTitle}
                           onChange={(e) => setTrainingMappedTitle(e.target.value)}
                           placeholder="Mapped qualification title"
+                          list="training-mapping-options"
                         />
+                        <datalist id="training-mapping-options">
+                          {(Array.isArray(trainingMappingOptions) ? trainingMappingOptions : []).map((opt) => (
+                            <option
+                              key={`${opt.code || opt.title}-${opt.title || ''}`}
+                              value={opt.code || opt.title}
+                              label={opt.title || opt.code}
+                            />
+                          ))}
+                        </datalist>
                         <div className="grid grid-cols-2 gap-2">
                           <Input
                             type="date"

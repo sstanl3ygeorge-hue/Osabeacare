@@ -929,6 +929,26 @@ export default function AuditReadyTrainingMatrix({
       return String(a?.raw_course_title || '').localeCompare(String(b?.raw_course_title || ''));
     });
   })();
+  const trainingMappingOptions = (() => {
+    const seen = new Set();
+    const out = [];
+    const add = (code, title) => {
+      const c = String(code || '').trim();
+      const t = String(title || '').trim();
+      if (!c && !t) return;
+      const key = `${c.toLowerCase()}|${t.toLowerCase()}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      out.push({ code: c || t, title: t || c });
+    };
+    (Array.isArray(mandatoryTraining) ? mandatoryTraining : []).forEach((item) => {
+      add(item?.code || item?.id, item?.title || item?.training_name);
+    });
+    (Array.isArray(canonicalTrainingRecords) ? canonicalTrainingRecords : []).forEach((item) => {
+      add(item?.code || item?.requirement_id || item?.id, item?.title || item?.training_name);
+    });
+    return out.sort((a, b) => String(a.title || '').localeCompare(String(b.title || '')));
+  })();
   const groupedCertificates = (() => {
     const byKey = new Map();
     for (const cert of certificates) {
@@ -2120,6 +2140,7 @@ export default function AuditReadyTrainingMatrix({
         requirementType="training_certificate"
         mode="training-review"
         trainingItem={trainingReviewItem}
+        trainingMappingOptions={trainingMappingOptions}
         trainingAcceptLabel={trainingReviewPurpose === 'verify' ? 'Verify training' : 'Accept extracted item'}
         trainingRejectLabel={trainingReviewPurpose === 'verify' ? null : 'Reject / needs correction'}
         trainingCompletionMessage={trainingReviewPurpose === 'verify'

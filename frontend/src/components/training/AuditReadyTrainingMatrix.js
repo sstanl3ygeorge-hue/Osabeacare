@@ -356,8 +356,14 @@ export default function AuditReadyTrainingMatrix({
 
   // Open training detail drawer
   const handleOpenDetail = (item) => {
-    setSelectedTraining(item);
-    setDrawerOpen(true);
+    // Force fresh drawer state so opening item B after closing item A
+    // cannot render stale content from the previous selection.
+    setDrawerOpen(false);
+    setSelectedTraining(null);
+    setTimeout(() => {
+      setSelectedTraining(item);
+      setDrawerOpen(true);
+    }, 0);
   };
 
   // Open edit dialog for proposed item
@@ -1749,8 +1755,33 @@ export default function AuditReadyTrainingMatrix({
                       {certificates.map(cert => (
                         <li key={cert.id} className="border border-gray-200 rounded-lg p-3 flex items-center gap-3">
                           <FileText className="h-5 w-5 text-blue-600" />
-                          <span className="font-medium">{cert.original_filename || cert.file_name || 'Training Certificate'}</span>
+                          <span className="font-medium flex-1 min-w-0 truncate">{cert.original_filename || cert.file_name || 'Training Certificate'}</span>
                           <span className="text-xs text-gray-500">Uploaded {formatBackendDate(cert.uploaded_at, { format: 'medium' })}</span>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-8"
+                            onClick={() => handleOpenDetail({
+                              id: cert.id,
+                              code: cert.id,
+                              title: cert.original_filename || cert.file_name || 'Training Certificate',
+                              status: cert.status || 'uploaded',
+                              uploaded_at: cert.uploaded_at,
+                              source_document_id: cert.id,
+                              original_filename: cert.original_filename || cert.file_name,
+                              evidence_files: [
+                                {
+                                  document_id: cert.id,
+                                  original_filename: cert.original_filename || cert.file_name,
+                                  uploaded_at: cert.uploaded_at,
+                                },
+                              ],
+                            })}
+                            data-testid={`view-certificate-${cert.id}`}
+                          >
+                            <Eye className="h-3.5 w-3.5 mr-1" />
+                            View
+                          </Button>
                         </li>
                       ))}
                     </ul>
@@ -1873,7 +1904,15 @@ export default function AuditReadyTrainingMatrix({
                 if (!editingItem) return;
                 try {
                   // Use the PATCH endpoint which accepts bulk updates with proper format
-                  const trainingCode = editingItem.code || editingItem.requirement_id || editingItem.id;
+                  const trainingCode =
+                    editingItem.code ||
+                    editingItem.requirement_id ||
+                    editingItem.training_code ||
+                    editingItem.mapped_training_code;
+                  if (!trainingCode) {
+                    toast.error('Training mapping is missing. Use Review Evidence to map this item before editing dates.');
+                    return;
+                  }
                   
                   await axios.patch(
                     `${API}/employees/${employeeId}/training/${trainingCode}`,

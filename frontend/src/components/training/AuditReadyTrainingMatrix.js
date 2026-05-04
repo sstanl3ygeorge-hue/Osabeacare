@@ -243,6 +243,7 @@ export default function AuditReadyTrainingMatrix({
 
   // Remove certificate state
   const [removeCertDialogCert, setRemoveCertDialogCert] = useState(null);
+  const [noExpiryChecked, setNoExpiryChecked] = useState(false);
   const [removingCert, setRemovingCert] = useState(false);
 
   // Approve-and-verify state
@@ -373,6 +374,7 @@ export default function AuditReadyTrainingMatrix({
       return;
     }
     setEditingItem(item);
+    setNoExpiryChecked(!item?.expires_at && !item?.expiry_date);
     setEditDialogOpen(true);
   };
 
@@ -1525,6 +1527,19 @@ export default function AuditReadyTrainingMatrix({
                                     </>
                                   ) : (
                                     <>
+                                      {item.mapped_training_code && (
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          className="h-7 px-2 text-xs border-blue-200 text-blue-700 hover:bg-blue-50"
+                                          disabled={sourceErrors.proposedItems}
+                                          onClick={() => handleEditProposed(item)}
+                                          title="Add missing completion/expiry dates before review"
+                                        >
+                                          <Edit2 className="h-3 w-3 mr-1" />
+                                          Add dates
+                                        </Button>
+                                      )}
                                       <Button
                                         size="sm"
                                         variant="outline"
@@ -1912,11 +1927,29 @@ export default function AuditReadyTrainingMatrix({
                 <label className="text-sm font-medium">Expiry Date</label>
                 <Input
                   type="date"
-                  defaultValue={editingItem.expires_at?.split('T')[0] || editingItem.expiry_date?.split('T')[0] || ''}
-                  onChange={(e) => setEditingItem({...editingItem, expires_at: e.target.value, expiry_date: e.target.value})}
+                  value={noExpiryChecked ? '' : (editingItem.expires_at?.split('T')[0] || editingItem.expiry_date?.split('T')[0] || '')}
+                  onChange={(e) => {
+                    setNoExpiryChecked(false);
+                    setEditingItem({...editingItem, expires_at: e.target.value, expiry_date: e.target.value});
+                  }}
+                  disabled={noExpiryChecked}
                   data-testid="edit-training-expiry-date"
                 />
                 <p className="text-xs text-slate-500">Leave blank for training that doesn't expire</p>
+                <label className="flex items-center gap-2 text-xs text-slate-600">
+                  <input
+                    type="checkbox"
+                    checked={noExpiryChecked}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setNoExpiryChecked(checked);
+                      if (checked) {
+                        setEditingItem({ ...editingItem, expires_at: null, expiry_date: null });
+                      }
+                    }}
+                  />
+                  This training does not expire
+                </label>
               </div>
               
               {/* Provider */}

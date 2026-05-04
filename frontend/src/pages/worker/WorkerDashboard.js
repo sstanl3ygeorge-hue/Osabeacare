@@ -3543,13 +3543,23 @@ export default function WorkerDashboard() {
                           const status = String(ref.status || '').toLowerCase();
                           const refHasMismatchFlag =
                             ref?.integrity?.mismatch_detected === true ||
-                            ref?.mismatch_detected === true;
+                            ref?.mismatch_detected === true ||
+                            ref?.requires_mismatch_explanation === true ||
+                            ref?.awaiting_worker_explanation === true;
+                          const mismatchTextHint = String(
+                            ref?.status_message ||
+                            ref?.readiness_note ||
+                            ref?.worker_task_text ||
+                            ''
+                          ).toLowerCase();
                           const statusImpliesMismatchContext =
                             status.includes('mismatch') ||
                             status.includes('response_received') ||
                             status.includes('awaiting_review') ||
                             status.includes('pending_admin_review') ||
-                            status.includes('reviewed');
+                            status.includes('reviewed') ||
+                            mismatchTextHint.includes('mismatch') ||
+                            mismatchTextHint.includes('awaiting worker explanation');
                           const needsExplanation =
                             (Boolean(mismatch) || refHasMismatchFlag) &&
                             statusImpliesMismatchContext &&

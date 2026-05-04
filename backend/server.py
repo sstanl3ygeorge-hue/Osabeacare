@@ -41265,6 +41265,78 @@ async def get_application_status(reference: str):
         "message": "Your application is being processed. We will contact you if any additional information is required."
     }
 
+class ResendPortalLinkRequest(BaseModel):
+    reference: str
+    email: str
+
+
+@api_router.post("/applications/resend-portal-link")
+async def resend_application_portal_link(payload: ResendPortalLinkRequest):
+    """Public self-service resend for applicant portal access link."""
+    reference = (payload.reference or "").strip().upper()
+    email = (payload.email or "").strip().lower()
+    if not reference or not email:
+        raise HTTPException(status_code=400, detail="Reference and email are required")
+
+    applicant = await db.employees.find_one(
+        {"applicant_reference": reference, "email": email},
+        {"_id": 0, "id": 1, "first_name": 1, "email": 1, "status": 1, "applicant_reference": 1}
+    )
+    if not applicant:
+        raise HTTPException(status_code=404, detail="No matching application found")
+
+    if not resend.api_key:
+        raise HTTPException(
+            status_code=503,
+            detail="Email delivery is temporarily unavailable. Please contact recruitment support."
+        )
+
+    try:
+        now_iso = datetime.now(timezone.utc).isoformat()
+        magic_token = jwt.encode({
+            "employee_id": applicant.get("id"),
+            "email": applicant.get("email"),
+            "type": "worker_login",
+            "exp": datetime.now(timezone.utc) + timedelta(days=7),
+        }, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+        await db.worker_magic_links.insert_one({
+            "token": magic_token,
+            "employee_id": applicant.get("id"),
+            "email": applicant.get("email"),
+            "expires_at": (datetime.now(timezone.utc) + timedelta(days=7)).isoformat(),
+            "used": False,
+            "created_at": now_iso,
+            "purpose": "application_portal_resend",
+        })
+
+        portal_url = f"{frontend_url}/worker/verify?token={magic_token}"
+        first_name = applicant.get("first_name") or "Applicant"
+        html = f"""
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color:#1e293b;">Hello {first_name},</h2>
+            <p style="color:#475569; line-height:1.6;">
+                Here is your refreshed portal access link for application <strong>{reference}</strong>.
+            </p>
+            <p style="text-align:center; margin: 24px 0;">
+                <a href="{portal_url}" style="background:#2563EB;color:#fff;padding:12px 24px;text-decoration:none;border-radius:8px;font-weight:700;">
+                    Access My Onboarding Portal
+                </a>
+            </p>
+            <p style="color:#64748b; font-size:12px;">This secure link expires in 7 days.</p>
+        </div>
+        """
+        await asyncio.to_thread(resend.Emails.send, {
+            "from": SENDER_EMAIL,
+            "to": [email],
+            "subject": f"Your Osabea portal access link ({reference})",
+            "html": html,
+        })
+        logger.info("Application portal link resent: reference=%s email=%s", reference, email)
+        return {"success": True, "message": "Portal access link resent. Please check your email and spam/junk folder."}
+    except Exception as e:
+        logger.warning("Failed to resend application portal link: reference=%s email=%s error=%s", reference, email, e)
+        raise HTTPException(status_code=500, detail="Unable to resend portal link right now. Please try again shortly.")
 
 
 async def get_assignments():
@@ -45637,6 +45709,7 @@ async def shutdown_scheduler():
             logger.info("Scheduler shutdown complete")
     except Exception as e:
         logger.error(f"Scheduler shutdown error: {e}")
+
 
 
 

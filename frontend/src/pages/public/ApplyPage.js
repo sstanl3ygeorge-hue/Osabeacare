@@ -81,6 +81,7 @@ export default function ApplyPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [submissionResult, setSubmissionResult] = useState(null);
+  const [isResendingPortalLink, setIsResendingPortalLink] = useState(false);
   const [cvFile, setCvFile] = useState(null);
   const [cvFileId, setCvFileId] = useState(null);
   const [isUploadingCv, setIsUploadingCv] = useState(false);
@@ -2147,6 +2148,33 @@ export default function ApplyPage() {
           Use this link to upload documents, complete forms, and track your application progress.
           The link expires in 7 days.
         </p>
+        <div className="mt-4 border-t border-blue-200 pt-3">
+          <p className="text-xs text-blue-700 mb-2">
+            Not received after 5 minutes? Check spam/junk, then resend your portal link.
+          </p>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={isResendingPortalLink}
+            onClick={async () => {
+              try {
+                setIsResendingPortalLink(true);
+                await axios.post(`${API}/applications/resend-portal-link`, {
+                  reference: submissionResult?.reference,
+                  email: formData?.email,
+                });
+                toast.success('Portal link resent. Please check your inbox and spam/junk folder.');
+              } catch (error) {
+                toast.error(error?.response?.data?.detail || 'Could not resend portal link right now.');
+              } finally {
+                setIsResendingPortalLink(false);
+              }
+            }}
+          >
+            {isResendingPortalLink ? 'Resending...' : 'Resend portal access link'}
+          </Button>
+        </div>
       </div>
       
       {submissionResult?.next_steps && (
@@ -2303,4 +2331,3 @@ export default function ApplyPage() {
     </div>
   );
 }
-

@@ -244,6 +244,7 @@ export default function AuditReadyTrainingMatrix({
   // Remove certificate state
   const [removeCertDialogCert, setRemoveCertDialogCert] = useState(null);
   const [noExpiryChecked, setNoExpiryChecked] = useState(false);
+  const [optionalApproveConfirmItem, setOptionalApproveConfirmItem] = useState(null);
   const [removingCert, setRemovingCert] = useState(false);
 
   // Approve-and-verify state
@@ -910,6 +911,19 @@ export default function AuditReadyTrainingMatrix({
       return String(a?.raw_course_title || '').localeCompare(String(b?.raw_course_title || ''));
     });
   })();
+  const groupedCertificates = (() => {
+    const byKey = new Map();
+    for (const cert of certificates) {
+      const key = `${normalizeTrainingAliasKey(cert?.original_filename || cert?.file_name || 'training certificate')}|${String(cert?.uploaded_at || '').slice(0, 10)}`;
+      if (!byKey.has(key)) {
+        byKey.set(key, { ...cert, duplicateCount: 1 });
+      } else {
+        const existing = byKey.get(key);
+        existing.duplicateCount += 1;
+      }
+    }
+    return Array.from(byKey.values());
+  })();
   const trainingLibraryBanner = getTrainingLibraryBannerState({
     proposedItems,
     proposedItemsErrored: sourceErrors.proposedItems,
@@ -1545,7 +1559,20 @@ export default function AuditReadyTrainingMatrix({
                                         variant="outline"
                                         className="h-7 px-2 text-xs"
                                         disabled={sourceErrors.proposedItems}
-                                        onClick={() => openTrainingEvidenceReview(item)}
+                                        onClick={() => {
+                                          if (item.is_unmapped || !item.mapped_training_code) {
+                                            const likelyMandatory = mandatoryTraining.some((m) => {
+                                              const mk = normalizeTrainingAliasKey(m?.title || m?.code || m?.id);
+                                              const ik = normalizeTrainingAliasKey(item?.raw_course_title || item?.mapped_training_title);
+                                              return mk && ik && (mk === ik || mk.includes(ik) || ik.includes(mk));
+                                            });
+                                            if (likelyMandatory) {
+                                              setOptionalApproveConfirmItem(item);
+                                              return;
+                                            }
+                                          }
+                                          openTrainingEvidenceReview(item);
+                                        }}
                                       >
                                         <Eye className="h-3 w-3 mr-1" />
                                         {item.is_unmapped || !item.mapped_training_code
@@ -1823,11 +1850,16 @@ export default function AuditReadyTrainingMatrix({
                   <div>
                     <h4 className="font-semibold text-blue-900 mb-2">Uploaded Certificates</h4>
                     <ul className="space-y-2">
-                      {certificates.map(cert => (
+                      {groupedCertificates.map(cert => (
                         <li key={cert.id} className="border border-gray-200 rounded-lg p-3 flex items-center gap-3">
                           <FileText className="h-5 w-5 text-blue-600" />
                           <span className="font-medium flex-1 min-w-0 truncate">{cert.original_filename || cert.file_name || 'Training Certificate'}</span>
                           <span className="text-xs text-gray-500">Uploaded {formatBackendDate(cert.uploaded_at, { format: 'medium' })}</span>
+                          {cert.duplicateCount > 1 && (
+                            <Badge variant="outline" className="text-xs border-amber-200 text-amber-700">
+                              {cert.duplicateCount} similar files
+                            </Badge>
+                          )}
                           <Button
                             variant="outline"
                             size="sm"
@@ -2230,6 +2262,34 @@ export default function AuditReadyTrainingMatrix({
             >
               {removingCert ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Trash2 className="h-4 w-4 mr-2" />}
               Remove certificate
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!optionalApproveConfirmItem} onOpenChange={(open) => { if (!open) setOptionalApproveConfirmItem(null); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Confirm optional qualification route</DialogTitle>
+            <DialogDescription>
+              This extracted item looks similar to a mandatory training requirement. Approving as optional may leave a work blocker unresolved.
+            </DialogDescription>
+          </DialogHeader>
+          {optionalApproveConfirmItem && (
+            <div className="rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+              {optionalApproveConfirmItem.raw_course_title || optionalApproveConfirmItem.mapped_training_title}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setOptionalApproveConfirmItem(null)}>Cancel</Button>
+            <Button
+              onClick={() => {
+                if (optionalApproveConfirmItem) openTrainingEvidenceReview(optionalApproveConfirmItem);
+                setOptionalApproveConfirmItem(null);
+              }}
+              className="bg-amber-600 hover:bg-amber-700 text-white"
+            >
+              Continue to review
             </Button>
           </DialogFooter>
         </DialogContent>

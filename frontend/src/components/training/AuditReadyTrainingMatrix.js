@@ -571,6 +571,33 @@ export default function AuditReadyTrainingMatrix({
     }
   };
 
+  const handleBatchReject = async () => {
+    if (selectedForBatch.size === 0) return;
+    setBatchVerifying(true);
+    try {
+      const itemsInBatch = proposedItems.filter((p) => p.status === 'proposed' && selectedForBatch.has(p.id));
+      await axios.post(
+        `${API}/employees/${employeeId}/training/proposed-items/review`,
+        {
+          items: itemsInBatch.map((item) => ({
+            item_id: item.id,
+            approve: false,
+            notes: 'Rejected in batch by admin',
+          })),
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success(`${itemsInBatch.length} item${itemsInBatch.length !== 1 ? 's' : ''} rejected`);
+      setSelectedForBatch(new Set());
+      fetchTrainingData();
+      onRefresh?.();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Batch reject failed');
+    } finally {
+      setBatchVerifying(false);
+    }
+  };
+
   const toggleBatchSelect = (itemId) => {
     setSelectedForBatch(prev => {
       const next = new Set(prev);
@@ -1450,6 +1477,16 @@ export default function AuditReadyTrainingMatrix({
                                 )}
                                 Approve & Verify selected
                               </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7 text-xs border-red-300 text-red-700 hover:bg-red-50"
+                                disabled={batchVerifying || sourceErrors.proposedItems}
+                                onClick={handleBatchReject}
+                              >
+                                <XCircle className="h-3 w-3 mr-1" />
+                                Reject selected
+                              </Button>
                             </>
                           ) : (
                             multiDocKeys.length > 0 && (
@@ -1476,6 +1513,17 @@ export default function AuditReadyTrainingMatrix({
                         const quickOk = canQuickVerify(item);
                         const isVerifying = quickVerifying[item.id];
                         const isSelected = selectedForBatch.has(item.id);
+                        const sourceDocId = item?.source_document_id || null;
+                        const normalizedMapped = normalizeTrainingAliasKey(item?.mapped_training_title || item?.mapped_training_code || '');
+                        const likelyDuplicateApproved = !!(
+                          sourceDocId &&
+                          normalizedMapped &&
+                          (Array.isArray(canonicalTrainingRecords) ? canonicalTrainingRecords : []).some((row) => {
+                            if ((row?.source_document_id || null) !== sourceDocId) return false;
+                            const rowNorm = normalizeTrainingAliasKey(row?.title || row?.code || '');
+                            return !!rowNorm && rowNorm === normalizedMapped;
+                          })
+                        );
                         return (
                           <div
                             key={item.id}
@@ -1515,6 +1563,11 @@ export default function AuditReadyTrainingMatrix({
                                     {!item.source_document_id && ' — no source certificate'}
                                   </p>
                                 )}
+                                {likelyDuplicateApproved && (
+                                  <p className="text-xs text-amber-700 mt-0.5">
+                                    Duplicate warning: this certificate already has an approved item mapped to the same qualification.
+                                  </p>
+                                )}
                               </div>
 
                               {/* Badges */}
@@ -1543,7 +1596,14 @@ export default function AuditReadyTrainingMatrix({
                                         size="sm"
                                         className="h-7 px-2 text-xs bg-emerald-600 hover:bg-emerald-700 text-white"
                                         disabled={isVerifying || sourceErrors.proposedItems}
-                                        onClick={() => handleApproveAndVerify(item)}
+                                        onClick={() => {
+                                          if (likelyDuplicateApproved) {
+                                            toast.warning('Duplicate source+mapping detected. Use Review Evidence to reject or remap this item.');
+                                            openTrainingEvidenceReview(item);
+                                            return;
+                                          }
+                                          handleApproveAndVerify(item);
+                                        }}
                                         title="Approve this item and mark it verified in one step"
                                       >
                                         {isVerifying ? (
@@ -2349,7 +2409,4 @@ export default function AuditReadyTrainingMatrix({
     </div>
   );
 }
-
-
-
 

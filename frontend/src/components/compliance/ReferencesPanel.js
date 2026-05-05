@@ -25,9 +25,9 @@ const STATUS_CONFIG = {
   sent: { label: 'Awaiting response', color: 'bg-amber-100 text-amber-700', icon: Send },
   response_received: { label: 'Response received — awaiting admin review', color: 'bg-purple-100 text-purple-700', icon: MessageSquare },
   verified: { label: 'Satisfactory', color: 'bg-green-100 text-green-700', icon: CheckCircle },
-  rejected: { label: 'Unsatisfactory / action required', color: 'bg-red-100 text-red-700', icon: XCircle },
+  rejected: { label: 'Unsatisfactory — worker action required', color: 'bg-red-100 text-red-700', icon: XCircle },
   legacy_unverified: { label: 'Declared referee on file — response evidence not found', color: 'bg-amber-100 text-amber-700', icon: AlertTriangle },
-  mismatch: { label: 'Mismatch — investigation required', color: 'bg-amber-100 text-amber-800', icon: AlertTriangle },
+  mismatch: { label: 'Mismatch — explanation required', color: 'bg-amber-100 text-amber-800', icon: AlertTriangle },
 };
 
 /**

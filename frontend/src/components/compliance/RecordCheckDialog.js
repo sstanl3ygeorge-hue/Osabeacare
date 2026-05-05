@@ -277,12 +277,11 @@ const RTW_METHOD_GUIDANCE = {
 
 // Map check types to requirement IDs for proof file storage
 const CHECK_TYPE_TO_REQUIREMENT = {
-  // Use canonical requirement IDs expected by /employees/{id}/upload-document
-  // validation against MANDATORY_ITEMS.
-  right_to_work: 'right_to_work',
-  right_to_work_check: 'right_to_work',
-  dbs: 'dbs',
-  dbs_status_check: 'dbs',
+  // Must align with backend check/evidence requirement IDs.
+  right_to_work: 'right_to_work_check',
+  right_to_work_check: 'right_to_work_check',
+  dbs: 'dbs_check',
+  dbs_status_check: 'dbs_check',
   identity: 'identity_documents',
   identity_verification: 'identity_documents',
   proof_of_address: 'proof_of_address',

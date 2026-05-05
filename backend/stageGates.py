@@ -900,12 +900,15 @@ class StageGateService:
                 reason_label = MATCH_REASON_LABELS.get(match_reason, match_reason)
 
                 if not matched and not override_reason:
-                    # No employer match AND no documented reason — must be
-                    # resolved per CQC. Per-ref block message is fine here.
-                    _block(
+                    # NHS/CQC dynamic rule:
+                    # - If at least one referee matches the most-recent employer,
+                    #   an additional unmatched referee is a documentation warning.
+                    # - Hard block is applied once at the aggregate level below
+                    #   ONLY when none of the referees match the most-recent employer.
+                    _warn(
                         ref_key,
                         f"Reference employer '{ref_company}' not found in declared employment history — "
-                        "discrepancy must be documented and investigated before approval (NHS guidance)"
+                        "record explanation or replace referee per NHS guidance"
                     )
                 elif matched and not is_most_recent:
                     matched_name = (matching_employer or {}).get("employer_name", "")

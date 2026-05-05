@@ -257,7 +257,7 @@ export default function ReferenceEmploymentComparison({ employeeId, onRefresh })
                       <div className="flex items-center gap-2 mt-1 text-[10px] text-gray-500">
                         <Calendar className="h-3 w-3" />
                         <span>
-                          {emp.start_date || 'N/A'} â€“ {emp.is_current ? 'Present' : (emp.end_date || 'N/A')}
+                          {emp.start_date || 'N/A'} - {emp.is_current ? 'Present' : (emp.end_date || 'N/A')}
                         </span>
                       </div>
                     </div>
@@ -328,8 +328,9 @@ export default function ReferenceEmploymentComparison({ employeeId, onRefresh })
                           )}
                           {status === 'alert' && (
                             <div className="mt-2 p-1.5 bg-red-100/60 rounded text-[10px] text-red-800">
-                              This referee does not match employment history. Do not approve
-                              until a clear explanation is recorded or a replacement referee is provided.
+                              {references.some((r) => r?.compliance_status === 'ok')
+                                ? 'This referee does not match employment history. A most-recent employer match is already on file; record the reason for this additional referee or request a replacement if needed.'
+                                : 'This referee does not match employment history. Do not approve until a clear explanation is recorded or a replacement referee is provided.'}
                             </div>
                           )}
 

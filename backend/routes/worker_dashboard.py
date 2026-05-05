@@ -261,9 +261,33 @@ def build_canonical_next_action(worker_tasks: Optional[list] = None) -> Optional
         return None
 
     blocking = [t for t in pending if bool(t.get("blocking_readiness"))]
-    chosen = (blocking[0] if blocking else pending[0]) if pending else None
-    if not chosen:
+    pool = blocking if blocking else pending
+    if not pool:
         return None
+
+    # Keep top next-action aligned with readiness truth:
+    # unresolved references/employment history/tasks should rank above
+    # contract signing prompts so workers are not sent to contract early.
+    def _priority(task: dict) -> int:
+        key = str(task.get("key") or "").strip().lower()
+        ttype = str(task.get("type") or "").strip().lower()
+        title = str(task.get("title") or "").strip().lower()
+        text = f"{key} {ttype} {title}"
+        if "reference" in text:
+            return 0
+        if "employment_gap" in text or "employment history" in text or "gap" in text:
+            return 1
+        if "right_to_work" in text or "dbs" in text or "identity" in text:
+            return 2
+        if "training" in text or "induction" in text:
+            return 3
+        if "form" in text:
+            return 4
+        if "contract" in text or "handbook" in text:
+            return 9
+        return 5
+
+    chosen = sorted(pool, key=_priority)[0]
 
     return {
         "key": chosen.get("key") or chosen.get("type") or "task",

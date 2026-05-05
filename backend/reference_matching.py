@@ -69,6 +69,17 @@ def normalize_employer(name: str) -> str:
     return strip_employer_suffix(name)
 
 
+def _normalize_before_comma(name: str) -> str:
+    """
+    Normalise only the segment before the first comma.
+    Helps treat "Rayvin Care" and "Rayvin Care, Kent" as the same employer.
+    """
+    raw = (name or "").strip()
+    if "," in raw:
+        raw = raw.split(",", 1)[0].strip()
+    return normalize_employer(raw)
+
+
 def match_employers(
     ref_company: str,
     employment_history: list[dict],
@@ -97,9 +108,14 @@ def match_employers(
 
     # Pass 1 — normalised exact / substring
     for emp in employment_history:
-        emp_norm = normalize_employer(emp.get("employer_name") or "")
+        emp_name = emp.get("employer_name") or ""
+        emp_norm = normalize_employer(emp_name)
         if not emp_norm:
             continue
+        # Treat comma-suffix locality variants as exact.
+        # Example: "Rayvin Care" == "Rayvin Care, Kent"
+        if _normalize_before_comma(ref_company) == _normalize_before_comma(emp_name):
+            return True, emp, "exact"
         if ref_norm == emp_norm:
             return True, emp, "exact"
         if ref_norm in emp_norm or emp_norm in ref_norm:

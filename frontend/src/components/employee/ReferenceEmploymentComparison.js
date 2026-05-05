@@ -143,7 +143,10 @@ export default function ReferenceEmploymentComparison({ employeeId, onRefresh })
 
   const alertCount = references.filter(r => r?.compliance_status === 'alert').length;
   const hasMostRecentEmployerMatch = references.some((r) => r?.compliance_status === 'ok');
-  const effectiveHardDiscrepancy = hasDiscrepancy && !hasMostRecentEmployerMatch;
+  // Final rule: once at least one referee matches the most-recent employer,
+  // cross-check stays in pass state (green). Additional unmatched referees are
+  // documented as follow-up notes, not hard-fail blockers.
+  const effectiveHardDiscrepancy = hasDiscrepancy && matchedCount === 0;
 
   // Header badge
   // hasDiscrepancy = true only for alert (no-match) refs
@@ -154,6 +157,13 @@ export default function ReferenceEmploymentComparison({ employeeId, onRefresh })
       <Badge className="bg-red-100 text-red-700">
         <XCircle className="h-3 w-3 mr-1" />
         {alertCount} no employment match
+      </Badge>
+    );
+  } else if (hasMostRecentEmployerMatch) {
+    headerBadge = (
+      <Badge className="bg-green-100 text-green-700">
+        <CheckCircle className="h-3 w-3 mr-1" />
+        Most-recent match on file
       </Badge>
     );
   } else if (hasWarnings || (alertCount > 0 && hasMostRecentEmployerMatch)) {
@@ -208,6 +218,8 @@ export default function ReferenceEmploymentComparison({ employeeId, onRefresh })
             }
             {effectiveHardDiscrepancy
               ? 'At least one referee does not match employment history. Do not approve until you record an explanation or request a replacement referee.'
+              : hasMostRecentEmployerMatch
+              ? 'Most-recent employer match is on file. Record notes for any additional unmatched referee where needed.'
               : (hasWarnings || (alertCount > 0 && hasMostRecentEmployerMatch))
               ? 'A referee matches an earlier employer (not the most recent). Record a reason in the recruitment file per NHS guidance.'
               : (alert.message || 'Reference-employment cross-check complete.')}
@@ -390,15 +402,17 @@ export default function ReferenceEmploymentComparison({ employeeId, onRefresh })
             <div className={`mt-4 p-3 rounded-lg border ${
               effectiveHardDiscrepancy
                 ? 'bg-red-50 border-red-200'
+                : hasMostRecentEmployerMatch
+                ? 'bg-green-50 border-green-200'
                 : 'bg-amber-50 border-amber-200'
             }`}>
               <h5 className={`text-sm font-medium mb-2 ${
-                effectiveHardDiscrepancy ? 'text-red-800' : 'text-amber-800'
+                effectiveHardDiscrepancy ? 'text-red-800' : hasMostRecentEmployerMatch ? 'text-green-800' : 'text-amber-800'
               }`}>
-                {effectiveHardDiscrepancy ? 'Required Actions (NHS / CQC)' : 'NHS Documentation Required'}
+                {effectiveHardDiscrepancy ? 'Required Actions (NHS / CQC)' : hasMostRecentEmployerMatch ? 'Cross-check Passed' : 'NHS Documentation Required'}
               </h5>
               <ul className={`space-y-1 text-xs ${
-                effectiveHardDiscrepancy ? 'text-red-700' : 'text-amber-700'
+                effectiveHardDiscrepancy ? 'text-red-700' : hasMostRecentEmployerMatch ? 'text-green-700' : 'text-amber-700'
               }`}>
                 {alertCount > 0 && (
                   <>

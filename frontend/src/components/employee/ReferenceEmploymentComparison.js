@@ -194,7 +194,7 @@ export default function ReferenceEmploymentComparison({ employeeId, onRefresh })
         </div>
 
         {/* Alert banner */}
-        {alert.show && alert.message && (
+        {alert.show && (
           <div className={`mt-2 p-2 rounded-lg border text-xs flex items-start gap-1 ${
             alert.level === 'alert'
               ? 'bg-red-50 border-red-200 text-red-700'
@@ -204,7 +204,11 @@ export default function ReferenceEmploymentComparison({ employeeId, onRefresh })
               ? <XCircle className="h-3 w-3 shrink-0 mt-0.5" />
               : <AlertTriangle className="h-3 w-3 shrink-0 mt-0.5" />
             }
-            {alert.message}
+            {hasDiscrepancy
+              ? 'At least one referee does not match employment history. Do not approve until you record an explanation or request a replacement referee.'
+              : hasWarnings
+              ? 'A referee matches an earlier employer (not the most recent). Record a reason in the recruitment file per NHS guidance.'
+              : (alert.message || 'Reference-employment cross-check complete.')}
           </div>
         )}
       </CardHeader>
@@ -324,8 +328,8 @@ export default function ReferenceEmploymentComparison({ employeeId, onRefresh })
                           )}
                           {status === 'alert' && (
                             <div className="mt-2 p-1.5 bg-red-100/60 rounded text-[10px] text-red-800">
-                              No declared employment match found. Do not approve until an explanation
-                              has been obtained and documented.
+                              This referee does not match employment history. Do not approve
+                              until a clear explanation is recorded or a replacement referee is provided.
                             </div>
                           )}
 
@@ -389,7 +393,7 @@ export default function ReferenceEmploymentComparison({ employeeId, onRefresh })
                   <>
                     <li className="flex items-start gap-1">
                       <span className="w-1 h-1 rounded-full bg-red-400 mt-1.5 shrink-0" />
-                      Obtain and document explanation for reference(s) not found in declared employment history
+                      Obtain and document explanation for reference(s) that do not match employment history
                     </li>
                     <li className="flex items-start gap-1">
                       <span className="w-1 h-1 rounded-full bg-red-400 mt-1.5 shrink-0" />
@@ -400,13 +404,13 @@ export default function ReferenceEmploymentComparison({ employeeId, onRefresh })
                 {warningCount > 0 && (
                   <li className="flex items-start gap-1">
                     <span className="w-1 h-1 rounded-full bg-amber-400 mt-1.5 shrink-0" />
-                    Reference matched to an earlier employer (valid match)  record the reason in the recruitment file per NHS guidance
+                    One referee matches an earlier employer (valid). Record the reason in the recruitment file per NHS guidance.
                   </li>
                 )}
                 {hasDiscrepancy && (
                   <li className="flex items-start gap-1">
                     <span className="w-1 h-1 rounded-full bg-gray-400 mt-1.5 shrink-0" />
-                    All unmatched reference discrepancies must be documented before approval
+                    If any referee does not match employment history, document the discrepancy before approval.
                   </li>
                 )}
               </ul>

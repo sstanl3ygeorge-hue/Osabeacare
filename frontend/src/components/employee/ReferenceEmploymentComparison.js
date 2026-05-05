@@ -142,23 +142,25 @@ export default function ReferenceEmploymentComparison({ employeeId, onRefresh })
   } = comparison_summary;
 
   const alertCount = references.filter(r => r?.compliance_status === 'alert').length;
+  const hasMostRecentEmployerMatch = references.some((r) => r?.compliance_status === 'ok');
+  const effectiveHardDiscrepancy = hasDiscrepancy && !hasMostRecentEmployerMatch;
 
   // Header badge
   // hasDiscrepancy = true only for alert (no-match) refs
   // hasWarnings    = true for earlier-employer (valid match) refs
   let headerBadge;
-  if (hasDiscrepancy) {
+  if (effectiveHardDiscrepancy) {
     headerBadge = (
       <Badge className="bg-red-100 text-red-700">
         <XCircle className="h-3 w-3 mr-1" />
         {alertCount} no employment match
       </Badge>
     );
-  } else if (hasWarnings) {
+  } else if (hasWarnings || (alertCount > 0 && hasMostRecentEmployerMatch)) {
     headerBadge = (
       <Badge className="bg-amber-100 text-amber-700">
         <Info className="h-3 w-3 mr-1" />
-        {warningCount} earlier employer — review required
+        {(warningCount > 0 ? warningCount : alertCount)} review required
       </Badge>
     );
   } else {
@@ -172,7 +174,7 @@ export default function ReferenceEmploymentComparison({ employeeId, onRefresh })
 
   return (
     <Card
-      className={`border shadow-sm ${hasDiscrepancy ? 'border-red-200' : hasWarnings ? 'border-amber-200' : 'border-[#E4E8EB]'}`}
+      className={`border shadow-sm ${effectiveHardDiscrepancy ? 'border-red-200' : (hasWarnings || (alertCount > 0 && hasMostRecentEmployerMatch)) ? 'border-amber-200' : 'border-[#E4E8EB]'}`}
       data-testid="reference-employment-comparison"
     >
       <CardHeader className="pb-2">
@@ -182,7 +184,7 @@ export default function ReferenceEmploymentComparison({ employeeId, onRefresh })
           onClick={() => setExpanded(!expanded)}
         >
           <CardTitle className="font-heading text-base flex items-center gap-2">
-            <Users className={`h-5 w-5 ${hasDiscrepancy ? 'text-red-600' : hasWarnings ? 'text-amber-600' : 'text-primary'}`} />
+            <Users className={`h-5 w-5 ${effectiveHardDiscrepancy ? 'text-red-600' : (hasWarnings || (alertCount > 0 && hasMostRecentEmployerMatch)) ? 'text-amber-600' : 'text-primary'}`} />
             Reference-Employment Cross Check
           </CardTitle>
           <div className="flex items-center gap-2">
@@ -204,9 +206,9 @@ export default function ReferenceEmploymentComparison({ employeeId, onRefresh })
               ? <XCircle className="h-3 w-3 shrink-0 mt-0.5" />
               : <AlertTriangle className="h-3 w-3 shrink-0 mt-0.5" />
             }
-            {hasDiscrepancy
+            {effectiveHardDiscrepancy
               ? 'At least one referee does not match employment history. Do not approve until you record an explanation or request a replacement referee.'
-              : hasWarnings
+              : (hasWarnings || (alertCount > 0 && hasMostRecentEmployerMatch))
               ? 'A referee matches an earlier employer (not the most recent). Record a reason in the recruitment file per NHS guidance.'
               : (alert.message || 'Reference-employment cross-check complete.')}
           </div>
@@ -225,11 +227,11 @@ export default function ReferenceEmploymentComparison({ employeeId, onRefresh })
               <p className="text-2xl font-bold text-gray-700">{totalDeclared}</p>
               <p className="text-xs text-gray-500">References Declared</p>
             </div>
-            <div className={`p-2 rounded-lg text-center ${hasDiscrepancy ? 'bg-red-50' : 'bg-green-50'}`}>
-              <p className={`text-2xl font-bold ${hasDiscrepancy ? 'text-red-700' : 'text-green-700'}`}>
+            <div className={`p-2 rounded-lg text-center ${effectiveHardDiscrepancy ? 'bg-red-50' : (hasWarnings || (alertCount > 0 && hasMostRecentEmployerMatch)) ? 'bg-amber-50' : 'bg-green-50'}`}>
+              <p className={`text-2xl font-bold ${effectiveHardDiscrepancy ? 'text-red-700' : (hasWarnings || (alertCount > 0 && hasMostRecentEmployerMatch)) ? 'text-amber-700' : 'text-green-700'}`}>
                 {matchedCount}
               </p>
-              <p className={`text-xs ${hasDiscrepancy ? 'text-red-600' : 'text-green-600'}`}>Matched</p>
+              <p className={`text-xs ${effectiveHardDiscrepancy ? 'text-red-600' : (hasWarnings || (alertCount > 0 && hasMostRecentEmployerMatch)) ? 'text-amber-600' : 'text-green-600'}`}>Matched</p>
             </div>
           </div>
 
@@ -376,19 +378,19 @@ export default function ReferenceEmploymentComparison({ employeeId, onRefresh })
 
 
           {/* Action items */}
-          {(hasDiscrepancy || hasWarnings) && (
+          {(effectiveHardDiscrepancy || hasWarnings || (alertCount > 0 && hasMostRecentEmployerMatch)) && (
             <div className={`mt-4 p-3 rounded-lg border ${
-              hasDiscrepancy
+              effectiveHardDiscrepancy
                 ? 'bg-red-50 border-red-200'
                 : 'bg-amber-50 border-amber-200'
             }`}>
               <h5 className={`text-sm font-medium mb-2 ${
-                hasDiscrepancy ? 'text-red-800' : 'text-amber-800'
+                effectiveHardDiscrepancy ? 'text-red-800' : 'text-amber-800'
               }`}>
-                {hasDiscrepancy ? 'Required Actions (NHS / CQC)' : 'NHS Documentation Required'}
+                {effectiveHardDiscrepancy ? 'Required Actions (NHS / CQC)' : 'NHS Documentation Required'}
               </h5>
               <ul className={`space-y-1 text-xs ${
-                hasDiscrepancy ? 'text-red-700' : 'text-amber-700'
+                effectiveHardDiscrepancy ? 'text-red-700' : 'text-amber-700'
               }`}>
                 {alertCount > 0 && (
                   <>
@@ -408,7 +410,7 @@ export default function ReferenceEmploymentComparison({ employeeId, onRefresh })
                     One referee matches an earlier employer (valid). Record the reason in the recruitment file per NHS guidance.
                   </li>
                 )}
-                {hasDiscrepancy && (
+                {effectiveHardDiscrepancy && (
                   <li className="flex items-start gap-1">
                     <span className="w-1 h-1 rounded-full bg-gray-400 mt-1.5 shrink-0" />
                     If any referee does not match employment history, document the discrepancy before approval.

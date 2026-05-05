@@ -25,7 +25,7 @@ const MATCH_REASON_LABELS = {
 // ---------------------------------------------------------------------------
 // Per-reference compliance badge (three-tier NHS model)
 // ---------------------------------------------------------------------------
-function ComplianceStatusBadge({ status, isMostRecent }) {
+function ComplianceStatusBadge({ status }) {
   if (status === 'ok') {
     return (
       <Badge className="bg-green-100 text-green-800 text-[10px] flex items-center gap-0.5 shrink-0">
@@ -282,7 +282,13 @@ export default function ReferenceEmploymentComparison({ employeeId, onRefresh })
                 )}
                 {references.map((ref, idx) => {
                   if (!ref) return null;
-                  const status = ref.compliance_status || 'alert';
+                  const rawStatus = ref.compliance_status || 'alert';
+                  // If we already have one most-recent-employer match on file,
+                  // additional unmatched referees are a documentation warning,
+                  // not a hard-fail blocker on their own.
+                  const status = (
+                    rawStatus === 'alert' && hasMostRecentEmployerMatch
+                  ) ? 'warning' : rawStatus;
                   const matchLabel = MATCH_REASON_LABELS[ref.match_reason] || MATCH_REASON_LABELS.none;
                   const hasName = Boolean(ref.name);
 
@@ -328,9 +334,11 @@ export default function ReferenceEmploymentComparison({ employeeId, onRefresh })
                               Review and record explanation if required (NHS guidance).
                             </div>
                           )}
-                          {status === 'alert' && (
-                            <div className="mt-2 p-1.5 bg-red-100/60 rounded text-[10px] text-red-800">
-                              {references.some((r) => r?.compliance_status === 'ok')
+                          {rawStatus === 'alert' && (
+                            <div className={`mt-2 p-1.5 rounded text-[10px] ${
+                              hasMostRecentEmployerMatch ? 'bg-amber-100/70 text-amber-800' : 'bg-red-100/60 text-red-800'
+                            }`}>
+                              {hasMostRecentEmployerMatch
                                 ? 'This referee does not match employment history. A most-recent employer match is already on file; record the reason for this additional referee or request a replacement if needed.'
                                 : 'This referee does not match employment history. Do not approve until a clear explanation is recorded or a replacement referee is provided.'}
                             </div>

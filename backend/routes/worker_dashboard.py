@@ -1937,6 +1937,25 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             if admin_user:
                 verified_by_name = f"{admin_user.get('first_name', '')} {admin_user.get('last_name', '')}".strip()
         
+        # Worker action-path normalization:
+        # Any rejected or unresolved mismatch state must expose a clear worker
+        # path (provide new referee OR explain mismatch) so the dashboard never
+        # lands in a blocked state with no actionable control.
+        unresolved_mismatch = bool(
+            mismatch_is_detected and not mismatch_is_resolved
+        )
+        requires_mismatch_explanation = bool(
+            unresolved_mismatch
+            and not mismatch_explanation
+            and mismatch_admin_decision != "accepted"
+        )
+        can_provide_new = bool(
+            data_cleared
+            or ref_status == "not_declared"
+            or ref_status == "rejected"
+            or (unresolved_mismatch and mismatch_admin_decision == "rejected")
+        )
+
         references_status.append({
             "reference_number": ref_num,
             "referee_name": referee_name if is_declared else None,
@@ -1944,7 +1963,9 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             "status": ref_status,
             "status_label": status_label,
             "rejection_reason": rejection_reason if (is_rejected or data_cleared) else None,
-            "can_provide_new": data_cleared or ref_status == "not_declared",
+            "can_provide_new": can_provide_new,
+            "requires_mismatch_explanation": requires_mismatch_explanation,
+            "needs_explanation": requires_mismatch_explanation,
             "verified_at": verified_at,
             "verified_by_name": verified_by_name,
             "response_received_at": response_received_at,

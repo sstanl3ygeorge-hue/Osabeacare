@@ -627,6 +627,13 @@ export default function ReferencesPanel({ employeeId, employee, onRefresh, onEdi
                         </p>
                       </div>
                     )}
+                    {!replacementRequested && (displayStatus === 'rejected' || displayStatus === 'mismatch') && (
+                      <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2" data-testid={`reference-action-required-${refNum}`}>
+                        <p className="text-xs font-medium text-rose-800">
+                          This referee does not currently count toward readiness. Ask worker to provide a replacement referee with reason.
+                        </p>
+                      </div>
+                    )}
                     {/* Declared Info */}
                     {declared.name && !replacementRequested ? (
                       <div className="space-y-3">

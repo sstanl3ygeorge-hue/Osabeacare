@@ -1993,14 +1993,20 @@ export default function WorkerDashboard() {
       const blockerCount = Array.isArray(lockedContract.contract_signing_blockers)
         ? lockedContract.contract_signing_blockers.length
         : 0;
+      const hasReferenceOrGapBlockers = (Array.isArray(legalBlockers) ? legalBlockers : []).some((b) => {
+        const gate = String(b?.gate || b?.id || '').toLowerCase();
+        return gate.includes('reference') || gate.includes('employment_gap');
+      });
       return {
         key: 'contract_locked',
-        title: 'Contract awaiting earlier steps',
-        description: blockerCount > 0
-          ? `${blockerCount} item${blockerCount === 1 ? '' : 's'} still needed before your contract can be signed.`
-          : 'Your contract will unlock once the remaining onboarding checks are complete.',
-        primaryLabel: 'See what\'s outstanding',
-        route: '#agreements-section',
+        title: hasReferenceOrGapBlockers ? 'Resolve onboarding blockers first' : 'Contract awaiting earlier steps',
+        description: hasReferenceOrGapBlockers
+          ? 'Please resolve your reference and employment-history blockers first. Your contract will unlock after those checks are cleared.'
+          : (blockerCount > 0
+            ? `${blockerCount} item${blockerCount === 1 ? '' : 's'} still needed before your contract can be signed.`
+            : 'Your contract will unlock once the remaining onboarding checks are complete.'),
+        primaryLabel: hasReferenceOrGapBlockers ? 'Review blockers' : 'See what\'s outstanding',
+        route: hasReferenceOrGapBlockers ? '#checks-card' : '#agreements-section',
         level: 'high',
       };
     }

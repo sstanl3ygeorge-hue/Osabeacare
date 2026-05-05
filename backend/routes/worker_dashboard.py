@@ -701,7 +701,6 @@ async def acknowledge_worker_agreement(
     await try_auto_promote_worker(employee_id)
 
     refreshed = await read_employee_agreement_state(db, employee, normalized_agreement_type)
-    next_action = build_canonical_next_action(worker_tasks)
 
     return {
         "success": True,
@@ -2124,6 +2123,8 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
         recurring_summary["items"] = normalized
         recurring_summary["preview"] = normalized[:5]
     
+    next_action = build_canonical_next_action(worker_tasks)
+
     return {
         "employee": {
             "id": employee_id,

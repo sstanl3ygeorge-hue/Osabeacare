@@ -278,8 +278,8 @@ const RTW_METHOD_GUIDANCE = {
 // Map check types to requirement IDs for proof file storage
 const CHECK_TYPE_TO_REQUIREMENT = {
   // Must align with backend check/evidence requirement IDs.
-  right_to_work: 'right_to_work_check',
-  right_to_work_check: 'right_to_work_check',
+  right_to_work: 'right_to_work',
+  right_to_work_check: 'right_to_work',
   dbs: 'dbs_check',
   dbs_status_check: 'dbs_check',
   identity: 'identity_documents',

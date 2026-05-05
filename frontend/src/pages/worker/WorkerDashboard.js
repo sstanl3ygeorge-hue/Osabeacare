@@ -2036,14 +2036,21 @@ export default function WorkerDashboard() {
   const actionableWorkerTasks = pendingWorkerTasks
     .map((task) => ({ task, mapped: mapWorkerTaskToNextAction(task) }))
     .filter((x) => Boolean(x.mapped));
-  const displayedNextAction = (canonicalNextAction && canonicalNextAction.key ? {
-    key: canonicalNextAction.key,
-    title: canonicalNextAction.title || 'Action required',
-    description: canonicalNextAction.description || 'Open this task to continue your onboarding.',
-    primaryLabel: canonicalNextAction.primary_label || 'Open task',
-    route: canonicalNextAction.route || '/worker/dashboard',
-    level: canonicalNextAction.level || 'high',
-  } : null)
+  const canonicalNextActionMapped = (() => {
+    if (!(canonicalNextAction && canonicalNextAction.key)) return null;
+    const taskLike = {
+      key: canonicalNextAction.key,
+      type: canonicalNextAction.key,
+      title: canonicalNextAction.title,
+      description: canonicalNextAction.description,
+      action_route: canonicalNextAction.route,
+      blocking_readiness: canonicalNextAction.level === 'critical',
+      status: 'pending',
+    };
+    return mapWorkerTaskToNextAction(taskLike);
+  })();
+
+  const displayedNextAction = canonicalNextActionMapped
     || (actionableWorkerTasks[0] && actionableWorkerTasks[0].mapped)
     || synthesizeAgreementNextAction();
 

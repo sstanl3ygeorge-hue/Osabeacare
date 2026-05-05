@@ -260,8 +260,6 @@ def build_canonical_next_action(worker_tasks: Optional[list] = None) -> Optional
     if not chosen:
         return None
 
-    next_action = build_canonical_next_action(worker_tasks)
-
     return {
         "key": chosen.get("key") or chosen.get("type") or "task",
         "title": chosen.get("title") or "Action required",
@@ -703,6 +701,8 @@ async def acknowledge_worker_agreement(
     await try_auto_promote_worker(employee_id)
 
     refreshed = await read_employee_agreement_state(db, employee, normalized_agreement_type)
+    next_action = build_canonical_next_action(worker_tasks)
+
     return {
         "success": True,
         "agreement": refreshed,

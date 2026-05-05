@@ -579,6 +579,7 @@ export default function ReferencesPanel({ employeeId, employee, onRefresh, onEdi
               const request = ref?.request || {};
               const response = ref?.response || {};
               const verification = ref?.verification || {};
+              const replacementRequested = Boolean(ref?.replacement_requested_at || request?.replacement_requested_at);
               const rawStatus = ref?.status || 'not_declared';
               const displayStatus = deriveDisplayStatus(ref);
               const config = STATUS_CONFIG[displayStatus] || STATUS_CONFIG.not_declared;
@@ -599,7 +600,7 @@ export default function ReferencesPanel({ employeeId, employee, onRefresh, onEdi
                       Reference {refNum}
                     </h3>
                     <div className="flex items-center gap-2">
-                      {declared.name && onEditReference && (
+                      {declared.name && !replacementRequested && onEditReference && (
                         <Button
                           variant="ghost"
                           size="sm"
@@ -619,8 +620,15 @@ export default function ReferencesPanel({ employeeId, employee, onRefresh, onEdi
 
                   {/* Content */}
                   <div className="p-4 space-y-4">
+                    {replacementRequested && (
+                      <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2" data-testid={`reference-replacement-pending-${refNum}`}>
+                        <p className="text-xs font-medium text-amber-800">
+                          Replacement requested: waiting for worker to provide new referee details.
+                        </p>
+                      </div>
+                    )}
                     {/* Declared Info */}
-                    {declared.name ? (
+                    {declared.name && !replacementRequested ? (
                       <div className="space-y-3">
                         <div className="flex items-start gap-3">
                           <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">

@@ -18,7 +18,6 @@ import {
 } from 'lucide-react';
 import DocumentExtractionReview from '../../components/documents/DocumentExtractionReview';
 import { formatBackendDate, formatBackendDateTime } from '../../lib/dateUtils';
-import { isActiveLifecycleStatus } from '../../lib/lifecycle';
 import API_BASE from '../../utils/apiBase';
 
 const API = API_BASE;
@@ -157,10 +156,12 @@ export default function TrainingPage() {
       ]);
       
       setTraining(trainingRes.data || []);
-      const activeWorkforceEmployees = (employeesRes.data || []).filter((employee) => {
-        return isActiveLifecycleStatus(employee?.status);
-      });
-      setEmployees(activeWorkforceEmployees);
+      // Keep employee-stage list authoritative from backend.
+      // We previously applied an extra strict client-side lifecycle filter
+      // which could hide valid employee-stage staff from the matrix.
+      // This caused "All employees" to miss people even though they exist
+      // in the employee-stage dataset.
+      setEmployees(employeesRes.data || []);
       
       // Set training definitions from canonical source
       if (defsRes?.data?.definitions) {

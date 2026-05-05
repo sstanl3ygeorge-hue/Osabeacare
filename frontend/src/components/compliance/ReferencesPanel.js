@@ -66,6 +66,17 @@ function deriveDisplayStatus(ref) {
   return status;
 }
 
+function getMismatchTypeLabel(typeValue) {
+  const t = String(typeValue || '').toLowerCase();
+  if (t.includes('identity') || t.includes('email') || t.includes('name') || t.includes('organisation')) {
+    return 'referee details mismatch';
+  }
+  if (t.includes('employment') || t.includes('recent_employer') || t.includes('earlier_employer')) {
+    return 'employment mismatch';
+  }
+  return 'mismatch';
+}
+
 export default function ReferencesPanel({ employeeId, employee, onRefresh, onEditReference }) {
   const [references, setReferences] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -905,6 +916,9 @@ export default function ReferencesPanel({ employeeId, employee, onRefresh, onEdi
                                 </div>
                               )}
                               {canReviewMismatch && (
+                                (() => {
+                                  const reviewTypeLabel = getMismatchTypeLabel(ref?.integrity?.mismatch_explanation_type);
+                                  return (
                                 <Button
                                   size="sm"
                                   variant="outline"
@@ -913,8 +927,10 @@ export default function ReferencesPanel({ employeeId, employee, onRefresh, onEdi
                                   data-testid={`review-explanation-inline-btn-${refNum}`}
                                 >
                                   <MessageSquare className="h-4 w-4 mr-2" />
-                                  Review Mismatch Explanation
+                                  {`Review ${reviewTypeLabel}`}
                                 </Button>
+                                  );
+                                })()
                               )}
                               {displayStatus === 'response_received' && !hasCanonicalResponse && (
                                 <div className="bg-amber-50 rounded-lg p-3 border border-amber-200">
@@ -960,7 +976,7 @@ export default function ReferencesPanel({ employeeId, employee, onRefresh, onEdi
                                 <p className="text-xs font-semibold text-slate-700 mb-1">
                                   Worker Explanation{' '}
                                   <span className="text-slate-400 font-normal">
-                                    ({ref.integrity.mismatch_explanation_type || 'other'})
+                                    ({getMismatchTypeLabel(ref.integrity.mismatch_explanation_type || 'other')})
                                   </span>
                                 </p>
                                 <p className="text-xs text-slate-600 mb-2">{ref.integrity.mismatch_explanation}</p>
@@ -975,6 +991,9 @@ export default function ReferencesPanel({ employeeId, employee, onRefresh, onEdi
                                     {ref.integrity.mismatch_admin_notes && ` — ${ref.integrity.mismatch_admin_notes}`}
                                   </p>
                                 ) : (
+                                  (() => {
+                                    const reviewTypeLabel = getMismatchTypeLabel(ref?.integrity?.mismatch_explanation_type);
+                                    return (
                                   <Button
                                     size="sm"
                                     variant="outline"
@@ -983,15 +1002,17 @@ export default function ReferencesPanel({ employeeId, employee, onRefresh, onEdi
                                     data-testid={`review-explanation-btn-${refNum}`}
                                   >
                                     <MessageSquare className="h-3 w-3 mr-1" />
-                                    Review Explanation
+                                    {`Review ${reviewTypeLabel}`}
                                   </Button>
+                                    );
+                                  })()
                                 )}
                               </div>
                             )}
 
                             {!ref.integrity.mismatch_explanation && (
                               <p className="text-xs text-amber-600 italic">
-                                Awaiting worker explanation via dashboard task.
+                                Awaiting worker {getMismatchTypeLabel(ref.integrity.mismatch_explanation_type)} explanation via dashboard task.
                               </p>
                             )}
                           </div>

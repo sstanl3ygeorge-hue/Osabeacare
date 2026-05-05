@@ -3668,8 +3668,29 @@ export default function WorkerDashboard() {
                               ? mismatch.existing_explanation
                               : undefined,
                           };
-                          const buttonLabel =
-                            hasExistingExplanation ? 'Update explanation' : 'Explain mismatch';
+                          const mismatchType =
+                            String(
+                              mismatch?.mismatch_type ||
+                              mismatch?.type ||
+                              mismatch?.existing_explanation?.type ||
+                              ''
+                            ).toLowerCase();
+                          const isIdentityMismatch =
+                            mismatchType.includes('identity') ||
+                            mismatchType.includes('email') ||
+                            mismatchType.includes('name') ||
+                            mismatchType.includes('organisation');
+                          const isEmploymentMismatch =
+                            mismatchType.includes('employment') ||
+                            mismatchType.includes('recent_employer') ||
+                            mismatchType.includes('earlier_employer');
+                          const buttonLabel = hasExistingExplanation
+                            ? 'Update explanation'
+                            : isIdentityMismatch
+                              ? 'Explain referee details'
+                              : isEmploymentMismatch
+                                ? 'Explain employment mismatch'
+                                : 'Explain mismatch';
                           return (
                             <Button
                               size="sm"

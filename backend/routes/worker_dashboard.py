@@ -184,6 +184,7 @@ def build_worker_tasks(
                 }
             )
 
+    has_reference_worker_blocker = False
     for blocker in readiness_blockers or []:
         classification = str(blocker.get("classification") or "").strip().lower()
         if classification != "worker_action":
@@ -211,6 +212,8 @@ def build_worker_tasks(
             task_type = "form"
         elif blocker_id.startswith("reference_") or "employment_gap" in blocker_id:
             route = "/worker/dashboard#checks"
+            if blocker_id.startswith("reference_"):
+                has_reference_worker_blocker = True
 
         _add_task(
             {
@@ -227,7 +230,9 @@ def build_worker_tasks(
 
     contract_state = str((contract_status or {}).get("contract_state") or (contract_status or {}).get("status") or "").strip().lower()
     contract_can_sign = bool((contract_status or {}).get("can_sign"))
-    if contract_state == "pending_signature" and contract_can_sign:
+    # Do not prioritize contract signing while worker-action reference blockers
+    # remain unresolved. This keeps next-action truth aligned with readiness.
+    if contract_state == "pending_signature" and contract_can_sign and not has_reference_worker_blocker:
         _add_task(
             {
                 "type": "contract",
@@ -1788,6 +1793,8 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             request_status = request_data.get("status")
             request_token = request_data.get("token")
             request_sent = bool(request_sent_at) or request_status in ["awaiting_response", "requested", "sent"] or bool(request_token)
+            replacement_requested_at = request_data.get("replacement_requested_at")
+            replacement_requested = bool(replacement_requested_at) or request_status == "replacement_requested"
 
             response_received_at = response_data.get("received_at")
             response_received = (
@@ -1803,7 +1810,7 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             is_rejected = verification_data.get("status") == "rejected" or request_status == "rejected"
             rejection_reason = verification_data.get("rejection_reason", "")
 
-            data_cleared = is_rejected and not referee_name
+            data_cleared = (is_rejected and not referee_name) or replacement_requested
             mismatch_explanation = mismatch_data.get("reason") or mismatch_data.get("notes")
             mismatch_explanation_status = "documented" if mismatch_data.get("documented") else "not_submitted"
             # Admin writes decision to employee flat fields only; db.references.mismatch.detected is a bool flag.
@@ -1823,6 +1830,14 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             )
             if is_verified and mismatch_is_detected and not mismatch_is_resolved:
                 is_verified = False
+
+            # Replacement requested supersedes previously declared referee.
+            # Worker should only see "provide new referee" as the action item.
+            if replacement_requested:
+                referee_name = ""
+                referee_email = ""
+                is_declared = False
+                response_received = False
         else:
             referee_name = employee.get(f"{prefix}name", "")
             referee_email = employee.get(f"{prefix}email", "")
@@ -1832,6 +1847,8 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             request_status = employee.get(f"{prefix}request_status")
             request_token = employee.get(f"{prefix}request_token")
             request_sent = bool(request_sent_at) or request_status in ["awaiting_response", "requested", "sent"] or bool(request_token)
+            replacement_requested_at = employee.get(f"{prefix}replacement_requested_at")
+            replacement_requested = bool(replacement_requested_at) or request_status == "replacement_requested"
 
             response_data = employee.get(f"{prefix}response_data")
             response_received_at = employee.get(f"{prefix}response_received_at")
@@ -1849,7 +1866,7 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             is_rejected = employee.get(f"{prefix}rejected", False) or request_status == "rejected"
             rejection_reason = employee.get(f"{prefix}rejection_reason", "")
 
-            data_cleared = is_rejected and not referee_name
+            data_cleared = (is_rejected and not referee_name) or replacement_requested
             mismatch_explanation = employee.get(f"{prefix}mismatch_explanation")
             mismatch_explanation_status = employee.get(f"{prefix}mismatch_explanation_status", "not_submitted")
             mismatch_admin_decision = employee.get(f"{prefix}mismatch_admin_decision")
@@ -1861,6 +1878,12 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
                 or employee.get(f"{prefix}mismatch_override_reason")
             ):
                 is_verified = False
+
+            if replacement_requested:
+                referee_name = ""
+                referee_email = ""
+                is_declared = False
+                response_received = False
         
         if is_verified:
             ref_status = "verified"

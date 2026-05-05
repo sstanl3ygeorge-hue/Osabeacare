@@ -16198,16 +16198,15 @@ async def export_employee_file(employee_id: str, user: dict = Depends(get_curren
     }
     
     with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
-        # Create empty folders
-        for folder in folders:
-            zf.writestr(f"{folder}/.gitkeep", "")
-        
+        section_file_counts = {folder: 0 for folder in folders}
+        empty_section_notes = {}
+
         # Add generated forms
         forms = await db.generated_forms.find(
             {"employee_id": employee_id, "status": {"$in": ["completed", "reviewed", "signed_off"]}},
             {"_id": 0}
         ).to_list(100)
-        
+
         for form in forms:
             folder = form_folder_map.get(form.get("template_name"), "O_Other")
             filename = f"{form.get('template_name', 'Form')}_{form.get('id', 'unknown')[:8]}.json"
@@ -16222,13 +16221,14 @@ async def export_employee_file(employee_id: str, user: dict = Depends(get_curren
             }
             import json
             zf.writestr(f"{folder}/{filename}", json.dumps(form_content, indent=2))
-        
+            section_file_counts[folder] = section_file_counts.get(folder, 0) + 1
+
         # Add uploaded documents
         documents = await db.employee_documents.find(
             {"employee_id": employee_id},
             {"_id": 0}
         ).to_list(100)
-        
+
         for doc in documents:
             folder = doc_folder_map.get(doc.get("document_type"), "O_Other")
             file_url = doc.get("file_url")
@@ -16238,15 +16238,16 @@ async def export_employee_file(employee_id: str, user: dict = Depends(get_curren
                     ext = ".pdf" if "pdf" in content_type else ".file"
                     filename = doc.get("original_filename") or f"{doc.get('document_type', 'document')}_{doc.get('id', 'unknown')[:8]}{ext}"
                     zf.writestr(f"{folder}/{filename}", content)
+                    section_file_counts[folder] = section_file_counts.get(folder, 0) + 1
                 except Exception as e:
                     logger.error(f"Failed to add document to ZIP: {e}")
-        
+
         # Add training records summary
         training = await db.training_records.find(
             {"employee_id": employee_id},
             {"_id": 0}
         ).to_list(100)
-        
+
         if training:
             import json
             training_summary = []
@@ -16259,7 +16260,8 @@ async def export_employee_file(employee_id: str, user: dict = Depends(get_curren
                     "provider": t.get("provider")
                 })
             zf.writestr("N_Training/_training_summary.json", json.dumps(training_summary, indent=2))
-        
+            section_file_counts["N_Training"] = section_file_counts.get("N_Training", 0) + 1
+
         # Add employee summary file
         summary = {
             "employee_code": employee.get("employee_code"),
@@ -16276,6 +16278,49 @@ async def export_employee_file(employee_id: str, user: dict = Depends(get_curren
         }
         import json
         zf.writestr("_EMPLOYEE_SUMMARY.json", json.dumps(summary, indent=2))
+
+        # Phase C1 hardening: replace .gitkeep placeholders with explicit
+        # per-section notes and a manifest so inspectors can understand
+        # whether a section is intentionally empty vs export failure.
+        for folder in folders:
+            if section_file_counts.get(folder, 0) == 0:
+                note = {
+                    "section": folder,
+                    "status": "empty",
+                    "reason": "No evidence currently stored for this section at export time.",
+                    "employee_id": employee_id,
+                    "export_date": summary["export_date"],
+                }
+                empty_section_notes[folder] = note
+                zf.writestr(f"{folder}/_EMPTY_SECTION.json", json.dumps(note, indent=2))
+
+        pack_manifest = {
+            "pack_type": "employee_file_export",
+            "employee_id": employee_id,
+            "employee_code": employee.get("employee_code"),
+            "employee_name": summary["name"],
+            "generated_by_user_id": user.get("user_id"),
+            "generated_at": summary["export_date"],
+            "sections": [
+                {
+                    "name": folder,
+                    "files_exported": section_file_counts.get(folder, 0),
+                    "empty": section_file_counts.get(folder, 0) == 0,
+                }
+                for folder in folders
+            ],
+            "totals": {
+                "forms": len(forms),
+                "documents": len(documents),
+                "training_records": len(training),
+                "empty_sections": len([f for f in folders if section_file_counts.get(f, 0) == 0]),
+            },
+            "notes": {
+                "empty_sections_have_placeholder_json": True,
+                "legacy_gitkeep_placeholder_used": False,
+            },
+        }
+        zf.writestr("00_PACK_MANIFEST.json", json.dumps(pack_manifest, indent=2))
     
     zip_buffer.seek(0)
     

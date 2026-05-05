@@ -1761,6 +1761,7 @@ export default function WorkerDashboard() {
     recurring_compliance_summary: _recurring_compliance_summary,
     agreements: _agreements,
     worker_tasks: _worker_tasks,
+    next_action: _next_action,
   } = dashboard;
 
   // Safe array defaults — prevent .length / .map / .filter on undefined
@@ -1781,6 +1782,7 @@ export default function WorkerDashboard() {
     .filter((agreement) => agreement?.latest_active !== false)
     .filter((agreement, idx, arr) => arr.findIndex((x) => x?.id === agreement?.id) === idx);
   const worker_tasks = _worker_tasks || [];
+  const canonicalNextAction = _next_action || null;
   const recurring_compliance_summary = _recurring_compliance_summary || { total: 0, overdue: 0, due: 0, upcoming: 0, scheduled: 0, preview: [] };
   const recurringItems = recurring_compliance_summary.items || recurring_compliance_summary.preview || [];
   const recurringItemsByStatus = {
@@ -2031,7 +2033,18 @@ export default function WorkerDashboard() {
     }
     return null;
   };
-  const displayedNextAction = mapWorkerTaskToNextAction(pendingWorkerTasks[0])
+  const actionableWorkerTasks = pendingWorkerTasks
+    .map((task) => ({ task, mapped: mapWorkerTaskToNextAction(task) }))
+    .filter((x) => Boolean(x.mapped));
+  const displayedNextAction = (canonicalNextAction && canonicalNextAction.key ? {
+    key: canonicalNextAction.key,
+    title: canonicalNextAction.title || 'Action required',
+    description: canonicalNextAction.description || 'Open this task to continue your onboarding.',
+    primaryLabel: canonicalNextAction.primary_label || 'Open task',
+    route: canonicalNextAction.route || '/worker/dashboard',
+    level: canonicalNextAction.level || 'high',
+  } : null)
+    || (actionableWorkerTasks[0] && actionableWorkerTasks[0].mapped)
     || synthesizeAgreementNextAction();
 
   const scrollToSection = (selector) => {
@@ -2222,14 +2235,14 @@ export default function WorkerDashboard() {
           </button>
         </div>
       )}
-      {pendingWorkerTasks.length > 0 ? (
+      {actionableWorkerTasks.length > 0 ? (
         <Card className="border border-red-200 bg-red-50/60 shadow-sm" data-testid="worker-action-required-section">
           <CardHeader className="pb-2">
             <CardTitle className="text-lg text-slate-900">Action Required</CardTitle>
           </CardHeader>
           <CardContent className="pt-0">
             <div className="space-y-2">
-              {pendingWorkerTasks.map((task) => (
+              {actionableWorkerTasks.map(({ task, mapped }) => (
                 <div key={task.key || task.title} className="flex flex-col gap-2 rounded-lg border border-red-100 bg-white p-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-slate-900">{task.title}</p>
@@ -2238,7 +2251,7 @@ export default function WorkerDashboard() {
                   <Button
                     size="sm"
                     className="w-full sm:w-auto"
-                    onClick={() => handleNextAction(mapWorkerTaskToNextAction(task))}
+                    onClick={() => handleNextAction(mapped)}
                   >
                     Open task
                   </Button>
@@ -3494,9 +3507,44 @@ export default function WorkerDashboard() {
             </CardHeader>
             <CardContent>
               {!showReferencesDetails ? (
-                <p className="text-sm text-slate-600">
-                  References collapsed to reduce noise. Expand to view referee status and required actions.
-                </p>
+                <div className="space-y-2">
+                  <p className="text-sm text-slate-600">
+                    References collapsed to reduce noise. Expand to view referee status and required actions.
+                  </p>
+                  {(() => {
+                    const quickExplainRef = (references || []).find((ref) => {
+                      const status = String(ref?.status || '').toLowerCase();
+                      const notReplacement = !ref?.replacement_requested_at && !ref?.can_provide_new;
+                      return (
+                        notReplacement &&
+                        !isReferenceComplete(ref?.status) &&
+                        (status.includes('response_received') || status.includes('pending_admin_review'))
+                      );
+                    });
+                    if (!quickExplainRef) return null;
+                    return (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="text-xs border-amber-300 text-amber-700 hover:bg-amber-50"
+                        onClick={() => {
+                          setSelectedMismatch({
+                            reference_number: quickExplainRef.reference_number,
+                            referee_name: quickExplainRef.referee_name,
+                            referee_company: quickExplainRef.organisation || quickExplainRef.company,
+                            message: 'Please explain why this reference may not match your declared employment history.',
+                          });
+                          setMismatchExplanationType('');
+                          setMismatchExplanationText('');
+                          setShowMismatchExplanationModal(true);
+                        }}
+                        data-testid="quick-explain-mismatch-collapsed"
+                      >
+                        Explain reference mismatch
+                      </Button>
+                    );
+                  })()}
+                </div>
               ) : (
               <div className="space-y-2">
                 {references.map((ref, idx) => (

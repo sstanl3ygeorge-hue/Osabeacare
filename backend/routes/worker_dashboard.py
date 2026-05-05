@@ -244,6 +244,35 @@ def build_worker_tasks(
     return tasks
 
 
+def build_canonical_next_action(worker_tasks: Optional[list] = None) -> Optional[dict]:
+    """
+    Canonical next action for worker dashboard.
+    Priority: first pending blocking task, then first pending non-blocking task.
+    Returns None when no actionable task exists.
+    """
+    tasks = worker_tasks or []
+    pending = [t for t in tasks if str(t.get("status") or "").lower() == "pending"]
+    if not pending:
+        return None
+
+    blocking = [t for t in pending if bool(t.get("blocking_readiness"))]
+    chosen = (blocking[0] if blocking else pending[0]) if pending else None
+    if not chosen:
+        return None
+
+    next_action = build_canonical_next_action(worker_tasks)
+
+    return {
+        "key": chosen.get("key") or chosen.get("type") or "task",
+        "title": chosen.get("title") or "Action required",
+        "description": chosen.get("description") or "Open this task to continue your onboarding.",
+        "route": chosen.get("action_route") or "/worker/dashboard",
+        "primary_label": "Open task",
+        "level": "critical" if chosen.get("blocking_readiness") else "high",
+        "source": "backend_canonical",
+    }
+
+
 def compute_employment_readiness(
     *,
     is_active_employee: bool,
@@ -2140,6 +2169,7 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
         "agreements": agreements_status
         ,
         "worker_tasks": worker_tasks,
+        "next_action": next_action,
     }
 
 

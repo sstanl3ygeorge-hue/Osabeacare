@@ -781,31 +781,50 @@ export default function RecordCheckDialog({
 
     setIsUploading(true);
     try {
-      const formDataUpload = new FormData();
-      formDataUpload.append('file', proofFile);
-      formDataUpload.append('requirement_id', CHECK_TYPE_TO_REQUIREMENT[checkType] || checkType);
-      formDataUpload.append('document_type', 'verification_proof');
-      formDataUpload.append('document_label', `${getTitle()} - Proof`);
+      const requirementId = CHECK_TYPE_TO_REQUIREMENT[checkType] || checkType;
+      const headers = {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'multipart/form-data'
+      };
 
-      const response = await axios.post(
-        `${API}/employees/${employeeId}/upload-document`,
-        formDataUpload,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'multipart/form-data'
-          }
-        }
-      );
+      // Primary route (legacy/general upload path)
+      let response;
+      try {
+        const formDataUpload = new FormData();
+        formDataUpload.append('file', proofFile);
+        formDataUpload.append('requirement_id', requirementId);
+        formDataUpload.append('document_type', 'verification_proof');
+        formDataUpload.append('document_label', `${getTitle()} - Proof`);
+        response = await axios.post(
+          `${API}/employees/${employeeId}/upload-document`,
+          formDataUpload,
+          { headers }
+        );
+      } catch (primaryErr) {
+        // Fallback route (requirement-native evidence endpoint)
+        const formDataEvidence = new FormData();
+        formDataEvidence.append('file', proofFile);
+        formDataEvidence.append('file_label', `${getTitle()} - Proof`);
+        response = await axios.post(
+          `${API}/employees/${employeeId}/requirements/${requirementId}/evidence`,
+          formDataEvidence,
+          { headers }
+        );
+      }
 
-      const docId = response.data?.document_id || response.data?.id;
+      const docId = response.data?.document_id || response.data?.id || response.data?.evidence_id;
       setUploadedProofId(docId);
       setUploadedProofName(proofFile.name);
       toast.success('Proof file uploaded successfully');
       return docId;
     } catch (err) {
       console.error('Failed to upload proof file:', err);
-      toast.error(err.response?.data?.detail || 'Failed to upload proof file');
+      const detail =
+        err?.response?.data?.detail
+        || err?.response?.data?.error
+        || err?.response?.data?.message
+        || 'Failed to upload proof file';
+      toast.error(detail);
       return null;
     } finally {
       setIsUploading(false);

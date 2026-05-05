@@ -802,14 +802,36 @@ export default function ReferencesPanel({ employeeId, employee, onRefresh, onEdi
                           response, review the worker explanation, or reject.
                         */}
                         {declared.email && (() => {
-                          const canSendRequest = !hasCanonicalResponse
-                            && !ref?.verification?.verified_at
-                            && ref?.status !== 'rejected'
-                            && (displayStatus === 'declared' || displayStatus === 'sent' || displayStatus === 'legacy_unverified');
-                          const canReviewResponse = Boolean(ref?.can_review_response ?? hasCanonicalResponse);
-                          const canVerify = Boolean(ref?.can_verify_reference);
-                          const canReject = Boolean(ref?.can_reject_reference ?? (ref?.status !== 'rejected'));
-                          const canReviewMismatch = Boolean(ref?.can_review_mismatch_explanation);
+                          // Canonical action gating: UI buttons must follow backend
+                          // `allowed_actions` so admin and worker state stay in lockstep.
+                          // Keep a narrow legacy fallback only when this list is missing.
+                          const allowedActions = Array.isArray(ref?.allowed_actions) ? ref.allowed_actions : [];
+                          const allowed = new Set(allowedActions.map((a) => String(a || '').toLowerCase()));
+                          const hasCanonicalAllowedActions = allowed.size > 0;
+                          const canSendRequest = hasCanonicalAllowedActions
+                            ? (
+                                allowed.has('send_request')
+                                || allowed.has('resend_request')
+                                || allowed.has('re_request')
+                              )
+                            : (
+                                !hasCanonicalResponse
+                                && !ref?.verification?.verified_at
+                                && ref?.status !== 'rejected'
+                                && (displayStatus === 'declared' || displayStatus === 'sent' || displayStatus === 'legacy_unverified')
+                              );
+                          const canReviewResponse = hasCanonicalAllowedActions
+                            ? allowed.has('review_response')
+                            : Boolean(ref?.can_review_response ?? hasCanonicalResponse);
+                          const canVerify = hasCanonicalAllowedActions
+                            ? (allowed.has('mark_satisfactory') || allowed.has('verify_reference'))
+                            : Boolean(ref?.can_verify_reference);
+                          const canReject = hasCanonicalAllowedActions
+                            ? (allowed.has('mark_unsatisfactory') || allowed.has('reject_reference'))
+                            : Boolean(ref?.can_reject_reference ?? (ref?.status !== 'rejected'));
+                          const canReviewMismatch = hasCanonicalAllowedActions
+                            ? allowed.has('review_mismatch_explanation')
+                            : Boolean(ref?.can_review_mismatch_explanation);
                           const showActionBar = canSendRequest || canReviewResponse || canVerify || canReject || canReviewMismatch;
                           if (!showActionBar) return null;
                           return (
@@ -1115,12 +1137,13 @@ export default function ReferencesPanel({ employeeId, employee, onRefresh, onEdi
 
           {/* Readiness Requirements */}
           <div className="bg-gray-50 rounded-lg p-4">
-            <h4 className="font-medium text-sm mb-2">Reference Readiness Criteria</h4>
+            <h4 className="font-medium text-sm mb-2">Reference Readiness Criteria (CQC/NHS)</h4>
             <ul className="text-sm text-gray-600 space-y-1">
               <li>- Minimum 2 satisfactory professional references required</li>
               <li>- Each must have a canonical response on file (not just declared or legacy-verified)</li>
               <li>- Each must be reviewed and marked satisfactory by an admin</li>
-              <li>- At least one should be from the most recent employer</li>
+              <li>- At least one must match the most recent declared employer</li>
+              <li>- A second reference can be from an earlier employer or alternative source only with documented explanation</li>
               <li>- Declared referee details alone do not count as a satisfactory reference</li>
             </ul>
           </div>

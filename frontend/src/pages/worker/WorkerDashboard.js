@@ -1922,6 +1922,10 @@ export default function WorkerDashboard() {
     const isContract = gate.includes('contract');
     return !isContract && severity === 'critical';
   });
+  const hasReferenceOrGapBlockers = (Array.isArray(legalBlockers) ? legalBlockers : []).some((b) => {
+    const gate = String(b?.gate || b?.id || '').toLowerCase();
+    return gate.includes('reference') || gate.includes('employment_gap') || gate.includes('employment history');
+  });
   const mapWorkerTaskToNextAction = (task) => {
     if (!task) return null;
     const taskKey = String(task?.key || task?.type || '').toLowerCase();
@@ -1930,7 +1934,7 @@ export default function WorkerDashboard() {
       taskKey.includes('contract') ||
       taskTitle.includes('contract') ||
       taskTitle.includes('sign new contract');
-    if (looksLikeContractTask && (!effectiveContractCanSign || hasNonContractCriticalBlockers)) {
+    if (looksLikeContractTask && (!effectiveContractCanSign || hasNonContractCriticalBlockers || hasReferenceOrGapBlockers)) {
       return null;
     }
     return {
@@ -1999,9 +2003,9 @@ export default function WorkerDashboard() {
       });
       return {
         key: 'contract_locked',
-        title: hasReferenceOrGapBlockers ? 'Resolve onboarding blockers first' : 'Contract awaiting earlier steps',
+        title: hasReferenceOrGapBlockers ? 'Resolve references/history first' : 'Contract awaiting earlier steps',
         description: hasReferenceOrGapBlockers
-          ? 'Please resolve your reference and employment-history blockers first. Your contract will unlock after those checks are cleared.'
+          ? 'Please resolve your reference and employment-history actions first. Your contract will unlock automatically once those are reviewed.'
           : (blockerCount > 0
             ? `${blockerCount} item${blockerCount === 1 ? '' : 's'} still needed before your contract can be signed.`
             : 'Your contract will unlock once the remaining onboarding checks are complete.'),

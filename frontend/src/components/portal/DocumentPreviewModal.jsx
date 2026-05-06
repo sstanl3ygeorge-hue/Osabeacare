@@ -31,6 +31,58 @@ const getFileType = (contentType, filename) => {
   return 'other';
 };
 
+const detectMimeFromBytes = (buffer) => {
+  if (!buffer || buffer.byteLength < 4) return null;
+  const bytes = new Uint8Array(buffer);
+
+  // PDF: %PDF-
+  if (
+    bytes[0] === 0x25 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x44 &&
+    bytes[3] === 0x46
+  ) {
+    return 'application/pdf';
+  }
+
+  // PNG: 89 50 4E 47 0D 0A 1A 0A
+  if (
+    bytes.byteLength >= 8 &&
+    bytes[0] === 0x89 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x4e &&
+    bytes[3] === 0x47 &&
+    bytes[4] === 0x0d &&
+    bytes[5] === 0x0a &&
+    bytes[6] === 0x1a &&
+    bytes[7] === 0x0a
+  ) {
+    return 'image/png';
+  }
+
+  // JPEG: FF D8 FF
+  if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return 'image/jpeg';
+  }
+
+  // WebP: RIFF....WEBP
+  if (
+    bytes.byteLength >= 12 &&
+    bytes[0] === 0x52 &&
+    bytes[1] === 0x49 &&
+    bytes[2] === 0x46 &&
+    bytes[3] === 0x46 &&
+    bytes[8] === 0x57 &&
+    bytes[9] === 0x45 &&
+    bytes[10] === 0x42 &&
+    bytes[11] === 0x50
+  ) {
+    return 'image/webp';
+  }
+
+  return null;
+};
+
 const formatFileSize = (bytes) => {
   if (!bytes) return 'Unknown size';
   const units = ['B', 'KB', 'MB', 'GB'];
@@ -132,7 +184,20 @@ export default function DocumentPreviewModal({
         }
         
         const blob = await response.blob();
-        const type = response.headers.get('content-type') || blob.type;
+        const headerType = response.headers.get('content-type') || blob.type;
+        let type = headerType;
+
+        // Legacy fix: some stamped files were uploaded with wrong content-type.
+        // Sniff bytes so preview mode (PDF vs image) matches real file data.
+        if (headerType?.includes('pdf') || !headerType) {
+          try {
+            const buf = await blob.arrayBuffer();
+            const detected = detectMimeFromBytes(buf);
+            if (detected) type = detected;
+          } catch {
+            // Non-fatal: keep header/blob type fallback.
+          }
+        }
         
         if (isMounted) {
           setContentType(type);

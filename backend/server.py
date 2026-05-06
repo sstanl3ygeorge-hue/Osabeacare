@@ -27238,6 +27238,34 @@ def _training_matrix_columns():
             "scope": "nurse",
         })
 
+    # Care Certificate hybrid items — shown for HCA + NURSE roles only.
+    # These use temporary 90-day records written on induction signoff; when the
+    # real certificate is uploaded it supersedes the temp record automatically.
+    # Column IDs match the requirement_id written by the signoff handler so the
+    # training_lookup keys resolve without any extra mapping.
+    care_cert_columns = [
+        {"id": "understand_your_role",    "name": "CC: Understand Your Role"},
+        {"id": "personal_development",    "name": "CC: Your Personal Development"},
+        {"id": "duty_of_care",            "name": "CC: Duty of Care"},
+        {"id": "equality_diversity",      "name": "CC: Equality and Diversity"},
+        {"id": "work_person_centred",     "name": "CC: Work in a Person-Centred Way"},
+        {"id": "communication",           "name": "CC: Communication"},
+        {"id": "privacy_dignity",         "name": "CC: Privacy and Dignity"},
+        {"id": "food_hygiene",            "name": "CC: Fluids, Nutrition & Food Hygiene"},
+        {"id": "mental_health",           "name": "CC: Mental Health / Dementia Awareness"},
+    ]
+    for cc in care_cert_columns:
+        col_id = cc["id"]
+        if col_id in seen_ids:
+            continue
+        seen_ids.add(col_id)
+        columns.append({
+            "id": col_id,
+            "name": cc["name"],
+            "has_refresher": False,
+            "scope": "care_certificate",
+        })
+
     return columns
 
 
@@ -27445,6 +27473,16 @@ async def build_training_matrix_read_model():
             training_id = col["id"]
 
             if col.get("scope") == "nurse" and not is_nurse:
+                row["training"][training_id] = {
+                    "status": "not_applicable",
+                    "verified": False,
+                    "completion_date": "",
+                    "expiry_date": "",
+                    "days_until_expiry": None,
+                }
+                continue
+
+            if col.get("scope") == "care_certificate" and system_role not in (SystemRole.HCA, SystemRole.NURSE):
                 row["training"][training_id] = {
                     "status": "not_applicable",
                     "verified": False,

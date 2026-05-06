@@ -134,22 +134,48 @@ def match_employers(
     return False, None, "none"
 
 
+# ---------------------------------------------------------------------------
+# Own-organisation tokens (normalised, lowercase).
+# Employment history entries whose normalised employer name contains ANY of
+# these tokens are excluded when identifying the most-recent employer for
+# reference-check purposes, because applicants cannot supply a reference from
+# the hiring organisation about themselves.
+# ---------------------------------------------------------------------------
+OWN_ORG_TOKENS: frozenset[str] = frozenset({"osabea"})
+
+
 def identify_most_recent_employer(employment_history: list[dict]) -> str | None:
     """
-    Return the *normalised* name of the most-recent employer.
+    Return the *normalised* name of the most-recent employer, excluding the
+    hiring organisation itself.
 
-    Priority
-    --------
+    Applicants cannot supply a reference from their own (current) employer
+    about themselves, so entries whose normalised name contains any token in
+    OWN_ORG_TOKENS are excluded before the most-recent lookup runs.
+
+    Priority (applied to the filtered list)
+    ----------------------------------------
     1. Any entry where is_current = True
     2. Entry with the latest end_date year
     3. First entry in the list (caller should order most-recent first)
 
-    Returns None if the list is empty.
+    Returns None if the list is empty or all entries belong to the own org.
     """
     if not employment_history:
         return None
 
-    current = [e for e in employment_history if e.get("is_current")]
+    # Exclude own-org entries so the gate targets the most-recent *external* employer.
+    filtered = [
+        e for e in employment_history
+        if not any(
+            token in normalize_employer(e.get("employer_name") or "")
+            for token in OWN_ORG_TOKENS
+        )
+    ]
+    # Fall back to full list if filtering removed everything (edge case).
+    history = filtered if filtered else employment_history
+
+    current = [e for e in history if e.get("is_current")]
     if current:
         return normalize_employer(current[0].get("employer_name") or "")
 
@@ -158,7 +184,7 @@ def identify_most_recent_employer(employment_history: list[dict]) -> str | None:
         m = re.search(r"(\d{4})", str(date_str))
         return int(m.group(1)) if m else 0
 
-    best = max(employment_history, key=_year)
+    best = max(history, key=_year)
     name = best.get("employer_name") or ""
     return normalize_employer(name) if name else None
 

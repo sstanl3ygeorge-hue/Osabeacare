@@ -229,13 +229,13 @@ export default function ReferenceEmploymentComparison({ employeeId, onRefresh })
               ? <XCircle className="h-3 w-3 shrink-0 mt-0.5" />
               : <AlertTriangle className="h-3 w-3 shrink-0 mt-0.5" />
             }
-            {effectiveHardDiscrepancy
-              ? 'At least one referee does not match employment history. Do not approve until you record an explanation or request a replacement referee.'
-              : hasAnyEmployerMatch
-              ? 'Most-recent employer match is on file. Record notes for any additional unmatched referee where needed.'
-              : (hasWarnings || (alertCount > 0 && hasAnyEmployerMatch))
-              ? 'A referee matches an earlier employer (not the most recent). Record a reason in the recruitment file per NHS guidance.'
-              : (alert.message || 'Reference-employment cross-check complete.')}
+              {effectiveHardDiscrepancy
+                ? 'At least one referee does not match employment history. Do not approve until you record an explanation or request a replacement referee.'
+                : hasMostRecentEmployerMatch
+                ? 'Most-recent employer match is on file. Record notes for any additional unmatched referee where needed.'
+                : hasAnyEmployerMatch
+                ? 'A referee matches an earlier employer (not the most recent). Record a reason in the recruitment file per NHS guidance.'
+                : (alert.message || 'Reference-employment cross-check complete.')}
           </div>
         )}
       </CardHeader>

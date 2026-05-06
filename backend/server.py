@@ -46324,6 +46324,39 @@ async def startup():
     except Exception as e:
         logger.error(f"Auto-seeding policies failed: {e}")
 
+    # ── Patch existing induction temp records that are missing expiry_date ───
+    # Records written before commit 398063e had no expiry_date stored.
+    # Backfill: expiry_date = completion_date + 90 days, verification_status = "verified".
+    try:
+        from datetime import timedelta as _td
+        stale_records = await db.training_records.find(
+            {
+                "source_type": "form_submission",
+                "evidence_type": "temporary_internal",
+                "record_status": {"$nin": ["deleted", "superseded"]},
+                "expiry_date": {"$in": [None, ""]},
+            },
+            {"_id": 0, "id": 1, "completion_date": 1},
+        ).to_list(5000)
+        patched = 0
+        for rec in stale_records:
+            comp = rec.get("completion_date")
+            if comp:
+                try:
+                    comp_dt = datetime.fromisoformat(comp) if "T" in str(comp) else datetime.strptime(str(comp)[:10], "%Y-%m-%d")
+                    exp = (comp_dt + _td(days=90)).strftime("%Y-%m-%d")
+                    await db.training_records.update_one(
+                        {"id": rec["id"]},
+                        {"$set": {"expiry_date": exp, "verification_status": "verified"}},
+                    )
+                    patched += 1
+                except Exception:
+                    pass
+        if patched:
+            logger.info(f"Backfilled expiry_date on {patched} temporary induction training records.")
+    except Exception as e:
+        logger.error(f"Induction temp record backfill failed: {e}")
+
 
 @app.on_event("startup")
 async def startup_db_client():

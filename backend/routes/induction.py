@@ -11,7 +11,7 @@ This module handles:
 import io
 import uuid
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import StreamingResponse
@@ -1104,10 +1104,12 @@ async def signoff_induction_item(
     # record that the training evaluator will cap at 90 days expiry.  When the
     # employee later uploads their real Care Certificate for this topic, the normal
     # deduplication/supersession pipeline will mark this record as superseded.
-    if completion_type == "hybrid":
+    if completion_type in ("hybrid", "manual"):
         training_sync_id = _INDUCTION_TRAINING_SYNC.get(resolved_item_code)
         req_id = training_sync_id or resolved_item_code
-        now_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        _now_dt = datetime.now(timezone.utc)
+        now_date = _now_dt.strftime("%Y-%m-%d")
+        expiry_date = (_now_dt + timedelta(days=90)).strftime("%Y-%m-%d")
         temp_record = {
             "id": str(uuid.uuid4()),
             "employee_id": employee_id,
@@ -1117,13 +1119,15 @@ async def signoff_induction_item(
             "evidence_type": "temporary_internal",
             "completion_method": "manual",
             "completion_date": now_date,
+            "expiry_date": expiry_date,
             "verified": True,
+            "verification_status": "verified",
             "verified_by": user["user_id"],
             "verified_by_name": admin_name,
             "verified_at": now,
             "record_status": "active",
             "notes": (
-                "Temporary induction evidence from hybrid form sign-off. "
+                "Temporary induction evidence from hybrid/manual form sign-off. "
                 "Real Care Certificate required within 90 days."
             ),
             "created_at": now,
@@ -1180,7 +1184,6 @@ async def bulk_signoff_induction_items(
         raise HTTPException(status_code=422, detail="item_codes must not be empty.")
 
     now = datetime.now(timezone.utc).isoformat()
-    now_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     admin = await db.users.find_one(
         {"$or": [{"user_id": user["user_id"]}, {"id": user["user_id"]}]},
@@ -1190,8 +1193,11 @@ async def bulk_signoff_induction_items(
     if not admin_name and admin:
         admin_name = f"{admin.get('first_name', '')} {admin.get('last_name', '')}".strip() or admin.get("email", "Admin")
 
-    # Determine evidence type based on whether a source document is provided
+    # Determine evidence type and dates based on whether a source document is provided
     has_source_doc = bool(payload.source_document_id)
+    _bulk_now_dt = datetime.now(timezone.utc)
+    bulk_now_date = _bulk_now_dt.strftime("%Y-%m-%d")
+    bulk_expiry_date = None if has_source_doc else (_bulk_now_dt + timedelta(days=90)).strftime("%Y-%m-%d")
     if has_source_doc:
         source_type = "certificate"
         evidence_type = "external_certificate"
@@ -1202,7 +1208,7 @@ async def bulk_signoff_induction_items(
         evidence_type = "temporary_internal"
         completion_method = "manual"
         record_notes = (
-            "Temporary induction evidence from hybrid form sign-off. "
+            "Temporary induction evidence from bulk hybrid sign-off. "
             "Real Care Certificate required within 90 days."
         )
 
@@ -1292,8 +1298,10 @@ async def bulk_signoff_induction_items(
             "source_type": source_type,
             "evidence_type": evidence_type,
             "completion_method": completion_method,
-            "completion_date": now_date,
+            "completion_date": bulk_now_date,
+            "expiry_date": bulk_expiry_date,
             "verified": True,
+            "verification_status": "verified",
             "verified_by": user["user_id"],
             "verified_by_name": admin_name,
             "verified_at": now,

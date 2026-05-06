@@ -12057,6 +12057,71 @@ async def get_employee_training_matrix(
         for item in matrix_items
     ]
 
+    # ── Care Certificate section ──────────────────────────────────────────────
+    # Show the 9 hybrid induction items and their current training record status
+    # so the Training tab can render a dedicated "Care Certificate" section.
+    _CC_ITEMS = [
+        {"id": "understand_your_role",    "name": "Understand Your Role"},
+        {"id": "personal_development",    "name": "Your Personal Development"},
+        {"id": "duty_of_care",            "name": "Duty of Care"},
+        {"id": "equality_diversity",      "name": "Equality and Diversity"},
+        {"id": "work_person_centred",     "name": "Work in a Person-Centred Way"},
+        {"id": "communication",           "name": "Communication"},
+        {"id": "privacy_dignity",         "name": "Privacy and Dignity"},
+        {"id": "food_hygiene",            "name": "Fluids, Nutrition & Food Hygiene"},
+        {"id": "mental_health",           "name": "Mental Health / Dementia Awareness"},
+    ]
+    care_certificate_items = []
+    for cc in _CC_ITEMS:
+        req_id = cc["id"]
+        # Find the best active training record for this CC item
+        cc_rec = canonical_best_record.get(req_id) or canonical_best_record.get(
+            _canonical_training_code(req_id)
+        )
+        # Also search raw records by requirement_id in case canonical mapping misses
+        if not cc_rec:
+            cc_rec = next(
+                (r for r in deduped_records if r.get("requirement_id") == req_id),
+                None,
+            )
+        if cc_rec:
+            computed_cc = compute_training_record_status(cc_rec)
+            care_certificate_items.append({
+                "id": req_id,
+                "name": cc["name"],
+                "record_id": cc_rec.get("id"),
+                "status": _record_effective_status(cc_rec),
+                "computed_status": computed_cc.get("computed_status"),
+                "completed_at": cc_rec.get("completion_date") or cc_rec.get("completed_at"),
+                "expires_at": computed_cc.get("expiry_date") or cc_rec.get("expiry_date"),
+                "days_until_expiry": computed_cc.get("days_until_expiry"),
+                "verified": bool(cc_rec.get("verified") or cc_rec.get("verification_status") == "verified"),
+                "verified_by": cc_rec.get("verified_by_name") or cc_rec.get("verified_by"),
+                "verified_at": cc_rec.get("verified_at"),
+                "source_type": cc_rec.get("source_type"),
+                "evidence_type": cc_rec.get("evidence_type"),
+                "is_temporary": cc_rec.get("evidence_type") == "temporary_internal",
+                "source_document_id": cc_rec.get("source_document_id") or cc_rec.get("certificate_document_id"),
+            })
+        else:
+            care_certificate_items.append({
+                "id": req_id,
+                "name": cc["name"],
+                "record_id": None,
+                "status": "missing",
+                "computed_status": "not_started",
+                "completed_at": None,
+                "expires_at": None,
+                "days_until_expiry": None,
+                "verified": False,
+                "verified_by": None,
+                "verified_at": None,
+                "source_type": None,
+                "evidence_type": None,
+                "is_temporary": False,
+                "source_document_id": None,
+            })
+
     return {
         "employee_id": employee_id,
         "employee_name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
@@ -12071,6 +12136,7 @@ async def get_employee_training_matrix(
         "dependency_warnings": dependency_warnings,
         "items": matrix_items,
         "additional_items": additional_items,
+        "care_certificate_items": care_certificate_items,
         "completion_summary": {
             "required_total": required_total,
             "verified_total": verified_total,

@@ -12,7 +12,7 @@ import io
 import uuid
 import logging
 from datetime import datetime, timezone
-from typing import Optional
+from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -649,6 +649,12 @@ class HybridSignOffPayload(BaseModel):
     notes: Optional[str] = None
 
 
+class BulkSignOffPayload(BaseModel):
+    item_codes: List[str]                 # e.g. ["understand_your_role", "duty_of_care", ...]
+    notes: Optional[str] = None
+    source_document_id: Optional[str] = None  # ID of an uploaded Care Certificate document
+
+
 class HybridReturnPayload(BaseModel):
     return_reason: str
 
@@ -1147,6 +1153,184 @@ async def signoff_induction_item(
         "signed_off_at": now,
         "signed_off_by": admin_name,
         "overall_status": checklist["overall_status"],
+    }
+
+
+@router.post("/employees/{employee_id}/induction/bulk-signoff")
+async def bulk_signoff_induction_items(
+    employee_id: str,
+    payload: BulkSignOffPayload,
+    user: dict = Depends(require_manager_or_admin),
+):
+    """
+    Admin: sign off multiple hybrid/manual induction items in one action.
+
+    Use this when an employee brings a Care Certificate from a previous employer
+    or when an admin wants to sign off several standards at once after a review.
+
+    If `source_document_id` is provided (an already-uploaded Care Certificate
+    document), the created training records are marked as external certificates
+    (no 90-day cap). Without it, records are 90-day temporary internal evidence.
+
+    Returns a per-item result summary.
+    """
+    db = get_db()
+
+    if not payload.item_codes:
+        raise HTTPException(status_code=422, detail="item_codes must not be empty.")
+
+    now = datetime.now(timezone.utc).isoformat()
+    now_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    admin = await db.users.find_one(
+        {"$or": [{"user_id": user["user_id"]}, {"id": user["user_id"]}]},
+        {"_id": 0, "name": 1, "first_name": 1, "last_name": 1, "email": 1},
+    )
+    admin_name = (admin or {}).get("name") or ""
+    if not admin_name and admin:
+        admin_name = f"{admin.get('first_name', '')} {admin.get('last_name', '')}".strip() or admin.get("email", "Admin")
+
+    # Determine evidence type based on whether a source document is provided
+    has_source_doc = bool(payload.source_document_id)
+    if has_source_doc:
+        source_type = "certificate"
+        evidence_type = "external_certificate"
+        completion_method = "certificate"
+        record_notes = "Care Certificate from previous employer / external provider."
+    else:
+        source_type = "form_submission"
+        evidence_type = "temporary_internal"
+        completion_method = "manual"
+        record_notes = (
+            "Temporary induction evidence from hybrid form sign-off. "
+            "Real Care Certificate required within 90 days."
+        )
+
+    # Load or initialise checklist
+    from induction_definitions import DEFAULT_INDUCTION_ITEMS, _STANDARDS_BY_ID
+    checklist = await db.induction_checklists.find_one({"employee_id": employee_id})
+    if not checklist:
+        checklist = {
+            "id": str(uuid.uuid4()),
+            "employee_id": employee_id,
+            "items": [
+                {
+                    "id": item_def["id"],
+                    "name": item_def["name"],
+                    "mandatory": item_def["mandatory"],
+                    "status": "pending",
+                    "completed_at": None,
+                    "completed_by": None,
+                    "completed_by_name": None,
+                    "notes": None,
+                }
+                for item_def in DEFAULT_INDUCTION_ITEMS
+            ],
+            "overall_status": "pending",
+            "started_at": None,
+            "completed_at": None,
+            "created_at": now,
+            "updated_at": now,
+        }
+        await db.induction_checklists.insert_one({k: v for k, v in checklist.items() if k != "_id"})
+
+    ensure_checklist_list_format(checklist)
+
+    results = []
+    signed_off_codes = []
+
+    for item_code in payload.item_codes:
+        target = _resolve_induction_item_target(item_code)
+        cfg = target["cfg"]
+
+        if not cfg:
+            results.append({"item_code": item_code, "ok": False, "error": "Unknown induction item code"})
+            continue
+
+        completion_type = cfg.get("completion_type")
+        if completion_type == "automatic":
+            results.append({"item_code": item_code, "ok": False, "error": "Automatic items cannot be manually signed off"})
+            continue
+
+        resolved_item_code = target["item_code"]
+        item_name = cfg["title"]
+
+        # Update checklist item
+        item_found = False
+        for checklist_item in checklist["items"]:
+            if checklist_item.get("id") == resolved_item_code or checklist_item.get("name") == item_name:
+                checklist_item["status"] = "completed"
+                checklist_item["completed_at"] = now
+                checklist_item["completed_by"] = user["user_id"]
+                checklist_item["completed_by_name"] = admin_name
+                checklist_item["notes"] = payload.notes
+                item_found = True
+                break
+
+        if not item_found:
+            std = _STANDARDS_BY_ID.get(resolved_item_code, {})
+            checklist["items"].append({
+                "id": resolved_item_code,
+                "name": item_name,
+                "mandatory": std.get("mandatory", True),
+                "order": std.get("num"),
+                "status": "completed",
+                "completed_at": now,
+                "completed_by": user["user_id"],
+                "completed_by_name": admin_name,
+                "notes": payload.notes,
+            })
+
+        # Create training record
+        training_sync_id = _INDUCTION_TRAINING_SYNC.get(resolved_item_code)
+        req_id = training_sync_id or resolved_item_code
+        temp_record = {
+            "id": str(uuid.uuid4()),
+            "employee_id": employee_id,
+            "training_name": item_name,
+            "requirement_id": req_id,
+            "source_type": source_type,
+            "evidence_type": evidence_type,
+            "completion_method": completion_method,
+            "completion_date": now_date,
+            "verified": True,
+            "verified_by": user["user_id"],
+            "verified_by_name": admin_name,
+            "verified_at": now,
+            "record_status": "active",
+            "notes": record_notes,
+            "created_at": now,
+            "updated_at": now,
+        }
+        if has_source_doc:
+            temp_record["source_document_id"] = payload.source_document_id
+            temp_record["certificate_document_id"] = payload.source_document_id
+
+        await db.training_records.insert_one({k: v for k, v in temp_record.items() if k != "_id"})
+        signed_off_codes.append(resolved_item_code)
+        results.append({"item_code": resolved_item_code, "ok": True, "training_record_id": temp_record["id"]})
+
+    _recalculate_induction_checklist_status(checklist, now)
+    await db.induction_checklists.update_one(
+        {"employee_id": employee_id}, {"$set": _without_mongo_id(checklist)}
+    )
+
+    await log_audit_action(
+        user["user_id"], "induction_bulk_signoff", "induction_checklist", employee_id,
+        {
+            "requested_codes": payload.item_codes,
+            "signed_off_codes": signed_off_codes,
+            "source_document_id": payload.source_document_id,
+            "has_source_doc": has_source_doc,
+            "admin_notes": payload.notes,
+        },
+    )
+
+    return {
+        "ok": True,
+        "signed_off_count": len(signed_off_codes),
+        "overall_status": checklist["overall_status"],
+        "results": results,
     }
 
 

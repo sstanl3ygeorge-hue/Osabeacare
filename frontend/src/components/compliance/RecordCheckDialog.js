@@ -927,7 +927,8 @@ export default function RecordCheckDialog({
         checked_at: formData.checked_at,
         outcome: formData.outcome,
         notes: formData.notes || null,
-        evidence_document_id: proofDocId // CRITICAL: Link check to proof file
+        evidence_document_id: proofDocId, // Legacy alias kept for backward compatibility
+        proof_document_id: proofDocId // Canonical proof linkage for RTW/DBS
       };
 
       // Add type-specific fields

@@ -3346,6 +3346,8 @@ async def _create_required_stamped_file_for_document(doc: dict, stamp_data: dict
             elif "tiff" in content_type:
                 original_format = "TIFF"
             stamped_bytes = add_verification_stamp_to_image(original_bytes, stamp_data, original_format)
+            # Persist stamped image with matching extension/content type for correct preview behavior.
+            file_ext = "jpg" if original_format == "JPEG" else original_format.lower()
         else:
             converted_pdf = convert_document_to_pdf(original_bytes, content_type, file_url)
             stamped_bytes = add_verification_stamp_to_pdf(converted_pdf, stamp_data) if converted_pdf else None

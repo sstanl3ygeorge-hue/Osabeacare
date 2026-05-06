@@ -845,6 +845,7 @@ class StageGateService:
         #     blocks once at the references level until a matching referee is
         #     supplied — silent overrides are not enough on their own.
         any_matched_most_recent = False
+        any_admin_accepted_recent_exception = False
         ref_summary: list[dict] = []
 
         for ref_num in [1, 2]:
@@ -882,6 +883,7 @@ class StageGateService:
                 "matched": False,
                 "is_most_recent": False,
                 "has_override_reason": bool(override_reason),
+                "recent_mismatch_exception_accepted": False,
             }
 
             if ref_company:
@@ -894,8 +896,23 @@ class StageGateService:
 
                 ref_state["matched"] = matched
                 ref_state["is_most_recent"] = is_most_recent
+
+                mismatch_obj = (ref_slot.get("mismatch") or {}) if isinstance(ref_slot, dict) else {}
+                recent_exception_accepted = bool(
+                    mismatch_obj.get("resolved")
+                    or str(mismatch_obj.get("admin_decision") or "").lower() == "accepted"
+                    or str(employee.get(f"reference_{ref_num}_mismatch_admin_decision") or "").lower() == "accepted"
+                    or employee.get(f"reference_{ref_num}_mismatch_override_reason")
+                )
+                ref_state["recent_mismatch_exception_accepted"] = recent_exception_accepted
+
                 if is_most_recent:
                     any_matched_most_recent = True
+                elif matched and verified and recent_exception_accepted:
+                    # Explicit admin acceptance for a non-most-recent employer match:
+                    # this is a documented exception path (CQC/NHS audit-traceable)
+                    # and should satisfy the aggregate most-recent rule.
+                    any_admin_accepted_recent_exception = True
 
                 reason_label = MATCH_REASON_LABELS.get(match_reason, match_reason)
 
@@ -946,6 +963,7 @@ class StageGateService:
             and most_recent_norm
             and any_company_declared
             and not any_matched_most_recent
+            and not any_admin_accepted_recent_exception
             and not any(b["key"] == "references_most_recent_employer" for b in blocking_items)
         ):
             _block(

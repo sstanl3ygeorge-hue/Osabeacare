@@ -26,7 +26,12 @@ from enum import Enum
 from typing import Optional, Any, Dict, List
 from datetime import datetime, timezone
 from functools import wraps
-import asyncpg
+try:
+    import asyncpg
+    _ASYNCPG_IMPORT_ERROR = None
+except Exception as _asyncpg_exc:
+    asyncpg = None
+    _ASYNCPG_IMPORT_ERROR = _asyncpg_exc
 
 logger = logging.getLogger("read_source_switch")
 logger.setLevel(logging.INFO)
@@ -82,10 +87,10 @@ def is_supabase_enabled(entity: str) -> bool:
 
 
 # Supabase connection pool (initialized lazily)
-_pg_pool: Optional[asyncpg.Pool] = None
+_pg_pool: Optional[Any] = None
 
 
-async def get_pg_pool() -> Optional[asyncpg.Pool]:
+async def get_pg_pool() -> Optional[Any]:
     """Get or create Postgres connection pool."""
     global _pg_pool
     
@@ -95,6 +100,13 @@ async def get_pg_pool() -> Optional[asyncpg.Pool]:
     db_url = os.environ.get("SUPABASE_DB_URL")
     if not db_url:
         logger.warning("SUPABASE_DB_URL not configured - Supabase reads will fall back to Mongo")
+        return None
+
+    if asyncpg is None:
+        logger.warning(
+            "asyncpg import unavailable - Supabase reads will fall back to Mongo: %s",
+            _ASYNCPG_IMPORT_ERROR,
+        )
         return None
     
     try:

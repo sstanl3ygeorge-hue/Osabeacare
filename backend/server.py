@@ -19899,12 +19899,45 @@ async def unverify_requirement(
     # Build query with legacy mapping support
     legacy_mapping = {
         "dbs_certificate": ["dbs", "dbs_certificate"],
+        "dbs_check": ["dbs", "dbs_certificate", "dbs_check", "dbs_status_check"],
+        "dbs_status_check": ["dbs", "dbs_certificate", "dbs_check", "dbs_status_check"],
         "identity_documents": ["identity_rtw", "identity_documents"],
-        "right_to_work": ["right_to_work", "identity_rtw", "right_to_work_documents", "right_to_work_evidence"],
-        "right_to_work_documents": ["right_to_work", "identity_rtw", "right_to_work_documents", "right_to_work_evidence"],
-        "right_to_work_evidence": ["right_to_work", "identity_rtw", "right_to_work_documents", "right_to_work_evidence"],
+        "right_to_work": ["right_to_work", "identity_rtw", "right_to_work_documents", "right_to_work_evidence", "right_to_work_check"],
+        "right_to_work_documents": ["right_to_work", "identity_rtw", "right_to_work_documents", "right_to_work_evidence", "right_to_work_check"],
+        "right_to_work_evidence": ["right_to_work", "identity_rtw", "right_to_work_documents", "right_to_work_evidence", "right_to_work_check"],
+        "right_to_work_check": ["right_to_work", "identity_rtw", "right_to_work_documents", "right_to_work_evidence", "right_to_work_check"],
     }
     req_ids_to_search = legacy_mapping.get(requirement_id, [requirement_id])
+
+    dual_row_check_collections = {
+        "right_to_work": "rtw_checks",
+        "right_to_work_documents": "rtw_checks",
+        "right_to_work_evidence": "rtw_checks",
+        "right_to_work_check": "rtw_checks",
+        "dbs": "dbs_checks",
+        "dbs_certificate": "dbs_checks",
+        "dbs_check": "dbs_checks",
+        "dbs_status_check": "dbs_checks",
+        "identity_documents": "identity_verifications",
+        "identity_verification": "identity_verifications",
+        "proof_of_address": "address_verifications",
+        "address_verification": "address_verifications",
+    }
+    check_collection = dual_row_check_collections.get(requirement_id)
+    invalidated_check_count = 0
+    if check_collection:
+        check_update_result = await db[check_collection].update_many(
+            {"employee_id": employee_id, "is_current": True},
+            {"$set": {
+                "is_current": False,
+                "outcome": "invalidated",
+                "invalidated_at": now,
+                "invalidated_by": user['user_id'],
+                "invalidation_reason": f"Requirement unverified: {requirement_id}",
+                "updated_at": now,
+            }}
+        )
+        invalidated_check_count = int(check_update_result.modified_count or 0)
     
     if req_type == 'training':
         await db.training_records.update_many(
@@ -19918,9 +19951,15 @@ async def unverify_requirement(
         )
     
     await log_audit_action(user['user_id'], "unverify_requirement", "requirement", requirement_id,
-                           {"employee_id": employee_id})
-    
-    return {"success": True, "message": f"Verification removed from '{requirement['name']}'"}
+                           {"employee_id": employee_id, "invalidated_checks": invalidated_check_count})
+
+    await update_employee_compliance(employee_id)
+
+    return {
+        "success": True,
+        "message": f"Verification removed from '{requirement['name']}'",
+        "invalidated_checks": invalidated_check_count,
+    }
 
 
 # ==================== EMPLOYEE DOCUMENT ROUTES ====================

@@ -861,6 +861,12 @@ async def get_unified_employee_status(
     rtw_check = await db.rtw_checks.find_one(
         {"employee_id": emp_id, "is_current": True}, {"_id": 0}
     )
+    dbs_check_history_exists = await db.dbs_checks.find_one(
+        {"employee_id": emp_id}, {"_id": 0, "id": 1}
+    ) is not None
+    rtw_check_history_exists = await db.rtw_checks.find_one(
+        {"employee_id": emp_id}, {"_id": 0, "id": 1}
+    ) is not None
     current_proof_doc_ids = {
         doc_id for doc_id in [
             (dbs_check or {}).get("proof_document_id"),
@@ -1011,18 +1017,21 @@ async def get_unified_employee_status(
         # For all other requirements: count verified stamps as before.
         if req_id in ("dbs", "right_to_work"):
             _active_check = dbs_check if req_id == "dbs" else rtw_check
+            _has_any_check_history = dbs_check_history_exists if req_id == "dbs" else rtw_check_history_exists
             _check_verified = bool(_active_check and (_active_check.get("outcome") == "verified"))
             _has_live_evidence = len(matching_docs) > 0
             # Legacy path: when no formal check record exists at all, accept an
             # admin-verified document (doc.verified=True or status approved/verified).
             # This aligns with the /compliance-file endpoint evidence-row logic.
-            # If ANY check record is present (even unverified), it takes priority.
+            # If ANY check history exists (including invalidated), a current check
+            # is required to mark this requirement complete.
             _dbs_rtw_reject_set = frozenset((
                 "rejected", "amendment_requested", "invalidated",
                 "deleted", "superseded", "uploaded_in_error",
             ))
             _legacy_doc_verified = (
                 _active_check is None
+                and not _has_any_check_history
                 and any(
                     (doc.get("verified") is True or doc.get("status") in ("approved", "verified"))
                     and (doc.get("status") or "").lower() not in _dbs_rtw_reject_set

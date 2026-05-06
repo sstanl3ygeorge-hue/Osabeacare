@@ -46324,11 +46324,27 @@ async def startup():
     except Exception as e:
         logger.error(f"Auto-seeding policies failed: {e}")
 
-    # ── Patch existing induction temp records that are missing expiry_date ───
-    # Records written before commit 398063e had no expiry_date stored.
-    # Backfill: expiry_date = completion_date + 90 days, verification_status = "verified".
+    # ── Backfill induction temp training records ────────────────────────────
+    # Two passes:
+    # Pass 1: patch existing temp records missing expiry_date.
+    # Pass 2: for any completed hybrid/manual induction item that never had a
+    #         training record written (signoffs before the feature was deployed),
+    #         create one now from the induction_checklists collection.
     try:
         from datetime import timedelta as _td
+
+        # CARE_CERTIFICATE_STANDARDS already imported at top of file.
+        # Build: item_id → (requirement_id, auto_complete)
+        _CC_SYNC = {
+            s["id"]: (s.get("training_sync") or s["id"], s.get("auto_complete", "hybrid"))
+            for s in CARE_CERTIFICATE_STANDARDS
+        }
+        _CC_NEEDS_TEMP = {
+            item_id for item_id, (_, ac) in _CC_SYNC.items()
+            if ac in ("hybrid", "manual") and item_id != "shadow_shift"
+        }
+
+        # Pass 1 — patch existing records missing expiry_date
         stale_records = await db.training_records.find(
             {
                 "source_type": "form_submission",
@@ -46354,6 +46370,80 @@ async def startup():
                     pass
         if patched:
             logger.info(f"Backfilled expiry_date on {patched} temporary induction training records.")
+
+        # Pass 2 — create missing training records from induction checklists
+        # Load all existing temp requirement_ids per employee so we don't double-create.
+        existing_temp = await db.training_records.find(
+            {
+                "source_type": "form_submission",
+                "evidence_type": "temporary_internal",
+                "record_status": {"$nin": ["deleted", "superseded"]},
+            },
+            {"_id": 0, "employee_id": 1, "requirement_id": 1},
+        ).to_list(10000)
+        existing_set: set[tuple] = {
+            (r["employee_id"], r["requirement_id"])
+            for r in existing_temp
+            if r.get("employee_id") and r.get("requirement_id")
+        }
+
+        checklists = await db.induction_checklists.find(
+            {}, {"_id": 0, "employee_id": 1, "items": 1}
+        ).to_list(2000)
+
+        created = 0
+        _now_dt = datetime.now(timezone.utc)
+        _now_iso = _now_dt.isoformat()
+
+        for cl in checklists:
+            emp_id = cl.get("employee_id")
+            if not emp_id:
+                continue
+            for item in cl.get("items", []):
+                item_id = item.get("id")
+                if item_id not in _CC_NEEDS_TEMP:
+                    continue
+                if item.get("status") != "completed":
+                    continue
+                req_id, _ = _CC_SYNC[item_id]
+                if (emp_id, req_id) in existing_set:
+                    continue
+                # Determine completion date
+                comp_raw = item.get("completed_at") or _now_iso
+                try:
+                    comp_dt = datetime.fromisoformat(str(comp_raw).replace("Z", "+00:00"))
+                except Exception:
+                    comp_dt = _now_dt
+                comp_date = comp_dt.strftime("%Y-%m-%d")
+                exp_date = (comp_dt + _td(days=90)).strftime("%Y-%m-%d")
+                item_name = item.get("name", item_id.replace("_", " ").title())
+                new_rec = {
+                    "id": str(uuid.uuid4()),
+                    "employee_id": emp_id,
+                    "training_name": item_name,
+                    "requirement_id": req_id,
+                    "source_type": "form_submission",
+                    "evidence_type": "temporary_internal",
+                    "completion_method": "manual",
+                    "completion_date": comp_date,
+                    "expiry_date": exp_date,
+                    "verified": True,
+                    "verification_status": "verified",
+                    "verified_by_name": item.get("completed_by_name") or "System backfill",
+                    "record_status": "active",
+                    "notes": (
+                        "Backfilled from induction checklist — temporary 90-day evidence. "
+                        "Real Care Certificate required."
+                    ),
+                    "created_at": _now_iso,
+                    "updated_at": _now_iso,
+                }
+                await db.training_records.insert_one({k: v for k, v in new_rec.items() if k != "_id"})
+                existing_set.add((emp_id, req_id))
+                created += 1
+
+        if created:
+            logger.info(f"Created {created} missing induction training records from induction checklists.")
     except Exception as e:
         logger.error(f"Induction temp record backfill failed: {e}")
 

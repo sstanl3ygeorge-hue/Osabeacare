@@ -46339,6 +46339,16 @@ async def startup():
             s["id"]: (s.get("training_sync") or s["id"], s.get("auto_complete", "hybrid"))
             for s in CARE_CERTIFICATE_STANDARDS
         }
+        _CC_NAME_TO_ID = {
+            str(s.get("name", "")).strip().lower(): s["id"]
+            for s in CARE_CERTIFICATE_STANDARDS
+            if s.get("name") and s.get("id")
+        }
+        _CC_NUM_TO_ID = {
+            str(s.get("num")): s["id"]
+            for s in CARE_CERTIFICATE_STANDARDS
+            if s.get("num") is not None and s.get("id")
+        }
         _CC_NEEDS_TEMP = {
             item_id for item_id, (_, ac) in _CC_SYNC.items()
             if ac in ("hybrid", "manual") and item_id != "shadow_shift"
@@ -46395,28 +46405,81 @@ async def startup():
         _now_dt = datetime.now(timezone.utc)
         _now_iso = _now_dt.isoformat()
 
+        def _iter_checklist_items(items_value):
+            """Yield checklist item dicts from list/dict legacy storage shapes."""
+            if isinstance(items_value, list):
+                for it in items_value:
+                    if isinstance(it, dict):
+                        yield it
+                return
+            if isinstance(items_value, dict):
+                for key, val in items_value.items():
+                    if isinstance(val, dict):
+                        if not val.get("id"):
+                            val = {**val, "id": key}
+                        yield val
+
+        def _resolve_cc_item_id(item: dict) -> str | None:
+            raw_id = (
+                item.get("id")
+                or item.get("item_id")
+                or item.get("item_code")
+            )
+            if raw_id:
+                cand = str(raw_id).strip().lower()
+                if cand in _CC_SYNC:
+                    return cand
+                if cand.startswith("standard_"):
+                    num = cand.split("_")[-1]
+                    resolved = _CC_NUM_TO_ID.get(num)
+                    if resolved:
+                        return resolved
+
+            raw_name = item.get("name") or item.get("item_name")
+            if raw_name:
+                return _CC_NAME_TO_ID.get(str(raw_name).strip().lower())
+
+            return None
+
+        def _is_completed_checklist_item(item: dict) -> bool:
+            status_text = str(item.get("status") or item.get("item_status") or "").strip().lower()
+            return (
+                status_text == "completed"
+                or bool(item.get("completed"))
+                or bool(item.get("is_completed"))
+                or bool(item.get("signed_off"))
+                or bool(item.get("signoff_at"))
+                or bool(item.get("completed_at"))
+            )
+
         for cl in checklists:
             emp_id = cl.get("employee_id")
             if not emp_id:
                 continue
-            for item in cl.get("items", []):
-                item_id = item.get("id")
+            for item in _iter_checklist_items(cl.get("items", [])):
+                item_id = _resolve_cc_item_id(item)
                 if item_id not in _CC_NEEDS_TEMP:
                     continue
-                if item.get("status") != "completed":
+                if not _is_completed_checklist_item(item):
                     continue
                 req_id, _ = _CC_SYNC[item_id]
                 if (emp_id, req_id) in existing_set:
                     continue
                 # Determine completion date
-                comp_raw = item.get("completed_at") or _now_iso
+                comp_raw = (
+                    item.get("completed_at")
+                    or item.get("signoff_at")
+                    or item.get("signed_off_at")
+                    or item.get("updated_at")
+                    or _now_iso
+                )
                 try:
                     comp_dt = datetime.fromisoformat(str(comp_raw).replace("Z", "+00:00"))
                 except Exception:
                     comp_dt = _now_dt
                 comp_date = comp_dt.strftime("%Y-%m-%d")
                 exp_date = (comp_dt + _td(days=90)).strftime("%Y-%m-%d")
-                item_name = item.get("name", item_id.replace("_", " ").title())
+                item_name = item.get("name") or item.get("item_name") or item_id.replace("_", " ").title()
                 new_rec = {
                     "id": str(uuid.uuid4()),
                     "employee_id": emp_id,
@@ -46429,7 +46492,12 @@ async def startup():
                     "expiry_date": exp_date,
                     "verified": True,
                     "verification_status": "verified",
-                    "verified_by_name": item.get("completed_by_name") or "System backfill",
+                    "verified_by_name": (
+                        item.get("completed_by_name")
+                        or item.get("signoff_by_name")
+                        or item.get("reviewed_by")
+                        or "System backfill"
+                    ),
                     "record_status": "active",
                     "notes": (
                         "Backfilled from induction checklist — temporary 90-day evidence. "

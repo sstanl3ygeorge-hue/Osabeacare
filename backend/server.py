@@ -28077,10 +28077,10 @@ async def export_training_matrix(
                                  ParagraphStyle('Date', fontSize=9, alignment=TA_CENTER, spaceAfter=15)))
         
         # Define colors matching Excel format
-        color_blue = colors.Color(0.2, 0.6, 0.85)  # In date (blue)
+        color_green = colors.Color(0.18, 0.63, 0.18)  # In date (green)
         color_yellow = colors.Color(1, 0.85, 0.4)  # Expiring (yellow/orange)
         color_red = colors.Color(0.9, 0.3, 0.3)    # Expired/missing (red)
-        color_header = colors.Color(0, 0.55, 0.75) # Header (teal blue like Excel)
+        color_header = colors.Color(0, 0.55, 0.75) # Header (teal blue)
         color_white = colors.white
         
         # Build headers
@@ -28218,7 +28218,7 @@ async def export_training_matrix(
         for row_idx, statuses in enumerate(row_training_status, start=1):
             for col_idx, status in enumerate(statuses, start=4):  # Start after fixed columns
                 if status == "in_date":
-                    table_style.add('BACKGROUND', (col_idx, row_idx), (col_idx, row_idx), color_blue)
+                    table_style.add('BACKGROUND', (col_idx, row_idx), (col_idx, row_idx), color_green)
                     table_style.add('TEXTCOLOR', (col_idx, row_idx), (col_idx, row_idx), colors.white)
                 elif status == "expiring":
                     table_style.add('BACKGROUND', (col_idx, row_idx), (col_idx, row_idx), color_yellow)
@@ -28234,7 +28234,7 @@ async def export_training_matrix(
         legend_style = ParagraphStyle('Legend', fontSize=8, spaceAfter=4)
         elements.append(Paragraph(
             "<b>Legend:</b> "
-            "<font color='#3399DD'>■</font> In Date | "
+            "<font color='#2EA12E'>■</font> In Date | "
             "<font color='#FFD966'>■</font> Expiring Soon (30 days) | "
             "<font color='#E64D4D'>■</font> Expired/Missing",
             legend_style

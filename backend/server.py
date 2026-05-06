@@ -16222,18 +16222,122 @@ class RecruitmentApprovalRequest(BaseModel):
 
 @api_router.get("/employees/{employee_id}/export-file")
 async def export_employee_file(employee_id: str, user: dict = Depends(get_current_user)):
-    """Export employee file as ZIP with organized folder structure"""
+    """Export employee file as ZIP — every folder contains the same PDFs/files you see in the portal."""
+    import json as _json
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib import colors as rl_colors
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
+    from services.pdf_service import generate_structured_form_pdf
+
     employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
-    
-    # Create ZIP in memory
-    zip_buffer = io.BytesIO()
-    
-    # Define folder structure
+
+    emp_name_str = f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip()
+    emp_code = employee.get("employee_code", "unknown")
+    export_ts = datetime.now(timezone.utc)
+    export_date_str = export_ts.isoformat()
+
+    # ── helpers ──────────────────────────────────────────────────────────────
+
+    def _content_type_ext(ct: str, fallback_filename: str = "") -> str:
+        """Return a proper file extension from a content-type string."""
+        ct = (ct or "").lower()
+        if "pdf" in ct:
+            return ".pdf"
+        if "jpeg" in ct or "jpg" in ct:
+            return ".jpg"
+        if "png" in ct:
+            return ".png"
+        if "gif" in ct:
+            return ".gif"
+        if "webp" in ct:
+            return ".webp"
+        if "word" in ct or "docx" in ct:
+            return ".docx"
+        # Last resort: try to derive from the stored filename
+        if "." in fallback_filename:
+            return "." + fallback_filename.rsplit(".", 1)[-1].lower()
+        return ".bin"
+
+    def _safe_get(url: str):
+        """Fetch bytes from storage; return (bytes, content_type) or (None, None)."""
+        if not url:
+            return None, None
+        try:
+            content, ct = get_object(url)
+            return content, ct
+        except Exception as exc:
+            logger.warning("ZIP export: could not fetch %s — %s", url, exc)
+            return None, None
+
+    def _fmt_date(val) -> str:
+        if not val:
+            return "N/A"
+        try:
+            s = str(val)
+            return s[:10]  # YYYY-MM-DD
+        except Exception:
+            return str(val)
+
+    # ── styled summary-PDF builder (reused for RTW, DBS, Training, Employee) ─
+
+    def _make_summary_pdf(title: str, sections: list) -> bytes:
+        """
+        sections = [
+            {"heading": "Section Name", "rows": [("Label", "Value"), ...]},
+            ...
+        ]
+        """
+        buf = io.BytesIO()
+        doc = SimpleDocTemplate(buf, pagesize=A4,
+                                topMargin=15*mm, bottomMargin=15*mm,
+                                leftMargin=20*mm, rightMargin=20*mm)
+        styles = getSampleStyleSheet()
+        teal = rl_colors.HexColor("#0F766E")
+        white = rl_colors.white
+        light = rl_colors.HexColor("#F0FAFA")
+
+        title_style = ParagraphStyle("ZT", parent=styles["Heading1"],
+                                     fontSize=16, textColor=teal, spaceAfter=6*mm)
+        heading_style = ParagraphStyle("ZH", parent=styles["Heading2"],
+                                       fontSize=11, textColor=white,
+                                       backColor=teal, spaceBefore=6*mm, spaceAfter=3*mm,
+                                       leftIndent=-2*mm, borderPadding=(2*mm, 3*mm, 2*mm, 3*mm))
+        body_style = ParagraphStyle("ZB", parent=styles["Normal"], fontSize=9)
+
+        story = [Paragraph(title, title_style),
+                 Paragraph(f"Exported: {export_ts.strftime('%d/%m/%Y %H:%M')} UTC  |  Employee: {emp_name_str} ({emp_code})", body_style),
+                 Spacer(1, 4*mm)]
+
+        for sec in sections:
+            story.append(Paragraph(sec["heading"], heading_style))
+            rows = sec.get("rows", [])
+            if rows:
+                tdata = [[Paragraph(f"<b>{r[0]}</b>", body_style),
+                          Paragraph(str(r[1]) if r[1] not in (None, "") else "—", body_style)]
+                         for r in rows]
+                tbl = Table(tdata, colWidths=[65*mm, 105*mm])
+                tbl.setStyle(TableStyle([
+                    ("ROWBACKGROUNDS", (0, 0), (-1, -1), [white, light]),
+                    ("GRID", (0, 0), (-1, -1), 0.4, rl_colors.HexColor("#CCCCCC")),
+                    ("TOPPADDING", (0, 0), (-1, -1), 4),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                ]))
+                story.append(tbl)
+            story.append(Spacer(1, 2*mm))
+
+        doc.build(story)
+        return buf.getvalue()
+
+    # ── folders ──────────────────────────────────────────────────────────────
+
     folders = [
         "A_Application_Form",
-        "B_Recruitment_Checklist", 
+        "B_Recruitment_Checklist",
         "C_Personal_Information",
         "D_Interview",
         "E_Equal_Opportunities",
@@ -16246,35 +16350,39 @@ async def export_employee_file(employee_id: str, user: dict = Depends(get_curren
         "L_Contract",
         "M_Supervision_Appraisals",
         "N_Training",
-        "O_Other"
+        "O_Other",
     ]
-    
-    # Map form templates to folders
-    form_folder_map = {
-        "Application Form": "A_Application_Form",
-        "Recruitment Compliance Checklist": "B_Recruitment_Checklist",
-        "Personal Information Form": "C_Personal_Information",
-        "Interview Record Form": "D_Interview",
-        "Equal Opportunities Monitoring Form": "E_Equal_Opportunities",
-        "Health Screening Questionnaire": "F_Health_Screening",
-        "Induction & Competency Assessment": "J_Induction_Shadowing_Observations",
-        "Contract Acknowledgement Form": "L_Contract",
-        "Supervision Record": "M_Supervision_Appraisals",
-        "Annual Appraisal Form": "M_Supervision_Appraisals",
-        "Reference Request & Verification Form": "H_References",
-        "DBS Review & Risk Assessment": "I_DBS",
-        "Employee Handbook Acknowledgement": "O_Other"
+
+    # form_type / requirement_id  →  (folder, friendly_name)
+    SUBMISSION_FOLDER_MAP = {
+        "application_form":           ("A_Application_Form", "Application_Form"),
+        "recruitment_checklist":      ("B_Recruitment_Checklist", "Recruitment_Compliance_Checklist"),
+        "personal_info":              ("C_Personal_Information", "Personal_Information"),
+        "equal_opportunities":        ("E_Equal_Opportunities", "Equal_Opportunities"),
+        "health_screening":           ("F_Health_Screening", "Health_Screening_Questionnaire"),
+        "staff_health_questionnaire": ("F_Health_Screening", "Staff_Health_Questionnaire"),
+        "interview_record":           ("D_Interview", "Interview_Record"),
+        "pre_interview_questionnaire":("D_Interview", "Pre_Interview_Questionnaire"),
+        "induction":                  ("J_Induction_Shadowing_Observations", "Induction_Assessment"),
+        "contract":                   ("L_Contract", "Contract_Acknowledgement"),
+        "supervision_record":         ("M_Supervision_Appraisals", "Supervision_Record"),
+        "annual_appraisal":           ("M_Supervision_Appraisals", "Appraisal"),
+        "handbook":                   ("O_Other", "Handbook_Acknowledgement"),
+        "employee_handbook_acknowledgement": ("O_Other", "Handbook_Acknowledgement"),
     }
-    
-    # Map document types to folders
+
     doc_folder_map = {
         "passport": "G_Identity_RTW",
         "visa": "G_Identity_RTW",
         "right_to_work": "G_Identity_RTW",
         "driving_licence": "G_Identity_RTW",
         "birth_certificate": "G_Identity_RTW",
+        "share_code": "G_Identity_RTW",
+        "brp": "G_Identity_RTW",
         "dbs": "I_DBS",
+        "dbs_certificate": "I_DBS",
         "reference": "H_References",
+        "reference_letter": "H_References",
         "contract": "L_Contract",
         "training_certificate": "N_Training",
         "professional_registration": "O_Other",
@@ -16283,149 +16391,338 @@ async def export_employee_file(employee_id: str, user: dict = Depends(get_curren
         "competency_assessment": "N_Training",
         "hmrc": "K_HMRC",
         "p45": "K_HMRC",
-        "ni_number": "K_HMRC"
+        "ni_number": "K_HMRC",
+        "p60": "K_HMRC",
     }
-    
-    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
-        section_file_counts = {folder: 0 for folder in folders}
-        empty_section_notes = {}
 
-        # Add generated forms
-        forms = await db.generated_forms.find(
-            {"employee_id": employee_id, "status": {"$in": ["completed", "reviewed", "signed_off"]}},
-            {"_id": 0}
-        ).to_list(100)
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        section_file_counts = {f: 0 for f in folders}
 
-        for form in forms:
-            folder = form_folder_map.get(form.get("template_name"), "O_Other")
-            filename = f"{form.get('template_name', 'Form')}_{form.get('id', 'unknown')[:8]}.json"
-            # Save form data as JSON (in production, this would be a PDF)
-            form_content = {
-                "template_name": form.get("template_name"),
-                "employee_name": form.get("employee_name"),
-                "status": form.get("status"),
-                "form_data": form.get("form_data"),
-                "completed_at": form.get("completed_at"),
-                "signed_off_at": form.get("signed_off_at")
-            }
-            import json
-            zf.writestr(f"{folder}/{filename}", json.dumps(form_content, indent=2))
+        def _add(folder: str, filename: str, data: bytes):
+            zf.writestr(f"{folder}/{filename}", data)
             section_file_counts[folder] = section_file_counts.get(folder, 0) + 1
 
-        # Add uploaded documents
+        # ══════════════════════════════════════════════════════════════════
+        # 1. FORM SUBMISSIONS → proper PDFs via the same renderers the
+        #    portal's "Download PDF" button uses.
+        # ══════════════════════════════════════════════════════════════════
+        submissions = await db.form_submissions.find(
+            {"employee_id": employee_id},
+            {"_id": 0}
+        ).to_list(200)
+
+        for sub in submissions:
+            form_type = sub.get("form_type") or sub.get("requirement_id") or ""
+            folder_info = SUBMISSION_FOLDER_MAP.get(form_type)
+            if not folder_info:
+                # try prefix match for variants like "application_form_v2"
+                for key, info in SUBMISSION_FOLDER_MAP.items():
+                    if form_type.startswith(key):
+                        folder_info = info
+                        break
+            if not folder_info:
+                folder_info = ("O_Other", form_type.replace("_", " ").title())
+
+            folder, friendly = folder_info
+            sub_id = sub.get("id", "unknown")
+            fname_base = f"{friendly}_{sub_id[:8]}"
+
+            # Check if a pre-rendered PDF export already exists in storage
+            existing_export = await db.form_pdf_exports.find_one(
+                {"submission_id": sub_id},
+                {"_id": 0, "file_url": 1},
+                sort=[("created_at", -1)]
+            )
+            if existing_export and existing_export.get("file_url"):
+                pdf_bytes, _ = _safe_get(existing_export["file_url"])
+                if pdf_bytes:
+                    _add(folder, f"{fname_base}.pdf", pdf_bytes)
+                    continue
+
+            # Render on-the-fly using the same functions the portal uses
+            try:
+                form_data = sub.get("form_data") or {}
+                legacy_data = sub.get("data") or {}
+                if isinstance(form_data, dict) and isinstance(legacy_data, dict):
+                    submission_data = {**legacy_data, **form_data}
+                else:
+                    submission_data = form_data or legacy_data or {}
+                submission_data["_submitted_at"] = sub.get("submitted_at", "")
+                submission_data["_verified"] = sub.get("verified", False)
+                submission_data["_status"] = sub.get("status", "submitted")
+
+                if form_type == "application_form":
+                    pdf_bytes = await generate_application_form_pdf(submission_data, employee)
+                elif form_type == "staff_health_questionnaire":
+                    active_tpl = await db.form_pdf_templates.find_one(
+                        {"form_type": form_type, "is_active": True}
+                    )
+                    mapping_config = (active_tpl or {}).get("mapping_config") or FORM_BASED_REQUIREMENTS.get(form_type, {})
+                    pdf_bytes = await generate_staff_health_pdf(submission_data, employee, mapping_config)
+                elif form_type == "interview_record":
+                    # backfill assessment snapshot if needed
+                    if (submission_data.get("format_version") == "v2_osabea"
+                            and not submission_data.get("assessment_items")):
+                        try:
+                            from interview_questions import get_role_interview_config
+                            role = employee.get("job_title") or employee.get("role") or "support_worker"
+                            config = get_role_interview_config(role)
+                            questions = config.get("questions", [])
+                            questionnaire = await db.form_submissions.find_one({
+                                "employee_id": employee_id,
+                                "$or": [
+                                    {"form_type": "pre_interview_questionnaire"},
+                                    {"requirement_id": "pre_interview_questionnaire"},
+                                    {"requirement_id": "interview"},
+                                ]
+                            }, {"_id": 0})
+                            worker_answers = ((questionnaire or {}).get("form_data") or
+                                              (questionnaire or {}).get("data") or {})
+                            q_scores = submission_data.get("question_scores") or {}
+                            q_notes = submission_data.get("question_notes") or {}
+                            submission_data["assessment_items"] = [
+                                {
+                                    "question_id": q.get("id"),
+                                    "question_text": q.get("question"),
+                                    "category": q.get("category"),
+                                    "skills_assessed": q.get("skills_assessed"),
+                                    "worker_answer": worker_answers.get(q.get("id")),
+                                    "admin_score": q_scores.get(q.get("id")),
+                                    "admin_notes": q_notes.get(q.get("id")),
+                                }
+                                for q in questions if q.get("id")
+                            ]
+                        except Exception:
+                            pass
+                    template_def = FORM_BASED_REQUIREMENTS.get(form_type, {})
+                    pdf_bytes = generate_structured_form_pdf(
+                        form_type=form_type,
+                        form_name=template_def.get("name", "Interview Record"),
+                        submission_data=submission_data,
+                        employee_data=employee,
+                        template_sections=template_def.get("sections"),
+                    )
+                else:
+                    template_def = FORM_BASED_REQUIREMENTS.get(form_type, {})
+                    pdf_bytes = generate_structured_form_pdf(
+                        form_type=form_type,
+                        form_name=template_def.get("name", form_type.replace("_", " ").title()),
+                        submission_data=submission_data,
+                        employee_data=employee,
+                        template_sections=template_def.get("sections"),
+                    )
+                _add(folder, f"{fname_base}.pdf", pdf_bytes)
+            except Exception as exc:
+                logger.error("ZIP export: PDF render failed for submission %s (%s): %s", sub_id, form_type, exc)
+
+        # ══════════════════════════════════════════════════════════════════
+        # 2. UPLOADED DOCUMENTS → actual files with correct extensions
+        # ══════════════════════════════════════════════════════════════════
         documents = await db.employee_documents.find(
             {"employee_id": employee_id},
             {"_id": 0}
-        ).to_list(100)
+        ).to_list(200)
 
         for doc in documents:
-            folder = doc_folder_map.get(doc.get("document_type"), "O_Other")
-            file_url = doc.get("file_url")
-            if file_url:
-                try:
-                    content, content_type = get_object(file_url)
-                    ext = ".pdf" if "pdf" in content_type else ".file"
-                    filename = doc.get("original_filename") or f"{doc.get('document_type', 'document')}_{doc.get('id', 'unknown')[:8]}{ext}"
-                    zf.writestr(f"{folder}/{filename}", content)
-                    section_file_counts[folder] = section_file_counts.get(folder, 0) + 1
-                except Exception as e:
-                    logger.error(f"Failed to add document to ZIP: {e}")
+            doc_type = (doc.get("document_type") or "").lower()
+            folder = doc_folder_map.get(doc_type, "O_Other")
+            file_url = doc.get("file_url") or doc.get("storage_path")
+            if not file_url:
+                continue
+            try:
+                content, ct = get_object(file_url)
+                orig_fn = doc.get("original_filename") or ""
+                ext = _content_type_ext(ct, orig_fn)
+                if orig_fn and orig_fn.lower().endswith(ext):
+                    filename = orig_fn
+                else:
+                    safe_type = doc_type.replace(" ", "_") or "document"
+                    filename = f"{safe_type}_{doc.get('id', 'unknown')[:8]}{ext}"
+                _add(folder, filename, content)
+            except Exception as exc:
+                logger.error("ZIP export: failed to add document %s: %s", doc.get("id"), exc)
 
-        # Add training records summary
-        training = await db.training_records.find(
+        # ══════════════════════════════════════════════════════════════════
+        # 3. SIGNED CONTRACT → L_Contract
+        #    Priority: executed (both parties signed) > worker signed > rendered
+        # ══════════════════════════════════════════════════════════════════
+        contract_rec = await db.generated_contracts.find_one(
             {"employee_id": employee_id},
+            {"_id": 0},
+            sort=[("created_at", -1)]
+        )
+        if contract_rec:
+            contract_url = (
+                contract_rec.get("executed_contract_pdf_url")
+                or contract_rec.get("worker_signed_contract_pdf_url")
+                or contract_rec.get("rendered_contract_pdf_url")
+            )
+            if contract_url:
+                pdf_bytes, _ = _safe_get(contract_url)
+                if pdf_bytes:
+                    _add("L_Contract", f"Contract_{emp_code}.pdf", pdf_bytes)
+
+        # ══════════════════════════════════════════════════════════════════
+        # 4. RIGHT TO WORK CHECK SUMMARY → G_Identity_RTW
+        # ══════════════════════════════════════════════════════════════════
+        rtw = await db.rtw_checks.find_one({"employee_id": employee_id}, {"_id": 0})
+        if rtw:
+            rtw_pdf = _make_summary_pdf("Right to Work Check Record", [
+                {
+                    "heading": "Check Details",
+                    "rows": [
+                        ("Employee", emp_name_str),
+                        ("Employee Code", emp_code),
+                        ("Check Date", _fmt_date(rtw.get("check_date") or rtw.get("checked_at"))),
+                        ("Expiry Date", _fmt_date(rtw.get("expiry_date"))),
+                        ("Check Type", rtw.get("check_type") or rtw.get("rtw_type") or "N/A"),
+                        ("Status", rtw.get("status") or rtw.get("verification_status") or "N/A"),
+                        ("Share Code", rtw.get("share_code") or "N/A"),
+                        ("Verified By", rtw.get("verified_by_name") or rtw.get("verified_by") or "N/A"),
+                        ("Verified At", _fmt_date(rtw.get("verified_at"))),
+                        ("Notes", rtw.get("notes") or ""),
+                    ],
+                }
+            ])
+            _add("G_Identity_RTW", f"RTW_Check_Summary_{emp_code}.pdf", rtw_pdf)
+
+        # ══════════════════════════════════════════════════════════════════
+        # 5. DBS CHECK SUMMARY → I_DBS
+        # ══════════════════════════════════════════════════════════════════
+        dbs = await db.dbs_checks.find_one({"employee_id": employee_id}, {"_id": 0})
+        if dbs:
+            dbs_pdf = _make_summary_pdf("DBS Check Record", [
+                {
+                    "heading": "DBS Details",
+                    "rows": [
+                        ("Employee", emp_name_str),
+                        ("Employee Code", emp_code),
+                        ("DBS Type", dbs.get("dbs_type") or dbs.get("check_type") or "N/A"),
+                        ("Certificate Number", dbs.get("certificate_number") or dbs.get("dbs_number") or "N/A"),
+                        ("Issue Date", _fmt_date(dbs.get("issue_date") or dbs.get("check_date"))),
+                        ("Expiry Date", _fmt_date(dbs.get("expiry_date"))),
+                        ("Status", dbs.get("status") or dbs.get("verification_status") or "N/A"),
+                        ("Barred Lists Checked", "Yes" if dbs.get("barred_lists_checked") else "N/A"),
+                        ("Outcome", dbs.get("outcome") or dbs.get("result") or "N/A"),
+                        ("Verified By", dbs.get("verified_by_name") or dbs.get("verified_by") or "N/A"),
+                        ("Verified At", _fmt_date(dbs.get("verified_at"))),
+                        ("Notes", dbs.get("notes") or ""),
+                    ],
+                }
+            ])
+            _add("I_DBS", f"DBS_Check_Summary_{emp_code}.pdf", dbs_pdf)
+
+        # ══════════════════════════════════════════════════════════════════
+        # 6. TRAINING RECORDS → N_Training (PDF summary, not JSON)
+        # ══════════════════════════════════════════════════════════════════
+        training_records = await db.training_records.find(
+            {"employee_id": employee_id,
+             "record_status": {"$nin": ["deleted", "superseded"]}},
             {"_id": 0}
-        ).to_list(100)
+        ).to_list(200)
 
-        if training:
-            import json
-            training_summary = []
-            for t in training:
-                training_summary.append({
-                    "training_name": t.get("training_name"),
-                    "status": t.get("status"),
-                    "completed_at": t.get("completed_at"),
-                    "expiry_date": t.get("expiry_date"),
-                    "provider": t.get("provider")
-                })
-            zf.writestr("N_Training/_training_summary.json", json.dumps(training_summary, indent=2))
-            section_file_counts["N_Training"] = section_file_counts.get("N_Training", 0) + 1
+        if training_records:
+            verified = [t for t in training_records if
+                        t.get("verification_status") == "verified" or t.get("verified")]
+            pending = [t for t in training_records if
+                       t.get("verification_status") not in ("verified",) and not t.get("verified")]
 
-        # Add employee summary file
-        summary = {
-            "employee_code": employee.get("employee_code"),
-            "name": f"{employee.get('first_name')} {employee.get('last_name')}",
-            "email": employee.get("email"),
-            "role": employee.get("role"),
-            "onboarding_status": employee.get("onboarding_status"),
-            "status": employee.get("status"),
-            "start_date": employee.get("start_date"),
-            "export_date": datetime.now(timezone.utc).isoformat(),
-            "total_forms": len(forms),
-            "total_documents": len(documents),
-            "total_training": len(training)
-        }
-        import json
-        zf.writestr("_EMPLOYEE_SUMMARY.json", json.dumps(summary, indent=2))
+            def _training_rows(recs):
+                rows = []
+                for t in recs:
+                    name = t.get("training_name") or t.get("requirement_id") or "Unknown"
+                    comp = _fmt_date(t.get("completion_date") or t.get("completed_at"))
+                    exp = _fmt_date(t.get("expiry_date") or t.get("expires_at"))
+                    prov = t.get("provider") or t.get("training_provider") or "—"
+                    rows.append((name, f"Completed: {comp}  |  Expires: {exp}  |  Provider: {prov}"))
+                return rows
 
-        # Phase C1 hardening: replace .gitkeep placeholders with explicit
-        # per-section notes and a manifest so inspectors can understand
-        # whether a section is intentionally empty vs export failure.
+            training_pdf = _make_summary_pdf("Training Records", [
+                {"heading": f"Verified & Current ({len(verified)} records)",
+                 "rows": _training_rows(verified) or [("No verified training records", "")]},
+                {"heading": f"Pending Review / Unverified ({len(pending)} records)",
+                 "rows": _training_rows(pending) or [("None", "")]},
+            ])
+            _add("N_Training", f"Training_Summary_{emp_code}.pdf", training_pdf)
+
+        # ══════════════════════════════════════════════════════════════════
+        # 7. EMPLOYEE PROFILE COVER SHEET → root of ZIP (replaces JSON)
+        # ══════════════════════════════════════════════════════════════════
+        profile_pdf = _make_summary_pdf("Employee File Export", [
+            {
+                "heading": "Employee Details",
+                "rows": [
+                    ("Full Name", emp_name_str),
+                    ("Employee Code", emp_code),
+                    ("Role", employee.get("role") or "N/A"),
+                    ("Email", employee.get("email") or "N/A"),
+                    ("Phone", employee.get("phone") or "N/A"),
+                    ("Start Date", _fmt_date(employee.get("start_date"))),
+                    ("Status", employee.get("status") or "N/A"),
+                    ("Lifecycle", employee.get("lifecycle") or "N/A"),
+                ],
+            },
+            {
+                "heading": "Export Summary",
+                "rows": [
+                    ("Export Date", export_ts.strftime("%d/%m/%Y %H:%M UTC")),
+                    ("Exported By", user.get("name") or user.get("user_id") or "Admin"),
+                    ("Form Submissions", str(len(submissions))),
+                    ("Uploaded Documents", str(len(documents))),
+                    ("Training Records", str(len(training_records))),
+                ],
+            },
+        ])
+        zf.writestr("00_Employee_Cover_Sheet.pdf", profile_pdf)
+
+        # ── Empty-section placeholder (JSON, admin-only guidance) ─────────
         for folder in folders:
             if section_file_counts.get(folder, 0) == 0:
                 note = {
                     "section": folder,
                     "status": "empty",
-                    "reason": "No evidence currently stored for this section at export time.",
-                    "employee_id": employee_id,
-                    "export_date": summary["export_date"],
+                    "reason": "No evidence stored for this section at export time.",
+                    "export_date": export_date_str,
                 }
-                empty_section_notes[folder] = note
-                zf.writestr(f"{folder}/_EMPTY_SECTION.json", json.dumps(note, indent=2))
+                zf.writestr(f"{folder}/_EMPTY_SECTION.json", _json.dumps(note, indent=2))
 
-        pack_manifest = {
+        # ── Pack manifest ─────────────────────────────────────────────────
+        manifest = {
             "pack_type": "employee_file_export",
             "employee_id": employee_id,
-            "employee_code": employee.get("employee_code"),
-            "employee_name": summary["name"],
+            "employee_code": emp_code,
+            "employee_name": emp_name_str,
             "generated_by_user_id": user.get("user_id"),
-            "generated_at": summary["export_date"],
+            "generated_at": export_date_str,
             "sections": [
                 {
-                    "name": folder,
-                    "files_exported": section_file_counts.get(folder, 0),
-                    "empty": section_file_counts.get(folder, 0) == 0,
+                    "name": f,
+                    "files_exported": section_file_counts.get(f, 0),
+                    "empty": section_file_counts.get(f, 0) == 0,
                 }
-                for folder in folders
+                for f in folders
             ],
             "totals": {
-                "forms": len(forms),
+                "form_submissions": len(submissions),
                 "documents": len(documents),
-                "training_records": len(training),
-                "empty_sections": len([f for f in folders if section_file_counts.get(f, 0) == 0]),
-            },
-            "notes": {
-                "empty_sections_have_placeholder_json": True,
-                "legacy_gitkeep_placeholder_used": False,
+                "training_records": len(training_records),
+                "empty_sections": sum(1 for f in folders if section_file_counts.get(f, 0) == 0),
             },
         }
-        zf.writestr("00_PACK_MANIFEST.json", json.dumps(pack_manifest, indent=2))
-    
+        zf.writestr("00_PACK_MANIFEST.json", _json.dumps(manifest, indent=2))
+
     zip_buffer.seek(0)
-    
-    # Generate filename
-    emp_name = f"{employee.get('first_name')}_{employee.get('last_name')}".replace(" ", "_")
-    emp_code = employee.get("employee_code", "unknown")
-    filename = f"{emp_code}_{emp_name}_File.zip"
-    
-    await log_audit_action(user['user_id'], "export_employee_file", "employee", employee_id, {
+    filename = f"{emp_code}_{emp_name_str.replace(' ', '_')}_File.zip"
+
+    await log_audit_action(user["user_id"], "export_employee_file", "employee", employee_id, {
         "filename": filename
     })
-    
+
     return StreamingResponse(
         zip_buffer,
         media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 @api_router.get("/employees/{employee_id}/export-compliance-summary")

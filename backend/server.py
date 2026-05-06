@@ -27257,6 +27257,51 @@ def _format_training_matrix_date(date_val):
         return ""
 
 
+def _training_matrix_lookup_keys(record: dict) -> set[str]:
+    """Build robust matrix lookup keys from a training record.
+
+    This uses shared canonical taxonomy resolution and bridges known vocabulary
+    differences between matrix column IDs and shared canonical keys.
+    """
+    keys: set[str] = set()
+
+    raw_values = [
+        record.get("requirement_id"),
+        record.get("mapped_training_code"),
+        record.get("training_name"),
+    ]
+
+    for raw in raw_values:
+        if not raw:
+            continue
+
+        text = str(raw).strip()
+        if not text:
+            continue
+
+        # Preserve legacy exact lookup behavior.
+        keys.add(text)
+        keys.add(text.replace("-", "_"))
+        keys.add(text.replace("_", "-"))
+
+        normalized = normalize_training_key(text)
+        if normalized:
+            keys.add(normalized)
+
+        canonical = resolve_training_to_canonical_shared(text)
+        if canonical:
+            keys.add(canonical)
+
+            # Bridge canonical taxonomy -> matrix column IDs (MANDATORY_ITEMS IDs).
+            if canonical == "health_safety_welfare":
+                keys.add("health_safety")
+            elif canonical == "basic_life_support_adults":
+                keys.add("bls")
+                keys.add("basic_life_support")
+
+    return {k for k in keys if k}
+
+
 async def build_training_matrix_read_model():
     """
     Shared read model for the visible training matrix, summary, and export.
@@ -27374,13 +27419,9 @@ async def build_training_matrix_read_model():
         training_records = records_by_employee.get(emp_id, [])
         training_lookup = {}
         for record in training_records:
-            keys = {
-                record.get("requirement_id"),
-                record.get("mapped_training_code"),
-                normalize_training_key(record.get("training_name", "")),
-            }
+            keys = _training_matrix_lookup_keys(record)
             score = 0 if record.get("verified") or record.get("verification_status") == "verified" else 1
-            for key in [k for k in keys if k]:
+            for key in keys:
                 current = training_lookup.get(key)
                 if not current or score < current.get("_score", 99):
                     training_lookup[key] = {**record, "_score": score}

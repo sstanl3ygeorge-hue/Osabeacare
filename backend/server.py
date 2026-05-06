@@ -917,7 +917,6 @@ class EmployeeStatus:
     SUPERSEDED = "superseded"
 
 # Stage Classification Constants
-# Applicant = pre-hire decision, Employee = post-hire decision
 APPLICANT_STATUSES = [
     EmployeeStatus.NEW,
     EmployeeStatus.SCREENING,
@@ -20917,16 +20916,42 @@ async def upload_document_for_requirement(
     timestamp = datetime.now(timezone.utc).strftime('%d-%m-%Y_%H%M%S')
     filename = f"{employee_name}_{requirement_id}_{timestamp}.{ext}"
     path = f"{APP_NAME}/documents/{employee_id}/{requirement_id}/{filename}"
-    
+
     data = await file.read()
-    put_object(path, data, file.content_type or "application/octet-stream")
+    storage_path = None
+    stored_file_url = None
+    detected_content_type = file.content_type or "application/octet-stream"
+
+    try:
+        from supabase_storage import is_supabase_storage_configured, upload_to_supabase
+
+        if is_supabase_storage_configured():
+            upload_result = await upload_to_supabase(
+                data,
+                filename,
+                bucket="documents",
+                folder=f"employee-documents/{employee_id}/{requirement_id}",
+            )
+            stored_file_url = upload_result.get("url")
+            storage_path = upload_result.get("path")
+            logger.info(f"Document uploaded to Supabase: {storage_path}")
+        else:
+            storage_path = path
+            upload_result = put_object(storage_path, data, detected_content_type)
+            stored_file_url = upload_result.get("url") or f"{STORAGE_URL}/objects/{storage_path}"
+            logger.info(f"Document uploaded to Emergent storage: {storage_path}")
+    except Exception as e:
+        logger.error(f"Document upload failed for employee {employee_id} requirement {requirement_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to upload document: {str(e)}")
+
+    if not storage_path:
+        raise HTTPException(status_code=500, detail="Upload failed: no storage path returned")
     
     if allow_multiple:
         # Multi-file requirement: always create new document
         doc_id = str(uuid.uuid4())
         
         # Detect file type properly
-        detected_content_type = file.content_type or "application/octet-stream"
         if ext.lower() in ['pdf']:
             detected_content_type = "application/pdf"
         elif ext.lower() in ['jpg', 'jpeg']:
@@ -20945,7 +20970,8 @@ async def upload_document_for_requirement(
             "requirement_id": requirement_id,
             "requirement_name": req_name,
             "document_label": document_label or file.filename,  # Use provided label or filename
-            "file_url": path,
+            "file_url": stored_file_url or storage_path,
+            "storage_path": storage_path,
             "original_filename": file.filename,
             "file_type": detected_content_type,  # Store the content type for proper serving
             "content_type": detected_content_type,  # Backup field
@@ -20985,8 +21011,7 @@ async def upload_document_for_requirement(
         
         if existing_doc:
             # Detect file type properly
-            detected_content_type = file.content_type or "application/octet-stream"
-            if ext.lower() in ['pdf']:
+                if ext.lower() in ['pdf']:
                 detected_content_type = "application/pdf"
             elif ext.lower() in ['jpg', 'jpeg']:
                 detected_content_type = "image/jpeg"
@@ -20997,7 +21022,8 @@ async def upload_document_for_requirement(
             
             # Update existing document
             update_data = {
-                "file_url": path,
+            "file_url": stored_file_url or storage_path,
+            "storage_path": storage_path,
                 "original_filename": file.filename,
                 "file_type": detected_content_type,  # Store content type
                 "content_type": detected_content_type,  # Backup field
@@ -21027,8 +21053,7 @@ async def upload_document_for_requirement(
             doc_id = str(uuid.uuid4())
             
             # Detect file type properly
-            detected_content_type = file.content_type or "application/octet-stream"
-            if ext.lower() in ['pdf']:
+                if ext.lower() in ['pdf']:
                 detected_content_type = "application/pdf"
             elif ext.lower() in ['jpg', 'jpeg']:
                 detected_content_type = "image/jpeg"
@@ -21046,7 +21071,8 @@ async def upload_document_for_requirement(
                 "requirement_id": requirement_id,
                 "requirement_name": req_name,
                 "document_label": document_label,
-                "file_url": path,
+            "file_url": stored_file_url or storage_path,
+            "storage_path": storage_path,
                 "original_filename": file.filename,
                 "file_type": detected_content_type,  # Store content type
                 "content_type": detected_content_type,  # Backup field

@@ -22,6 +22,18 @@ const MATCH_REASON_LABELS = {
   none: 'No match',
 };
 
+function isReferenceEmploymentMatch(ref) {
+  const reason = String(ref?.match_reason || '').toLowerCase();
+  return Boolean(
+    ref?.matches_employment_history === true
+    || ['exact', 'substring', 'normalized'].includes(reason)
+    || ref?.matching_employer?.employer_name
+    || ref?.matched_employer
+    || ref?.compliance_status === 'ok'
+    || ref?.compliance_status === 'warning'
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Per-reference compliance badge (three-tier NHS model)
 // ---------------------------------------------------------------------------
@@ -143,7 +155,7 @@ export default function ReferenceEmploymentComparison({ employeeId, onRefresh })
 
   const alertCount = references.filter(r => r?.compliance_status === 'alert').length;
   const hasMostRecentEmployerMatch = references.some((r) => r?.compliance_status === 'ok');
-  const hasAnyEmployerMatch = matchedCount > 0;
+  const hasAnyEmployerMatch = references.some(isReferenceEmploymentMatch) || matchedCount > 0;
   // Final rule: once at least one referee matches the most-recent employer,
   // cross-check stays in pass state (green). Additional unmatched referees are
   // documented as follow-up notes, not hard-fail blockers.
@@ -296,11 +308,12 @@ export default function ReferenceEmploymentComparison({ employeeId, onRefresh })
                 {references.map((ref, idx) => {
                   if (!ref) return null;
                   const rawStatus = ref.compliance_status || 'alert';
+                  const semanticMatch = isReferenceEmploymentMatch(ref);
                   // If we already have one most-recent-employer match on file,
                   // additional unmatched referees are a documentation warning,
                   // not a hard-fail blocker on their own.
                   const status = (
-                    rawStatus === 'alert' && hasAnyEmployerMatch
+                    (rawStatus === 'alert' && (hasAnyEmployerMatch || semanticMatch))
                   ) ? 'warning' : rawStatus;
                   const matchLabel = MATCH_REASON_LABELS[ref.match_reason] || MATCH_REASON_LABELS.none;
                   const hasName = Boolean(ref.name);
@@ -326,15 +339,15 @@ export default function ReferenceEmploymentComparison({ employeeId, onRefresh })
                           </div>
 
                           {/* Match reason pill — always show matched employer for ok/warning */}
-                          {ref.matches_employment_history && (
+                          {semanticMatch && (
                             <div className="mt-2 flex flex-wrap gap-1">
                               <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-green-100 text-green-700">
                                 <CheckCircle className="h-2.5 w-2.5" />
                                 {matchLabel}
                               </span>
-                              {ref.matching_employer?.employer_name && (
+                              {(ref.matching_employer?.employer_name || ref.matched_employer) && (
                                 <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">
-                                  Matched to: {ref.matching_employer.employer_name}
+                                  Matched to: {ref.matching_employer?.employer_name || ref.matched_employer}
                                 </span>
                               )}
                             </div>

@@ -27891,11 +27891,15 @@ async def build_training_matrix_read_model():
                     else:
                         exp = expiry_date if expiry_date.tzinfo else expiry_date.replace(tzinfo=timezone.utc)
                     days_until_expiry = (exp - now).days
+                    expiring_threshold_days = 90 if (
+                        record.get("source_type") == "form_submission"
+                        and record.get("evidence_type") == "temporary_internal"
+                    ) else 30
                     if days_until_expiry < 0:
                         status = "expired"
                         summary["expired"] += 1
                         column_stats[training_id]["out_of_date"] += 1
-                    elif days_until_expiry <= 30:
+                    elif days_until_expiry <= expiring_threshold_days:
                         status = "expiring"
                         summary["needs_renewal"] += 1
                         column_stats[training_id]["in_date"] += 1
@@ -28235,7 +28239,7 @@ async def export_training_matrix(
         elements.append(Paragraph(
             "<b>Legend:</b> "
             "<font color='#2EA12E'>■</font> In Date | "
-            "<font color='#FFD966'>■</font> Expiring Soon (30 days) | "
+            "<font color='#FFD966'>■</font> Expiring Soon (30 days; 90 days for temporary induction evidence) | "
             "<font color='#E64D4D'>■</font> Expired/Missing",
             legend_style
         ))

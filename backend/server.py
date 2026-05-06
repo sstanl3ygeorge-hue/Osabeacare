@@ -669,16 +669,38 @@ def init_storage():
         return None
 
 def put_object(path: str, data: bytes, content_type: str) -> dict:
-    key = init_storage()
-    if not key:
-        raise HTTPException(status_code=500, detail="Storage not initialized")
-    resp = requests.put(
-        f"{STORAGE_URL}/objects/{path}",
-        headers={"X-Storage-Key": key, "Content-Type": content_type},
-        data=data, timeout=120
-    )
-    resp.raise_for_status()
-    return resp.json()
+    supabase_url = os.environ.get("SUPABASE_URL")
+    supabase_service_key = os.environ.get("SUPABASE_SERVICE_KEY")
+    supabase_bucket = os.environ.get("SUPABASE_STORAGE_BUCKET", "documents")
+
+    if not supabase_url or not supabase_service_key:
+        raise HTTPException(status_code=500, detail="Supabase storage not configured")
+
+    clean_path = str(path or "").lstrip("/")
+    if not clean_path:
+        raise HTTPException(status_code=500, detail="Invalid storage path")
+
+    upload_url = f"{supabase_url}/storage/v1/object/{supabase_bucket}/{clean_path}"
+    headers = {
+        "Authorization": f"Bearer {supabase_service_key}",
+        "apikey": supabase_service_key,
+        "Content-Type": content_type or "application/octet-stream",
+        "x-upsert": "true",
+    }
+
+    resp = requests.post(upload_url, headers=headers, data=data, timeout=120)
+    if resp.status_code not in [200, 201]:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Supabase upload failed: {resp.status_code} {resp.text}",
+        )
+
+    public_url = f"{supabase_url}/storage/v1/object/public/{supabase_bucket}/{clean_path}"
+    return {
+        "url": public_url,
+        "path": clean_path,
+        "bucket": supabase_bucket,
+    }
 
 def get_object(path: str) -> tuple:
     key = init_storage()

@@ -20915,51 +20915,51 @@ async def upload_document_for_requirement(
     employee_name = f"{first_name}{last_name}".replace(' ', '_')
     timestamp = datetime.now(timezone.utc).strftime('%d-%m-%Y_%H%M%S')
     filename = f"{employee_name}_{requirement_id}_{timestamp}.{ext}"
-    path = f"{APP_NAME}/documents/{employee_id}/{requirement_id}/{filename}"
 
     data = await file.read()
     storage_path = None
     stored_file_url = None
     detected_content_type = file.content_type or "application/octet-stream"
 
+    def _determine_content_type(file_ext: str, fallback: str) -> str:
+        ext_lower = (file_ext or "").lower()
+        if ext_lower == "pdf":
+            return "application/pdf"
+        if ext_lower in ["jpg", "jpeg"]:
+            return "image/jpeg"
+        if ext_lower == "png":
+            return "image/png"
+        if ext_lower == "webp":
+            return "image/webp"
+        return fallback
+
+    detected_content_type = _determine_content_type(ext, detected_content_type)
+
     try:
         from supabase_storage import is_supabase_storage_configured, upload_to_supabase
 
-        if is_supabase_storage_configured():
-            upload_result = await upload_to_supabase(
-                data,
-                filename,
-                bucket="documents",
-                folder=f"employee-documents/{employee_id}/{requirement_id}",
-            )
-            stored_file_url = upload_result.get("url")
-            storage_path = upload_result.get("path")
-            logger.info(f"Document uploaded to Supabase: {storage_path}")
-        else:
-            storage_path = path
-            upload_result = put_object(storage_path, data, detected_content_type)
-            stored_file_url = upload_result.get("url") or f"{STORAGE_URL}/objects/{storage_path}"
-            logger.info(f"Document uploaded to Emergent storage: {storage_path}")
+        if not is_supabase_storage_configured():
+            raise HTTPException(status_code=500, detail="Supabase storage is not configured for document uploads")
+
+        upload_result = await upload_to_supabase(
+            data,
+            filename,
+            bucket="documents",
+            folder=f"employee-documents/{employee_id}/{requirement_id}",
+        )
+        stored_file_url = upload_result.get("url")
+        storage_path = upload_result.get("path")
+        logger.info(f"Document uploaded to Supabase: {storage_path}")
     except Exception as e:
         logger.error(f"Document upload failed for employee {employee_id} requirement {requirement_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to upload document: {str(e)}")
 
-    if not storage_path:
-        raise HTTPException(status_code=500, detail="Upload failed: no storage path returned")
+    if not storage_path or not stored_file_url:
+        raise HTTPException(status_code=500, detail="Upload failed: incomplete storage metadata returned")
     
     if allow_multiple:
         # Multi-file requirement: always create new document
         doc_id = str(uuid.uuid4())
-        
-        # Detect file type properly
-        if ext.lower() in ['pdf']:
-            detected_content_type = "application/pdf"
-        elif ext.lower() in ['jpg', 'jpeg']:
-            detected_content_type = "image/jpeg"
-        elif ext.lower() in ['png']:
-            detected_content_type = "image/png"
-        elif ext.lower() in ['webp']:
-            detected_content_type = "image/webp"
         
         doc_data = {
             "id": doc_id,
@@ -21010,20 +21010,10 @@ async def upload_document_for_requirement(
         }, {"_id": 0})
         
         if existing_doc:
-            # Detect file type properly
-                if ext.lower() in ['pdf']:
-                detected_content_type = "application/pdf"
-            elif ext.lower() in ['jpg', 'jpeg']:
-                detected_content_type = "image/jpeg"
-            elif ext.lower() in ['png']:
-                detected_content_type = "image/png"
-            elif ext.lower() in ['webp']:
-                detected_content_type = "image/webp"
-            
             # Update existing document
             update_data = {
-            "file_url": stored_file_url or storage_path,
-            "storage_path": storage_path,
+                "file_url": stored_file_url,
+                "storage_path": storage_path,
                 "original_filename": file.filename,
                 "file_type": detected_content_type,  # Store content type
                 "content_type": detected_content_type,  # Backup field
@@ -21052,16 +21042,6 @@ async def upload_document_for_requirement(
             # Create new document
             doc_id = str(uuid.uuid4())
             
-            # Detect file type properly
-                if ext.lower() in ['pdf']:
-                detected_content_type = "application/pdf"
-            elif ext.lower() in ['jpg', 'jpeg']:
-                detected_content_type = "image/jpeg"
-            elif ext.lower() in ['png']:
-                detected_content_type = "image/png"
-            elif ext.lower() in ['webp']:
-                detected_content_type = "image/webp"
-            
             doc_data = {
                 "id": doc_id,
                 "employee_id": employee_id,
@@ -21071,8 +21051,8 @@ async def upload_document_for_requirement(
                 "requirement_id": requirement_id,
                 "requirement_name": req_name,
                 "document_label": document_label,
-            "file_url": stored_file_url or storage_path,
-            "storage_path": storage_path,
+                "file_url": stored_file_url,
+                "storage_path": storage_path,
                 "original_filename": file.filename,
                 "file_type": detected_content_type,  # Store content type
                 "content_type": detected_content_type,  # Backup field
@@ -38962,10 +38942,10 @@ async def get_compliance_file(
             if _latest:
                 _vs = str(_latest.get("verification_status") or _latest.get("status") or "").strip().lower()
                 # Tier 4 fallback tightening: only trust an ack row if it
-                # has hard evidence of a real worker action — verified_at,
+                # has hard evidence of a real worker action ï¿½ verified_at,
                 # worker_signed_at, or worker_acknowledged_at. A bare ack
                 # row with no valid verification_status (e.g. leftover from
-                # a rebuild) must not be surfaced as "submitted" — that
+                # a rebuild) must not be surfaced as "submitted" - that
                 # produced contradictory badge+subtitle on Lawrence's row.
                 has_worker_action = bool(
                     _latest.get("verified_at")
@@ -38984,7 +38964,7 @@ async def get_compliance_file(
                 elif has_worker_action:
                     # Worker has acted (acknowledged/signed) but verification
                     # status is ambiguous. Treat as awaiting admin review so
-                    # the Verify button renders on the admin row — never
+                    # the Verify button renders on the admin row - never
                     # "recorded" (that status has no follow-up action).
                     _status = "awaiting_review"
                     _summary = f"{title}: awaiting admin review"

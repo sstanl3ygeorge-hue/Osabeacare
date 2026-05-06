@@ -25,11 +25,15 @@ from services.pdf_service import generate_admin_form_pdf, generate_evidence_reco
 from induction_definitions import (
     DEFAULT_INDUCTION_ITEMS,
     INDUCTION_NAME_TO_TRAINING_PATTERNS,
+    CARE_CERTIFICATE_STANDARDS,
     get_induction_rule_metadata_by_name,
     get_employee_induction_status,
     is_training_verified_for_item,
     ensure_checklist_list_format,
 )
+
+# Build a lookup for training_sync per induction item id (e.g. "fluids_nutrition" → "food_hygiene")
+_INDUCTION_TRAINING_SYNC = {s["id"]: s.get("training_sync") for s in CARE_CERTIFICATE_STANDARDS}
 
 router = APIRouter(tags=["Induction Checklist"])
 logger = logging.getLogger(__name__)
@@ -1088,6 +1092,38 @@ async def signoff_induction_item(
     await db.induction_checklists.update_one(
         {"employee_id": employee_id}, {"$set": _without_mongo_id(checklist)}
     )
+
+    # ── Create temporary training record for hybrid completions ──────────────
+    # Hybrid items have no real certificate, so we write a form_submission training
+    # record that the training evaluator will cap at 90 days expiry.  When the
+    # employee later uploads their real Care Certificate for this topic, the normal
+    # deduplication/supersession pipeline will mark this record as superseded.
+    if completion_type == "hybrid":
+        training_sync_id = _INDUCTION_TRAINING_SYNC.get(resolved_item_code)
+        req_id = training_sync_id or resolved_item_code
+        now_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        temp_record = {
+            "id": str(uuid.uuid4()),
+            "employee_id": employee_id,
+            "training_name": item_name,
+            "requirement_id": req_id,
+            "source_type": "form_submission",
+            "evidence_type": "temporary_internal",
+            "completion_method": "manual",
+            "completion_date": now_date,
+            "verified": True,
+            "verified_by": user["user_id"],
+            "verified_by_name": admin_name,
+            "verified_at": now,
+            "record_status": "active",
+            "notes": (
+                "Temporary induction evidence from hybrid form sign-off. "
+                "Real Care Certificate required within 90 days."
+            ),
+            "created_at": now,
+            "updated_at": now,
+        }
+        await db.training_records.insert_one({k: v for k, v in temp_record.items() if k != "_id"})
 
     await log_audit_action(
         user["user_id"], "induction_item_signed_off", "induction_checklist", employee_id,

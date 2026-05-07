@@ -1334,6 +1334,36 @@ export default function ApplyPage() {
     </div>
   );
 
+  // Derive the list of employer names from employment history for reference matching hints
+  const employerNamesFromHistory = formData.employment_history
+    .map(e => e.employer_name.trim())
+    .filter(Boolean);
+
+  // Most-recent employer: is_current first, then latest end_date, then first entry
+  const mostRecentEmployerName = (() => {
+    const history = formData.employment_history.filter(e => e.employer_name.trim());
+    if (!history.length) return null;
+    const current = history.find(e => e.is_current);
+    if (current) return current.employer_name.trim();
+    const sorted = [...history].sort((a, b) => {
+      const dateA = a.end_date ? new Date(a.end_date) : new Date(0);
+      const dateB = b.end_date ? new Date(b.end_date) : new Date(0);
+      return dateB - dateA;
+    });
+    return sorted[0].employer_name.trim();
+  })();
+
+  // Loose client-side match: normalise and check substring containment
+  const looselyMatchesHistory = (orgInput) => {
+    if (!orgInput.trim() || !employerNamesFromHistory.length) return true; // no history yet — don't warn
+    const normalize = s => s.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+    const normInput = normalize(orgInput);
+    return employerNamesFromHistory.some(name => {
+      const normName = normalize(name);
+      return normName.includes(normInput) || normInput.includes(normName);
+    });
+  };
+
   const renderReferences = () => (
     <div className="space-y-6">
       <div>
@@ -1341,6 +1371,16 @@ export default function ApplyPage() {
         <p className="text-sm text-text-muted mb-6">
           We require a minimum of 2 professional references. These will be contacted to verify your employment history and suitability.
         </p>
+      </div>
+
+      {/* Guidance banner — reduces post-submission reference mismatches */}
+      <div className="rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-800 space-y-2">
+        <p className="font-semibold">Important — how to fill in your references</p>
+        <ul className="list-disc pl-5 space-y-1">
+          <li><strong>At least one reference must be from your most recent employer</strong>{mostRecentEmployerName ? ` (${mostRecentEmployerName})` : ''}. This is required for NHS/CQC compliance.</li>
+          <li>Enter the <strong>Organisation</strong> name exactly as you listed it in your employment history above — avoid abbreviations (e.g., use &ldquo;Kent Community Health NHS Foundation Trust&rdquo; not &ldquo;KCHT&rdquo;).</li>
+          <li>If you worked through an <strong>agency</strong>, enter the employer you were placed with, not the agency name, and note this in your employment history.</li>
+        </ul>
       </div>
       
       {formData.references.map((ref, idx) => (
@@ -1370,11 +1410,24 @@ export default function ApplyPage() {
             
             <div className="space-y-2">
               <Label>Organisation *</Label>
-              <Input 
+              {/* datalist gives autocomplete from employment history — prevents spelling/formatting mismatches */}
+              <datalist id={`employer-list-${idx}`}>
+                {employerNamesFromHistory.map((name, i) => (
+                  <option key={i} value={name} />
+                ))}
+              </datalist>
+              <Input
+                list={`employer-list-${idx}`}
                 value={ref.referee_organisation}
                 onChange={(e) => handleArrayChange('references', idx, 'referee_organisation', e.target.value)}
+                placeholder="Enter or select from your employment history"
                 className={validationErrors[`ref_${idx}_org`] ? 'border-red-500' : ''}
               />
+              {ref.referee_organisation.trim() && !looselyMatchesHistory(ref.referee_organisation) && (
+                <p className="text-xs text-amber-600 mt-1">
+                  This organisation doesn&apos;t match any employer in your employment history. Please check the spelling or add the employer in Step 2.
+                </p>
+              )}
             </div>
             
             <div className="grid sm:grid-cols-2 gap-4">

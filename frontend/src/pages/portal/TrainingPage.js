@@ -333,13 +333,20 @@ export default function TrainingPage() {
   const filteredTraining = training.filter(record => {
     if (employeeFilter !== 'all' && record.employee_id !== employeeFilter) return false;
     if (filter === 'all') return true;
-    
-    // Use backend-computed renewal_status or computed_status
-    const renewalStatus = record.renewal_status || record.computed_status;
-    if (!renewalStatus && (filter === 'expired' || filter === 'expiring_soon')) return false;
-    if (!renewalStatus && filter === 'valid') return !record.expiry_date;
-    
-    return renewalStatus === filter || (filter === 'expiring_soon' && renewalStatus === 'needs_renewal');
+
+    const renewalStatus = record.renewal_status;   // expiring_soon | expired | valid | no_expiry | null
+    const computedStatus = record.computed_status; // needs_renewal | expired | completed | not_started
+
+    if (filter === 'expired') {
+      return renewalStatus === 'expired' || computedStatus === 'expired';
+    }
+    if (filter === 'expiring_soon') {
+      return renewalStatus === 'expiring_soon' || computedStatus === 'needs_renewal';
+    }
+    if (filter === 'valid') {
+      return renewalStatus === 'valid' || renewalStatus === 'no_expiry' || computedStatus === 'completed';
+    }
+    return false;
   });
 
   // Use backend summary as source of truth, fallback to local calculation

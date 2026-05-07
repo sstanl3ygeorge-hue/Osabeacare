@@ -27884,6 +27884,20 @@ async def build_training_matrix_read_model():
                 summary["awaiting_review"] += 1
                 summary["awaiting_verification"] += 1
 
+            # If no expiry date stored, derive one from completion date + known renewal period.
+            # This prevents old verified records from falsely counting as "in_date" indefinitely.
+            if not expiry_date and completion_date:
+                try:
+                    training_name = record.get("training_name") or col.get("label") or training_id
+                    expiry_months = get_expiry_months_for_training(training_name)
+                    if isinstance(completion_date, str):
+                        comp_dt = datetime.fromisoformat(completion_date.replace("Z", "+00:00")) if "T" in completion_date else datetime.fromisoformat(f"{completion_date}T00:00:00+00:00")
+                    else:
+                        comp_dt = completion_date if completion_date.tzinfo else completion_date.replace(tzinfo=timezone.utc)
+                    expiry_date = comp_dt + timedelta(days=expiry_months * 30)
+                except Exception:
+                    pass
+
             if expiry_date:
                 try:
                     if isinstance(expiry_date, str):

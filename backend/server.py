@@ -27902,7 +27902,7 @@ async def build_training_matrix_read_model():
                     elif days_until_expiry <= expiring_threshold_days:
                         status = "expiring"
                         summary["needs_renewal"] += 1
-                        column_stats[training_id]["in_date"] += 1
+                        column_stats[training_id]["out_of_date"] += 1
                     elif verified:
                         summary["verified"] += 1
                         column_stats[training_id]["in_date"] += 1
@@ -27940,17 +27940,29 @@ async def build_training_matrix_read_model():
             summary["awaiting_extraction_review"] += row["pending_extraction_count"]
         rows.append(row)
 
+    # Columns with no applicable staff (e.g., nurse-only columns in a non-nurse
+    # cohort) are marked non-applicable and excluded from average calculations.
+    column_applicability = {
+        training_id: bool(stats["total"])
+        for training_id, stats in column_stats.items()
+    }
     column_percentages = {
         training_id: round((stats["in_date"] / stats["total"]) * 100) if stats["total"] else 0
         for training_id, stats in column_stats.items()
     }
-    average_percentage = round(sum(column_percentages.values()) / len(column_percentages)) if column_percentages else 0
+    applicable_percentages = [
+        column_percentages[training_id]
+        for training_id, is_applicable in column_applicability.items()
+        if is_applicable
+    ]
+    average_percentage = round(sum(applicable_percentages) / len(applicable_percentages)) if applicable_percentages else 0
 
     return {
         "summary": summary,
         "columns": columns,
         "rows": rows,
         "column_stats": column_stats,
+        "column_applicability": column_applicability,
         "column_percentages": column_percentages,
         "average_percentage": average_percentage,
         "employee_status_filter": matrix_statuses,
@@ -27979,6 +27991,9 @@ async def export_training_matrix(
     cqc_training_order = matrix_model["columns"]
     matrix_data = matrix_model["rows"]
     column_stats = matrix_model["column_stats"]
+    column_applicability = matrix_model.get("column_applicability", {
+        training_id: bool(stats["total"]) for training_id, stats in column_stats.items()
+    })
     column_percentages = matrix_model["column_percentages"]
     average_percentage = matrix_model["average_percentage"]
     
@@ -28023,7 +28038,7 @@ async def export_training_matrix(
         # Out of date row
         out_of_date_row = ["", "", "", "", "Out of date"]
         for t in cqc_training_order:
-            out_of_date_row.append(column_stats[t["id"]]["out_of_date"])
+            out_of_date_row.append(column_stats[t["id"]]["out_of_date"] if column_applicability.get(t["id"], True) else "")
             if t["has_refresher"]:
                 out_of_date_row.append("")
         writer.writerow(out_of_date_row)
@@ -28034,7 +28049,7 @@ async def export_training_matrix(
         # Training % In Date row
         percentage_row = ["", "", "", "Training % In Date"]
         for t in cqc_training_order:
-            percentage_row.append(f"{column_percentages[t['id']]}%")
+            percentage_row.append(f"{column_percentages[t['id']]}%" if column_applicability.get(t["id"], True) else "N/A")
             if t["has_refresher"]:
                 percentage_row.append("")
         writer.writerow(percentage_row)
@@ -28144,8 +28159,13 @@ async def export_training_matrix(
             "", "", ""
         ]
         for t in cqc_training_order:
-            out_of_date_row.append(Paragraph(str(column_stats[t["id"]]["out_of_date"]), 
-                                            ParagraphStyle('Sum', fontSize=6, alignment=TA_CENTER, textColor=colors.red)))
+            if column_applicability.get(t["id"], True):
+                out_of_date_row.append(Paragraph(
+                    str(column_stats[t["id"]]["out_of_date"]),
+                    ParagraphStyle('Sum', fontSize=6, alignment=TA_CENTER, textColor=colors.red),
+                ))
+            else:
+                out_of_date_row.append("")
             if t["has_refresher"]:
                 out_of_date_row.append("")
         table_data.append(out_of_date_row)
@@ -28161,8 +28181,16 @@ async def export_training_matrix(
             Paragraph("<b>Training % In Date</b>", ParagraphStyle('Sum', fontSize=6))
         ]
         for t in cqc_training_order:
-            pct_row.append(Paragraph(f"<b>{column_percentages[t['id']]}%</b>", 
-                                    ParagraphStyle('Sum', fontSize=6, alignment=TA_CENTER)))
+            if column_applicability.get(t["id"], True):
+                pct_row.append(Paragraph(
+                    f"<b>{column_percentages[t['id']]}%</b>",
+                    ParagraphStyle('Sum', fontSize=6, alignment=TA_CENTER),
+                ))
+            else:
+                pct_row.append(Paragraph(
+                    "<b>N/A</b>",
+                    ParagraphStyle('Sum', fontSize=6, alignment=TA_CENTER, textColor=colors.gray),
+                ))
             if t["has_refresher"]:
                 pct_row.append("")
         table_data.append(pct_row)
@@ -28240,7 +28268,8 @@ async def export_training_matrix(
             "<b>Legend:</b> "
             "<font color='#2EA12E'>■</font> In Date | "
             "<font color='#FFD966'>■</font> Expiring Soon (30 days; 90 days for temporary induction evidence) | "
-            "<font color='#E64D4D'>■</font> Expired/Missing",
+            "<font color='#E64D4D'>■</font> Expired/Missing | "
+            "<font color='#777777'>N/A</font> No applicable staff in this export",
             legend_style
         ))
         elements.append(Paragraph(f"<i>Total Staff: {len(matrix_data)}</i>", legend_style))

@@ -39,14 +39,13 @@ class _FakeDB:
 
 def test_expiring_training_does_not_count_as_out_of_date(monkeypatch):
     """
-    Expiring training (expires within 30 days) should NOT count as out_of_date.
-    Expiring status will display as amber in UI without affecting percentages.
-    Only actually expired (days < 0) counts as out_of_date.
+    Expiring training (expires within 30 days) is still valid — it counts as
+    in_date for the percentage (amber colour is the UI warning). Only actually
+    expired (days < 0) or missing training counts as out_of_date.
     """
     now = datetime.now(timezone.utc)
     employee_id = "emp-test-expiring"
     
-    # Create two training records: one verified + in_date, one expiring (but not yet expired)
     training_records = [
         {
             "id": "rec-safeguarding-good",
@@ -67,7 +66,7 @@ def test_expiring_training_does_not_count_as_out_of_date(monkeypatch):
             "verification_status": "verified",
             "verified": True,
             "completion_date": (now - timedelta(days=365)).isoformat(),
-            "expiry_date": (now + timedelta(days=20)).isoformat(),  # 20 days away - EXPIRING
+            "expiry_date": (now + timedelta(days=20)).isoformat(),  # 20 days away - EXPIRING (amber)
             "record_status": "active",
         },
     ]
@@ -93,28 +92,21 @@ def test_expiring_training_does_not_count_as_out_of_date(monkeypatch):
     
     model = asyncio.run(server.build_training_matrix_read_model())
     
-    # Find the column stats for these two trainings
     safeguarding_stats = model["column_stats"].get("safeguarding", {})
     manual_handling_stats = model["column_stats"].get("manual_handling", {})
     
     assert safeguarding_stats, "Safeguarding column not found"
     assert manual_handling_stats, "Manual handling column not found"
     
-    # Safeguarding: verified + not expiring = should be in_date
+    # Safeguarding: verified + not expiring = in_date
     assert safeguarding_stats["in_date"] > 0, "Verified non-expiring training should count as in_date"
     assert safeguarding_stats["out_of_date"] == 0, "Verified non-expiring training should NOT count as out_of_date"
     
-    # Manual handling: verified AND expiring = should NOT count as out_of_date
-    # (expiring just shows amber in UI, doesn't affect percentage)
+    # Manual handling: expiring (amber) = still valid, still counts as in_date for percentage
+    assert manual_handling_stats["in_date"] > 0, \
+        "Expiring training is still valid — must count as in_date for the percentage"
     assert manual_handling_stats["out_of_date"] == 0, \
-        "Expiring training must NOT count as out_of_date (only actually expired does)"
-    assert manual_handling_stats["in_date"] == 0, \
-        "Expiring training also shouldn't be counted as in_date (it's pending)"
-    
-    # Manual handling percentage should be 0% because expiring doesn't count as in_date
-    manual_handling_pct = model["column_percentages"].get("manual_handling", -1)
-    assert manual_handling_pct == 0, \
-        f"Expiring training should give 0% in_date percentage, got {manual_handling_pct}%"
+        "Expiring training must NOT count as out_of_date (only expired/missing does)"
 
 
 def test_expired_training_also_counts_as_out_of_date(monkeypatch):

@@ -27914,8 +27914,12 @@ async def build_training_matrix_read_model():
                         summary["expired"] += 1
                         column_stats[training_id]["out_of_date"] += 1
                     elif days_until_expiry <= expiring_threshold_days:
+                        # Still valid — just approaching renewal window.
+                        # Counts as in_date for percentage; amber colour handles
+                        # the visual warning so staff know renewal is due soon.
                         status = "expiring"
                         summary["needs_renewal"] += 1
+                        column_stats[training_id]["in_date"] += 1
                     elif verified:
                         summary["verified"] += 1
                         column_stats[training_id]["in_date"] += 1

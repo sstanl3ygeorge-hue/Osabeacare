@@ -37,15 +37,16 @@ class _FakeDB:
         self.proposed_training_items = _FakeCollection(proposed_items)
 
 
-def test_expiring_training_reduces_in_date_percentage(monkeypatch):
+def test_expiring_training_does_not_count_as_out_of_date(monkeypatch):
     """
-    Expiring training (expires within 30 days) must count as out_of_date,
-    not in_date, so compliance percentages reflect real risk.
+    Expiring training (expires within 30 days) should NOT count as out_of_date.
+    Expiring status will display as amber in UI without affecting percentages.
+    Only actually expired (days < 0) counts as out_of_date.
     """
     now = datetime.now(timezone.utc)
     employee_id = "emp-test-expiring"
     
-    # Create two training records: one verified + in_date, one expiring
+    # Create two training records: one verified + in_date, one expiring (but not yet expired)
     training_records = [
         {
             "id": "rec-safeguarding-good",
@@ -55,7 +56,7 @@ def test_expiring_training_reduces_in_date_percentage(monkeypatch):
             "verification_status": "verified",
             "verified": True,
             "completion_date": (now - timedelta(days=365)).isoformat(),
-            "expiry_date": (now + timedelta(days=180)).isoformat(),  # 6 months away
+            "expiry_date": (now + timedelta(days=180)).isoformat(),  # 6 months away - SAFE
             "record_status": "active",
         },
         {
@@ -66,7 +67,7 @@ def test_expiring_training_reduces_in_date_percentage(monkeypatch):
             "verification_status": "verified",
             "verified": True,
             "completion_date": (now - timedelta(days=365)).isoformat(),
-            "expiry_date": (now + timedelta(days=20)).isoformat(),  # 20 days away — EXPIRING
+            "expiry_date": (now + timedelta(days=20)).isoformat(),  # 20 days away - EXPIRING
             "record_status": "active",
         },
     ]
@@ -103,13 +104,14 @@ def test_expiring_training_reduces_in_date_percentage(monkeypatch):
     assert safeguarding_stats["in_date"] > 0, "Verified non-expiring training should count as in_date"
     assert safeguarding_stats["out_of_date"] == 0, "Verified non-expiring training should NOT count as out_of_date"
     
-    # Manual handling: verified BUT expiring = should be out_of_date, NOT in_date
-    assert manual_handling_stats["out_of_date"] > 0, \
-        "Expiring training should count as out_of_date (REGRESSION: was being counted as in_date)"
+    # Manual handling: verified AND expiring = should NOT count as out_of_date
+    # (expiring just shows amber in UI, doesn't affect percentage)
+    assert manual_handling_stats["out_of_date"] == 0, \
+        "Expiring training must NOT count as out_of_date (only actually expired does)"
     assert manual_handling_stats["in_date"] == 0, \
-        "Expiring training must NOT count as in_date"
+        "Expiring training also shouldn't be counted as in_date (it's pending)"
     
-    # Manual handling percentage should be 0% because all records are expiring
+    # Manual handling percentage should be 0% because expiring doesn't count as in_date
     manual_handling_pct = model["column_percentages"].get("manual_handling", -1)
     assert manual_handling_pct == 0, \
         f"Expiring training should give 0% in_date percentage, got {manual_handling_pct}%"

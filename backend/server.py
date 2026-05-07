@@ -27902,13 +27902,11 @@ async def build_training_matrix_read_model():
                     elif days_until_expiry <= expiring_threshold_days:
                         status = "expiring"
                         summary["needs_renewal"] += 1
-                        column_stats[training_id]["out_of_date"] += 1
                     elif verified:
                         summary["verified"] += 1
                         column_stats[training_id]["in_date"] += 1
                     else:
                         summary["completed"] += 1
-                        column_stats[training_id]["out_of_date"] += 1
                 except Exception:
                     if verified:
                         summary["verified"] += 1

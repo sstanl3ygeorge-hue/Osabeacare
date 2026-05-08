@@ -16,6 +16,7 @@ Fields match the Osabea Body Map – Male/Female CQC Expert templates:
 
 import uuid
 import io
+import base64
 import logging
 from pathlib import Path
 from datetime import datetime, timezone
@@ -30,7 +31,31 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Body Maps"])
 
-BODY_MAP_ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets" / "body_maps"
+# ── Template image loader ────────────────────────────────────────────────────
+# Images are embedded as base64 so they work in any deployment environment.
+# Fallback to filesystem (backend/assets/body_maps/) if data module absent.
+
+def _get_body_map_image_bytes(gender_raw: str) -> Optional[bytes]:
+    """Return PNG bytes for the given gender, or None if unavailable."""
+    g = gender_raw.strip().lower()
+    is_male   = g in ("male", "m", "man")
+    is_female = g in ("female", "f", "woman")
+    if not is_male and not is_female:
+        return None
+    # Try embedded data module first (always works in production)
+    try:
+        from . import body_maps_data as _bmd
+        b64 = _bmd.BODY_MAP_MALE_PNG_B64 if is_male else _bmd.BODY_MAP_FEMALE_PNG_B64
+        return base64.b64decode(b64)
+    except Exception:
+        pass
+    # Fallback: filesystem relative to this file
+    assets_dir = Path(__file__).resolve().parent.parent / "assets" / "body_maps"
+    filename = "body_map_male.png" if is_male else "body_map_female.png"
+    candidate = assets_dir / filename
+    if candidate.exists():
+        return candidate.read_bytes()
+    return None
 
 # All named body regions — front and back, used in dropdown selector
 BODY_REGIONS = [
@@ -88,20 +113,7 @@ BODY_REGIONS = [
 ]
 
 
-def _get_body_map_image_path(gender_value: str) -> Optional[Path]:
-    raw = (gender_value or "").strip().lower()
-    if raw in ("male", "m", "man"):
-        candidate = BODY_MAP_ASSETS_DIR / "body_map_male.png"
-    elif raw in ("female", "f", "woman"):
-        candidate = BODY_MAP_ASSETS_DIR / "body_map_female.png"
-    else:
-        candidate = None
-    if candidate and candidate.exists():
-        return candidate
-    return None
-
-
-def _annotate_body_map_image(img_path: Path, marks: list) -> bytes:
+def _annotate_body_map_image(img_bytes: bytes, marks: list) -> bytes:
     """
     Draws numbered red circle markers on the CQC Expert body-map template image
     at anatomically accurate positions for each recorded region.
@@ -171,7 +183,7 @@ def _annotate_body_map_image(img_path: Path, marks: list) -> bytes:
         "Buttocks \u2013 right":      (37.0, 83.5),
     }
 
-    img = Image.open(img_path).convert("RGBA")
+    img = Image.open(io.BytesIO(img_bytes)).convert("RGBA")
     W, H = img.size
     overlay = Image.new("RGBA", img.size, (255, 255, 255, 0))
     draw = ImageDraw.Draw(overlay)
@@ -439,9 +451,9 @@ def _render_body_map_pdf(doc: dict) -> bytes:
     elif raw_gender in ("female", "f", "woman"):
         gender_label = "Female"
     else:
-        gender_label = (doc.get("gender", "") or "Unknown").strip() or "Unknown"
+        gender_label = None  # don't print "unknown" in the title
 
-    title = f"Body Map – {gender_label}"
+    title = f"Body Map \u2013 {gender_label}" if gender_label else "Body Map"
 
     marks = doc.get("marks", [])
 
@@ -497,12 +509,14 @@ def _render_body_map_pdf(doc: dict) -> bytes:
     elements.append(Paragraph("Body Diagram", section_style))
     diagram_note = ParagraphStyle("FigNote", parent=styles["Normal"], fontSize=7, textColor=colors.HexColor("#6B7280"), spaceAfter=6)
 
-    img_path = _get_body_map_image_path(raw_gender)
+    img_path = _get_body_map_image_bytes(raw_gender)
+    if img_path is None and raw_gender not in ("male", "female"):
+        img_path = _get_body_map_image_bytes("male")  # default to male outline if no gender recorded
     if img_path:
         elements.append(Paragraph(
             "Red numbered markers show the location of each recorded mark. "
-            "L = person\u2019s left side, R = person\u2019s right side (anatomical). "
-            "Front view is at top; back view at bottom of the diagram.",
+            "L\u2009=\u2009person\u2019s left, R\u2009=\u2009person\u2019s right (anatomical). "
+            "Front view at top; back view at bottom.",
             diagram_note,
         ))
         annotated_bytes = _annotate_body_map_image(img_path, marks)

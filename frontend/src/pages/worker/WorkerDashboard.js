@@ -1226,7 +1226,7 @@ export default function WorkerDashboard() {
     setBodyMapForm({
       related_shift_id: shift?.id || '',
       service_user_id: shift?.service_user_id || '',
-      gender: 'unknown',
+      gender: '',
       injury_date: '',
       reported_to: '',
       additional_information: '',
@@ -1252,6 +1252,10 @@ export default function WorkerDashboard() {
   const handleSubmitBodyMap = async () => {
     if (bodyMapForm.marks.length === 0) {
       toast.error('Add at least one marked location before submitting');
+      return;
+    }
+    if (!bodyMapForm.gender) {
+      toast.error('Please select the gender of the service user');
       return;
     }
     setBodyMapSubmitting(true);
@@ -5726,17 +5730,19 @@ export default function WorkerDashboard() {
           </DialogHeader>
           <div className="space-y-4">
             <div>
-              <Label>Gender of service user</Label>
+              <Label>Gender of service user <span className="text-red-500">*</span></Label>
               <select
-                value={bodyMapForm.gender || 'unknown'}
+                value={bodyMapForm.gender || ''}
                 onChange={(e) => setBodyMapForm(prev => ({ ...prev, gender: e.target.value }))}
-                className="mt-1 w-full text-sm border border-slate-300 rounded-lg px-3 py-2 bg-white"
+                className={`mt-1 w-full text-sm border rounded-lg px-3 py-2 bg-white ${
+                  !bodyMapForm.gender ? 'border-red-300' : 'border-slate-300'
+                }`}
               >
-                <option value="unknown">Not specified (auto-detect)</option>
+                <option value="">Select gender...</option>
                 <option value="male">Male</option>
                 <option value="female">Female</option>
               </select>
-              <p className="text-xs text-slate-400 mt-1">Auto-detected from the service user profile. Override if needed.</p>
+              <p className="text-xs text-slate-400 mt-1">This determines which body diagram is used in the exported PDF.</p>
             </div>
             <div>
               <Label>Date of injury (if known)</Label>

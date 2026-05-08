@@ -499,12 +499,167 @@ export default function ComplianceCentrePage() {
       } else {
         setTemplateDraft(null);
         setTemplateForm({
-          title: policy.name || 'Whistleblowing Policy',
-          module: 'Governance',
-          owner_name: '',
-          effective_date: new Date().toISOString().split('T')[0],
+          title: 'Whistleblowing Policy',
+          module: 'Safeguarding',
+          owner_name: 'Ebahi Ileogben',
+          effective_date: '2026-03-11',
           review_period_months: 12,
-          content: { purpose: '', principles: '', scope: '', procedure: '', protections: '', exclusions: '', responsibilities: '', references: '' }
+          content: {
+            purpose: `This policy and accompanying procedure sets out the approach of Osabea Healthcare Solutions Ltd to provide detailed information, advice and guidance to support staff through the whistleblowing procedure.
+
+The aim of this policy is to provide a clear and simple framework for members of staff to be able to raise genuine concerns they may have about any aspect of the delivery of care and services within Osabea Healthcare Solutions Ltd, for those concerns to be raised reasonably and responsibly with the right people at an early stage, and for them to be dealt with fairly and promptly. It is only by dealing with these openly that we can protect employees and Individuals to ensure real quality of care.
+
+Osabea Healthcare Solutions Ltd is committed to maintaining a high standard of service to Individuals. It also seeks to encourage a culture of openness whereby the constructive expression by staff of their concerns is welcomed as contributing towards improving services.
+
+Therefore, the organisation treats unprofessional conduct very seriously and will ensure any employee using this procedure is protected from receiving or suffering any disadvantage as a result of raising a concern in good faith in line with the Public Disclosure Act 1998 (PIDA) and the Employment Rights Act 1996.
+
+This policy does not replace the Safeguarding Policy & Procedure, which includes the organisations' standard procedures for reporting allegations and concerns.
+
+This policy is not appropriate for resolving grievances about terms of employment or personal treatment, which should be dealt with under the Grievance Policy and Procedure.
+
+Individuals other than staff who have a genuine concern about the delivery of care and services within Osabea Healthcare Solutions Ltd should raise it through our Complaints Procedure.
+
+The Registered Manager is responsible for the implementation and review of this policy. A current copy of the policy will be available in the Main Office. This policy will be reviewed at least annually, or more frequently if significant changes occur.`,
+
+            principles: `Definitions
+
+Whistleblowing: The Care Quality Commission (CQC) defines the term 'whistleblowing' as: "The term used when someone who works for an employer raises a concern about malpractice, risk (for example about patient safety), wrongdoing or possible illegality, which harms, or creates a risk of harm, to people who use the service, colleagues or the wider public".
+
+If any employee within Osabea Healthcare Solutions Ltd reports information about a wrongdoing to the attention of their employers or a relevant organisation, they are protected in certain ways under the Public Interest Disclosure Act 1998 and Employment Rights Act 1996, so people are encouraged to speak out if they find malpractice in an organisation.
+
+Care Quality Commission (CQC): The Care Quality Commission is the independent regulator of healthcare and adult social care services in England. They complete inspections to ensure that care organisations are meeting national standards of quality and safety required by law and take action against an organisation if they are not.
+
+Public Interest Disclosure: "Blowing the whistle" is more formally known as 'making a disclosure in the public interest'. The employee must have made a 'qualifying disclosure'. This is a disclosure of information which, in the reasonable belief of the employee making the disclosure, tends to show one or more of the following:
+- That a criminal offence has been committed, is being committed or is likely to be committed;
+- That a person has failed, is failing, or is likely to fail to comply with any legal obligation to which they are subject;
+- That a miscarriage of justice has occurred, is occurring, or is likely to occur;
+- That the health or safety of any individual has been, is being, or is likely to be endangered;
+- That the environment has been, is being, or is likely to be damaged;
+- That information tending to show any of the above has been, is being, or is likely to be deliberately concealed.
+
+Quality Statements:
+- We have a proactive and positive culture of safety based on openness and honesty, in which concerns about safety are listened to, safety events are investigated and reported thoroughly, and lessons are learned to continually identify and embed good practices.
+- We work with people and our partners to establish and maintain safe systems of care, in which safety is managed, monitored and assured.
+- We concentrate on improving people's lives while protecting their right to live in safety, free from bullying, harassment, abuse, discrimination, avoidable harm and neglect.
+- We work with people to understand and manage risks by thinking holistically so that care meets their needs in a way that is safe and supportive.
+- We detect and control potential risks in the care environment. We make sure that equipment, facilities and technology support the delivery of safe care.`,
+
+            scope: `This policy applies to all employees of Osabea Healthcare Solutions Ltd, including permanent, part-time, agency, and temporary staff.
+
+If staff wish to make a complaint about their employment matters or how they feel they are being treated, they should follow the relevant Osabea Healthcare Solutions Ltd policies:
+- Grievance Policy & Procedure
+- Equality, Diversity & Inclusion Policy & Procedure
+- Anti-Harassment & Bullying Policy & Procedure
+
+These policies and procedures can be found in the Main Office.
+
+Key Lines of Enquiry (KLOE):
+SAFE: How do systems, processes and practices safeguard people from abuse? How are risks to people assessed and their safety monitored and managed so they are supported to stay safe and their freedom is respected? Are lessons learned and improvements made when things go wrong?
+Effective: What processes are in place to ensure there is no discrimination, including in relation to protected characteristics under the Equality Act, when making care and support decisions?
+Caring: How does the service support people to express their views and be actively involved in making decisions about their care, support and treatment as far as possible?
+Responsive: How are people's concerns and complaints listened and responded to and used to improve the quality of care?
+Well-led: How does the service promote and support fairness, transparency and an open culture for staff? How does the service work in partnership with other agencies?`,
+
+            procedure: `The Steps of Raising Concerns
+
+Any employee who has a concern regarding malpractice and misconduct within Osabea Healthcare Solutions Ltd should raise that concern internally, rather than externally in the first instance, wherever possible to the Supervisor or Registered Manager, as early as possible, thus reducing the risk of any issue becoming more serious.
+
+If employees' concerns relate directly to their Supervisor or Registered Manager then they should contact the Designated Safeguarding Lead.
+
+Employees are not expected to investigate the matter themselves or seek evidence to support their suspicions.
+
+- Matters can be raised either verbally or in writing;
+- Disclosures should be provided with full details, history of concern, names, dates and places where possible and any other supporting evidence;
+- Any disclosure made under this policy will be treated in the strictest of confidence;
+- Any origin of an allegation will be kept confidential wherever possible;
+- Anonymous disclosures may be made, however, this type of disclosure can make investigations difficult as more information may be needed, but will still be investigated.
+
+Investigating and Dealing with Allegations
+
+The relevant Registered Manager or Designated Safeguarding Lead will take reports seriously and investigate all allegations thoroughly. This may involve an internal inquiry or a more formal investigation depending on the severity of the concern and the evaluation of the report. Staff taking the step of reporting concerns will be supported by management at every stage.
+
+Upon receipt of a disclosure, the Registered Manager or Designated Safeguarding Lead will inform the employee who made the disclosure what steps will be taken to investigate the matter, the likely timeframe and how the outcome of the investigation will be communicated.
+
+- If requested, every effort will be made to protect the identity of the person who has raised a concern.
+- If the member of staff raising a concern wishes, they may be accompanied at discussions by another work colleague or trade union representative. The companion must respect the confidentiality of the disclosure and any subsequent investigation.
+- Staff will be given the appropriate advice and support during the process.
+- Where possible management will inform the employee of the outcome of the investigation without breaching obligations of confidentiality to others involved.
+- Staff raising the concern may be asked to participate as a witness in any action, which may include writing a statement and/or appearing at a disciplinary hearing or court case.
+- Where further action is not considered appropriate, Staff will be given a prompt explanation of the reasons. Staff will also be informed of what further steps are available to them under the procedure.
+
+Reporting Externally
+
+In most cases, employees should not find it necessary to alert anyone externally. The law recognises that in some circumstances it may be appropriate for employees to report to an external body such as the Care Quality Commission or the Local Authority — for example if an employee felt internal processes had not dealt with the concern.
+
+All employees are encouraged to seek advice before reporting externally.
+
+Protect – Speak up, Stop Harm (formerly Public Concern at Work) operates a confidential helpline: https://protect-advice.org.uk/
+
+If Staff raise a concern with the Care Quality Commission the information they give will be dealt with in confidence, and staff can raise concerns anonymously. More information: www.cqc.org.uk/content/report-concern-if-you-are-member-staff
+
+Monitoring
+
+Records will be kept of any concerns raised under this policy, and the outcome of investigations and any subsequent action taken will be monitored to ensure that its provisions are being implemented effectively.
+
+Training
+
+Osabea Healthcare Solutions Ltd will ensure that all employees are trained in safeguarding and whistleblowing procedures during their induction training programme and will be updated at least annually. All guidance issued / training given will be recorded on each staff member's learning and development file.`,
+
+            protections: `Osabea Healthcare Solutions Ltd are committed to this policy. If an employee raises a genuine concern under this policy, they will not be at risk of losing their job or suffering any detriment (such as reprisal or victimisation). Provided employees are acting in good faith (effectively this means honestly), this includes when employees are genuinely mistaken or if there is an innocent explanation for their concerns.
+
+If an employee believes that they have suffered negative treatment, they should inform the Registered Manager, Designated Safeguarding Lead and/or Director immediately.
+
+If the matter is not remedied it should be raised formally using the organisation's Grievance Policy & Procedure.
+
+No Osabea Healthcare Solutions Ltd employee should threaten or retaliate against whistleblowing in any way. Any employees involved in such conduct may be subjected to disciplinary action.
+
+Employees are protected under the Public Interest Disclosure Act 1998 and Employment Rights Act 1996.`,
+
+            exclusions: `The organisation's assurance is not extended to those who maliciously raise a matter they know is untrue. If, following a thorough investigation, it is found that employees raised a matter maliciously, this will be dealt with under the Osabea Healthcare Solutions Ltd Disciplinary & Dismissal Policy & Procedure.
+
+This policy is not intended to replace the Osabea Healthcare Solutions Ltd Grievance Procedure, which remains the proper method of dealing with issues of a personal nature relating to matters of employment.
+
+This policy does not replace the Safeguarding Policy & Procedure, which includes the organisations' standard procedures for reporting allegations and concerns.
+
+This policy is not appropriate for resolving grievances about terms of employment or personal treatment — these should be dealt with under the Grievance Policy and Procedure.
+
+Individuals other than staff who have a genuine concern about the delivery of care and services should raise it through the Complaints Procedure.`,
+
+            responsibilities: `Responsibilities of Employees
+
+Staff will observe Osabea Healthcare Solutions Ltd policies closely and report anything that causes them concern at the earliest opportunity. This is part of all employees' duty and moral responsibility as part of their role.
+
+This could include aspects of:
+- Poor performance and practice – including failure to comply with the organisations' practice policy framework;
+- Poor management performance and practice – including failure to observe agreed and established instructions, policies and procedures;
+- Financial malpractice – including fraud or suspected fraud or corruption;
+- Concerns about health and safety in the workplace – including dangers to Individuals, Staff, the environment and non-compliance with legislation;
+- Breach of statutory obligation and other criminal or illegal practices;
+- Personal gain when ordering services or goods on behalf of Osabea Healthcare Solutions Ltd.
+
+If staff are ever in doubt they should always raise it.
+
+It is the employee's responsibility to read and adhere to this policy and procedure. The Registered Manager is responsible for the implementation and review of this policy.`,
+
+            references: `Relevant Legislation:
+- Public Interest Disclosure Act 1998: http://www.legislation.gov.uk/ukpga/1998/23/contents
+- Employment Rights Act 1996: http://www.legislation.gov.uk/ukpga/1996/18/contents
+
+Relevant Regulations:
+- Regulation 12: Safe care and treatment
+- Regulation 20: Duty of candour
+- CQC Guidance: https://www.cqc.org.uk/sites/default/files/20150324_guidance_providers_meeting_regulations_01.pdf
+- Protect – Speak up, Stop Harm: https://protect-advice.org.uk/
+
+Related Policies and Procedures to be read in conjunction with this policy:
+- Safeguarding Adults at Risk Policy & Procedure
+- Grievance Policy & Procedure
+- Complaints Policy & Procedure
+- Equality, Diversity & Inclusion Policy & Procedure
+- Anti-Harassment & Bullying Policy & Procedure
+
+Internal Contact: Registered Manager / Designated Safeguarding Lead — Ebahi Ileogben`
+          }
         });
       }
     } catch {

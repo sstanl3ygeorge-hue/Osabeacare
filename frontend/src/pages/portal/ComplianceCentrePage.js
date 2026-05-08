@@ -1035,6 +1035,7 @@ export default function ComplianceCentrePage() {
         reason: ''
       });
     } else if (type === 'audit') {
+      if (record.audit_type === 'client_file_audit') fetchAuditServiceUsers();
       setAmendForm({
         audit_type: record.audit_type || 'infection_control_audit',
         audit_date: record.audit_date ? record.audit_date.split('T')[0] : '',
@@ -1044,6 +1045,8 @@ export default function ComplianceCentrePage() {
         actions_required: record.actions_required || '',
         next_review_date: record.next_review_date ? record.next_review_date.split('T')[0] : '',
         status: record.status || 'open',
+        service_user_id: record.service_user_id || '',
+        checklist: record.checklist || (record.audit_type === 'client_file_audit' ? initChecklist() : null),
         reason: ''
       });
     }
@@ -4331,7 +4334,7 @@ export default function ComplianceCentrePage() {
           setAmendForm({});
         }
       }}>
-        <DialogContent className="max-w-lg w-[95vw] max-h-[90vh] overflow-y-auto">
+        <DialogContent className={`${amendType === 'audit' && amendForm.audit_type === 'client_file_audit' ? 'max-w-2xl' : 'max-w-lg'} w-[95vw] max-h-[90vh] overflow-y-auto`}>
           <DialogHeader>
             <DialogTitle className="font-heading text-lg pr-6">
               Edit {amendType === 'policy' ? 'Policy' : amendType === 'insurance' ? 'Certificate' : amendType === 'incident' ? 'Incident' : amendType === 'meeting' ? 'Staff Meeting' : 'Employer Audit'} Details
@@ -4915,6 +4918,53 @@ export default function ComplianceCentrePage() {
                     </Select>
                   </div>
                 </div>
+
+                {amendForm.audit_type === 'client_file_audit' && (
+                  <div className="space-y-3 rounded-xl border border-blue-200 bg-blue-50 p-4">
+                    <p className="text-sm font-medium text-blue-800">Client File Audit — Rescore Checklist</p>
+                    <div className="space-y-2">
+                      <Label>Service User</Label>
+                      <Select
+                        value={amendForm.service_user_id || ''}
+                        onValueChange={(v) => setAmendForm({ ...amendForm, service_user_id: v })}
+                      >
+                        <SelectTrigger className="rounded-xl bg-white"><SelectValue placeholder="Select service user…" /></SelectTrigger>
+                        <SelectContent>
+                          {auditServiceUsers.map((su) => (
+                            <SelectItem key={su.id} value={su.id}>{su.full_name || su.id}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>File section checklist</Label>
+                      <p className="text-xs text-blue-700">Update each section after follow-up: ✓ compliant, ✗ gap found, — not applicable</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {CLIENT_FILE_CHECKLIST_SECTIONS.map((section) => {
+                          const val = amendForm.checklist?.[section.id];
+                          return (
+                            <div key={section.id} className="flex items-center gap-2 rounded-lg border border-blue-200 bg-white px-3 py-2">
+                              <span className="flex-1 text-sm text-text-primary">{section.label}</span>
+                              <div className="flex gap-1">
+                                {[['pass', '✓', 'text-green-700 bg-green-100'], ['fail', '✗', 'text-red-700 bg-red-100'], ['na', '—', 'text-gray-600 bg-gray-100']].map(([v, sym, cls]) => (
+                                  <button
+                                    key={v}
+                                    type="button"
+                                    className={`rounded px-2 py-0.5 text-xs font-bold transition-opacity ${val === v ? cls + ' opacity-100' : 'opacity-30 hover:opacity-70 ' + cls}`}
+                                    onClick={() => setAmendForm((prev) => ({
+                                      ...prev,
+                                      checklist: { ...prev.checklist, [section.id]: val === v ? null : v },
+                                    }))}
+                                  >{sym}</button>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                )}
               </>
             )}
             

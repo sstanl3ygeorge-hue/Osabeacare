@@ -101,6 +101,121 @@ def _get_body_map_image_path(gender_value: str) -> Optional[Path]:
     return None
 
 
+def _annotate_body_map_image(img_path: Path, marks: list) -> bytes:
+    """
+    Draws numbered red circle markers on the CQC Expert body-map template image
+    at anatomically accurate positions for each recorded region.
+    Returns PNG bytes of the annotated image.
+
+    Coordinate convention:
+    - Portrait images: head on RIGHT, feet on LEFT in each figure.
+    - Four stacked views: front (y 0-22%), right-side, left-side, back (y 65-92%).
+    - Anatomical LEFT = upper side. Anatomical RIGHT = lower side.
+    - (x_pct, y_pct) are % of full image W/H.
+    """
+    from PIL import Image, ImageDraw, ImageFont
+
+    # (x%, y%) mapped to each named region across front + back views
+    REGION_COORDS_PCT: dict = {
+        # ── Front view (y 1-22%) ──────────────────────────────────
+        "Head \u2013 top":            (90.0, 10.5),
+        "Forehead":              (90.0, 10.8),
+        "Left eye / cheek":      (89.5, 10.0),   # anatomical L = upper/top side
+        "Right eye / cheek":     (89.5, 13.5),
+        "Nose":                  (89.5, 11.8),
+        "Mouth / lips":          (89.5, 12.8),
+        "Left ear":              (90.5,  9.3),
+        "Right ear":             (90.5, 14.7),
+        "Chin / jaw":            (88.5, 13.3),
+        "Neck \u2013 front":          (82.0, 12.0),
+        "Neck \u2013 back":           (82.0, 12.0),
+        "Left shoulder":         (73.0,  6.5),
+        "Right shoulder":        (73.0, 17.5),
+        "Chest \u2013 left":          (67.0,  9.8),
+        "Chest \u2013 right":         (67.0, 14.2),
+        "Abdomen \u2013 left":        (57.0, 10.2),
+        "Abdomen \u2013 right":       (57.0, 13.8),
+        "Groin / perineal area": (41.0, 12.0),
+        # Left arm (anatomical left = upper side)
+        "Left upper arm":        (69.0,  6.0),
+        "Left elbow":            (59.0,  4.8),
+        "Left forearm":          (52.0,  4.0),
+        "Left wrist":            (47.0,  3.5),
+        "Left hand / fingers":   (42.0,  3.2),
+        # Right arm (anatomical right = lower side)
+        "Right upper arm":       (69.0, 18.0),
+        "Right elbow":           (59.0, 19.5),
+        "Right forearm":         (52.0, 20.0),
+        "Right wrist":           (47.0, 20.4),
+        "Right hand / fingers":  (42.0, 20.7),
+        # Legs front
+        "Left hip":              (42.0,  8.3),
+        "Left thigh":            (33.0,  7.6),
+        "Left knee":             (24.0,  7.3),
+        "Left lower leg / shin": (16.0,  7.0),
+        "Left ankle":            ( 9.0,  6.8),
+        "Left foot / toes":      ( 3.5,  7.8),
+        "Right hip":             (42.0, 15.7),
+        "Right thigh":           (33.0, 16.5),
+        "Right knee":            (24.0, 17.0),
+        "Right lower leg / shin":(16.0, 17.2),
+        "Right ankle":           ( 9.0, 17.5),
+        "Right foot / toes":     ( 3.5, 17.0),
+        # ── Back view (y 65-92%) ─────────────────────────────────
+        "Upper back \u2013 left":     (63.0, 72.0),
+        "Upper back \u2013 right":    (63.0, 84.0),
+        "Lower back \u2013 left":     (50.0, 71.5),
+        "Lower back \u2013 right":    (50.0, 84.5),
+        "Sacrum / coccyx":       (40.0, 78.0),
+        "Buttocks \u2013 left":       (37.0, 72.5),
+        "Buttocks \u2013 right":      (37.0, 83.5),
+    }
+
+    img = Image.open(img_path).convert("RGBA")
+    W, H = img.size
+    overlay = Image.new("RGBA", img.size, (255, 255, 255, 0))
+    draw = ImageDraw.Draw(overlay)
+
+    r = max(10, W // 28)  # circle radius scales with image width
+
+    font = None
+    for font_path in ["arial.ttf", "Arial.ttf",
+                      "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                      "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"]:
+        try:
+            font = ImageFont.truetype(font_path, max(10, W // 28))
+            break
+        except Exception:
+            continue
+    if font is None:
+        font = ImageFont.load_default()
+
+    for i, mark in enumerate(marks, 1):
+        region = mark.get("region", "")
+        coord = REGION_COORDS_PCT.get(region)
+        if coord is None:
+            continue
+        x = int(W * coord[0] / 100)
+        y = int(H * coord[1] / 100)
+        draw.ellipse([x - r, y - r, x + r, y + r],
+                     fill=(220, 30, 30, 230),
+                     outline=(255, 255, 255, 200))
+        label = str(i)
+        try:
+            bbox = draw.textbbox((0, 0), label, font=font)
+            tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+        except AttributeError:
+            tw, th = r, r
+        draw.text((x - tw // 2, y - th // 2), label,
+                  fill=(255, 255, 255, 255), font=font)
+
+    combined = Image.alpha_composite(img, overlay).convert("RGB")
+    buf = io.BytesIO()
+    combined.save(buf, "PNG")
+    buf.seek(0)
+    return buf.getvalue()
+
+
 # ─────────────────────────────────────────────────────────
 # Models
 # ─────────────────────────────────────────────────────────
@@ -385,10 +500,13 @@ def _render_body_map_pdf(doc: dict) -> bytes:
     img_path = _get_body_map_image_path(raw_gender)
     if img_path:
         elements.append(Paragraph(
-            "Diagram image is sourced directly from the uploaded CQC Expert template.",
+            "Red numbered markers show the location of each recorded mark. "
+            "L = person\u2019s left side, R = person\u2019s right side (anatomical). "
+            "Front view is at top; back view at bottom of the diagram.",
             diagram_note,
         ))
-        diagram = Image(str(img_path))
+        annotated_bytes = _annotate_body_map_image(img_path, marks)
+        diagram = Image(io.BytesIO(annotated_bytes))
         diagram.drawHeight = 145 * mm
         diagram.drawWidth = diagram.drawHeight * (diagram.imageWidth / float(diagram.imageHeight))
         img_table = Table([[diagram]], colWidths=[170 * mm])

@@ -17,6 +17,7 @@ Fields match the Osabea Body Map – Male/Female CQC Expert templates:
 import uuid
 import io
 import logging
+from pathlib import Path
 from datetime import datetime, timezone
 from typing import Optional, List
 from fastapi import APIRouter, HTTPException, Depends, Query
@@ -28,6 +29,8 @@ from .dependencies import get_db, get_current_user, get_current_worker, require_
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Body Maps"])
+
+BODY_MAP_ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets" / "body_maps"
 
 # All named body regions — front and back, used in dropdown selector
 BODY_REGIONS = [
@@ -83,6 +86,19 @@ BODY_REGIONS = [
     "Right ankle",
     "Right foot / toes",
 ]
+
+
+def _get_body_map_image_path(gender_value: str) -> Optional[Path]:
+    raw = (gender_value or "").strip().lower()
+    if raw in ("male", "m", "man"):
+        candidate = BODY_MAP_ASSETS_DIR / "body_map_male.png"
+    elif raw in ("female", "f", "woman"):
+        candidate = BODY_MAP_ASSETS_DIR / "body_map_female.png"
+    else:
+        candidate = None
+    if candidate and candidate.exists():
+        return candidate
+    return None
 
 
 # ─────────────────────────────────────────────────────────
@@ -281,7 +297,7 @@ def _render_body_map_pdf(doc: dict) -> bytes:
     from reportlab.lib import colors
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.enums import TA_CENTER, TA_LEFT
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable, Image
     from reportlab.lib.units import mm
 
     buffer = io.BytesIO()
@@ -364,22 +380,40 @@ def _render_body_map_pdf(doc: dict) -> bytes:
 
     # ── Body figure diagram ───────────────────────────────────────────────────
     elements.append(Paragraph("Body Diagram", section_style))
-    elements.append(Paragraph(
-        "Red numbered markers indicate the location of each recorded mark. "
-        "L = person's left side, R = person's right side (anatomical convention).",
-        ParagraphStyle("FigNote", parent=styles["Normal"], fontSize=7, textColor=colors.HexColor("#6B7280"), spaceAfter=6)
-    ))
+    diagram_note = ParagraphStyle("FigNote", parent=styles["Normal"], fontSize=7, textColor=colors.HexColor("#6B7280"), spaceAfter=6)
 
-    figure = _draw_body_figure(marks, width=160, height=320)
-    # Centre the figure using a single-cell table
-    fig_table = Table([[_make_drawing_flowable(figure)]], colWidths=[170 * mm])
-    fig_table.setStyle(TableStyle([
-        ("ALIGN",   (0, 0), (-1, -1), "CENTER"),
-        ("VALIGN",  (0, 0), (-1, -1), "MIDDLE"),
-        ("TOPPADDING",    (0, 0), (-1, -1), 4),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-    ]))
-    elements.append(fig_table)
+    img_path = _get_body_map_image_path(raw_gender)
+    if img_path:
+        elements.append(Paragraph(
+            "Diagram image is sourced directly from the uploaded CQC Expert template.",
+            diagram_note,
+        ))
+        diagram = Image(str(img_path))
+        diagram.drawHeight = 145 * mm
+        diagram.drawWidth = diagram.drawHeight * (diagram.imageWidth / float(diagram.imageHeight))
+        img_table = Table([[diagram]], colWidths=[170 * mm])
+        img_table.setStyle(TableStyle([
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ]))
+        elements.append(img_table)
+    else:
+        elements.append(Paragraph(
+            "Template image unavailable, showing fallback diagram. "
+            "Red numbered markers indicate recorded mark locations.",
+            diagram_note,
+        ))
+        figure = _draw_body_figure(marks, width=160, height=320)
+        fig_table = Table([[_make_drawing_flowable(figure)]], colWidths=[170 * mm])
+        fig_table.setStyle(TableStyle([
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ]))
+        elements.append(fig_table)
 
     # ── Marks table ───────────────────────────────────────────────────────────
     if marks:

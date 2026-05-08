@@ -128,59 +128,60 @@ def _annotate_body_map_image(img_bytes: bytes, marks: list) -> bytes:
     from PIL import Image, ImageDraw, ImageFont
 
     # (x%, y%) mapped to each named region across front + back views
+    # Calibrated to CQC Expert template: body horizontal, head on RIGHT, feet on LEFT
     REGION_COORDS_PCT: dict = {
-        # ── Front view (y 1-22%) ──────────────────────────────────
-        "Head \u2013 top":            (90.0, 10.5),
-        "Forehead":              (90.0, 10.8),
-        "Left eye / cheek":      (89.5, 10.0),   # anatomical L = upper/top side
-        "Right eye / cheek":     (89.5, 13.5),
-        "Nose":                  (89.5, 11.8),
-        "Mouth / lips":          (89.5, 12.8),
-        "Left ear":              (90.5,  9.3),
-        "Right ear":             (90.5, 14.7),
-        "Chin / jaw":            (88.5, 13.3),
-        "Neck \u2013 front":          (82.0, 12.0),
-        "Neck \u2013 back":           (82.0, 12.0),
-        "Left shoulder":         (73.0,  6.5),
-        "Right shoulder":        (73.0, 17.5),
-        "Chest \u2013 left":          (67.0,  9.8),
-        "Chest \u2013 right":         (67.0, 14.2),
-        "Abdomen \u2013 left":        (57.0, 10.2),
-        "Abdomen \u2013 right":       (57.0, 13.8),
-        "Groin / perineal area": (41.0, 12.0),
-        # Left arm (anatomical left = upper side)
-        "Left upper arm":        (69.0,  6.0),
-        "Left elbow":            (59.0,  4.8),
-        "Left forearm":          (52.0,  4.0),
-        "Left wrist":            (47.0,  3.5),
-        "Left hand / fingers":   (42.0,  3.2),
-        # Right arm (anatomical right = lower side)
-        "Right upper arm":       (69.0, 18.0),
-        "Right elbow":           (59.0, 19.5),
-        "Right forearm":         (52.0, 20.0),
-        "Right wrist":           (47.0, 20.4),
-        "Right hand / fingers":  (42.0, 20.7),
-        # Legs front
-        "Left hip":              (42.0,  8.3),
-        "Left thigh":            (33.0,  7.6),
-        "Left knee":             (24.0,  7.3),
-        "Left lower leg / shin": (16.0,  7.0),
-        "Left ankle":            ( 9.0,  6.8),
-        "Left foot / toes":      ( 3.5,  7.8),
-        "Right hip":             (42.0, 15.7),
+        # ── Front view (y 0-24%) ──────────────────────────────────────────
+        "Head \u2013 top":            (77.0,  7.0),   # top of head
+        "Forehead":              (76.0,  8.0),
+        "Left eye / cheek":      (74.0,  9.5),   # anatomical left = upper/top side of face
+        "Right eye / cheek":     (74.0, 13.5),
+        "Nose":                  (75.0, 11.5),
+        "Mouth / lips":          (75.0, 12.5),
+        "Left ear":              (80.0,  9.0),
+        "Right ear":             (80.0, 14.0),
+        "Chin / jaw":            (75.5, 14.5),
+        "Neck \u2013 front":          (68.0, 16.5),
+        "Neck \u2013 back":           (68.0, 16.5),
+        "Left shoulder":         (62.0, 13.0),  # anatomical left = above center
+        "Right shoulder":        (62.0, 19.0),  # anatomical right = below center
+        "Chest \u2013 left":          (54.0, 14.0),
+        "Chest \u2013 right":         (54.0, 18.0),
+        "Abdomen \u2013 left":        (45.0, 16.0),
+        "Abdomen \u2013 right":       (45.0, 18.0),
+        "Groin / perineal area": (35.0, 18.0),
+        # Left arm (anatomical left = upper side in lying position)
+        "Left upper arm":        (65.0,  8.0),
+        "Left elbow":            (50.0,  5.0),
+        "Left forearm":          (38.0,  4.0),
+        "Left wrist":            (28.0,  3.5),
+        "Left hand / fingers":   (18.0,  3.0),
+        # Right arm (anatomical right = lower side in lying position)
+        "Right upper arm":       (65.0, 22.0),
+        "Right elbow":           (50.0, 24.0),
+        "Right forearm":         (38.0, 24.5),
+        "Right wrist":           (28.0, 24.8),
+        "Right hand / fingers":  (18.0, 25.0),
+        # Legs front (y 18-45%)
+        "Left hip":              (35.0, 10.0),   # left leg extends upward from body
+        "Left thigh":            (25.0, 10.0),
+        "Left knee":             (15.0, 10.0),
+        "Left lower leg / shin": ( 8.0, 10.0),
+        "Left ankle":            ( 3.0, 11.0),
+        "Left foot / toes":      ( 1.0, 13.0),
+        "Right hip":             (35.0, 22.0),  # right leg extends downward
         "Right thigh":           (33.0, 16.5),
         "Right knee":            (24.0, 17.0),
         "Right lower leg / shin":(16.0, 17.2),
         "Right ankle":           ( 9.0, 17.5),
         "Right foot / toes":     ( 3.5, 17.0),
-        # ── Back view (y 65-92%) ─────────────────────────────────
-        "Upper back \u2013 left":     (63.0, 72.0),
-        "Upper back \u2013 right":    (63.0, 84.0),
-        "Lower back \u2013 left":     (50.0, 71.5),
-        "Lower back \u2013 right":    (50.0, 84.5),
-        "Sacrum / coccyx":       (40.0, 78.0),
-        "Buttocks \u2013 left":       (37.0, 72.5),
-        "Buttocks \u2013 right":      (37.0, 83.5),
+        # ── Back view (y 66-90%) ──────────────────────────────────────────
+        "Upper back \u2013 left":     (65.0, 70.0),
+        "Upper back \u2013 right":    (65.0, 81.0),
+        "Lower back \u2013 left":     (52.0, 73.0),
+        "Lower back \u2013 right":    (52.0, 80.0),
+        "Sacrum / coccyx":       (42.0, 78.0),
+        "Buttocks \u2013 left":       (40.0, 71.0),
+        "Buttocks \u2013 right":      (40.0, 82.0),
     }
 
     img = Image.open(io.BytesIO(img_bytes)).convert("RGBA")

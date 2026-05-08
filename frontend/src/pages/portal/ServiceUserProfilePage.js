@@ -1267,6 +1267,37 @@ function NextActionsCard({ readiness, serviceUserId, onOpenTab, onNavigate }) {
 // Overview Tab Component
 function OverviewTab({ serviceUser, onOpenSection, serviceUserId }) {
   const encodedServiceUserId = encodeURIComponent(serviceUserId || '');
+  const [bodyMaps, setBodyMaps] = useState([]);
+  const [bodyMapsLoading, setBodyMapsLoading] = useState(false);
+
+  useEffect(() => {
+    if (!serviceUserId) return;
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    setBodyMapsLoading(true);
+    fetch(`${API}/service-users/${serviceUserId}/body-maps`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(r => r.ok ? r.json() : [])
+      .then(data => setBodyMaps(Array.isArray(data) ? data : []))
+      .catch(() => setBodyMaps([]))
+      .finally(() => setBodyMapsLoading(false));
+  }, [serviceUserId]);
+
+  const handleDownloadBodyMapPdf = (id) => {
+    const token = localStorage.getItem('token');
+    fetch(`${API}/compliance/body-maps/${id}/pdf`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }).then(r => r.blob()).then(blob => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `body_map_${id}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }).catch(() => {});
+  };
+
   return (
     <div className="space-y-6">
       {/* Quick Info Cards */}
@@ -1413,6 +1444,42 @@ function OverviewTab({ serviceUser, onOpenSection, serviceUserId }) {
             Daily Notes
           </button>
         </div>
+      </div>
+
+      {/* Body Maps */}
+      <div className="p-4 rounded-lg bg-white border border-slate-200">
+        <h3 className="text-sm font-semibold text-text-primary mb-3 flex items-center gap-2">
+          <Shield className="h-4 w-4 text-teal-600" />
+          Body Maps
+        </h3>
+        {bodyMapsLoading ? (
+          <p className="text-xs text-slate-400">Loading…</p>
+        ) : bodyMaps.length === 0 ? (
+          <p className="text-xs text-slate-400">No body maps recorded for this service user.</p>
+        ) : (
+          <div className="space-y-2">
+            {bodyMaps.map(bm => (
+              <div key={bm.id} className="flex items-start justify-between gap-3 border border-slate-100 rounded-lg px-3 py-2 bg-slate-50 text-sm">
+                <div>
+                  <p className="font-medium text-slate-800">
+                    {bm.gender ? bm.gender.charAt(0).toUpperCase() + bm.gender.slice(1) : ''} body map
+                    {' — '}{bm.completed_date ? bm.completed_date.slice(0, 10) : ''}
+                  </p>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    By {bm.staff_name || '—'}{bm.marks?.length ? ` · ${bm.marks.length} mark(s)` : ''}
+                    {' · '}<span className={`capitalize ${bm.status === 'reviewed' ? 'text-green-600' : 'text-amber-600'}`}>{bm.status}</span>
+                  </p>
+                </div>
+                <button
+                  onClick={() => handleDownloadBodyMapPdf(bm.id)}
+                  className="text-xs text-teal-600 hover:underline whitespace-nowrap mt-0.5"
+                >
+                  PDF
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
       
       {/* Notes */}

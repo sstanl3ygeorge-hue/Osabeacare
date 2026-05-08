@@ -801,6 +801,19 @@ export default function WorkerDashboard() {
     service_user_id: '',
     note: '',
   });
+
+  // Body map state
+  const [bodyMapModalOpen, setBodyMapModalOpen] = useState(false);
+  const [bodyMapSubmitting, setBodyMapSubmitting] = useState(false);
+  const [bodyMapForm, setBodyMapForm] = useState({
+    related_shift_id: '',
+    service_user_id: '',
+    injury_date: '',
+    reported_to: '',
+    additional_information: '',
+    marks: [],
+  });
+  const [bodyMapMarkDraft, setBodyMapMarkDraft] = useState({ region: '', description: '' });
   const navigate = useNavigate();
 
   const fetchDashboard = useCallback(async () => {
@@ -1206,6 +1219,58 @@ export default function WorkerDashboard() {
   const openIncidentDetail = (incident) => {
     setSelectedIncident(incident);
     setIncidentDetailOpen(true);
+  };
+
+  const handleReportBodyMapForShift = () => {
+    const shift = selectedWorkerShift?.shift;
+    setBodyMapForm({
+      related_shift_id: shift?.id || '',
+      service_user_id: shift?.service_user_id || '',
+      injury_date: '',
+      reported_to: '',
+      additional_information: '',
+      marks: [],
+    });
+    setBodyMapMarkDraft({ region: '', description: '' });
+    setBodyMapModalOpen(true);
+  };
+
+  const handleAddBodyMapMark = () => {
+    if (!bodyMapMarkDraft.region || !bodyMapMarkDraft.description.trim()) {
+      toast.error('Select a body region and enter a description');
+      return;
+    }
+    setBodyMapForm(prev => ({ ...prev, marks: [...prev.marks, { ...bodyMapMarkDraft }] }));
+    setBodyMapMarkDraft({ region: '', description: '' });
+  };
+
+  const handleRemoveBodyMapMark = (idx) => {
+    setBodyMapForm(prev => ({ ...prev, marks: prev.marks.filter((_, i) => i !== idx) }));
+  };
+
+  const handleSubmitBodyMap = async () => {
+    if (bodyMapForm.marks.length === 0) {
+      toast.error('Add at least one marked location before submitting');
+      return;
+    }
+    setBodyMapSubmitting(true);
+    try {
+      const token = localStorage.getItem('workerToken');
+      await axios.post(`${API}/worker/body-maps`, {
+        related_shift_id: bodyMapForm.related_shift_id || null,
+        service_user_id: bodyMapForm.service_user_id || null,
+        injury_date: bodyMapForm.injury_date || null,
+        reported_to: bodyMapForm.reported_to || '',
+        additional_information: bodyMapForm.additional_information || '',
+        marks: bodyMapForm.marks,
+      }, { headers: { Authorization: `Bearer ${token}` } });
+      toast.success('Body map submitted');
+      setBodyMapModalOpen(false);
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to submit body map');
+    } finally {
+      setBodyMapSubmitting(false);
+    }
   };
 
   // Fetch reference-employment mismatches
@@ -5354,6 +5419,9 @@ export default function WorkerDashboard() {
             <Button variant="outline" onClick={handleReportIncidentForShift}>
               Report Incident For This Shift
             </Button>
+            <Button variant="outline" onClick={handleReportBodyMapForShift}>
+              Record Body Map
+            </Button>
             <Button variant="outline" onClick={() => setWorkerShiftDetailOpen(false)}>
               Close
             </Button>
@@ -5639,6 +5707,112 @@ export default function WorkerDashboard() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setIncidentDetailOpen(false)}>
               Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Body Map Dialog ─────────────────────────────────────────────────── */}
+      <Dialog open={bodyMapModalOpen} onOpenChange={setBodyMapModalOpen}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Record Body Map</DialogTitle>
+            <p className="text-xs text-slate-500 mt-1">
+              Record any injury, mark or bruising you have observed during normal care activities.
+              Staff must not physically inspect an individual if harm is suspected — that is the role of a medical practitioner.
+            </p>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label>Date of injury (if known)</Label>
+              <Input
+                type="date"
+                value={bodyMapForm.injury_date}
+                onChange={(e) => setBodyMapForm(prev => ({ ...prev, injury_date: e.target.value }))}
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <Label>Reported to</Label>
+              <Input
+                value={bodyMapForm.reported_to}
+                onChange={(e) => setBodyMapForm(prev => ({ ...prev, reported_to: e.target.value }))}
+                placeholder="e.g. Jane Smith (Manager)"
+                className="mt-1"
+              />
+            </div>
+
+            {/* Mark entry */}
+            <div className="border border-slate-200 rounded-xl p-3 space-y-3 bg-slate-50">
+              <p className="text-sm font-medium text-slate-700">Add a mark / injury location</p>
+              <div>
+                <Label className="text-xs">Body region</Label>
+                <select
+                  value={bodyMapMarkDraft.region}
+                  onChange={(e) => setBodyMapMarkDraft(prev => ({ ...prev, region: e.target.value }))}
+                  className="mt-1 w-full text-sm border border-slate-300 rounded-lg px-3 py-2 bg-white"
+                >
+                  <option value="">Select region...</option>
+                  {[
+                    "Head – top","Forehead","Left eye / cheek","Right eye / cheek","Nose","Mouth / lips","Left ear","Right ear","Chin / jaw",
+                    "Neck – front","Neck – back","Left shoulder","Right shoulder",
+                    "Chest – left","Chest – right","Abdomen – left","Abdomen – right",
+                    "Upper back – left","Upper back – right","Lower back – left","Lower back – right",
+                    "Buttocks – left","Buttocks – right","Sacrum / coccyx","Groin / perineal area",
+                    "Left upper arm","Left elbow","Left forearm","Left wrist","Left hand / fingers",
+                    "Right upper arm","Right elbow","Right forearm","Right wrist","Right hand / fingers",
+                    "Left hip","Left thigh","Left knee","Left lower leg / shin","Left ankle","Left foot / toes",
+                    "Right hip","Right thigh","Right knee","Right lower leg / shin","Right ankle","Right foot / toes",
+                  ].map(r => <option key={r} value={r}>{r}</option>)}
+                </select>
+              </div>
+              <div>
+                <Label className="text-xs">Description (size, colour, type of mark)</Label>
+                <textarea
+                  rows={2}
+                  value={bodyMapMarkDraft.description}
+                  onChange={(e) => setBodyMapMarkDraft(prev => ({ ...prev, description: e.target.value }))}
+                  placeholder="e.g. 2cm bruise, purple/yellow, circular — appears fresh"
+                  className="mt-1 w-full text-sm border border-slate-300 rounded-lg px-3 py-2 resize-none"
+                />
+              </div>
+              <Button size="sm" variant="outline" onClick={handleAddBodyMapMark} className="w-full">
+                + Add mark
+              </Button>
+            </div>
+
+            {/* Recorded marks */}
+            {bodyMapForm.marks.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-slate-700">Recorded marks ({bodyMapForm.marks.length})</p>
+                {bodyMapForm.marks.map((m, i) => (
+                  <div key={i} className="flex items-start justify-between gap-2 bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm">
+                    <div>
+                      <p className="font-medium text-slate-800">{i + 1}. {m.region}</p>
+                      <p className="text-slate-500 text-xs mt-0.5">{m.description}</p>
+                    </div>
+                    <button onClick={() => handleRemoveBodyMapMark(i)} className="text-red-400 hover:text-red-600 mt-0.5 shrink-0">✕</button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div>
+              <Label>Additional information</Label>
+              <textarea
+                rows={3}
+                value={bodyMapForm.additional_information}
+                onChange={(e) => setBodyMapForm(prev => ({ ...prev, additional_information: e.target.value }))}
+                placeholder="Any other relevant details..."
+                className="mt-1 w-full text-sm border border-slate-300 rounded-lg px-3 py-2 resize-none"
+              />
+            </div>
+          </div>
+          <DialogFooter className="mt-4">
+            <Button variant="outline" onClick={() => setBodyMapModalOpen(false)}>Cancel</Button>
+            <Button onClick={handleSubmitBodyMap} disabled={bodyMapSubmitting}>
+              {bodyMapSubmitting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+              Submit Body Map
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -1,0 +1,412 @@
+"""
+Body Map Routes
+
+Workers record observable injuries/marks during care visits.
+Admins can review, update status, and download PDFs.
+
+Fields match the Osabea Body Map – Male/Female CQC Expert templates:
+  - Name of Individual
+  - Date body map was completed
+  - Date of when injury occurred (if known)
+  - Name of Staff
+  - Reported to
+  - Additional information
+  - Marked body regions (with descriptions)
+"""
+
+import uuid
+import io
+import logging
+from datetime import datetime, timezone
+from typing import Optional, List
+from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, ConfigDict
+
+from .dependencies import get_db, get_current_user, get_current_worker, require_admin, log_audit_action
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(tags=["Body Maps"])
+
+# All named body regions — front and back, used in dropdown selector
+BODY_REGIONS = [
+    # Head & Face
+    "Head – top",
+    "Forehead",
+    "Left eye / cheek",
+    "Right eye / cheek",
+    "Nose",
+    "Mouth / lips",
+    "Left ear",
+    "Right ear",
+    "Chin / jaw",
+    # Neck & Trunk
+    "Neck – front",
+    "Neck – back",
+    "Left shoulder",
+    "Right shoulder",
+    "Chest – left",
+    "Chest – right",
+    "Abdomen – left",
+    "Abdomen – right",
+    "Upper back – left",
+    "Upper back – right",
+    "Lower back – left",
+    "Lower back – right",
+    "Buttocks – left",
+    "Buttocks – right",
+    "Sacrum / coccyx",
+    "Groin / perineal area",
+    # Arms
+    "Left upper arm",
+    "Left elbow",
+    "Left forearm",
+    "Left wrist",
+    "Left hand / fingers",
+    "Right upper arm",
+    "Right elbow",
+    "Right forearm",
+    "Right wrist",
+    "Right hand / fingers",
+    # Legs
+    "Left hip",
+    "Left thigh",
+    "Left knee",
+    "Left lower leg / shin",
+    "Left ankle",
+    "Left foot / toes",
+    "Right hip",
+    "Right thigh",
+    "Right knee",
+    "Right lower leg / shin",
+    "Right ankle",
+    "Right foot / toes",
+]
+
+
+# ─────────────────────────────────────────────────────────
+# Models
+# ─────────────────────────────────────────────────────────
+
+class BodyMapMark(BaseModel):
+    region: str
+    description: str  # size, colour, type of mark
+
+
+class WorkerBodyMapCreate(BaseModel):
+    service_user_id: Optional[str] = None
+    related_shift_id: Optional[str] = None
+    gender: Optional[str] = "unknown"   # male | female | unknown
+    injury_date: Optional[str] = None   # YYYY-MM-DD
+    reported_to: Optional[str] = ""
+    additional_information: Optional[str] = ""
+    marks: List[BodyMapMark] = []
+
+
+class AdminBodyMapUpdate(BaseModel):
+    status: Optional[str] = None        # submitted | reviewed | closed
+    reported_to: Optional[str] = None
+    additional_information: Optional[str] = None
+    review_notes: Optional[str] = None
+
+
+# ─────────────────────────────────────────────────────────
+# PDF renderer
+# ─────────────────────────────────────────────────────────
+
+def _render_body_map_pdf(doc: dict) -> bytes:
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib import colors
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
+    from reportlab.lib.units import mm
+
+    buffer = io.BytesIO()
+    doc_pdf = SimpleDocTemplate(
+        buffer, pagesize=A4,
+        topMargin=18 * mm, bottomMargin=18 * mm,
+        leftMargin=20 * mm, rightMargin=20 * mm,
+    )
+
+    styles = getSampleStyleSheet()
+    brand = colors.HexColor("#004D4D")
+    light = colors.HexColor("#F8FAFA")
+
+    title_style = ParagraphStyle("Title", parent=styles["Heading1"], fontSize=16, textColor=brand, alignment=TA_CENTER, spaceAfter=4)
+    subtitle_style = ParagraphStyle("Sub", parent=styles["Normal"], fontSize=9, textColor=colors.HexColor("#6B7280"), alignment=TA_CENTER, spaceAfter=10)
+    instruction_style = ParagraphStyle("Instr", parent=styles["Normal"], fontSize=8, textColor=colors.HexColor("#374151"), leading=12, spaceAfter=6)
+    section_style = ParagraphStyle("Section", parent=styles["Heading2"], fontSize=11, textColor=brand, spaceBefore=12, spaceAfter=4)
+    body_style = ParagraphStyle("Body", parent=styles["Normal"], fontSize=9, leading=13, spaceAfter=4)
+
+    gender_label = doc.get("gender", "unknown").capitalize()
+    title = f"Body Map – {gender_label}"
+
+    elements = [
+        Paragraph(title, title_style),
+        Paragraph("Osabea Healthcare Solutions Ltd", subtitle_style),
+        HRFlowable(width="100%", thickness=1, color=brand),
+        Spacer(1, 6),
+        Paragraph(
+            "Staff must not carry out any physical inspection of Individuals if they have reason to suspect harm. "
+            "This is the role of medical practitioners when there is a need.",
+            instruction_style
+        ),
+        Paragraph(
+            "The body map is for recording injuries that the Staff may have observed whilst carrying out their "
+            "normal care and support activities. Where appropriate use this form to provide further information "
+            "to support a safeguarding concern.",
+            instruction_style
+        ),
+        Paragraph(
+            "Record the area/site of any injury, marks, bruising, etc. Please also indicate the rough size in "
+            "centimetres or use a comparison, for example, the same size as a 10p coin. Record details such as "
+            "the colour of bruising, swelling and shape.",
+            instruction_style
+        ),
+        Spacer(1, 6),
+        HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#D1D5DB")),
+    ]
+
+    # Metadata table
+    meta = [
+        ["Name of Individual:", doc.get("service_user_name", "")],
+        ["Date body map was completed:", doc.get("completed_date", "")[:10] if doc.get("completed_date") else ""],
+        ["Date of when injury occurred (if known):", doc.get("injury_date", "") or "Not specified"],
+        ["Name of Staff:", doc.get("staff_name", "")],
+        ["Reported to:", doc.get("reported_to", "") or "—"],
+    ]
+    meta_table = Table(meta, colWidths=[80 * mm, 90 * mm])
+    meta_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (0, -1), light),
+        ("TEXTCOLOR", (0, 0), (0, -1), brand),
+        ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#D1D5DB")),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+    ]))
+    elements.append(Spacer(1, 8))
+    elements.append(meta_table)
+
+    # Marks
+    marks = doc.get("marks", [])
+    if marks:
+        elements.append(Paragraph("Recorded Marks / Injuries", section_style))
+        marks_data = [["#", "Body Region", "Description"]]
+        for i, mark in enumerate(marks, 1):
+            marks_data.append([str(i), mark.get("region", ""), mark.get("description", "")])
+        marks_table = Table(marks_data, colWidths=[10 * mm, 65 * mm, 95 * mm])
+        marks_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), brand),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 9),
+            ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#D1D5DB")),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, light]),
+        ]))
+        elements.append(marks_table)
+    else:
+        elements.append(Paragraph("Recorded Marks / Injuries", section_style))
+        elements.append(Paragraph("No marks recorded.", body_style))
+
+    # Additional information
+    elements.append(Paragraph("Additional Information", section_style))
+    elements.append(Paragraph(doc.get("additional_information", "") or "None provided.", body_style))
+
+    # Review notes (admin)
+    if doc.get("review_notes"):
+        elements.append(Paragraph("Manager Review Notes", section_style))
+        elements.append(Paragraph(doc["review_notes"], body_style))
+
+    # Footer
+    elements.append(Spacer(1, 16))
+    elements.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#D1D5DB")))
+    reviewed_str = ""
+    if doc.get("reviewed_at"):
+        reviewed_str = f"Reviewed: {doc['reviewed_at'][:10]}. "
+    footer = (
+        f"Submitted by {doc.get('staff_name', '')} on {doc.get('completed_date', '')[:10] if doc.get('completed_date') else 'N/A'}. "
+        f"{reviewed_str}"
+        "Osabea Healthcare Solutions Ltd — Body Map Record."
+    )
+    elements.append(Paragraph(footer, ParagraphStyle("Footer", parent=styles["Normal"], fontSize=7, textColor=colors.HexColor("#9CA3AF"), spaceBefore=4)))
+
+    doc_pdf.build(elements)
+    return buffer.getvalue()
+
+
+# ─────────────────────────────────────────────────────────
+# Worker endpoints
+# ─────────────────────────────────────────────────────────
+
+@router.post("/worker/body-maps")
+async def worker_create_body_map(
+    payload: WorkerBodyMapCreate,
+    worker: dict = Depends(get_current_worker),
+):
+    db = get_db()
+    employee_id = worker.get("employee_id")
+    if not employee_id:
+        raise HTTPException(status_code=400, detail="No employee linked to worker account")
+
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "first_name": 1, "last_name": 1, "status": 1})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    if employee.get("status") != "active":
+        raise HTTPException(status_code=403, detail="Body map recording is only available for active employees")
+
+    staff_name = f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip()
+
+    # Auto-resolve service user info
+    service_user_id = payload.service_user_id
+    service_user_name = ""
+    gender = payload.gender or "unknown"
+
+    if payload.related_shift_id:
+        shift = await db.shifts.find_one({"id": payload.related_shift_id}, {"_id": 0, "service_user_id": 1})
+        if shift and shift.get("service_user_id"):
+            service_user_id = shift["service_user_id"]
+
+    if service_user_id:
+        su = await db.service_users.find_one({"id": service_user_id}, {"_id": 0, "full_name": 1, "gender": 1})
+        if su:
+            service_user_name = su.get("full_name", "")
+            if not payload.gender or payload.gender == "unknown":
+                gender = su.get("gender", "unknown")
+
+    now = datetime.now(timezone.utc)
+    doc = {
+        "id": str(uuid.uuid4()),
+        "service_user_id": service_user_id,
+        "service_user_name": service_user_name,
+        "gender": gender,
+        "completed_date": now.isoformat(),
+        "injury_date": payload.injury_date,
+        "staff_name": staff_name,
+        "submitted_by_employee_id": employee_id,
+        "related_shift_id": payload.related_shift_id,
+        "reported_to": payload.reported_to or "",
+        "additional_information": payload.additional_information or "",
+        "marks": [m.model_dump() for m in payload.marks],
+        "status": "submitted",
+        "review_notes": None,
+        "reviewed_at": None,
+        "reviewed_by": None,
+        "created_at": now.isoformat(),
+        "updated_at": now.isoformat(),
+    }
+
+    await db.body_maps.insert_one(doc)
+    doc.pop("_id", None)
+    await log_audit_action(employee_id, "worker_create_body_map", "body_map", doc["id"], {"service_user_id": service_user_id})
+    return {"success": True, "body_map": doc}
+
+
+@router.get("/worker/body-maps")
+async def worker_list_body_maps(worker: dict = Depends(get_current_worker)):
+    db = get_db()
+    employee_id = worker.get("employee_id")
+    if not employee_id:
+        raise HTTPException(status_code=400, detail="No employee linked to worker account")
+    docs = await db.body_maps.find(
+        {"submitted_by_employee_id": employee_id}, {"_id": 0}
+    ).sort("created_at", -1).to_list(length=100)
+    return {"body_maps": docs, "total": len(docs)}
+
+
+# ─────────────────────────────────────────────────────────
+# Admin / manager endpoints
+# ─────────────────────────────────────────────────────────
+
+@router.get("/compliance/body-maps")
+async def list_body_maps(
+    service_user_id: Optional[str] = None,
+    status: Optional[str] = None,
+    user: dict = Depends(get_current_user),
+):
+    db = get_db()
+    filt = {}
+    if service_user_id:
+        filt["service_user_id"] = service_user_id
+    if status:
+        filt["status"] = status
+    docs = await db.body_maps.find(filt, {"_id": 0}).sort("created_at", -1).to_list(length=500)
+    return docs
+
+
+@router.get("/compliance/body-maps/{body_map_id}")
+async def get_body_map(body_map_id: str, user: dict = Depends(get_current_user)):
+    db = get_db()
+    doc = await db.body_maps.find_one({"id": body_map_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Body map not found")
+    return doc
+
+
+@router.put("/compliance/body-maps/{body_map_id}")
+async def update_body_map(
+    body_map_id: str,
+    body: AdminBodyMapUpdate,
+    user: dict = Depends(get_current_user),
+):
+    db = get_db()
+    doc = await db.body_maps.find_one({"id": body_map_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Body map not found")
+
+    now = datetime.now(timezone.utc).isoformat()
+    update = {"updated_at": now}
+    if body.status:
+        update["status"] = body.status
+        if body.status == "reviewed" and not doc.get("reviewed_at"):
+            update["reviewed_at"] = now
+            update["reviewed_by"] = user["user_id"]
+    if body.reported_to is not None:
+        update["reported_to"] = body.reported_to
+    if body.additional_information is not None:
+        update["additional_information"] = body.additional_information
+    if body.review_notes is not None:
+        update["review_notes"] = body.review_notes
+
+    await db.body_maps.update_one({"id": body_map_id}, {"$set": update})
+    updated = await db.body_maps.find_one({"id": body_map_id}, {"_id": 0})
+    await log_audit_action(user["user_id"], "update_body_map", "body_map", body_map_id, {"status": body.status})
+    return updated
+
+
+@router.get("/compliance/body-maps/{body_map_id}/pdf")
+async def download_body_map_pdf(body_map_id: str, user: dict = Depends(get_current_user)):
+    db = get_db()
+    doc = await db.body_maps.find_one({"id": body_map_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Body map not found")
+    try:
+        pdf_bytes = _render_body_map_pdf(doc)
+    except Exception as e:
+        logger.error(f"Body map PDF render failed: {e}")
+        raise HTTPException(status_code=500, detail="PDF generation failed")
+
+    gender = doc.get("gender", "unknown")
+    su_name = (doc.get("service_user_name", "") or "").replace(" ", "_")
+    date_str = (doc.get("completed_date", "") or "")[:10]
+    filename = f"body_map_{su_name}_{date_str}.pdf"
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/service-users/{service_user_id}/body-maps")
+async def get_service_user_body_maps(service_user_id: str, user: dict = Depends(get_current_user)):
+    db = get_db()
+    docs = await db.body_maps.find(
+        {"service_user_id": service_user_id}, {"_id": 0}
+    ).sort("created_at", -1).to_list(length=200)
+    return docs

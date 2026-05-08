@@ -188,7 +188,7 @@ def _annotate_body_map_image(img_bytes: bytes, marks: list) -> bytes:
     overlay = Image.new("RGBA", img.size, (255, 255, 255, 0))
     draw = ImageDraw.Draw(overlay)
 
-    r = max(10, W // 28)  # circle radius scales with image width
+    r = max(8, W // 45)  # circle radius scales with image width — smaller markers
 
     font = None
     for font_path in ["arial.ttf", "Arial.ttf",
@@ -521,7 +521,7 @@ def _render_body_map_pdf(doc: dict) -> bytes:
         ))
         annotated_bytes = _annotate_body_map_image(img_path, marks)
         diagram = Image(io.BytesIO(annotated_bytes))
-        diagram.drawHeight = 145 * mm
+        diagram.drawHeight = 200 * mm  # larger, more vertical emphasis
         diagram.drawWidth = diagram.drawHeight * (diagram.imageWidth / float(diagram.imageHeight))
         img_table = Table([[diagram]], colWidths=[170 * mm])
         img_table.setStyle(TableStyle([

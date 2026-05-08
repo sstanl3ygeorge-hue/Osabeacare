@@ -1396,3 +1396,100 @@ async def reject_shift_attendance(
         },
     )
     return {"success": True, "attendance": updated}
+
+
+# ---------------------------------------------------------------------------
+# Punctuality stats
+# ---------------------------------------------------------------------------
+
+LATE_GRACE_MINUTES = 5  # clock-in within 5 min of shift start is on-time
+
+
+@router.get("/shift-attendance-stats/punctuality")
+async def get_punctuality_stats(
+    days: int = Query(default=90, ge=1, le=365),
+    user: dict = Depends(require_manager_or_admin),
+):
+    """
+    Return per-employee punctuality metrics derived from approved attendance records.
+
+    Fields per employee entry:
+      - employee_id
+      - total_shifts       : approved records in the window
+      - on_time            : clocked in within LATE_GRACE_MINUTES of shift start_at
+      - late               : clocked in more than LATE_GRACE_MINUTES after shift start_at
+      - no_clock_out       : approved records with no clock_out_at
+      - punctuality_rate   : on_time / total_shifts (0-100, null if no data)
+    """
+    from datetime import timedelta
+
+    db = get_db()
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+    # Fetch approved attendance records inside the window
+    records = await db.shift_attendance_records.find(
+        {"status": "approved", "created_at": {"$gte": cutoff}},
+        {"_id": 0},
+    ).to_list(5000)
+
+    if not records:
+        return {"stats": [], "grace_minutes": LATE_GRACE_MINUTES, "days": days}
+
+    # Batch-fetch the related shifts (need start_at)
+    shift_ids = list({r.get("shift_id") for r in records if r.get("shift_id")})
+    shift_rows = await db.shifts.find(
+        {"id": {"$in": shift_ids}},
+        {"_id": 0, "id": 1, "start_at": 1},
+    ).to_list(len(shift_ids) + 1)
+    shift_start: Dict[str, str] = {s["id"]: s.get("start_at", "") for s in shift_rows}
+
+    # Aggregate per employee
+    from collections import defaultdict
+
+    totals: Dict[str, Dict[str, Any]] = defaultdict(
+        lambda: {"total_shifts": 0, "on_time": 0, "late": 0, "no_clock_out": 0}
+    )
+
+    for rec in records:
+        eid = rec.get("employee_id")
+        if not eid:
+            continue
+        bucket = totals[eid]
+        bucket["total_shifts"] += 1
+
+        if not rec.get("clock_out_at"):
+            bucket["no_clock_out"] += 1
+
+        raw_start = shift_start.get(rec.get("shift_id", ""), "")
+        raw_clock_in = rec.get("clock_in_at", "")
+        if raw_start and raw_clock_in:
+            try:
+                shift_dt = _parse_iso(raw_start, "start_at")
+                clock_dt = _parse_iso(raw_clock_in, "clock_in_at")
+                diff_minutes = (clock_dt - shift_dt).total_seconds() / 60
+                if diff_minutes <= LATE_GRACE_MINUTES:
+                    bucket["on_time"] += 1
+                else:
+                    bucket["late"] += 1
+            except Exception:
+                pass  # malformed date — skip classification
+
+    stats = []
+    for eid, bucket in totals.items():
+        total = bucket["total_shifts"]
+        rate = round(bucket["on_time"] / total * 100, 1) if total else None
+        stats.append(
+            {
+                "employee_id": eid,
+                "total_shifts": total,
+                "on_time": bucket["on_time"],
+                "late": bucket["late"],
+                "no_clock_out": bucket["no_clock_out"],
+                "punctuality_rate": rate,
+            }
+        )
+
+    # Sort worst punctuality first so the dashboard highlights problems
+    stats.sort(key=lambda x: (x["punctuality_rate"] is not None, x["punctuality_rate"] or 0))
+
+    return {"stats": stats, "grace_minutes": LATE_GRACE_MINUTES, "days": days}

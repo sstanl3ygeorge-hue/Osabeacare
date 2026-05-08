@@ -67,6 +67,7 @@ export default function ComplianceCentrePage() {
   const [trainingReport, setTrainingReport] = useState(null);
   const [complianceAlerts, setComplianceAlerts] = useState(null);
   const [feedbackStats, setFeedbackStats] = useState(null);
+  const [punctualityStats, setPunctualityStats] = useState(null);
   
   // Document preview modal state
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -294,9 +295,43 @@ export default function ComplianceCentrePage() {
     findings: '',
     actions_required: '',
     next_review_date: '',
-    status: 'open'
+    status: 'open',
+    service_user_id: '',
+    checklist: null,
   });
   const [isSubmittingEmployerAudit, setIsSubmittingEmployerAudit] = useState(false);
+  const [auditServiceUsers, setAuditServiceUsers] = useState([]);
+  const [auditServiceUsersLoaded, setAuditServiceUsersLoaded] = useState(false);
+
+  const CLIENT_FILE_CHECKLIST_SECTIONS = [
+    { id: '1_personal_referral', label: 'Personal Info & Referral' },
+    { id: '2_consent_contracts', label: 'Consent & Contracts' },
+    { id: '3_assessments', label: 'Assessments' },
+    { id: '4_care_plans', label: 'Care Plans' },
+    { id: '5_risk_assessments', label: 'Risk Assessments' },
+    { id: '6_monitoring', label: 'Monitoring' },
+    { id: '7_medication', label: 'Medication' },
+    { id: '8_health_visits', label: 'Health Visits' },
+    { id: '9_reviews', label: 'Reviews' },
+    { id: '10_correspondence', label: 'Letters & Correspondence' },
+    { id: '11_daily_notes', label: 'Daily Notes' },
+  ];
+
+  const initChecklist = () =>
+    Object.fromEntries(CLIENT_FILE_CHECKLIST_SECTIONS.map((s) => [s.id, null]));
+
+  const fetchAuditServiceUsers = async () => {
+    if (auditServiceUsersLoaded) return;
+    try {
+      const res = await axios.get(`${API}/service-users`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setAuditServiceUsers(Array.isArray(res.data) ? res.data : []);
+      setAuditServiceUsersLoaded(true);
+    } catch (_) {
+      /* non-critical */
+    }
+  };
 
   // Employee Assignment state
   const [assignDialogOpen, setAssignDialogOpen] = useState(false);
@@ -355,9 +390,10 @@ export default function ComplianceCentrePage() {
         axios.get(`${API}/staff/employees`, { headers: { Authorization: `Bearer ${token}` } }),
         axios.get(`${API}/policy-assignments?include_inactive=true`, { headers: { Authorization: `Bearer ${token}` } }),
         axios.get(`${API}/compliance/alerts-summary`, { headers: { Authorization: `Bearer ${token}` } }),
-        axios.get(`${API}/service-user-feedback/stats`, { headers: { Authorization: `Bearer ${token}` } })
+        axios.get(`${API}/service-user-feedback/stats`, { headers: { Authorization: `Bearer ${token}` } }),
+        axios.get(`${API}/shift-attendance-stats/punctuality`, { headers: { Authorization: `Bearer ${token}` } })
       ]);
-      const [dashRes, summaryRes, policiesRes, insuranceRes, incidentsRes, meetingsRes, auditsRes, employeesRes, assignmentsRes, alertsRes, feedbackStatsRes] =
+      const [dashRes, summaryRes, policiesRes, insuranceRes, incidentsRes, meetingsRes, auditsRes, employeesRes, assignmentsRes, alertsRes, feedbackStatsRes, punctualityStatsRes] =
         settled.map((r) => (r.status === 'fulfilled' ? r.value : { data: null }));
       if (settled.some((r) => r.status === 'rejected')) setStatusUnavailable(true);
       
@@ -370,6 +406,7 @@ export default function ComplianceCentrePage() {
       setEmployerAudits(Array.isArray(auditsRes.data) ? auditsRes.data : []);
       setComplianceAlerts(Array.isArray(alertsRes.data) ? alertsRes.data : []);
       setFeedbackStats(feedbackStatsRes.data || null);
+      setPunctualityStats(punctualityStatsRes.data || null);
       const employeeRows = Array.isArray(employeesRes.data)
         ? employeesRes.data
         : (Array.isArray(employeesRes.data?.employees) ? employeesRes.data.employees : []);
@@ -774,6 +811,10 @@ export default function ComplianceCentrePage() {
       toast.error('Audit type, date, completed by, outcome and findings are required');
       return;
     }
+    if (newEmployerAudit.audit_type === 'client_file_audit' && !newEmployerAudit.service_user_id) {
+      toast.error('Please select a service user for client-file audits');
+      return;
+    }
 
     setIsSubmittingEmployerAudit(true);
     try {
@@ -790,7 +831,9 @@ export default function ComplianceCentrePage() {
         findings: '',
         actions_required: '',
         next_review_date: '',
-        status: 'open'
+        status: 'open',
+        service_user_id: '',
+        checklist: null,
       });
       fetchData();
     } catch (error) {
@@ -1180,6 +1223,11 @@ export default function ComplianceCentrePage() {
   const clientFileAuditCount = employerAudits.filter((audit) => ['daily_records_audit', 'care_records_review', 'client_file_audit'].includes(audit?.audit_type)).length;
   const punctualityReviewCount = employerAudits.filter((audit) => audit?.audit_type === 'staff_punctuality_review').length;
   const familyVoiceReviewCount = employerAudits.filter((audit) => ['family_contact_review', 'service_user_feedback_review'].includes(audit?.audit_type)).length;
+  const punctualityStatsRows = punctualityStats?.stats || [];
+  const overallPunctualityRate = punctualityStatsRows.length
+    ? Math.round(punctualityStatsRows.reduce((sum, s) => sum + (s.punctuality_rate || 0), 0) / punctualityStatsRows.length)
+    : null;
+  const lateWorkerCount = punctualityStatsRows.filter((s) => s.punctuality_rate !== null && s.punctuality_rate < 90).length;
   const familyVoiceIssues = Number(feedbackStats?.concerns || 0) + Number(feedbackStats?.complaints || 0);
 
   if (loading) {
@@ -1455,9 +1503,15 @@ export default function ComplianceCentrePage() {
             </div>
             <div className="rounded-xl border border-[#E4E8EB] bg-[#F8FAFA] p-4">
               <p className="text-xs font-medium text-text-muted">Staff practice</p>
-              <p className="mt-1 text-2xl font-bold text-text-primary">{punctualityReviewCount}</p>
-              <p className="text-sm text-text-muted">punctuality reviews logged</p>
-              <p className="mt-2 text-xs text-text-muted">Use Shifts and Complaints to review punctuality and conduct evidence</p>
+              <p className="mt-1 text-2xl font-bold text-text-primary">
+                {overallPunctualityRate !== null ? `${overallPunctualityRate}%` : '—'}
+              </p>
+              <p className="text-sm text-text-muted">on-time rate (last 90 days)</p>
+              <p className="mt-2 text-xs text-text-muted">
+                {lateWorkerCount > 0
+                  ? `${lateWorkerCount} worker${lateWorkerCount > 1 ? 's' : ''} below 90% threshold · `
+                  : ''}{punctualityReviewCount} punctuality audit{punctualityReviewCount !== 1 ? 's' : ''} logged
+              </p>
             </div>
             <div className="rounded-xl border border-[#E4E8EB] bg-[#F8FAFA] p-4">
               <p className="text-xs font-medium text-text-muted">Service-user and family voice</p>
@@ -2946,7 +3000,19 @@ export default function ComplianceCentrePage() {
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div className="space-y-2">
                         <Label>Audit Type *</Label>
-                        <Select value={newEmployerAudit.audit_type} onValueChange={(v) => setNewEmployerAudit({ ...newEmployerAudit, audit_type: v })}>
+                        <Select
+                          value={newEmployerAudit.audit_type}
+                          onValueChange={(v) => {
+                            const isFile = v === 'client_file_audit';
+                            if (isFile) fetchAuditServiceUsers();
+                            setNewEmployerAudit({
+                              ...newEmployerAudit,
+                              audit_type: v,
+                              checklist: isFile ? initChecklist() : null,
+                              service_user_id: isFile ? newEmployerAudit.service_user_id : '',
+                            });
+                          }}
+                        >
                           <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
                           <SelectContent>
                             {EMPLOYER_AUDIT_TYPE_OPTIONS.map((option) => (
@@ -2960,6 +3026,53 @@ export default function ComplianceCentrePage() {
                         <Input type="date" value={newEmployerAudit.audit_date} onChange={(e) => setNewEmployerAudit({ ...newEmployerAudit, audit_date: e.target.value })} className="rounded-xl" required />
                       </div>
                     </div>
+
+                    {newEmployerAudit.audit_type === 'client_file_audit' && (
+                      <div className="space-y-3 rounded-xl border border-blue-200 bg-blue-50 p-4">
+                        <p className="text-sm font-medium text-blue-800">Client File Audit</p>
+                        <div className="space-y-2">
+                          <Label>Service User</Label>
+                          <Select
+                            value={newEmployerAudit.service_user_id || ''}
+                            onValueChange={(v) => setNewEmployerAudit({ ...newEmployerAudit, service_user_id: v })}
+                          >
+                            <SelectTrigger className="rounded-xl bg-white"><SelectValue placeholder="Select service user…" /></SelectTrigger>
+                            <SelectContent>
+                              {auditServiceUsers.map((su) => (
+                                <SelectItem key={su.id} value={su.id}>{su.full_name || su.id}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label>File section checklist</Label>
+                          <p className="text-xs text-blue-700">Mark each section: ✓ compliant, ✗ gap found, — not applicable</p>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            {CLIENT_FILE_CHECKLIST_SECTIONS.map((section) => {
+                              const val = newEmployerAudit.checklist?.[section.id];
+                              return (
+                                <div key={section.id} className="flex items-center gap-2 rounded-lg border border-blue-200 bg-white px-3 py-2">
+                                  <span className="flex-1 text-sm text-text-primary">{section.label}</span>
+                                  <div className="flex gap-1">
+                                    {[['pass', '✓', 'text-green-700 bg-green-100'], ['fail', '✗', 'text-red-700 bg-red-100'], ['na', '—', 'text-gray-600 bg-gray-100']].map(([v, sym, cls]) => (
+                                      <button
+                                        key={v}
+                                        type="button"
+                                        className={`rounded px-2 py-0.5 text-xs font-bold transition-opacity ${val === v ? cls + ' opacity-100' : 'opacity-30 hover:opacity-70 ' + cls}`}
+                                        onClick={() => setNewEmployerAudit((prev) => ({
+                                          ...prev,
+                                          checklist: { ...prev.checklist, [section.id]: val === v ? null : v },
+                                        }))}
+                                      >{sym}</button>
+                                    ))}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    )}
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div className="space-y-2">
@@ -3037,6 +3150,17 @@ export default function ComplianceCentrePage() {
                           </div>
                           <p className="text-sm text-text-primary"><span className="font-medium">Audit Date:</span> {formatBackendDate(audit.audit_date)}</p>
                           <p className="text-sm text-text-primary"><span className="font-medium">Completed By:</span> {audit.completed_by}</p>
+                          {audit.audit_type === 'client_file_audit' && (
+                            <div className="mt-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+                              <p>
+                                Service user: {audit.service_user_id || 'Not linked'}
+                              </p>
+                              <p>
+                                Checklist: {Object.values(audit.checklist || {}).filter((v) => v === 'pass').length} compliant,{' '}
+                                {Object.values(audit.checklist || {}).filter((v) => v === 'fail').length} gaps
+                              </p>
+                            </div>
+                          )}
                           <p className="text-sm text-text-muted mt-2"><span className="font-medium text-text-primary">Findings:</span> {audit.findings}</p>
                           {audit.actions_required && <p className="text-sm text-text-muted mt-1"><span className="font-medium text-text-primary">Actions:</span> {audit.actions_required}</p>}
                           {audit.next_review_date && <p className="text-xs text-text-muted mt-2">Next review: {formatBackendDate(audit.next_review_date)}</p>}

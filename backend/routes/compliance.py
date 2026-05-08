@@ -558,6 +558,9 @@ class EmployerAuditCreate(BaseModel):
     actions_required: Optional[str] = None
     next_review_date: Optional[str] = None
     status: Optional[str] = "open"
+    # Client-file audit extensions
+    service_user_id: Optional[str] = None
+    checklist: Optional[Dict[str, Any]] = None
 
 
 class EmployerAuditAmend(BaseModel):
@@ -570,6 +573,9 @@ class EmployerAuditAmend(BaseModel):
     next_review_date: Optional[str] = None
     status: Optional[str] = None
     reason: str
+    # Client-file audit extensions
+    service_user_id: Optional[str] = None
+    checklist: Optional[Dict[str, Any]] = None
 
 
 class EmployerAuditResponse(BaseModel):
@@ -588,6 +594,9 @@ class EmployerAuditResponse(BaseModel):
     created_by: str
     created_at: str
     updated_at: str
+    # Client-file audit extensions
+    service_user_id: Optional[str] = None
+    checklist: Optional[Dict[str, Any]] = None
 
 
 def _build_worker_incident_view(incident: Dict[str, Any]) -> Dict[str, Any]:
@@ -2147,6 +2156,8 @@ async def create_employer_audit(payload: EmployerAuditCreate, user: dict = Depen
         "status": status,
         "closed_at": now if status == "closed" else None,
         "closed_by": user["user_id"] if status == "closed" else None,
+        "service_user_id": payload.service_user_id,
+        "checklist": payload.checklist,
         "created_by": user["user_id"],
         "created_at": now,
         "updated_at": now,

@@ -529,3 +529,56 @@ def test_worker_shift_list_includes_current_daily_note(shift_client):
     shift_row = response.json()["shifts"][0]
     assert shift_row["current_daily_note"]["id"] == "note-1"
     assert shift_row["current_daily_note"]["note_text"] == "Checked hydration and mood."
+
+
+def test_shift_attendance_punctuality_stats_calculates_rates(shift_client):
+    client, db = shift_client
+
+    _seed_shift(
+        db,
+        shift_id="s-punctual",
+        status="assigned",
+        assigned_employee_id="emp-active",
+        start_at="2026-05-01T09:00:00+00:00",
+    )
+    _seed_assignment(db, assignment_id="a-punctual", shift_id="s-punctual", employee_id="emp-active")
+
+    db.shift_attendance_records.docs.append(
+        {
+            "id": "att-1",
+            "shift_id": "s-punctual",
+            "assignment_id": "a-punctual",
+            "employee_id": "emp-active",
+            "clock_in_at": "2026-05-01T09:03:00+00:00",
+            "clock_out_at": "2026-05-01T17:00:00+00:00",
+            "status": "approved",
+            "created_at": "2026-05-01T17:01:00+00:00",
+        }
+    )
+    db.shift_attendance_records.docs.append(
+        {
+            "id": "att-2",
+            "shift_id": "s-punctual",
+            "assignment_id": "a-punctual",
+            "employee_id": "emp-active",
+            "clock_in_at": "2026-05-02T09:12:00+00:00",
+            "clock_out_at": None,
+            "status": "approved",
+            "created_at": "2026-05-02T17:01:00+00:00",
+        }
+    )
+
+    response = client.get("/api/shift-attendance-stats/punctuality?days=365")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["grace_minutes"] == 5
+    assert payload["days"] == 365
+    assert len(payload["stats"]) == 1
+    row = payload["stats"][0]
+    assert row["employee_id"] == "emp-active"
+    assert row["total_shifts"] == 2
+    assert row["on_time"] == 1
+    assert row["late"] == 1
+    assert row["no_clock_out"] == 1
+    assert row["punctuality_rate"] == 50.0

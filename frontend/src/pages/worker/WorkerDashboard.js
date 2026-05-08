@@ -2578,6 +2578,10 @@ export default function WorkerDashboard() {
                     const responseStatus = item.worker_response_status || item.assignment?.worker_response_status || 'pending';
                     const assignmentStatus = item.assignment_status || item.assignment?.status || 'active';
                     const attendanceStatus = getWorkerShiftAttendanceStatus(item);
+                    const requiresDailyNote = Boolean(shift.service_user_id || shift.service_user?.id);
+                    const dailyNoteStatus = item.current_daily_note
+                      ? 'saved'
+                      : (requiresDailyNote ? 'pending' : 'not required');
                     const canRespond = (item.assignment_status === 'active') && (responseStatus === 'pending' || !responseStatus);
                     return (
                       <div key={item.assignment_id || shift.id} className="rounded-lg border border-slate-200 bg-white p-3">
@@ -2628,6 +2632,15 @@ export default function WorkerDashboard() {
                                       : 'bg-slate-100 text-slate-700'
                             }>
                               Attendance: {attendanceStatus || 'not started'}
+                            </Badge>
+                            <Badge className={
+                              dailyNoteStatus === 'saved'
+                                ? 'bg-green-100 text-green-700'
+                                : dailyNoteStatus === 'pending'
+                                  ? 'bg-amber-100 text-amber-700'
+                                  : 'bg-slate-100 text-slate-700'
+                            }>
+                              Daily note: {dailyNoteStatus}
                             </Badge>
                             {canRespond && (
                               <div className="flex items-center gap-1">

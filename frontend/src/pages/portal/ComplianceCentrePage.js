@@ -25,6 +25,28 @@ import API_BASE from '../../utils/apiBase';
 
 const API = API_BASE;
 
+const EMPLOYER_AUDIT_TYPE_OPTIONS = [
+  { value: 'infection_control_audit', label: 'Infection Control Audit' },
+  { value: 'medication_audit', label: 'Medication Audit' },
+  { value: 'health_and_safety_audit', label: 'Health and Safety Audit' },
+  { value: 'fire_safety_audit', label: 'Fire Safety Audit' },
+  { value: 'cleaning_audit', label: 'Cleaning Audit' },
+  { value: 'daily_records_audit', label: 'Daily Records Audit' },
+  { value: 'care_records_review', label: 'Care Records Review' },
+  { value: 'client_file_audit', label: 'Client File Audit' },
+  { value: 'family_contact_review', label: 'Family / Contact Review' },
+  { value: 'service_user_feedback_review', label: 'Service User Feedback Review' },
+  { value: 'staff_punctuality_review', label: 'Staff Punctuality Review' },
+  { value: 'general_quality_audit', label: 'General Quality Audit' }
+];
+
+const EMPLOYER_AUDIT_TYPE_LABELS = EMPLOYER_AUDIT_TYPE_OPTIONS.reduce((acc, option) => {
+  acc[option.value] = option.label;
+  return acc;
+}, {});
+
+const formatEmployerAuditType = (value) => EMPLOYER_AUDIT_TYPE_LABELS[value] || String(value || '').replace(/_/g, ' ');
+
 export default function ComplianceCentrePage() {
   const { token, isAdmin } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -43,7 +65,8 @@ export default function ComplianceCentrePage() {
   const [incidentFilter, setIncidentFilter] = useState({ status: 'all', severity: 'all' }); // Incident filters
   const [dbsReport, setDbsReport] = useState(null);
   const [trainingReport, setTrainingReport] = useState(null);
-  const [complianceAlerts, setComplianceAlerts] = useState(null); // For Insights tab
+  const [complianceAlerts, setComplianceAlerts] = useState(null);
+  const [feedbackStats, setFeedbackStats] = useState(null);
   
   // Document preview modal state
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -330,9 +353,11 @@ export default function ComplianceCentrePage() {
         axios.get(`${API}/compliance/staff-meetings`, { headers: { Authorization: `Bearer ${token}` } }),
         axios.get(`${API}/compliance/employer-audits`, { headers: { Authorization: `Bearer ${token}` } }),
         axios.get(`${API}/staff/employees`, { headers: { Authorization: `Bearer ${token}` } }),
-        axios.get(`${API}/policy-assignments?include_inactive=true`, { headers: { Authorization: `Bearer ${token}` } })
+        axios.get(`${API}/policy-assignments?include_inactive=true`, { headers: { Authorization: `Bearer ${token}` } }),
+        axios.get(`${API}/compliance/alerts-summary`, { headers: { Authorization: `Bearer ${token}` } }),
+        axios.get(`${API}/service-user-feedback/stats`, { headers: { Authorization: `Bearer ${token}` } })
       ]);
-      const [dashRes, summaryRes, policiesRes, insuranceRes, incidentsRes, meetingsRes, auditsRes, employeesRes, assignmentsRes] =
+      const [dashRes, summaryRes, policiesRes, insuranceRes, incidentsRes, meetingsRes, auditsRes, employeesRes, assignmentsRes, alertsRes, feedbackStatsRes] =
         settled.map((r) => (r.status === 'fulfilled' ? r.value : { data: null }));
       if (settled.some((r) => r.status === 'rejected')) setStatusUnavailable(true);
       
@@ -343,6 +368,8 @@ export default function ComplianceCentrePage() {
       setIncidents(Array.isArray(incidentsRes.data) ? incidentsRes.data : []);
       setStaffMeetings(Array.isArray(meetingsRes.data) ? meetingsRes.data : []);
       setEmployerAudits(Array.isArray(auditsRes.data) ? auditsRes.data : []);
+      setComplianceAlerts(Array.isArray(alertsRes.data) ? alertsRes.data : []);
+      setFeedbackStats(feedbackStatsRes.data || null);
       const employeeRows = Array.isArray(employeesRes.data)
         ? employeesRes.data
         : (Array.isArray(employeesRes.data?.employees) ? employeesRes.data.employees : []);
@@ -1132,6 +1159,29 @@ export default function ComplianceCentrePage() {
     valid: 4
   };
 
+  const today = new Date();
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+  const qaAlerts = Array.isArray(complianceAlerts) ? complianceAlerts : [];
+  const overdueCarePlanReviews = qaAlerts.filter((alert) => alert?.category === 'care_plan_review').length;
+  const recentEmployerAudits = employerAudits.filter((audit) => {
+    const auditDate = parseBackendDate(audit?.audit_date);
+    return auditDate instanceof Date && !Number.isNaN(auditDate.getTime()) && auditDate >= thirtyDaysAgo;
+  }).length;
+  const overdueEmployerAuditReviews = employerAudits.filter((audit) => {
+    const nextReview = parseBackendDate(audit?.next_review_date);
+    return String(audit?.status || '').toLowerCase() !== 'closed'
+      && nextReview instanceof Date
+      && !Number.isNaN(nextReview.getTime())
+      && nextReview < today;
+  }).length;
+  const medicationAuditCount = employerAudits.filter((audit) => audit?.audit_type === 'medication_audit').length;
+  const clientFileAuditCount = employerAudits.filter((audit) => ['daily_records_audit', 'care_records_review', 'client_file_audit'].includes(audit?.audit_type)).length;
+  const punctualityReviewCount = employerAudits.filter((audit) => audit?.audit_type === 'staff_punctuality_review').length;
+  const familyVoiceReviewCount = employerAudits.filter((audit) => ['family_contact_review', 'service_user_feedback_review'].includes(audit?.audit_type)).length;
+  const familyVoiceIssues = Number(feedbackStats?.concerns || 0) + Number(feedbackStats?.complaints || 0);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -1381,6 +1431,60 @@ export default function ComplianceCentrePage() {
           )}
         </div>
       )}
+
+      <Card className="border-[#E4E8EB] shadow-sm" data-testid="qa-rhythm-summary">
+        <CardHeader>
+          <CardTitle className="font-heading text-lg">Quality Assurance Rhythm</CardTitle>
+          <p className="text-sm text-text-muted">
+            Everyday governance checks built from care-plan reviews, provider audits, worker records, and service-user voice.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <div className="rounded-xl border border-[#E4E8EB] bg-[#F8FAFA] p-4">
+              <p className="text-xs font-medium text-text-muted">Care records</p>
+              <p className="mt-1 text-2xl font-bold text-text-primary">{overdueCarePlanReviews}</p>
+              <p className="text-sm text-text-muted">overdue care-plan reviews</p>
+              <p className="mt-2 text-xs text-text-muted">{clientFileAuditCount} client or daily-record audits logged</p>
+            </div>
+            <div className="rounded-xl border border-[#E4E8EB] bg-[#F8FAFA] p-4">
+              <p className="text-xs font-medium text-text-muted">Medication and file checks</p>
+              <p className="mt-1 text-2xl font-bold text-text-primary">{medicationAuditCount}</p>
+              <p className="text-sm text-text-muted">medication audits on register</p>
+              <p className="mt-2 text-xs text-text-muted">{overdueEmployerAuditReviews} employer audit reviews overdue</p>
+            </div>
+            <div className="rounded-xl border border-[#E4E8EB] bg-[#F8FAFA] p-4">
+              <p className="text-xs font-medium text-text-muted">Staff practice</p>
+              <p className="mt-1 text-2xl font-bold text-text-primary">{punctualityReviewCount}</p>
+              <p className="text-sm text-text-muted">punctuality reviews logged</p>
+              <p className="mt-2 text-xs text-text-muted">Use Shifts and Complaints to review punctuality and conduct evidence</p>
+            </div>
+            <div className="rounded-xl border border-[#E4E8EB] bg-[#F8FAFA] p-4">
+              <p className="text-xs font-medium text-text-muted">Service-user and family voice</p>
+              <p className="mt-1 text-2xl font-bold text-text-primary">{feedbackStats?.total || 0}</p>
+              <p className="text-sm text-text-muted">feedback records captured</p>
+              <p className="mt-2 text-xs text-text-muted">{familyVoiceIssues} concerns or complaints, {familyVoiceReviewCount} voice-review audits logged</p>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" size="sm" className="rounded-lg" onClick={() => window.location.href = '/portal/service-users'}>
+              Review care records
+            </Button>
+            <Button variant="outline" size="sm" className="rounded-lg" onClick={() => window.location.href = '/portal/shifts'}>
+              Review staff punctuality
+            </Button>
+            <Button variant="outline" size="sm" className="rounded-lg" onClick={() => window.location.href = '/portal/feedback'}>
+              Review service-user feedback
+            </Button>
+            <Button variant="outline" size="sm" className="rounded-lg" onClick={() => handleTabChange('employer-audits')}>
+              Log QA audit
+            </Button>
+          </div>
+          <p className="text-xs text-text-muted">
+            Last 30 days: {recentEmployerAudits} provider audits logged. Training, DBS, policies, and certificates remain tracked in the compliance summary above.
+          </p>
+        </CardContent>
+      </Card>
 
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-6">
@@ -2845,13 +2949,9 @@ export default function ComplianceCentrePage() {
                         <Select value={newEmployerAudit.audit_type} onValueChange={(v) => setNewEmployerAudit({ ...newEmployerAudit, audit_type: v })}>
                           <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="infection_control_audit">Infection Control Audit</SelectItem>
-                            <SelectItem value="medication_audit">Medication Audit</SelectItem>
-                            <SelectItem value="health_and_safety_audit">Health and Safety Audit</SelectItem>
-                            <SelectItem value="fire_safety_audit">Fire Safety Audit</SelectItem>
-                            <SelectItem value="cleaning_audit">Cleaning Audit</SelectItem>
-                            <SelectItem value="daily_records_audit">Daily Records Audit</SelectItem>
-                            <SelectItem value="general_quality_audit">General Quality Audit</SelectItem>
+                            {EMPLOYER_AUDIT_TYPE_OPTIONS.map((option) => (
+                              <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                            ))}
                           </SelectContent>
                         </Select>
                       </div>
@@ -2929,7 +3029,7 @@ export default function ComplianceCentrePage() {
                       <div className="flex items-start justify-between gap-3">
                         <div className="flex-1">
                           <div className="flex items-center gap-2 flex-wrap mb-1">
-                            <span className="text-xs px-2 py-0.5 rounded bg-blue-100 text-blue-700">{audit.audit_type?.replace(/_/g, ' ')}</span>
+                            <span className="text-xs px-2 py-0.5 rounded bg-blue-100 text-blue-700">{formatEmployerAuditType(audit.audit_type)}</span>
                             {getStatusBadge(audit.status || 'open')}
                             <span className={`text-xs px-2 py-0.5 rounded ${audit.overall_outcome === 'compliant' ? 'bg-green-100 text-green-700' : audit.overall_outcome === 'partially_compliant' ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'}`}>
                               {(audit.overall_outcome || '').replace(/_/g, ' ')}
@@ -4605,13 +4705,9 @@ export default function ComplianceCentrePage() {
                     >
                       <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="infection_control_audit">Infection Control Audit</SelectItem>
-                        <SelectItem value="medication_audit">Medication Audit</SelectItem>
-                        <SelectItem value="health_and_safety_audit">Health and Safety Audit</SelectItem>
-                        <SelectItem value="fire_safety_audit">Fire Safety Audit</SelectItem>
-                        <SelectItem value="cleaning_audit">Cleaning Audit</SelectItem>
-                        <SelectItem value="daily_records_audit">Daily Records Audit</SelectItem>
-                        <SelectItem value="general_quality_audit">General Quality Audit</SelectItem>
+                        {EMPLOYER_AUDIT_TYPE_OPTIONS.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </div>
@@ -4819,7 +4915,7 @@ export default function ComplianceCentrePage() {
                       )}
                       {historyType === 'audit' && (
                         <div className="text-xs text-text-muted space-y-1 pt-2 border-t border-[#E4E8EB]">
-                          {(entry.audit_type || entry.changes?.audit_type) && <p><span className="font-medium">Type:</span> {entry.audit_type || entry.changes?.audit_type}</p>}
+                          {(entry.audit_type || entry.changes?.audit_type) && <p><span className="font-medium">Type:</span> {formatEmployerAuditType(entry.audit_type || entry.changes?.audit_type)}</p>}
                           {(entry.audit_date || entry.changes?.audit_date) && <p><span className="font-medium">Date:</span> {formatBackendDate(entry.audit_date || entry.changes?.audit_date)}</p>}
                           {(entry.overall_outcome || entry.changes?.overall_outcome) && <p><span className="font-medium">Outcome:</span> {entry.overall_outcome || entry.changes?.overall_outcome}</p>}
                           {(entry.status || entry.changes?.status) && <p><span className="font-medium">Status:</span> {entry.status || entry.changes?.status}</p>}

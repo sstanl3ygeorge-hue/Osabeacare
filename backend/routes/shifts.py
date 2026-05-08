@@ -832,6 +832,17 @@ async def list_worker_shifts(
             if assignment_id and assignment_id not in latest_attendance_by_assignment:
                 latest_attendance_by_assignment[assignment_id] = row
 
+    daily_notes_by_shift_id: Dict[str, Dict[str, Any]] = {}
+    if shift_ids:
+        daily_note_rows = await db.shift_daily_notes.find(
+            {"shift_id": {"$in": shift_ids}, "employee_id": employee_id},
+            {"_id": 0},
+        ).to_list(500)
+        for row in daily_note_rows:
+            shift_id = row.get("shift_id")
+            if shift_id:
+                daily_notes_by_shift_id[shift_id] = row
+
     result = []
     for assignment in assignments:
         shift = shifts_by_id.get(assignment.get("shift_id"))
@@ -847,6 +858,7 @@ async def list_worker_shifts(
             "worker_responded_at": assignment.get("worker_responded_at"),
             "cancellation_reason": cancellation_reason,
             "current_attendance": latest_attendance_by_assignment.get(assignment.get("id")),
+            "current_daily_note": daily_notes_by_shift_id.get(shift.get("id")),
             "shift": shift,
         })
     return {"shifts": result, "total": len(result)}

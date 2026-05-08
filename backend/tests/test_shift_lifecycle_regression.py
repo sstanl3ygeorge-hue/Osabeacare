@@ -505,3 +505,27 @@ def test_worker_shift_hydrates_service_user_name(shift_client):
 
     assert response.status_code == 200
     assert response.json()["shifts"][0]["shift"]["service_user_name"] == "Alex Example"
+
+
+def test_worker_shift_list_includes_current_daily_note(shift_client):
+    client, db = shift_client
+
+    _seed_shift(db, shift_id="s-note", status="assigned", assigned_employee_id="emp-active")
+    _seed_assignment(db, assignment_id="a-note", shift_id="s-note", employee_id="emp-active")
+    db.shift_daily_notes.docs.append(
+        {
+            "id": "note-1",
+            "shift_id": "s-note",
+            "employee_id": "emp-active",
+            "note_text": "Checked hydration and mood.",
+            "tags": ["nutrition", "mood"],
+            "created_at": "2026-05-08T09:00:00+00:00",
+        }
+    )
+
+    response = client.get("/api/worker/shifts")
+
+    assert response.status_code == 200
+    shift_row = response.json()["shifts"][0]
+    assert shift_row["current_daily_note"]["id"] == "note-1"
+    assert shift_row["current_daily_note"]["note_text"] == "Checked hydration and mood."

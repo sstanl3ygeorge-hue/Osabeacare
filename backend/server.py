@@ -26348,34 +26348,20 @@ async def get_compliance_centre_summary(user: dict = Depends(get_current_user)):
     
     for emp in employees:
         emp_id = emp["id"]
-        
-        # Check DBS status
-        dbs_doc = await db.employee_documents.find_one({
-            "employee_id": emp_id,
-            "requirement_id": {"$in": ["dbs_certificate", "dbs_check"]}
-        }, {"_id": 0, "expiry_date": 1})
-        
-        if dbs_doc:
-            if dbs_doc.get("expiry_date"):
-                try:
-                    exp_str = dbs_doc["expiry_date"]
-                    if 'T' in str(exp_str):
-                        exp_date = datetime.fromisoformat(exp_str.replace('Z', '+00:00'))
-                    else:
-                        exp_date = datetime.fromisoformat(f"{exp_str}T00:00:00+00:00")
-                    
-                    if exp_date < now:
-                        dbs_expired += 1  # Expired but present — separate from missing
-                    elif exp_date < now + thirty_days:
-                        dbs_expiring += 1
-                    else:
-                        dbs_valid += 1
-                except Exception:
-                    dbs_valid += 1
-            else:
-                dbs_valid += 1
-        else:
+ 
+        # Use the canonical DBS summary so Compliance Hub matches the DBS Register.
+        dbs_summary = await get_employee_dbs_summary(emp_id)
+        dbs_status = dbs_summary.get("dbs_status")
+
+        if dbs_status == "missing":
             dbs_missing += 1
+        elif dbs_status == "review_overdue":
+            dbs_expired += 1
+        elif dbs_status in {"review_due_soon", "review_urgent"}:
+            dbs_expiring += 1
+        else:
+            # Treat current, certificate_only, and pending_verification as present-not-missing.
+            dbs_valid += 1
         
         # Check recent training
         recent_training = await db.training_records.count_documents({

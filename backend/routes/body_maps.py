@@ -248,27 +248,28 @@ def _draw_body_figure(marks: list, width: float = 160, height: float = 320):
     return d
 
 
-class _DrawingFlowable:
-    """Minimal Platypus-compatible wrapper for a ReportLab Drawing."""
-    def __init__(self, drawing):
-        self._d = drawing
-        self.width = drawing.width
-        self.height = drawing.height
+def _make_drawing_flowable(drawing):
+    """
+    Wraps a ReportLab Drawing in a proper Flowable so it renders
+    correctly inside Platypus documents and Tables.
+    """
+    from reportlab.platypus import Flowable
+    from reportlab.graphics import renderPDF
 
-    def wrap(self, aW, aH):
-        return self.width, self.height
+    class _Inner(Flowable):
+        def __init__(self, d):
+            super().__init__()
+            self._d = d
+            self.width = d.width
+            self.height = d.height
 
-    def drawOn(self, canv, x, y, _sW=0):
-        from reportlab.graphics import renderPDF
-        canv.saveState()
-        canv.translate(x, y)
-        renderPDF.draw(self._d, canv, 0, 0)
-        canv.restoreState()
+        def wrap(self, aW, aH):
+            return self.width, self.height
 
-    def getSpaceBefore(self): return 0
-    def getSpaceAfter(self): return 0
-    def splitOn(self, availWidth, availHeight): return [self]
-    def identity(self, maxLen=None): return repr(self)
+        def draw(self):
+            renderPDF.draw(self._d, self.canv, 0, 0)
+
+    return _Inner(drawing)
 
 
 # ─────────────────────────────────────────────────────────
@@ -371,7 +372,7 @@ def _render_body_map_pdf(doc: dict) -> bytes:
 
     figure = _draw_body_figure(marks, width=160, height=320)
     # Centre the figure using a single-cell table
-    fig_table = Table([[_DrawingFlowable(figure)]], colWidths=[170 * mm])
+    fig_table = Table([[_make_drawing_flowable(figure)]], colWidths=[170 * mm])
     fig_table.setStyle(TableStyle([
         ("ALIGN",   (0, 0), (-1, -1), "CENTER"),
         ("VALIGN",  (0, 0), (-1, -1), "MIDDLE"),
@@ -580,6 +581,18 @@ async def download_body_map_pdf(body_map_id: str, user: dict = Depends(get_curre
     doc = await db.body_maps.find_one({"id": body_map_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Body map not found")
+    # If gender was stored as unknown, try to resolve from service user now
+    raw_stored = (doc.get("gender", "") or "").strip().lower()
+    if raw_stored in ("unknown", "", None) and doc.get("service_user_id"):
+        su = await db.service_users.find_one(
+            {"id": doc["service_user_id"]}, {"_id": 0, "gender": 1}
+        )
+        if su:
+            raw = (su.get("gender", "") or "").strip().lower()
+            if raw in ("male", "m", "man"):
+                doc = {**doc, "gender": "male"}
+            elif raw in ("female", "f", "woman"):
+                doc = {**doc, "gender": "female"}
     try:
         pdf_bytes = _render_body_map_pdf(doc)
     except Exception as e:

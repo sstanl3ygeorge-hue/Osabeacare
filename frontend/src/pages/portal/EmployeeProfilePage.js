@@ -2102,53 +2102,26 @@ export default function EmployeeProfilePage() {
         formData.append('file_label', documentLabel);
       }
       
-      // Use special endpoint for application form with AI extraction
-      if (selectedRequirement === 'application_form') {
-        formData.append('auto_extract', 'true');
-        formData.append('notes', documentLabel || 'Admin uploaded existing application form');
-        
-        const response = await axios.post(`${API}/employees/${employeeId}/upload-existing-application`, formData, {
-          headers: { 
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'multipart/form-data'
-          }
-        });
-        
-        if (response.data.extraction) {
-          toast.success('Application form uploaded & extraction complete!', {
-            duration: 6000,
-            description: `${response.data.extraction.fields?.length || 0} fields extracted. Review them in the Profile section.`
-          });
-        } else if (response.data.extraction_error) {
-          toast.warning('Application form uploaded, but extraction failed', {
-            duration: 5000,
-            description: response.data.extraction_error
-          });
-        } else {
-          toast.success('Application form uploaded successfully');
+      // Use the unified evidence upload endpoint for all documents
+      const uploadResponse = await axios.post(`${API}/employees/${employeeId}/requirements/${selectedRequirement}/evidence`, formData, {
+        headers: { 
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'multipart/form-data'
         }
-      } else {
-        // Use the unified evidence upload endpoint for other documents
-        const uploadResponse = await axios.post(`${API}/employees/${employeeId}/requirements/${selectedRequirement}/evidence`, formData, {
-          headers: { 
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'multipart/form-data'
-          }
-        });
-        if (selectedRequirement === 'cv') {
-          console.debug('CV_LINK_DIAGNOSTIC upload_response', {
-            employeeId,
-            requirement_id: selectedRequirement,
-            response: uploadResponse.data
-          });
-        }
-        
-        // POST-UPLOAD FEEDBACK - Clear guidance on next step
-        toast.success('Document uploaded — please review and approve', {
-          duration: 5000,
-          description: 'Check the document is clear and correct, then mark as approved.'
+      });
+      if (selectedRequirement === 'cv') {
+        console.debug('CV_LINK_DIAGNOSTIC upload_response', {
+          employeeId,
+          requirement_id: selectedRequirement,
+          response: uploadResponse.data
         });
       }
+      
+      // POST-UPLOAD FEEDBACK - Clear guidance on next step
+      toast.success('Document uploaded — please review and approve', {
+        duration: 5000,
+        description: 'Check the document is clear and correct, then mark as approved.'
+      });
       
       setUploadDialogOpen(false);
       setSelectedRequirement('');

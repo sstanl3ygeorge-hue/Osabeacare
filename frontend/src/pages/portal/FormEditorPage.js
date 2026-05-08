@@ -337,31 +337,7 @@ export default function FormEditorPage() {
                     <Eye className="h-4 w-4 mr-2" />
                     View Document
                   </Button>
-                  <Button
-                    variant="outline"
-                    onClick={handleDownloadEvidence}
-                    className="rounded-xl"
-                    data-testid="download-evidence-btn"
-                  >
-                    <Download className="h-4 w-4 mr-2" />
-                    Download
-                  </Button>
-                  {!isVerified && isAdmin() && (
-                    <Button
-                      variant="outline"
-                      onClick={handleVerifyForm}
-                      disabled={isVerifying}
-                      className="text-success border-success hover:bg-success/10 rounded-xl"
-                      data-testid="verify-evidence-btn"
-                    >
-                      {isVerifying ? (
-                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                      ) : (
-                        <Shield className="h-4 w-4 mr-2" />
-                      )}
-                      Verify
-                    </Button>
-                  )}
+
                 </div>
 
                 {/* File Info */}

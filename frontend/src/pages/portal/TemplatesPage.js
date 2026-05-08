@@ -166,17 +166,7 @@ export default function TemplatesPage() {
           <p className="text-text-muted">Compliance form templates for employee onboarding</p>
         </div>
         
-        {isAdmin() && (
-          <Button 
-            onClick={handleSeedTemplates}
-            disabled={isSeeding}
-            className="bg-secondary hover:bg-secondary/90 text-white rounded-xl"
-            data-testid="seed-templates-btn"
-          >
-            {isSeeding ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <RefreshCw className="h-4 w-4 mr-2" />}
-            {templates.length === 0 ? 'Load Templates' : 'Update Templates'}
-          </Button>
-        )}
+
       </div>
 
       {/* Stats */}

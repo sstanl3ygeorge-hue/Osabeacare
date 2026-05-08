@@ -880,9 +880,9 @@ export default function ServiceUserProfilePage() {
       <Dialog open={showUploadDialog} onOpenChange={setShowUploadDialog}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>Upload Document</DialogTitle>
+            <DialogTitle>Add Document or Template Record</DialogTitle>
             <DialogDescription>
-              Add a document to {serviceUser.sections?.[uploadSection]?.name || 'this section'}
+              Use the template library for standard CQC Expert forms. Upload a file here only when you need an ad hoc document.
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleUploadDocument} className="space-y-4">
@@ -953,12 +953,15 @@ export default function ServiceUserProfilePage() {
             </div>
             
             <div className="flex justify-end gap-3 pt-4">
+              <Button type="button" variant="outline" onClick={() => navigate('/portal/templates')}>
+                Open Template Library
+              </Button>
               <Button type="button" variant="outline" onClick={() => setShowUploadDialog(false)}>
                 Cancel
               </Button>
               <Button type="submit" disabled={!uploadForm.file_url}>
                 <Upload className="h-4 w-4 mr-2" />
-                Upload Document
+                Save Document
               </Button>
             </div>
           </form>
@@ -1146,8 +1149,8 @@ function OnboardingReadinessCard({ readiness, loading, onRefresh, onOpenTarget }
     <div className="p-4 rounded-lg bg-gray-50 border border-gray-100">
       <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
         <div>
-          <h3 className="text-sm font-semibold text-text-primary">Onboarding Readiness</h3>
-          <p className="text-xs text-text-muted">Read-only checklist using existing care-plan and section records.</p>
+          <h3 className="text-sm font-semibold text-text-primary">Operational Readiness</h3>
+          <p className="text-xs text-text-muted">Read-only checklist showing what is complete, missing, or due for review.</p>
         </div>
         <div className="flex items-center gap-2">
           <span className={`px-2 py-0.5 rounded text-xs font-medium ${getOnboardingStatusStyles(overallStatus)}`}>
@@ -1206,7 +1209,7 @@ function NextActionsCard({ readiness, serviceUserId, onOpenTab, onNavigate }) {
     <div className="p-4 rounded-lg bg-gray-50 border border-gray-100">
       <div className="mb-3">
         <h3 className="text-sm font-semibold text-text-primary">Next Actions</h3>
-        <p className="text-xs text-text-muted">Quick operational steps for first-client readiness.</p>
+        <p className="text-xs text-text-muted">Priority steps for keeping the record complete and audit-ready.</p>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-1 gap-2">
@@ -1611,8 +1614,8 @@ function CarePlansTab({
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-semibold text-text-primary">Care Plan Versions</h2>
-          <p className="text-sm text-text-muted">Backend lifecycle status is authoritative. Active and superseded plans are read-only.</p>
+          <h2 className="text-lg font-semibold text-text-primary">Care Plan Lifecycle</h2>
+          <p className="text-sm text-text-muted">Active plan, drafts, and reviews in one place. The current plan drives care; older versions are retained for audit.</p>
         </div>
         <Button variant="outline" onClick={onRefresh} disabled={carePlansLoading}>
           Refresh
@@ -1756,7 +1759,7 @@ function CarePlansTab({
       </Dialog>
 
       <form onSubmit={onCreateDraft} className="rounded-lg border border-gray-200 p-4 space-y-3">
-        <h3 className="text-sm font-semibold text-text-primary">Create Draft Care Plan</h3>
+        <h3 className="text-sm font-semibold text-text-primary">Create Draft Plan</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div className="space-y-1">
             <Label htmlFor="care_plan_title">Title *</Label>

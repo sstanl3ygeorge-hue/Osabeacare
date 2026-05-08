@@ -682,8 +682,14 @@ async def get_admins_and_managers(db: dict = Depends(get_db)):
     names = []
     for user in users:
         name = user.get("full_name") or user.get("name")
-        if name:
-            names.append(name)
+        if not name:
+            continue
+        normalized_name = name.strip().lower()
+        if normalized_name.startswith("test ") or user.get("is_test_employee"):
+            continue
+        if normalized_name.startswith("demo ") or normalized_name.startswith("sample "):
+            continue
+        names.append(name)
     
     return {"admins": sorted(set(names))}  # Remove duplicates and sort
 

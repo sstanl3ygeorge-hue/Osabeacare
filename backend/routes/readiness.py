@@ -1256,6 +1256,14 @@ async def get_compliance_alerts_summary(
     alerts: List[Dict[str, Any]] = []
     excluded_doc_statuses = get_excluded_doc_statuses()
 
+    # Pre-load valid employee IDs to scope document and training alerts
+    _VALID_EMPLOYEE_STATUSES = ["onboarding", "active", "inactive", "active_employee"]
+    valid_employee_rows = await db.employees.find(
+        {"status": {"$in": _VALID_EMPLOYEE_STATUSES}},
+        {"_id": 0, "id": 1},
+    ).to_list(2000)
+    valid_employee_ids: set = {str(e["id"]).strip() for e in valid_employee_rows if e.get("id")}
+
     # ------------------------------------------------------------------
     # 1) Expired / expiring staff documents
     # ------------------------------------------------------------------
@@ -1264,6 +1272,7 @@ async def get_compliance_alerts_summary(
         {
             "expiry_date": {"$exists": True, "$ne": None},
             "status": {"$nin": list(excluded_doc_statuses)},
+            "employee_id": {"$in": list(valid_employee_ids)},
         },
         {"_id": 0, "employee_id": 1, "document_type": 1, "expiry_date": 1},
     ).to_list(5000)
@@ -1324,6 +1333,7 @@ async def get_compliance_alerts_summary(
         {
             "expiry_date": {"$exists": True, "$ne": None},
             "record_status": {"$ne": "superseded"},
+            "employee_id": {"$in": list(valid_employee_ids)},
         },
         {"_id": 0, "employee_id": 1, "training_name": 1, "expiry_date": 1},
     ).to_list(5000)

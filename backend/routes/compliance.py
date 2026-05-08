@@ -2279,11 +2279,49 @@ async def get_staff_dbs_report(user: dict = Depends(require_admin)):
     
     employees = await db.employees.find(
         {"status": {"$in": ["onboarding", "active"]}},
-        {"_id": 0, "id": 1, "first_name": 1, "last_name": 1, "dbs_status": 1, 
-         "dbs_certificate_number": 1, "dbs_issue_date": 1, "dbs_update_service_registered": 1}
+        {"_id": 0, "id": 1, "first_name": 1, "last_name": 1, "role": 1,
+         "dbs_status": 1, "dbs_certificate_number": 1,
+         "dbs_issue_date": 1, "dbs_expiry_date": 1,
+         "dbs_update_service_registered": 1}
     ).to_list(1000)
-    
-    return {"employees": employees, "total": len(employees)}
+
+    now = datetime.now(timezone.utc)
+    thirty_days = timedelta(days=30)
+
+    report = []
+    for emp in employees:
+        dbs_expiry = emp.get("dbs_expiry_date")
+        dbs_status = emp.get("dbs_status", "missing")
+
+        # Recompute status from expiry date if present
+        if dbs_expiry:
+            try:
+                exp_str = str(dbs_expiry)
+                if 'T' in exp_str:
+                    exp_dt = datetime.fromisoformat(exp_str.replace('Z', '+00:00'))
+                else:
+                    exp_dt = datetime.fromisoformat(f"{exp_str}T00:00:00+00:00")
+                if exp_dt < now:
+                    dbs_status = "expired"
+                elif exp_dt < now + thirty_days:
+                    dbs_status = "expiring_soon"
+                else:
+                    dbs_status = "valid"
+            except Exception:
+                pass
+
+        report.append({
+            "employee_id": emp.get("id"),
+            "name": f"{emp.get('first_name', '')} {emp.get('last_name', '')}".strip(),
+            "role": emp.get("role"),
+            "dbs_status": dbs_status,
+            "dbs_certificate_number": emp.get("dbs_certificate_number"),
+            "dbs_issue_date": emp.get("dbs_issue_date"),
+            "dbs_expiry": dbs_expiry,
+            "dbs_update_service_registered": emp.get("dbs_update_service_registered"),
+        })
+
+    return {"report": report, "total": len(report)}
 
 
 @router.get("/compliance/reports/training")
@@ -2297,9 +2335,12 @@ async def get_training_compliance_report(user: dict = Depends(require_admin)):
         {"_id": 0, "id": 1, "first_name": 1, "last_name": 1, "role": 1}
     ).to_list(1000)
     
-    # Get training records
+    # Get training records (exclude superseded/cancelled)
     training = await db.training_records.find(
-        {"employee_id": {"$in": [e["id"] for e in employees]}},
+        {
+            "employee_id": {"$in": [e["id"] for e in employees]},
+            "record_status": {"$nin": ["superseded", "cancelled", "failed"]}
+        },
         {"_id": 0}
     ).to_list(10000)
     
@@ -2311,8 +2352,39 @@ async def get_training_compliance_report(user: dict = Depends(require_admin)):
             training_by_emp[emp_id] = []
         training_by_emp[emp_id].append(t)
     
-    for emp in employees:
-        emp["training_records"] = training_by_emp.get(emp["id"], [])
-        emp["training_count"] = len(emp["training_records"])
+    now = datetime.now(timezone.utc)
+    thirty_days = timedelta(days=30)
     
-    return {"employees": employees, "total": len(employees)}
+    report = []
+    for emp in employees:
+        records = training_by_emp.get(emp["id"], [])
+        completed = [r for r in records if r.get("record_status") in ("completed", "verified", "approved")]
+        pending = [r for r in records if r.get("record_status") in ("pending", "in_progress", "submitted")]
+        
+        expiring_soon = []
+        for r in completed:
+            exp = r.get("expiry_date")
+            if exp:
+                try:
+                    exp_str = str(exp)
+                    if 'T' in exp_str:
+                        exp_dt = datetime.fromisoformat(exp_str.replace('Z', '+00:00'))
+                    else:
+                        exp_dt = datetime.fromisoformat(f"{exp_str}T00:00:00+00:00")
+                    if now <= exp_dt <= now + thirty_days:
+                        expiring_soon.append(r.get("training_name") or r.get("module_name") or "Training")
+                except Exception:
+                    pass
+        
+        report.append({
+            "employee_id": emp["id"],
+            "name": f"{emp.get('first_name', '')} {emp.get('last_name', '')}".strip(),
+            "role": emp.get("role"),
+            "completed_count": len(completed),
+            "pending_count": len(pending),
+            "expiring_soon": expiring_soon,
+            "training_records": records,
+            "training_count": len(records),
+        })
+    
+    return {"report": report, "total": len(report)}

@@ -26328,7 +26328,7 @@ async def get_compliance_centre_summary(user: dict = Depends(get_current_user)):
     
     # === STAFF COMPLIANCE SUMMARY ===
     employees = await db.employees.find(
-        {"status": {"$ne": "archived"}},
+        {"status": {"$in": STAGE_EMPLOYEE_STATUSES + ["active_employee"]}},
         {"_id": 0, "id": 1, "first_name": 1, "last_name": 1}
     ).to_list(1000)
     
@@ -26339,6 +26339,7 @@ async def get_compliance_centre_summary(user: dict = Depends(get_current_user)):
     # DBS Register status
     dbs_valid = 0
     dbs_missing = 0
+    dbs_expired = 0
     dbs_expiring = 0
     
     # Training in last 12 months
@@ -26364,7 +26365,7 @@ async def get_compliance_centre_summary(user: dict = Depends(get_current_user)):
                         exp_date = datetime.fromisoformat(f"{exp_str}T00:00:00+00:00")
                     
                     if exp_date < now:
-                        dbs_missing += 1  # Expired counts as missing
+                        dbs_expired += 1  # Expired but present — separate from missing
                     elif exp_date < now + thirty_days:
                         dbs_expiring += 1
                     else:
@@ -26387,11 +26388,11 @@ async def get_compliance_centre_summary(user: dict = Depends(get_current_user)):
     # Calculate overall status
     policies_ok = policies_missing == 0 and policies_overdue == 0
     certs_ok = certs_missing == 0 and certs_expired == 0
-    staff_ok = dbs_missing == 0
+    staff_ok = dbs_missing == 0 and dbs_expired == 0
     
     if policies_ok and certs_ok and staff_ok:
         overall_status = "OK"
-    elif (policies_missing > 5 or certs_missing > 3 or dbs_missing > (staff_total * 0.2)):
+    elif (policies_missing > 5 or certs_missing > 3 or (dbs_missing + dbs_expired) > (staff_total * 0.2)):
         overall_status = "Critical"
     else:
         overall_status = "Needs Attention"
@@ -26420,6 +26421,7 @@ async def get_compliance_centre_summary(user: dict = Depends(get_current_user)):
             "total": staff_total,
             "dbs_valid": dbs_valid,
             "dbs_missing": dbs_missing,
+            "dbs_expired": dbs_expired,
             "dbs_expiring": dbs_expiring,
             "training_last_12_months": training_completed_recently
         },

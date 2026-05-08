@@ -346,7 +346,7 @@ export default function ComplianceCentrePage() {
       const employeeRows = Array.isArray(employeesRes.data)
         ? employeesRes.data
         : (Array.isArray(employeesRes.data?.employees) ? employeesRes.data.employees : []);
-      const activeEmployees = employeeRows.filter(e => !['archived', 'withdrawn', 'superseded'].includes(e.status));
+      const activeEmployees = employeeRows.filter(e => ['onboarding', 'active', 'inactive', 'active_employee'].includes(e.status));
       setEmployees(activeEmployees);
       const staffForReadiness = activeEmployees.filter(e =>
         e.person_stage === 'employee' ||
@@ -1298,6 +1298,9 @@ export default function ComplianceCentrePage() {
                     {centreSummary.staff_compliance.dbs_missing > 0 && (
                       <p className="text-[10px] text-error font-medium">{centreSummary.staff_compliance.dbs_missing} missing DBS</p>
                     )}
+                    {centreSummary.staff_compliance.dbs_expired > 0 && (
+                      <p className="text-[10px] text-error font-medium">{centreSummary.staff_compliance.dbs_expired} expired DBS</p>
+                    )}
                   </div>
                 </div>
               </CardContent>
@@ -2003,6 +2006,14 @@ export default function ComplianceCentrePage() {
                           {centreSummary.staff_compliance.dbs_expiring}
                         </span>
                       </div>
+                      {(centreSummary.staff_compliance.dbs_expired ?? 0) > 0 && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm text-text-muted">Expired (on file)</span>
+                          <span className="font-bold text-error">
+                            {centreSummary.staff_compliance.dbs_expired}
+                          </span>
+                        </div>
+                      )}
                       <div className="pt-2 border-t">
                         <div className="w-full bg-gray-200 rounded-full h-2">
                           <div 
@@ -2112,7 +2123,7 @@ export default function ComplianceCentrePage() {
             </div>
             
             {/* Staff with Issues Alert */}
-            {centreSummary && (centreSummary.staff_compliance.dbs_missing > 0 || centreSummary.staff_compliance.dbs_expiring > 0) && (
+            {centreSummary && (centreSummary.staff_compliance.dbs_missing > 0 || centreSummary.staff_compliance.dbs_expired > 0 || centreSummary.staff_compliance.dbs_expiring > 0) && (
               <Card className="border-warning/30 bg-warning/5 shadow-sm">
                 <CardHeader className="pb-2">
                   <CardTitle className="font-heading text-base text-warning flex items-center gap-2">
@@ -2124,6 +2135,9 @@ export default function ComplianceCentrePage() {
                   <p className="text-sm text-text-muted">
                     {centreSummary.staff_compliance.dbs_missing > 0 && (
                       <span className="text-error">{centreSummary.staff_compliance.dbs_missing} staff missing DBS checks. </span>
+                    )}
+                    {(centreSummary.staff_compliance.dbs_expired ?? 0) > 0 && (
+                      <span className="text-error">{centreSummary.staff_compliance.dbs_expired} staff with expired DBS on file. </span>
                     )}
                     {centreSummary.staff_compliance.dbs_expiring > 0 && (
                       <span className="text-warning">{centreSummary.staff_compliance.dbs_expiring} DBS checks expiring within 30 days.</span>

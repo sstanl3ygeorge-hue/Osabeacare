@@ -1226,6 +1226,7 @@ export default function WorkerDashboard() {
     setBodyMapForm({
       related_shift_id: shift?.id || '',
       service_user_id: shift?.service_user_id || '',
+      gender: 'unknown',
       injury_date: '',
       reported_to: '',
       additional_information: '',
@@ -1259,6 +1260,7 @@ export default function WorkerDashboard() {
       await axios.post(`${API}/worker/body-maps`, {
         related_shift_id: bodyMapForm.related_shift_id || null,
         service_user_id: bodyMapForm.service_user_id || null,
+        gender: bodyMapForm.gender || 'unknown',
         injury_date: bodyMapForm.injury_date || null,
         reported_to: bodyMapForm.reported_to || '',
         additional_information: bodyMapForm.additional_information || '',
@@ -5723,6 +5725,19 @@ export default function WorkerDashboard() {
             </p>
           </DialogHeader>
           <div className="space-y-4">
+            <div>
+              <Label>Gender of service user</Label>
+              <select
+                value={bodyMapForm.gender || 'unknown'}
+                onChange={(e) => setBodyMapForm(prev => ({ ...prev, gender: e.target.value }))}
+                className="mt-1 w-full text-sm border border-slate-300 rounded-lg px-3 py-2 bg-white"
+              >
+                <option value="unknown">Not specified (auto-detect)</option>
+                <option value="male">Male</option>
+                <option value="female">Female</option>
+              </select>
+              <p className="text-xs text-slate-400 mt-1">Auto-detected from the service user profile. Override if needed.</p>
+            </div>
             <div>
               <Label>Date of injury (if known)</Label>
               <Input

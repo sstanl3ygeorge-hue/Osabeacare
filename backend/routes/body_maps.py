@@ -112,6 +112,166 @@ class AdminBodyMapUpdate(BaseModel):
 
 
 # ─────────────────────────────────────────────────────────
+# Body figure drawing (ReportLab vector, no external files)
+# ─────────────────────────────────────────────────────────
+
+def _draw_body_figure(marks: list, width: float = 160, height: float = 320):
+    """
+    Draws a simple front-view body outline using ReportLab shapes.
+    Numbered red markers are placed at the recorded body regions.
+    L/R labels follow anatomical convention (person's left = image right).
+    """
+    from reportlab.graphics.shapes import (
+        Drawing, Circle, Rect, Ellipse, String, Polygon,
+    )
+    from reportlab.lib import colors
+
+    d = Drawing(width, height)
+    skin = colors.HexColor("#EDE0D0")
+    oc = colors.HexColor("#004D4D")
+    mark_c = colors.HexColor("#DC2626")
+    cx = width / 2  # 80
+
+    # ── Head ──────────────────────────────────────────────────────────────────
+    d.add(Circle(cx, 293, 24, fillColor=skin, strokeColor=oc, strokeWidth=1.5))
+
+    # ── Neck ──────────────────────────────────────────────────────────────────
+    d.add(Rect(cx - 9, 258, 18, 21, fillColor=skin, strokeColor=oc, strokeWidth=1.5))
+
+    # ── Torso (polygon: wider at shoulders, tapers to waist, flares at hips) ─
+    d.add(Polygon([
+        cx - 9,  279,   # neck-torso L
+        cx - 44, 272,   # L shoulder (person's left = image right perspective: this is image left = person's right)
+        cx - 38, 155,   # L waist
+        cx - 40, 120,   # L hip
+        cx + 40, 120,   # R hip
+        cx + 38, 155,   # R waist
+        cx + 44, 272,   # R shoulder
+        cx + 9,  279,   # neck-torso R
+    ], fillColor=skin, strokeColor=oc, strokeWidth=1.5))
+
+    # ── Left arm (person's left = image right, x > cx) ────────────────────────
+    d.add(Polygon([
+        cx + 44, 272, cx + 62, 268,
+        cx + 64, 200, cx + 47, 204,
+    ], fillColor=skin, strokeColor=oc, strokeWidth=1.5))
+    d.add(Polygon([
+        cx + 47, 204, cx + 64, 200,
+        cx + 62, 148, cx + 46, 151,
+    ], fillColor=skin, strokeColor=oc, strokeWidth=1.5))
+    d.add(Ellipse(cx + 54, 143, 12, 7, fillColor=skin, strokeColor=oc, strokeWidth=1.5))
+
+    # ── Right arm (person's right = image left, x < cx) ──────────────────────
+    d.add(Polygon([
+        cx - 44, 272, cx - 62, 268,
+        cx - 64, 200, cx - 47, 204,
+    ], fillColor=skin, strokeColor=oc, strokeWidth=1.5))
+    d.add(Polygon([
+        cx - 47, 204, cx - 64, 200,
+        cx - 62, 148, cx - 46, 151,
+    ], fillColor=skin, strokeColor=oc, strokeWidth=1.5))
+    d.add(Ellipse(cx - 54, 143, 12, 7, fillColor=skin, strokeColor=oc, strokeWidth=1.5))
+
+    # ── Left leg (person's left = image right) ────────────────────────────────
+    d.add(Rect(cx + 4, 28, 32, 92, fillColor=skin, strokeColor=oc, strokeWidth=1.5))
+    d.add(Ellipse(cx + 20, 23, 18, 8, fillColor=skin, strokeColor=oc, strokeWidth=1.5))
+
+    # ── Right leg (person's right = image left) ───────────────────────────────
+    d.add(Rect(cx - 36, 28, 32, 92, fillColor=skin, strokeColor=oc, strokeWidth=1.5))
+    d.add(Ellipse(cx - 20, 23, 18, 8, fillColor=skin, strokeColor=oc, strokeWidth=1.5))
+
+    # ── Side labels ───────────────────────────────────────────────────────────
+    grey = colors.HexColor("#9CA3AF")
+    d.add(String(cx - 70, 250, "R", fontSize=7, fillColor=grey))
+    d.add(String(cx + 68, 250, "L", fontSize=7, fillColor=grey))
+    d.add(String(cx - 22, 4, "Front view", fontSize=6, fillColor=grey))
+
+    # ── Region → (x, y) coordinate map ───────────────────────────────────────
+    # Anatomical: person's LEFT = image RIGHT (x > cx), person's RIGHT = image LEFT (x < cx)
+    COORDS = {
+        "Head – top":            (cx,       316),
+        "Forehead":              (cx,       307),
+        "Left eye / cheek":      (cx + 11,  295),
+        "Right eye / cheek":     (cx - 11,  295),
+        "Nose":                  (cx,       290),
+        "Mouth / lips":          (cx,       282),
+        "Left ear":              (cx + 26,  293),
+        "Right ear":             (cx - 26,  293),
+        "Chin / jaw":            (cx,       270),
+        "Neck – front":          (cx,       267),
+        "Neck – back":           (cx,       267),
+        "Left shoulder":         (cx + 50,  273),
+        "Right shoulder":        (cx - 50,  273),
+        "Chest – left":          (cx + 18,  255),
+        "Chest – right":         (cx - 18,  255),
+        "Abdomen – left":        (cx + 16,  205),
+        "Abdomen – right":       (cx - 16,  205),
+        "Upper back – left":     (cx + 18,  248),
+        "Upper back – right":    (cx - 18,  248),
+        "Lower back – left":     (cx + 16,  168),
+        "Lower back – right":    (cx - 16,  168),
+        "Buttocks – left":       (cx + 18,  130),
+        "Buttocks – right":      (cx - 18,  130),
+        "Sacrum / coccyx":       (cx,       118),
+        "Groin / perineal area": (cx,       124),
+        "Left upper arm":        (cx + 57,  246),
+        "Left elbow":            (cx + 57,  212),
+        "Left forearm":          (cx + 56,  182),
+        "Left wrist":            (cx + 55,  158),
+        "Left hand / fingers":   (cx + 54,  143),
+        "Right upper arm":       (cx - 57,  246),
+        "Right elbow":           (cx - 57,  212),
+        "Right forearm":         (cx - 56,  182),
+        "Right wrist":           (cx - 55,  158),
+        "Right hand / fingers":  (cx - 54,  143),
+        "Left hip":              (cx + 30,  117),
+        "Left thigh":            (cx + 20,   88),
+        "Left knee":             (cx + 20,   68),
+        "Left lower leg / shin": (cx + 20,   50),
+        "Left ankle":            (cx + 20,   33),
+        "Left foot / toes":      (cx + 20,   21),
+        "Right hip":             (cx - 30,  117),
+        "Right thigh":           (cx - 20,   88),
+        "Right knee":            (cx - 20,   68),
+        "Right lower leg / shin":(cx - 20,   50),
+        "Right ankle":           (cx - 20,   33),
+        "Right foot / toes":     (cx - 20,   21),
+    }
+
+    for i, mark in enumerate(marks, 1):
+        coord = COORDS.get(mark.get("region", ""))
+        if coord:
+            x, y = coord
+            d.add(Circle(x, y, 8, fillColor=mark_c, strokeColor=colors.white, strokeWidth=1))
+            d.add(String(x - 3.5, y - 3, str(i), fontSize=7, fillColor=colors.white))
+
+    return d
+
+
+class _DrawingFlowable:
+    """Minimal Platypus-compatible wrapper for a ReportLab Drawing."""
+    def __init__(self, drawing):
+        self._d = drawing
+        self.width = drawing.width
+        self.height = drawing.height
+
+    def wrap(self, aW, aH):
+        return self.width, self.height
+
+    def drawOn(self, canv, x, y, _sW=0):
+        from reportlab.graphics import renderPDF
+        canv.saveState()
+        canv.translate(x, y)
+        renderPDF.draw(self._d, canv, 0, 0)
+        canv.restoreState()
+
+    def getSpaceBefore(self): return 0
+    def getSpaceAfter(self): return 0
+    def splitOn(self, availWidth, availHeight): return [self]
+    def identity(self, maxLen=None): return repr(self)
+
+
+# ─────────────────────────────────────────────────────────
 # PDF renderer
 # ─────────────────────────────────────────────────────────
 
@@ -140,8 +300,18 @@ def _render_body_map_pdf(doc: dict) -> bytes:
     section_style = ParagraphStyle("Section", parent=styles["Heading2"], fontSize=11, textColor=brand, spaceBefore=12, spaceAfter=4)
     body_style = ParagraphStyle("Body", parent=styles["Normal"], fontSize=9, leading=13, spaceAfter=4)
 
-    gender_label = doc.get("gender", "unknown").capitalize()
+    # Normalize stored gender (service users use "Male"/"Female")
+    raw_gender = (doc.get("gender", "") or "").strip().lower()
+    if raw_gender in ("male", "m", "man"):
+        gender_label = "Male"
+    elif raw_gender in ("female", "f", "woman"):
+        gender_label = "Female"
+    else:
+        gender_label = (doc.get("gender", "") or "Unknown").strip() or "Unknown"
+
     title = f"Body Map – {gender_label}"
+
+    marks = doc.get("marks", [])
 
     elements = [
         Paragraph(title, title_style),
@@ -169,7 +339,7 @@ def _render_body_map_pdf(doc: dict) -> bytes:
         HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#D1D5DB")),
     ]
 
-    # Metadata table
+    # ── Metadata table ────────────────────────────────────────────────────────
     meta = [
         ["Name of Individual:", doc.get("service_user_name", "")],
         ["Date body map was completed:", doc.get("completed_date", "")[:10] if doc.get("completed_date") else ""],
@@ -191,8 +361,26 @@ def _render_body_map_pdf(doc: dict) -> bytes:
     elements.append(Spacer(1, 8))
     elements.append(meta_table)
 
-    # Marks
-    marks = doc.get("marks", [])
+    # ── Body figure diagram ───────────────────────────────────────────────────
+    elements.append(Paragraph("Body Diagram", section_style))
+    elements.append(Paragraph(
+        "Red numbered markers indicate the location of each recorded mark. "
+        "L = person's left side, R = person's right side (anatomical convention).",
+        ParagraphStyle("FigNote", parent=styles["Normal"], fontSize=7, textColor=colors.HexColor("#6B7280"), spaceAfter=6)
+    ))
+
+    figure = _draw_body_figure(marks, width=160, height=320)
+    # Centre the figure using a single-cell table
+    fig_table = Table([[_DrawingFlowable(figure)]], colWidths=[170 * mm])
+    fig_table.setStyle(TableStyle([
+        ("ALIGN",   (0, 0), (-1, -1), "CENTER"),
+        ("VALIGN",  (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING",    (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    elements.append(fig_table)
+
+    # ── Marks table ───────────────────────────────────────────────────────────
     if marks:
         elements.append(Paragraph("Recorded Marks / Injuries", section_style))
         marks_data = [["#", "Body Region", "Description"]]
@@ -215,23 +403,22 @@ def _render_body_map_pdf(doc: dict) -> bytes:
         elements.append(Paragraph("Recorded Marks / Injuries", section_style))
         elements.append(Paragraph("No marks recorded.", body_style))
 
-    # Additional information
+    # ── Additional information ────────────────────────────────────────────────
     elements.append(Paragraph("Additional Information", section_style))
     elements.append(Paragraph(doc.get("additional_information", "") or "None provided.", body_style))
 
-    # Review notes (admin)
+    # ── Manager review notes ──────────────────────────────────────────────────
     if doc.get("review_notes"):
         elements.append(Paragraph("Manager Review Notes", section_style))
         elements.append(Paragraph(doc["review_notes"], body_style))
 
-    # Footer
+    # ── Footer ────────────────────────────────────────────────────────────────
     elements.append(Spacer(1, 16))
     elements.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#D1D5DB")))
-    reviewed_str = ""
-    if doc.get("reviewed_at"):
-        reviewed_str = f"Reviewed: {doc['reviewed_at'][:10]}. "
+    reviewed_str = f"Reviewed: {doc['reviewed_at'][:10]}. " if doc.get("reviewed_at") else ""
     footer = (
-        f"Submitted by {doc.get('staff_name', '')} on {doc.get('completed_date', '')[:10] if doc.get('completed_date') else 'N/A'}. "
+        f"Submitted by {doc.get('staff_name', '')} on "
+        f"{doc.get('completed_date', '')[:10] if doc.get('completed_date') else 'N/A'}. "
         f"{reviewed_str}"
         "Osabea Healthcare Solutions Ltd — Body Map Record."
     )
@@ -278,7 +465,14 @@ async def worker_create_body_map(
         if su:
             service_user_name = su.get("full_name", "")
             if not payload.gender or payload.gender == "unknown":
-                gender = su.get("gender", "unknown")
+                # Normalize: service users store "Male"/"Female" (capitalized)
+                raw = (su.get("gender", "") or "").strip().lower()
+                if raw in ("male", "m", "man"):
+                    gender = "male"
+                elif raw in ("female", "f", "woman"):
+                    gender = "female"
+                else:
+                    gender = raw or "unknown"
 
     now = datetime.now(timezone.utc)
     doc = {

@@ -355,6 +355,18 @@ export default function ComplianceCentrePage() {
   const [historyData, setHistoryData] = useState([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   
+  // Policy Template Editor state (Whistleblowing MVP)
+  const [templateEditorOpen, setTemplateEditorOpen] = useState(false);
+  const [templateEditorPolicy, setTemplateEditorPolicy] = useState(null); // org_policy row
+  const [templateDraft, setTemplateDraft] = useState(null); // policy_template doc from API
+  const [templateForm, setTemplateForm] = useState({
+    title: '', module: 'Governance', owner_name: '', effective_date: '',
+    review_period_months: 12,
+    content: { purpose: '', principles: '', scope: '', procedure: '', protections: '', exclusions: '', responsibilities: '', references: '' }
+  });
+  const [isSavingTemplate, setIsSavingTemplate] = useState(false);
+  const [isPublishingTemplate, setIsPublishingTemplate] = useState(false);
+
   // CQC Evidence Mapping state
   const [cqcEvidenceMap, setCqcEvidenceMap] = useState(null);
   const [cqcLoading, setCqcLoading] = useState(false);
@@ -453,6 +465,124 @@ export default function ComplianceCentrePage() {
       setCqcLoading(false);
     }
   };
+
+  // ── Policy Template Editor handlers ──────────────────────────────────────
+  const openTemplateEditor = async (policy) => {
+    setTemplateEditorPolicy(policy);
+    setTemplateEditorOpen(true);
+    // Try to load an existing draft for this policy key
+    try {
+      const res = await axios.get(`${API}/policy-templates`, {
+        headers: { Authorization: `Bearer ${token}` },
+        params: { policy_key: 'whistleblowing', status: 'draft' }
+      });
+      const draft = Array.isArray(res.data) && res.data.length > 0 ? res.data[0] : null;
+      if (draft) {
+        setTemplateDraft(draft);
+        setTemplateForm({
+          title: draft.title || policy.name || '',
+          module: draft.module || 'Governance',
+          owner_name: draft.owner_name || '',
+          effective_date: draft.effective_date || '',
+          review_period_months: draft.review_period_months || 12,
+          content: {
+            purpose: draft.content?.purpose || '',
+            principles: draft.content?.principles || '',
+            scope: draft.content?.scope || '',
+            procedure: draft.content?.procedure || '',
+            protections: draft.content?.protections || '',
+            exclusions: draft.content?.exclusions || '',
+            responsibilities: draft.content?.responsibilities || '',
+            references: draft.content?.references || '',
+          }
+        });
+      } else {
+        setTemplateDraft(null);
+        setTemplateForm({
+          title: policy.name || 'Whistleblowing Policy',
+          module: 'Governance',
+          owner_name: '',
+          effective_date: new Date().toISOString().split('T')[0],
+          review_period_months: 12,
+          content: { purpose: '', principles: '', scope: '', procedure: '', protections: '', exclusions: '', responsibilities: '', references: '' }
+        });
+      }
+    } catch {
+      setTemplateDraft(null);
+    }
+  };
+
+  const handleSaveTemplateDraft = async () => {
+    setIsSavingTemplate(true);
+    try {
+      const payload = {
+        policy_key: 'whistleblowing',
+        title: templateForm.title,
+        module: templateForm.module,
+        owner_name: templateForm.owner_name,
+        effective_date: templateForm.effective_date,
+        review_period_months: Number(templateForm.review_period_months),
+        content: templateForm.content
+      };
+      if (templateDraft) {
+        const res = await axios.put(`${API}/policy-templates/${templateDraft.id}`, payload, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        setTemplateDraft(res.data);
+      } else {
+        const res = await axios.post(`${API}/policy-templates`, payload, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        setTemplateDraft(res.data);
+      }
+      toast.success('Draft saved');
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to save draft');
+    } finally {
+      setIsSavingTemplate(false);
+    }
+  };
+
+  const handlePublishTemplate = async () => {
+    if (!templateDraft) {
+      toast.error('Save a draft first before publishing');
+      return;
+    }
+    setIsPublishingTemplate(true);
+    try {
+      // Save latest form state first
+      await axios.put(`${API}/policy-templates/${templateDraft.id}`, {
+        title: templateForm.title, module: templateForm.module,
+        owner_name: templateForm.owner_name, effective_date: templateForm.effective_date,
+        review_period_months: Number(templateForm.review_period_months),
+        content: templateForm.content
+      }, { headers: { Authorization: `Bearer ${token}` } });
+
+      await axios.post(`${API}/policy-templates/${templateDraft.id}/publish`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      toast.success('Policy published and synced to policy register');
+      setTemplateEditorOpen(false);
+      setTemplateDraft(null);
+      fetchData(); // Refresh policy list so Whistleblowing card shows active
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to publish policy');
+    } finally {
+      setIsPublishingTemplate(false);
+    }
+  };
+
+  const handlePreviewTemplatePdf = async () => {
+    if (!templateDraft) {
+      toast.error('Save a draft first to preview');
+      return;
+    }
+    const url = `${API}/policy-templates/${templateDraft.id}/pdf`;
+    window.open(url + `?token=${token}`, '_blank');
+  };
+  // ─────────────────────────────────────────────────────────────────────────
+
+
 
   const handleSeedPolicies = async () => {
     try {
@@ -1819,6 +1949,18 @@ export default function ComplianceCentrePage() {
                                             ) : null;
                                           })()}
                                         </Button>
+                                        {/* Edit Template — Whistleblowing only */}
+                                        {policy.name?.toLowerCase().includes('whistleblow') && (
+                                          <Button
+                                            size="sm"
+                                            variant="outline"
+                                            className="rounded-lg border-info/40 text-info hover:bg-info/5"
+                                            onClick={() => openTemplateEditor(policy)}
+                                          >
+                                            <Edit className="h-4 w-4 mr-1" />
+                                            Edit Template
+                                          </Button>
+                                        )}
                                       </>
                                     )}
                                   </div>
@@ -1836,6 +1978,18 @@ export default function ComplianceCentrePage() {
                                       <Upload className="h-4 w-4 mr-1" />
                                       Upload
                                     </Button>
+                                    {/* Edit Template — Whistleblowing only */}
+                                    {policy.name?.toLowerCase().includes('whistleblow') && (
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="rounded-lg border-info/40 text-info hover:bg-info/5"
+                                        onClick={() => openTemplateEditor(policy)}
+                                      >
+                                        <Edit className="h-4 w-4 mr-1" />
+                                        Edit Template
+                                      </Button>
+                                    )}
                                     {/* Disabled Assign Button - no document yet */}
                                     <Button 
                                       size="sm"
@@ -5108,6 +5262,145 @@ export default function ComplianceCentrePage() {
                 className="rounded-xl"
               >
                 Close
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Policy Template Editor Dialog (Whistleblowing MVP) ─────────────── */}
+      <Dialog open={templateEditorOpen} onOpenChange={setTemplateEditorOpen}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="font-heading text-lg">
+              Edit Policy Template — {templateForm.title || 'Whistleblowing Policy'}
+            </DialogTitle>
+            <p className="text-sm text-text-muted mt-1">
+              Write the policy content in-app. Save as draft while editing, then publish to generate the PDF and update the policy register.
+              {templateDraft && (
+                <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-warning/10 text-warning font-medium">
+                  Draft v{templateDraft.version}
+                </span>
+              )}
+            </p>
+          </DialogHeader>
+
+          <div className="space-y-6 mt-2">
+            {/* Metadata */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="col-span-2">
+                <Label className="text-sm font-medium">Policy Title *</Label>
+                <Input
+                  value={templateForm.title}
+                  onChange={(e) => setTemplateForm(f => ({ ...f, title: e.target.value }))}
+                  placeholder="Whistleblowing Policy"
+                  className="mt-1 rounded-xl"
+                />
+              </div>
+              <div>
+                <Label className="text-sm font-medium">Module</Label>
+                <Input
+                  value={templateForm.module}
+                  onChange={(e) => setTemplateForm(f => ({ ...f, module: e.target.value }))}
+                  placeholder="Governance"
+                  className="mt-1 rounded-xl"
+                />
+              </div>
+              <div>
+                <Label className="text-sm font-medium">Policy Owner *</Label>
+                <Input
+                  value={templateForm.owner_name}
+                  onChange={(e) => setTemplateForm(f => ({ ...f, owner_name: e.target.value }))}
+                  placeholder="e.g. Registered Manager"
+                  className="mt-1 rounded-xl"
+                />
+              </div>
+              <div>
+                <Label className="text-sm font-medium">Effective Date *</Label>
+                <Input
+                  type="date"
+                  value={templateForm.effective_date}
+                  onChange={(e) => setTemplateForm(f => ({ ...f, effective_date: e.target.value }))}
+                  className="mt-1 rounded-xl"
+                />
+              </div>
+              <div>
+                <Label className="text-sm font-medium">Review Period (months) *</Label>
+                <Input
+                  type="number"
+                  min="1"
+                  value={templateForm.review_period_months}
+                  onChange={(e) => setTemplateForm(f => ({ ...f, review_period_months: e.target.value }))}
+                  className="mt-1 rounded-xl"
+                />
+              </div>
+            </div>
+
+            {/* Content Sections */}
+            {[
+              { key: 'purpose', label: 'Statement of Purpose *', placeholder: 'Why this policy exists and what it aims to achieve...' },
+              { key: 'principles', label: 'Principles', placeholder: 'Core values guiding this policy...' },
+              { key: 'scope', label: 'Scope *', placeholder: 'Who and what this policy applies to...' },
+              { key: 'procedure', label: 'Procedure *', placeholder: 'Step-by-step process for raising a concern...' },
+              { key: 'protections', label: 'Protections', placeholder: 'Legal and company protections for whistleblowers...' },
+              { key: 'exclusions', label: 'Exclusions', placeholder: 'What this policy does not cover...' },
+              { key: 'responsibilities', label: 'Responsibilities', placeholder: 'Responsibilities of staff and management...' },
+              { key: 'references', label: 'References', placeholder: 'Legislation, standards or related policies...' },
+            ].map(({ key, label, placeholder }) => (
+              <div key={key}>
+                <Label className="text-sm font-medium">{label}</Label>
+                <Textarea
+                  rows={4}
+                  value={templateForm.content[key]}
+                  onChange={(e) => setTemplateForm(f => ({
+                    ...f,
+                    content: { ...f.content, [key]: e.target.value }
+                  }))}
+                  placeholder={placeholder}
+                  className="mt-1 rounded-xl resize-none"
+                />
+              </div>
+            ))}
+          </div>
+
+          <div className="flex items-center justify-between pt-4 border-t border-[#E4E8EB] mt-4">
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                className="rounded-xl"
+                onClick={handlePreviewTemplatePdf}
+                disabled={!templateDraft}
+                title={!templateDraft ? 'Save a draft first' : 'Preview PDF in new tab'}
+              >
+                <Eye className="h-4 w-4 mr-1" />
+                Preview PDF
+              </Button>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                className="rounded-xl"
+                onClick={() => setTemplateEditorOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="outline"
+                className="rounded-xl"
+                onClick={handleSaveTemplateDraft}
+                disabled={isSavingTemplate}
+              >
+                {isSavingTemplate ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Save className="h-4 w-4 mr-1" />}
+                Save Draft
+              </Button>
+              <Button
+                className="bg-primary hover:bg-primary-hover text-white rounded-xl"
+                onClick={handlePublishTemplate}
+                disabled={isPublishingTemplate || !templateDraft}
+                title={!templateDraft ? 'Save a draft first' : 'Publish this version'}
+              >
+                {isPublishingTemplate ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <CheckCircle className="h-4 w-4 mr-1" />}
+                Publish Version
               </Button>
             </div>
           </div>

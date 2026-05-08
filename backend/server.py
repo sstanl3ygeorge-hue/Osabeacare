@@ -153,6 +153,7 @@ from routes.audit_email import router as audit_email_router
 from routes.agreement_audit import router as agreement_audit_router
 from routes.feedback_complaints import router as feedback_complaints_router
 from routes.policies import router as policies_router
+from routes.policy_templates import router as policy_templates_router
 from routes.referee_outreach import router as referee_outreach_router
 from routes.induction import router as induction_router, DEFAULT_INDUCTION_ITEMS, INDUCTION_TRAINING_MAP
 from routes.induction_worker import router as induction_worker_router
@@ -46288,6 +46289,7 @@ api_router.include_router(verifications_router)
 api_router.include_router(migrations_router)
 api_router.include_router(feedback_complaints_router)
 api_router.include_router(policies_router)
+api_router.include_router(policy_templates_router)
 api_router.include_router(referee_outreach_router)
 api_router.include_router(induction_router)
 api_router.include_router(induction_worker_router)

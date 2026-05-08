@@ -307,10 +307,13 @@ async def get_dbs_register(
     db = get_db()
     EmployeeStatus = get_employee_status()
     get_employee_dbs_summary = get_employee_dbs_summary_func()
-    
-    # Get all non-archived employees
+
+    # Only include active employees (onboarding/active/inactive) — not applicants
+    from stage_identity import EMPLOYEE_STATUSES, LEGACY_STATUS_ALIASES
+    employee_statuses = EMPLOYEE_STATUSES + list(LEGACY_STATUS_ALIASES.keys())
+
     employees = await db.employees.find(
-        {"status": {"$ne": EmployeeStatus.ARCHIVED}},
+        {"status": {"$in": employee_statuses}},
         {"_id": 0, "id": 1, "first_name": 1, "last_name": 1, "role": 1, "email": 1}
     ).to_list(1000)
     

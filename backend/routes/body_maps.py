@@ -670,6 +670,24 @@ async def worker_create_body_map(
     return {"success": True, "body_map": doc}
 
 
+@router.get("/admins")
+async def get_admins_and_managers(db: dict = Depends(get_db)):
+    """Return list of admin, manager, and supervisor names for dropdown."""
+    users = await db.users.find(
+        {"role": {"$in": ["admin", "super_admin", "manager", "branch_manager", "supervisor"]}},
+        {"_id": 0, "full_name": 1, "name": 1}
+    ).to_list(None)
+    
+    # Use full_name if available, otherwise name field
+    names = []
+    for user in users:
+        name = user.get("full_name") or user.get("name")
+        if name:
+            names.append(name)
+    
+    return {"admins": sorted(set(names))}  # Remove duplicates and sort
+
+
 @router.get("/worker/body-maps")
 async def worker_list_body_maps(worker: dict = Depends(get_current_worker)):
     db = get_db()

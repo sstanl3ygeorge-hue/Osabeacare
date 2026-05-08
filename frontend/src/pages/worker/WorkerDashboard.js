@@ -814,7 +814,21 @@ export default function WorkerDashboard() {
     marks: [],
   });
   const [bodyMapMarkDraft, setBodyMapMarkDraft] = useState({ region: '', description: '' });
+  const [admins, setAdmins] = useState([]);
   const navigate = useNavigate();
+
+  // Fetch admins/managers/supervisors for dropdown
+  useEffect(() => {
+    const fetchAdmins = async () => {
+      try {
+        const response = await axios.get(`${API}/admins`);
+        setAdmins(response.data.admins || []);
+      } catch (error) {
+        console.error('Failed to fetch admins:', error);
+      }
+    };
+    fetchAdmins();
+  }, []);
 
   const fetchDashboard = useCallback(async () => {
     try {
@@ -1256,6 +1270,10 @@ export default function WorkerDashboard() {
     }
     if (!bodyMapForm.gender) {
       toast.error('Please select the gender of the service user');
+      return;
+    }
+    if (!bodyMapForm.reported_to) {
+      toast.error('Please select who this should be reported to');
       return;
     }
     setBodyMapSubmitting(true);
@@ -5754,13 +5772,19 @@ export default function WorkerDashboard() {
               />
             </div>
             <div>
-              <Label>Reported to</Label>
-              <Input
-                value={bodyMapForm.reported_to}
+              <Label>Reported to <span className="text-red-500">*</span></Label>
+              <select
+                value={bodyMapForm.reported_to || ''}
                 onChange={(e) => setBodyMapForm(prev => ({ ...prev, reported_to: e.target.value }))}
-                placeholder="e.g. Jane Smith (Manager)"
-                className="mt-1"
-              />
+                className={`mt-1 w-full text-sm border rounded-lg px-3 py-2 bg-white ${
+                  !bodyMapForm.reported_to ? 'border-red-300' : 'border-slate-300'
+                }`}
+              >
+                <option value="">Select admin/manager/supervisor...</option>
+                {admins.map((admin) => (
+                  <option key={admin} value={admin}>{admin}</option>
+                ))}
+              </select>
             </div>
 
             {/* Mark entry */}

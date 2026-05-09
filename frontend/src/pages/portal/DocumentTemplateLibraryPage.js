@@ -12,7 +12,7 @@ import { Textarea } from '../../components/ui/textarea';
 import { Badge } from '../../components/ui/badge';
 import { 
   Loader2, Upload, RefreshCw, Save, Rocket, FileText, Plus, Eye, Edit2, 
-  Archive, RotateCcw, Search, Filter, AlertCircle, CheckCircle2, Clock 
+  Archive, Search, AlertCircle, CheckCircle2, Clock 
 } from 'lucide-react';
 
 const API = API_BASE;
@@ -255,10 +255,21 @@ export default function DocumentTemplateLibraryPage() {
       return;
     }
 
-    // Validate file type
-    const validTypes = ['application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/pdf'];
-    if (!validTypes.includes(selectedFile.type)) {
+    // Validate file type — check MIME type or extension (Safari/iOS may report empty MIME)
+    const validMimes = [
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/pdf',
+      'application/octet-stream', // some browsers use this for DOCX
+    ];
+    const ext = selectedFile.name.split('.').pop()?.toLowerCase();
+    const validExt = ext === 'docx' || ext === 'pdf';
+    if (!validMimes.includes(selectedFile.type) && !validExt) {
       setFileError('Only DOCX and PDF files are supported');
+      setFile(null);
+      return;
+    }
+    if (!validExt) {
+      setFileError('Only .docx and .pdf files are accepted');
       setFile(null);
       return;
     }
@@ -355,17 +366,21 @@ export default function DocumentTemplateLibraryPage() {
     }));
   };
 
-  const handleSaveReviewedMapping = async () => {
-    // Find the first draft version and update mapping
-    if (!selectedTemplateId) return;
-    
-    const template = templates.find(t => t.id === selectedTemplateId);
-    if (!template) return;
-
-    // This mapping will be applied in the next step when user works with the template
-    // For now just close the modal
+  const handleSaveReviewedMapping = () => {
+    // Apply quick review choices into the mapping draft for the detail panel
+    setMappingDraft(prev => {
+      const merged = { ...prev };
+      for (const [placeholder, meta] of Object.entries(reviewingPlaceholders)) {
+        merged[placeholder] = {
+          ...(merged[placeholder] || {}),
+          system_variable: meta.system_variable || merged[placeholder]?.system_variable || '',
+          status: meta.status || 'detected',
+        };
+      }
+      return merged;
+    });
     setShowPlaceholderReview(false);
-    toast.success('Placeholder review complete. You can now map them in detail.');
+    toast.success('Placeholder review applied. Use Save Mapping to persist.');
   };
 
   const handleMapChange = (placeholderText, key, value) => {
@@ -494,17 +509,20 @@ export default function DocumentTemplateLibraryPage() {
   };
 
   const handleArchive = async (templateId) => {
-    if (!window.confirm('Archive this template? It will no longer be available for use.')) return;
+    if (!window.confirm('Archive this template? It will no longer be available for generation.')) return;
     
     setArchiving(true);
     try {
-      // Backend endpoint for archive (to be implemented)
       await axios.post(
         `${API}/document-templates/${templateId}/archive`,
         {},
         { headers: authHeaders }
       );
       toast.success('Template archived');
+      if (selectedTemplateId === templateId) {
+        setSelectedTemplateId('');
+        setTemplateDetail(null);
+      }
       await fetchTemplates();
     } catch (error) {
       console.error('Archive failed', error);

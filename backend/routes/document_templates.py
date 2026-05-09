@@ -1637,3 +1637,54 @@ async def list_document_audit_events(
 
     docs = await db.document_audit_events.find(filt, {"_id": 0}).sort("timestamp", -1).to_list(limit)
     return docs
+
+
+@router.post("/document-templates/{template_id}/archive")
+async def archive_document_template(
+    template_id: str,
+    user: dict = Depends(require_admin),
+):
+    """Archive a template and all its versions. Archived templates cannot be used for generation."""
+    db = get_db()
+    now_iso = datetime.utcnow().isoformat()
+    actor_id = user.get("id") or user.get("_id") or "unknown"
+
+    template = await db.document_templates.find_one({"id": template_id}, {"_id": 0})
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    if template.get("status") == "archived":
+        raise HTTPException(status_code=400, detail="Template is already archived")
+
+    before_snapshot = {k: v for k, v in template.items() if k not in ("extracted_text",)}
+
+    # Archive the template
+    await db.document_templates.update_one(
+        {"id": template_id},
+        {"$set": {"status": "archived", "updated_at": now_iso}},
+    )
+
+    # Archive all versions
+    await db.document_template_versions.update_many(
+        {"template_id": template_id, "status": {"$ne": "archived"}},
+        {"$set": {"status": "archived", "updated_at": now_iso}},
+    )
+
+    # Cancel any pending renewals
+    await db.document_renewals.update_many(
+        {"template_id": template_id, "status": {"$in": ["pending", "overdue"]}},
+        {"$set": {"status": "cancelled", "updated_at": now_iso}},
+    )
+
+    await _write_document_audit_event(
+        db=db,
+        document_type="template",
+        document_id=template_id,
+        action="archive",
+        actor_id=actor_id,
+        before=before_snapshot,
+        after={"status": "archived"},
+        reason="Admin manual archive",
+    )
+
+    return {"message": "Template archived", "template_id": template_id}

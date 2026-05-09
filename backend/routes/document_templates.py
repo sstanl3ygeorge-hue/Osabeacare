@@ -41,7 +41,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Document Template Engine"])
 _indexes_ready = False
 _indexes_lock = asyncio.Lock()
-LOCAL_ARCHIVE_PRELOAD_ROOT = Path(r"C:\Users\sstan\Downloads\Osabea Healthcare Solutions Ltd (2)")
 FAST_TRACK_ARCHIVE_PHASES = ("phase_1_critical", "phase_2_high")
 
 
@@ -214,6 +213,21 @@ def _sanitize_filename(name: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("_") or "template"
 
 
+def _strip_archive_provider_prefix(value: str) -> str:
+    text = (value or "").strip()
+    if not text:
+        return text
+
+    patterns = [
+        r"^osabea(?:care)?\s+healthcare\s+solutions\s+ltd[\s._-]*",
+        r"^osabea(?:care)?[\s._-]+",
+        r"^osabea(?:care)?$",
+    ]
+    for pattern in patterns:
+        text = re.sub(pattern, "", text, flags=re.IGNORECASE)
+    return text.strip(" _-.")
+
+
 def _gen_doc_code(title: str, category: Optional[str] = None) -> str:
     prefix = "DOC"
     if category:
@@ -225,10 +239,23 @@ def _gen_doc_code(title: str, category: Optional[str] = None) -> str:
 
 
 def _normalize_archive_title(filename: str) -> str:
-    stem = Path(filename).stem
+    stem = _strip_archive_provider_prefix(Path(filename).stem) or Path(filename).stem
     cleaned = re.sub(r"[_-]+", " ", stem)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     return cleaned.title() or "Imported Template"
+
+
+def _normalize_archive_filename(filename: str) -> str:
+    path = Path(filename)
+    stem = _strip_archive_provider_prefix(path.stem) or path.stem
+    cleaned_stem = re.sub(r"[_-]+", " ", stem)
+    normalized_stem = _sanitize_filename(cleaned_stem)
+    extension = path.suffix.lower()
+    return f"{normalized_stem}{extension}" if extension else normalized_stem
+
+
+def _is_temp_office_file(filename: str) -> bool:
+    return (filename or "").startswith("~$")
 
 
 def _manifest_phase_keys(phase: Optional[str]) -> List[str]:
@@ -240,12 +267,16 @@ def _manifest_phase_keys(phase: Optional[str]) -> List[str]:
 def _manifest_templates_for_phase(manifest: Dict[str, Any], phase: Optional[str]) -> List[Dict[str, Any]]:
     templates: List[Dict[str, Any]] = []
     for phase_key in _manifest_phase_keys(phase):
-        templates.extend(manifest.get("phases", {}).get(phase_key, []))
+        templates.extend(
+            template
+            for template in manifest.get("phases", {}).get(phase_key, [])
+            if not _is_temp_office_file(template.get("filename", ""))
+        )
     return templates
 
 
 def _resolve_archive_preload_root(manifest: Dict[str, Any]) -> Optional[Path]:
-    candidates: List[Path] = [LOCAL_ARCHIVE_PRELOAD_ROOT]
+    candidates: List[Path] = []
     archive_root = manifest.get("archive_root")
     if archive_root:
         candidates.append(Path(archive_root))
@@ -331,7 +362,7 @@ async def _build_archive_preload_preview(
             "duplicate_check": duplicate_info,
             "file_size": template.get("file_size"),
             "file_hash": file_hash,
-            "normalized_filename": _sanitize_filename(filename),
+            "normalized_filename": _normalize_archive_filename(filename),
             "clean_title": _normalize_archive_title(filename),
             "source_exists": bool(source_path),
             "source_path": str(source_path) if source_path else None,
@@ -389,7 +420,7 @@ async def _create_archive_preload_draft(
     classification_result = _classify_document(filename=filename, text_sample=(extracted_text[:3000] if extracted_text else ""))
     classification = classification_result.model_dump()
     clean_title = _normalize_archive_title(filename)
-    normalized_filename = _sanitize_filename(filename)
+    normalized_filename = _normalize_archive_filename(filename)
     suggested_destination_section = manifest_item.destination_section or (classification.get("suggested_destination_section") or {}).get("value")
 
     template_id = str(uuid.uuid4())

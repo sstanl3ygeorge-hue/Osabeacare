@@ -189,14 +189,7 @@ export default function DocumentTemplateLibraryPage() {
   const [archiving, setArchiving] = useState(false);
 
   // Archive import
-  const [archiveManifest, setArchiveManifest] = useState(null);
-  const [archivePreview, setArchivePreview] = useState(null);
-  const [selectedArchiveTemplates, setSelectedArchiveTemplates] = useState(new Set());
   const [archiveLoading, setArchiveLoading] = useState(false);
-  const [archiveImporting, setArchiveImporting] = useState(false);
-  const [archivePhase, setArchivePhase] = useState('phase_1_critical+phase_2_high');
-  const [archiveFolder, setArchiveFolder] = useState(null);
-  const [archiveImportStatus, setArchiveImportStatus] = useState(null);
 
   // Advanced Features (10 extended capabilities)
   const [advancedAnalytics, setAdvancedAnalytics] = useState(null);
@@ -256,6 +249,17 @@ export default function DocumentTemplateLibraryPage() {
   const pendingReviewTemplates = useMemo(() => {
     return templates.filter(template => template.import_status === 'pending_review');
   }, [templates]);
+
+  const selectedArchiveTemplates = useMemo(() => {
+    return new Set(pendingReviewTemplates.map(template => template.id));
+  }, [pendingReviewTemplates]);
+
+  const localArchiveImportCommand = useMemo(() => {
+    return [
+      'cd backend',
+      '..\\.venv\\Scripts\\python.exe scripts\\local_archive_import.py --dry-run --source-root "C:\\Users\\sstan\\Downloads\\Osabea Healthcare Solutions Ltd (2)"',
+    ].join('\n');
+  }, []);
 
   // Fetch templates
   const fetchTemplates = useCallback(async () => {
@@ -696,117 +700,6 @@ export default function DocumentTemplateLibraryPage() {
     }
   };
 
-  // Archive import handlers
-  const handleLoadArchiveManifest = async () => {
-    setArchiveLoading(true);
-    try {
-      const response = await axios.get(
-        `${API}/document-templates/archive/import-manifest`,
-        { headers: authHeaders }
-      );
-      setArchiveManifest(response.data);
-      if (response.data?.manifest_available === false || response.data?.total_templates === 0) {
-        setArchivePreview(null);
-        setSelectedArchiveTemplates(new Set());
-        toast.info(response.data?.message || 'Manifest not uploaded/configured');
-      } else {
-        toast.success(`Loaded ${response.data.total_templates} templates from archive`);
-      }
-    } catch (error) {
-      console.error('Failed to load archive manifest', error);
-      toast.error(error.response?.data?.detail || 'Failed to load archive manifest');
-    } finally {
-      setArchiveLoading(false);
-    }
-  };
-
-  const handlePreviewArchiveBatch = async () => {
-    if (!archiveManifest || archiveManifest.total_templates === 0) {
-      toast.info(archiveManifest?.message || 'Manifest not uploaded/configured');
-      return;
-    }
-
-    setArchiveLoading(true);
-    try {
-      const selectedFilenames = Array.from(selectedArchiveTemplates);
-      const response = await axios.post(
-        `${API}/document-templates/archive/preview-batch`,
-        {
-          templates: selectedFilenames,
-          phase: archivePhase,
-          folder_filter: archiveFolder,
-          dry_run: true,
-        },
-        { headers: authHeaders }
-      );
-      setArchivePreview(response.data);
-      toast.success(`Dry run: ${response.data.ready} ready, ${response.data.skipped} duplicates, ${response.data.missing_source} missing source files`);
-    } catch (error) {
-      console.error('Failed to preview batch', error);
-      toast.error(error.response?.data?.detail || 'Failed to preview batch');
-    } finally {
-      setArchiveLoading(false);
-    }
-  };
-
-  const handleBatchImportArchive = async () => {
-    if (!archivePreview || archivePreview.total_templates === 0) {
-      toast.error('Create preview first');
-      return;
-    }
-
-    const readyItems = archivePreview.preview_items.filter(p => p.import_status === 'ready');
-    if (readyItems.length === 0) {
-      toast.info('Run dry run first and resolve any missing or duplicate files');
-      return;
-    }
-
-    if (!window.confirm(`Preload ${readyItems.length} templates from the local archive as drafts for admin review? This will not publish them.`)) {
-      return;
-    }
-
-    setArchiveImporting(true);
-    try {
-      const response = await axios.post(
-        `${API}/document-templates/archive/batch-import`,
-        {
-          manifest_items: readyItems,
-          confirmed: true,
-        },
-        { headers: authHeaders }
-      );
-      toast.success(`Preloaded ${response.data.imported_count} templates for admin review`);
-      if (response.data.skipped_count > 0) {
-        toast.info(`${response.data.skipped_count} templates were duplicates and skipped`);
-      }
-      setArchivePreview(null);
-      setSelectedArchiveTemplates(new Set());
-      await fetchTemplates();
-    } catch (error) {
-      console.error('Batch import failed', error);
-      toast.error(error.response?.data?.detail || 'Batch import failed');
-    } finally {
-      setArchiveImporting(false);
-    }
-  };
-
-  const handleCheckImportStatus = async () => {
-    setArchiveLoading(true);
-    try {
-      const response = await axios.get(
-        `${API}/document-templates/archive/import-status`,
-        { headers: authHeaders }
-      );
-      setArchiveImportStatus(response.data);
-      toast.success(`${response.data.pending.count} pending, ${response.data.published.count} imported`);
-    } catch (error) {
-      console.error('Failed to check import status', error);
-      toast.error(error.response?.data?.detail || 'Failed to check import status');
-    } finally {
-      setArchiveLoading(false);
-    }
-  };
-
   // Advanced Feature Handlers
   const handleLoadAdvancedAnalytics = async () => {
     setArchiveLoading(true);
@@ -894,6 +787,33 @@ export default function DocumentTemplateLibraryPage() {
         </Button>
       </div>
 
+      {/* Local Archive Import */}
+      <Card className="border-[#E4E8EB]">
+        <CardHeader>
+          <div>
+            <CardTitle className="text-lg flex items-center gap-2">
+              <Archive className="h-5 w-5" />
+              Local Archive Import
+            </CardTitle>
+            <p className="text-xs text-text-muted mt-1">
+              Production does not read your Windows archive path. Run the local script on this machine, then review imported draft templates from the database here.
+            </p>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-950">
+            Use the local importer on your Windows machine to read the archive folder, extract placeholders and metadata, and write draft templates into the database for admin review. Production no longer tries to read your local filesystem.
+          </div>
+          <div className="rounded-lg border border-slate-200 bg-slate-950 p-3 text-[11px] text-slate-50">
+            <div className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-300">Dry Run Command</div>
+            <pre className="overflow-x-auto whitespace-pre-wrap">{localArchiveImportCommand}</pre>
+          </div>
+          <div className="text-xs text-text-muted">
+            Imported archive drafts remain admin-only and stay out of worker views until an admin explicitly publishes them.
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Main Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         {/* Import Form */}
@@ -901,162 +821,69 @@ export default function DocumentTemplateLibraryPage() {
           <CardHeader>
             <CardTitle className="text-base">Import New Template</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="space-y-1">
-              <Label className="text-xs font-semibold">Template File</Label>
-              <div className="relative">
-                <Input 
-                  type="file" 
-                  accept=".docx,.pdf" 
-                  onChange={handleFileChange}
-                  className="cursor-pointer"
-                />
-                {file && <CheckCircle2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-green-600" />}
-              </div>
-              {fileError && <p className="text-xs text-red-600">{fileError}</p>}
-              {file && <p className="text-xs text-text-muted">{file.name}</p>}
-              {uploadProgress > 0 && uploadProgress < 100 && (
-                <div className="w-full bg-gray-200 rounded h-2">
+          <CardContent className="space-y-4">
+            <div>
+              <Label className="text-xs">Template File</Label>
+              <Input
+                type="file"
+                accept=".docx,.pdf"
+                onChange={handleFileChange}
+                className="mt-1 text-xs"
+              />
+              {file && <p className="mt-1 text-[11px] text-text-muted">{file.name}</p>}
+              {fileError && <p className="mt-1 text-[11px] text-red-600">{fileError}</p>}
+              {importing && uploadProgress > 0 && (
+                <div className="mt-2 h-2 rounded bg-muted">
                   <div className="bg-primary h-2 rounded transition-all" style={{ width: `${uploadProgress}%` }} />
                 </div>
               )}
             </div>
 
-            {/* Classification Preview */}
-            {(classifying || classification) && (
-              <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 space-y-2">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5 text-xs font-semibold text-blue-900">
-                    <Sparkles className="h-3.5 w-3.5" />
-                    Auto Classification
-                  </div>
-                  {classifying && <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500" />}
-                  {classificationApplied && <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />}
+            {classification && (
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-semibold text-emerald-950">Filename Classification</span>
+                  <Button type="button" variant="outline" className="text-xs h-7" onClick={applyClassification}>
+                    {classifying ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Sparkles className="h-3 w-3 mr-1" />}
+                    Apply
+                  </Button>
                 </div>
-
-                {classification && (
-                  <>
-                    <div className="space-y-0">
-                      <ClassificationRow
-                        label="Category"
-                        value={classification.category.value}
-                        confidence={classification.category.confidence}
-                        reasoning={classification.category.reasoning}
-                      />
-                      <ClassificationRow
-                        label="Workflow"
-                        value={WORKFLOW_AREAS.find(w => w.value === classification.workflow_area.value)?.label || classification.workflow_area.value}
-                        confidence={classification.workflow_area.confidence}
-                        reasoning={classification.workflow_area.reasoning}
-                      />
-                      <ClassificationRow
-                        label="Audience"
-                        value={AUD_LABELS[classification.usage_audience.value] || classification.usage_audience.value}
-                        confidence={classification.usage_audience.confidence}
-                        reasoning={classification.usage_audience.reasoning}
-                      />
-                      <ClassificationRow
-                        label="User Role"
-                        value={PUR_LABELS[classification.primary_user_role?.value] || classification.primary_user_role?.value || '—'}
-                        confidence={classification.primary_user_role?.confidence || 0}
-                        reasoning={classification.primary_user_role?.reasoning || ''}
-                      />
-                      <ClassificationRow
-                        label="Owner"
-                        value={AOR_LABELS[classification.admin_owner_role?.value] || classification.admin_owner_role?.value || '—'}
-                        confidence={classification.admin_owner_role?.confidence || 0}
-                        reasoning={classification.admin_owner_role?.reasoning || ''}
-                      />
-                      <ClassificationRow
-                        label="Visibility"
-                        value={VIS_LABELS[classification.worker_visibility?.value] || classification.worker_visibility?.value || '—'}
-                        confidence={classification.worker_visibility?.confidence || 0}
-                        reasoning={classification.worker_visibility?.reasoning || ''}
-                      />
-                      <ClassificationRow
-                        label="Placement"
-                        value={PLACE_LABELS[classification.system_placement?.value] || classification.system_placement?.value || '—'}
-                        confidence={classification.system_placement?.confidence || 0}
-                        reasoning={classification.system_placement?.reasoning || ''}
-                      />
-                      <ClassificationRow
-                        label="Suggested Destination"
-                        value={destinationLookup[classification.suggested_destination_section?.value]?.title || classification.suggested_destination_section?.value || '—'}
-                        confidence={classification.suggested_destination_section?.confidence || 0}
-                        reasoning={classification.suggested_destination_section?.reasoning || 'No destination match yet'}
-                      />
-                      <ClassificationRow
-                        label="Frequency"
-                        value={FREQ_LABELS[classification.frequency.value] || classification.frequency.value}
-                        confidence={classification.frequency.confidence}
-                        reasoning={classification.frequency.reasoning}
-                      />
-                      <ClassificationRow
-                        label="Review"
-                        value={`${classification.review_cycle_months.value} months`}
-                        confidence={classification.review_cycle_months.confidence}
-                        reasoning={classification.review_cycle_months.reasoning}
-                      />
-                    </div>
-
-                    {!classificationApplied ? (
-                      <Button
-                        type="button"
-                        size="sm"
-                        onClick={applyClassification}
-                        className="w-full text-xs h-7 bg-blue-700 hover:bg-blue-800 text-white"
-                      >
-                        <ThumbsUp className="h-3 w-3 mr-1" />
-                        Apply Classification to Form
-                      </Button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => setClassificationApplied(false)}
-                        className="text-[10px] text-blue-700 underline w-full text-center"
-                      >
-                        <Reset className="inline h-2.5 w-2.5 mr-0.5" />Revert to manual
-                      </button>
-                    )}
-                  </>
-                )}
+                <div className="grid grid-cols-2 gap-2 text-[11px] text-emerald-950">
+                  <div>Category: <span className="font-medium">{classification.category?.value}</span></div>
+                  <div>Workflow: <span className="font-medium">{classification.workflow_area?.value}</span></div>
+                  <div>Audience: <span className="font-medium">{classification.usage_audience?.value}</span></div>
+                  <div>Visibility: <span className="font-medium">{classification.worker_visibility?.value}</span></div>
+                </div>
               </div>
             )}
 
-            <div className="space-y-1">
-              <Label className="text-xs font-semibold">Title (Optional)</Label>
-              <Input 
-                value={title} 
-                onChange={(e) => setTitle(e.target.value)} 
-                placeholder="Use file name if empty"
-                className="text-xs"
-              />
+            <div>
+              <Label className="text-xs">Title</Label>
+              <Input value={title} onChange={(e) => setTitle(e.target.value)} className="mt-1 text-xs" />
             </div>
 
-            <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-1">
-                <Label className="text-xs font-semibold">Category</Label>
-                <Select value={category} onValueChange={(v) => {
-                  setCategory(v);
-                  setGeneratedDocCode(generateDocCode(v, workflowArea));
-                }}>
-                  <SelectTrigger className="text-xs">
+            <div className="grid grid-cols-1 gap-3">
+              <div>
+                <Label className="text-xs">Category</Label>
+                <Select value={category} onValueChange={setCategory}>
+                  <SelectTrigger className="mt-1 text-xs">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {CATEGORIES.map((cat) => (
-                      <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                    {CATEGORIES.map((item) => (
+                      <SelectItem key={item} value={item}>{item}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-1">
-                <Label className="text-xs font-semibold">Workflow Area</Label>
-                <Select value={workflowArea} onValueChange={(v) => {
-                  setWorkflowArea(v);
-                  setGeneratedDocCode(generateDocCode(category, v));
-                }}>
-                  <SelectTrigger className="text-xs">
+              <div>
+                <Label className="text-xs">Document Type</Label>
+                <Input value={documentType} onChange={(e) => setDocumentType(e.target.value)} className="mt-1 text-xs" />
+              </div>
+              <div>
+                <Label className="text-xs">Workflow Area</Label>
+                <Select value={workflowArea} onValueChange={setWorkflowArea}>
+                  <SelectTrigger className="mt-1 text-xs">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -1068,45 +895,18 @@ export default function DocumentTemplateLibraryPage() {
               </div>
             </div>
 
-            <div className="space-y-1">
-              <Label className="text-xs font-semibold">Doc Code (Auto)</Label>
-              <Input 
-                value={generatedDocCode || generateDocCode(category, workflowArea)} 
-                disabled
-                className="text-xs bg-muted"
-              />
-            </div>
-
-            <div className="space-y-1">
-              <Label className="text-xs font-semibold">Source Provider</Label>
-              <Input 
-                value={sourceProvider} 
-                onChange={(e) => setSourceProvider(e.target.value)}
-                placeholder="e.g. CQC Expert, Internal"
-                className="text-xs"
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-1">
-                <Label className="text-xs font-semibold">Review Period (Mo)</Label>
-                <Input 
-                  type="number" 
-                  min="1" 
-                  max="36" 
-                  value={reviewPeriodMonths} 
-                  onChange={(e) => setReviewPeriodMonths(e.target.value)}
-                  className="text-xs"
-                />
+            <div className="grid grid-cols-1 gap-3">
+              <div>
+                <Label className="text-xs">Source Provider</Label>
+                <Input value={sourceProvider} onChange={(e) => setSourceProvider(e.target.value)} className="mt-1 text-xs" />
               </div>
-              <div className="space-y-1">
-                <Label className="text-xs font-semibold">Effective Date</Label>
-                <Input 
-                  type="date" 
-                  value={effectiveDate} 
-                  onChange={(e) => setEffectiveDate(e.target.value)}
-                  className="text-xs"
-                />
+              <div>
+                <Label className="text-xs">Review Period (Months)</Label>
+                <Input value={reviewPeriodMonths} onChange={(e) => setReviewPeriodMonths(e.target.value)} className="mt-1 text-xs" />
+              </div>
+              <div>
+                <Label className="text-xs">Effective Date</Label>
+                <Input type="date" value={effectiveDate} onChange={(e) => setEffectiveDate(e.target.value)} className="mt-1 text-xs" />
               </div>
             </div>
 
@@ -2020,221 +1820,6 @@ export default function DocumentTemplateLibraryPage() {
         )}
       </Card>
 
-      {/* Advanced Features Dashboard */}
-      <Card className="border-[#E4E8EB]">
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle className="text-lg flex items-center gap-2">
-                <Sparkles className="h-5 w-5" />
-                Advanced Archive Features
-              </CardTitle>
-              <p className="text-xs text-text-muted mt-1">
-                10 extended capabilities: naming suggestions, bulk editing, completeness scoring, gap analysis, visibility previews, compliance calendar, competency matrix, policy automation, and more
-              </p>
-            </div>
-            <Button 
-              onClick={handleLoadAdvancedAnalytics}
-              disabled={archiveLoading}
-              className="text-xs"
-            >
-              {archiveLoading ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Eye className="h-3 w-3 mr-1" />}
-              Load Analytics
-            </Button>
-          </div>
-        </CardHeader>
-
-        {advancedAnalytics && (
-          <CardContent className="space-y-6">
-            {/* 1. Migration Progress Tracking */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <div className="text-xs font-semibold">Migration Progress Tracker</div>
-                <Badge className="text-[10px]">{advancedAnalytics.migration_progress.progress_percentage}%</Badge>
-              </div>
-              <div className="w-full bg-gray-200 rounded-lg h-3">
-                <div 
-                  className="bg-gradient-to-r from-blue-500 to-green-500 h-3 rounded-lg transition-all" 
-                  style={{ width: `${advancedAnalytics.migration_progress.progress_percentage}%` }} 
-                />
-              </div>
-              <div className="grid grid-cols-4 gap-2 text-[10px]">
-                <div>
-                  <p className="text-text-muted">Completed</p>
-                  <p className="font-bold">{advancedAnalytics.migration_progress.completed}</p>
-                </div>
-                <div>
-                  <p className="text-text-muted">In Progress</p>
-                  <p className="font-bold">{advancedAnalytics.migration_progress.in_progress}</p>
-                </div>
-                <div>
-                  <p className="text-text-muted">Skipped</p>
-                  <p className="font-bold">{advancedAnalytics.migration_progress.skipped}</p>
-                </div>
-                <div>
-                  <p className="text-text-muted">Est. Days</p>
-                  <p className="font-bold">{advancedAnalytics.migration_progress.estimated_days}</p>
-                </div>
-              </div>
-              <div className="grid grid-cols-4 gap-2 text-[10px]">
-                {Object.entries(advancedAnalytics.migration_progress.timeline).map(([phase, data]) => (
-                  <div key={phase} className="p-1.5 rounded bg-gray-50 border">
-                    <p className="text-[9px] text-text-muted capitalize truncate">{phase.replace(/_/g, ' ')}</p>
-                    <p className="font-bold">{data.current}/{data.target}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* 2. Service-User Completeness Dashboard */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <div className="text-xs font-semibold">Service-User Section Completeness</div>
-                <Badge className="text-[10px]">{advancedAnalytics.service_user_completeness.completeness_percentage}%</Badge>
-              </div>
-              <div className="grid grid-cols-3 gap-2">
-                {Object.entries(advancedAnalytics.service_user_completeness.sections).map(([section, data]) => (
-                  <div key={section} className={`p-2 rounded text-[10px] border ${
-                    data.status === 'complete' ? 'bg-green-50 border-green-200' :
-                    data.status === 'partial' ? 'bg-blue-50 border-blue-200' :
-                    'bg-gray-50 border-gray-200'
-                  }`}>
-                    <p className="font-semibold capitalize">{section.replace(/_/g, ' ')}</p>
-                    <p>{data.count} {data.required ? '(required)' : '(optional)'}</p>
-                    <Badge className={`text-[8px] mt-1 ${
-                      data.status === 'complete' ? 'bg-green-200 text-green-900' :
-                      data.status === 'partial' ? 'bg-blue-200 text-blue-900' :
-                      'bg-gray-200 text-gray-900'
-                    }`}>{data.status}</Badge>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* 3. Compliance Renewal Calendar */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <div className="text-xs font-semibold">Compliance Renewal Calendar</div>
-                <Badge className="text-[10px] bg-orange-100 text-orange-900">{renewalCalendar?.urgent_count || 0} Urgent</Badge>
-              </div>
-              <div className="max-h-40 overflow-y-auto border rounded-lg">
-                <div className="space-y-1">
-                  {renewalCalendar?.events?.slice(0, 5).map((event, idx) => (
-                    <div key={idx} className={`p-2 border-b text-[10px] ${
-                      event.priority === 'urgent' ? 'bg-red-50' : 'bg-yellow-50'
-                    }`}>
-                      <div className="flex justify-between">
-                        <span className="font-semibold truncate">{event.title}</span>
-                        <Badge className={`text-[8px] ${
-                          event.priority === 'urgent' ? 'bg-red-200 text-red-900' : 'bg-yellow-200 text-yellow-900'
-                        }`}>{event.days_until} days</Badge>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {/* 4. Missing Legal Documents Gap Analysis */}
-            <div className="space-y-2">
-              <div className="text-xs font-semibold">Missing Legal Documents (Gap Analysis)</div>
-              <div className="grid grid-cols-2 gap-2">
-                {Object.entries(advancedAnalytics.missing_legal_documents).map(([category, docs]) => (
-                  <div key={category} className="p-2 rounded bg-yellow-50 border border-yellow-200 text-[10px]">
-                    <p className="font-semibold">{category}</p>
-                    <ul className="mt-1 space-y-0.5 list-disc list-inside">
-                      {docs.slice(0, 2).map((doc, idx) => (
-                        <li key={idx} className="text-[9px]">{doc}</li>
-                      ))}
-                      {docs.length > 2 && <li className="text-[9px]">+{docs.length - 2} more</li>}
-                    </ul>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* 5. Bulk Destination Editor */}
-            <div className="space-y-2">
-              <div className="text-xs font-semibold">Bulk Destination Editor</div>
-              {!bulkDestinationEditor ? (
-                <Button 
-                  onClick={() => setBulkDestinationEditor(true)}
-                  variant="outline"
-                  className="w-full text-xs"
-                >
-                  <Edit2 className="h-3 w-3 mr-1" />
-                  Edit Destinations for Multiple Templates
-                </Button>
-              ) : (
-                <div className="space-y-2 p-3 rounded border">
-                  <Select value={bulkDestination} onValueChange={setBulkDestination}>
-                    <SelectTrigger className="text-xs">
-                      <SelectValue placeholder="Select destination" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {destinationRegister?.map((dest) => (
-                        <SelectItem key={dest.destination_section} value={dest.destination_section}>
-                          {dest.title}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <div className="text-[10px] text-text-muted">
-                    {selectedBulkTemplates.size} template{selectedBulkTemplates.size !== 1 ? 's' : ''} selected
-                  </div>
-                  <div className="flex gap-2">
-                    <Button 
-                      onClick={() => setBulkDestinationEditor(false)}
-                      variant="outline"
-                      className="flex-1 text-xs"
-                    >
-                      Cancel
-                    </Button>
-                    <Button 
-                      onClick={handleBulkUpdateDestination}
-                      disabled={archiveLoading}
-                      className="flex-1 text-xs"
-                    >
-                      {archiveLoading ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Save className="h-3 w-3 mr-1" />}
-                      Apply to {selectedBulkTemplates.size}
-                    </Button>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* 6. Policy Assignment Automation */}
-            <div className="space-y-2">
-              <div className="text-xs font-semibold">Policy Assignment Automation</div>
-              <Button 
-                onClick={handleApplyPolicyAssignments}
-                disabled={archiveLoading || selectedArchiveTemplates.size === 0}
-                variant="outline"
-                className="w-full text-xs"
-              >
-                {archiveLoading ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Rocket className="h-3 w-3 mr-1" />}
-                Generate Assignments for {selectedArchiveTemplates.size} Templates
-              </Button>
-              {policyAssignments && (
-                <div className="p-2 rounded bg-blue-50 border border-blue-200 text-[10px]">
-                  <p className="font-semibold">{policyAssignments.count} assignments generated</p>
-                  <p className="text-[9px] text-text-muted mt-1">
-                    {policyAssignments.requires_confirmation ? '✓ Ready for confirmation' : 'Complete'}
-                  </p>
-                </div>
-              )}
-            </div>
-
-            <Button 
-              onClick={() => setShowAdvancedDashboard(false)}
-              variant="outline"
-              className="w-full text-xs"
-            >
-              Close Advanced Dashboard
-            </Button>
-          </CardContent>
-        )}
-      </Card>
     </div>
   );
 }

@@ -401,7 +401,12 @@ async def publish_policy_template(template_id: str, user: dict = Depends(require
     }
     await db.policy_templates.update_one({"id": template_id}, {"$set": update})
 
-    # Sync to org_policies row (if linked or matched by name)
+    # DUAL-PATH BOUNDARY: Sync to org_policies row (if linked or matched by name).
+    # This is intentional — policy_templates is the STRUCTURED AUTHORING path for
+    # rendered policies (currently Whistleblowing only). Template Library
+    # (document_templates) is the FILE-IMPORT path and must NOT be wired to write
+    # org_policies on publish, or it would overwrite the version managed here.
+    # The two collections serve different purposes and must remain isolated.
     try:
         existing_policy = await db.org_policies.find_one(
             {"name": {"$regex": doc.get("title", ""), "$options": "i"}}

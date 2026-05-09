@@ -53,7 +53,7 @@ export default function GlobalAuditLogPage() {
   const [error, setError] = useState(null);
   const [total, setTotal] = useState(0);
 
-  const [resourceType, setResourceType] = useState('');
+  const [resourceType, setResourceType] = useState('all');
   const [action, setAction] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
@@ -63,7 +63,7 @@ export default function GlobalAuditLogPage() {
     setError(null);
     try {
       const params = { limit: 200 };
-      if (resourceType) params.resource_type = resourceType;
+      if (resourceType && resourceType !== 'all') params.resource_type = resourceType;
       if (action.trim()) params.action = action.trim();
       if (dateFrom) params.date_from = dateFrom;
       if (dateTo) params.date_to = dateTo;
@@ -87,7 +87,7 @@ export default function GlobalAuditLogPage() {
   }, [fetchLogs]);
 
   const handleClear = () => {
-    setResourceType('');
+    setResourceType('all');
     setAction('');
     setDateFrom('');
     setDateTo('');
@@ -115,7 +115,7 @@ export default function GlobalAuditLogPage() {
                   <SelectValue placeholder="All types" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">All types</SelectItem>
+                  <SelectItem value="all">All types</SelectItem>
                   {RESOURCE_TYPE_OPTIONS.map((t) => (
                     <SelectItem key={t} value={t}>{t}</SelectItem>
                   ))}

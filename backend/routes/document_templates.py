@@ -26,6 +26,10 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from .dependencies import get_db, get_current_user, require_admin, log_audit_action
+from constants.service_user_destinations import (
+    get_service_user_destination_register,
+    suggest_service_user_destination_section,
+)
 from supabase_storage import (
     is_supabase_storage_configured,
     upload_to_supabase,
@@ -99,6 +103,7 @@ class PublishTemplateRequest(BaseModel):
     template_version_id: Optional[str] = None
     effective_date: Optional[str] = None
     review_date: Optional[str] = None
+    confirmed_destination_section: Optional[str] = None
 
 
 class GenerateDocumentRequest(BaseModel):
@@ -131,6 +136,7 @@ class ClassificationResult(BaseModel):
     admin_owner_role: ClassificationPrediction    # registered_manager | compliance_lead | hr_manager | clinical_lead | finance
     worker_visibility: ClassificationPrediction   # visible | restricted | admin_only
     system_placement: ClassificationPrediction    # compliance_hub | care_plan_module | incident_module | staff_profile | medication_module | service_user_record | all_modules
+    suggested_destination_section: Optional[ClassificationPrediction] = None
     frequency: ClassificationPrediction           # daily | per_shift | per_incident | weekly | monthly | quarterly | annual | one_off
     review_cycle_months: ClassificationPrediction
     suggested_title: Optional[str] = None
@@ -971,6 +977,23 @@ def _classify_document(filename: str, text_sample: str = "") -> ClassificationRe
         raw_stem = re.sub(rf"\b{noise}\b", "", raw_stem, flags=re.IGNORECASE).strip()
     suggested_title = re.sub(r"\s+", " ", raw_stem).title() if raw_stem else None
 
+    suggested_destination = suggest_service_user_destination_section(
+        filename=filename,
+        text_sample=text_sample,
+        classification={
+            "category": {"value": cat_value},
+            "document_type": {"value": cat_doc_type},
+            "workflow_area": {"value": wf_value},
+            "usage_audience": {"value": aud_value},
+            "primary_user_role": {"value": pur_value},
+            "admin_owner_role": {"value": aor_value},
+            "worker_visibility": {"value": vis_value},
+            "frequency": {"value": freq_value},
+            "review_cycle_months": {"value": str(rev_months)},
+            "suggested_title": suggested_title,
+        },
+    )
+
     # --- Primary user role --- who primarily completes / uses this document
     PUR_RULES: List[Tuple[str, List[str], float]] = [
         ("nurse",               ["medication", "mar sheet", "medicine", "drug", "controlled drug", "prescri", "clinical"], 0.87),
@@ -1103,6 +1126,15 @@ def _classify_document(filename: str, text_sample: str = "") -> ClassificationRe
         admin_owner_role=ClassificationPrediction(value=aor_value, confidence=aor_conf, reasoning=aor_reasoning),
         worker_visibility=ClassificationPrediction(value=vis_value, confidence=vis_conf, reasoning=vis_reasoning),
         system_placement=ClassificationPrediction(value=place_value, confidence=place_conf, reasoning=place_reasoning),
+        suggested_destination_section=(
+            ClassificationPrediction(
+                value=suggested_destination["destination_section"],
+                confidence=suggested_destination["confidence"],
+                reasoning=suggested_destination["reasoning"],
+            )
+            if suggested_destination
+            else None
+        ),
         frequency=ClassificationPrediction(value=freq_value, confidence=freq_conf, reasoning=freq_reasoning),
         review_cycle_months=ClassificationPrediction(value=str(rev_months), confidence=rev_conf, reasoning=rev_reasoning),
         suggested_title=suggested_title,
@@ -1122,6 +1154,16 @@ async def classify_document_template(
     """
     result = _classify_document(filename=filename, text_sample=text_sample or "")
     return result
+
+
+@router.get("/document-templates/service-user-destination-register")
+async def preview_service_user_destination_register(user: dict = Depends(require_admin)):
+    register = get_service_user_destination_register()
+    return {
+        "base_sections": [record for record in register if record.get("section_type") == "tab"],
+        "operational_destinations": [record for record in register if record.get("section_type") == "operational"],
+        "all_destinations": register,
+    }
 
 
 @router.post("/document-templates/import")
@@ -1179,6 +1221,7 @@ async def import_document_template(
     post_import_classification = _classify_document(
         filename=filename, text_sample=text_sample_for_classify
     ).model_dump()
+    suggested_destination_section = (post_import_classification.get("suggested_destination_section") or {}).get("value")
 
     detected_title = extracted_metadata.get("detected_title")
     final_title = (title or detected_title or "Imported Template").strip()
@@ -1204,6 +1247,7 @@ async def import_document_template(
         "status": "draft",
         "workflow_area": workflow_area,
         "classification": post_import_classification,
+        "suggested_destination_section": suggested_destination_section,
         "created_by": user["user_id"],
         "created_at": now_iso,
         "updated_at": now_iso,
@@ -1490,6 +1534,24 @@ async def publish_document_template(
     if version_doc.get("status") != "draft":
         raise HTTPException(status_code=409, detail="Only draft versions can be published")
 
+    suggested_destination = (template.get("classification") or {}).get("suggested_destination_section") or {}
+    suggested_destination_section = suggested_destination.get("value")
+    confirmed_destination_section = (body.confirmed_destination_section or "").strip()
+    if not confirmed_destination_section:
+        raise HTTPException(status_code=422, detail="Destination confirmation is required before publish")
+    if suggested_destination_section and confirmed_destination_section != suggested_destination_section:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Destination confirmation must match the suggested destination: {suggested_destination_section}",
+        )
+
+    destination_record = next(
+        (item for item in get_service_user_destination_register() if item.get("destination_section") == confirmed_destination_section),
+        None,
+    )
+    if not destination_record:
+        raise HTTPException(status_code=422, detail="Selected destination is not part of the service-user destination register")
+
     now_iso = _utc_now_iso()
     effective_date = body.effective_date or version_doc.get("effective_date") or now_iso[:10]
     review_date = body.review_date or _compute_review_date(effective_date, int(template.get("review_period_months") or 12))
@@ -1506,6 +1568,9 @@ async def publish_document_template(
                 "published_at": now_iso,
                 "published_by": user["user_id"],
                 "updated_at": now_iso,
+                "destination_section": confirmed_destination_section,
+                "destination_confirmed_at": now_iso,
+                "destination_confirmed_by": user["user_id"],
             }
         },
     )
@@ -1517,6 +1582,9 @@ async def publish_document_template(
                 "status": "active",
                 "current_version_id": version_id,
                 "updated_at": now_iso,
+                "destination_section": confirmed_destination_section,
+                "destination_confirmed_at": now_iso,
+                "destination_confirmed_by": user["user_id"],
             }
         },
     )
@@ -1564,6 +1632,8 @@ async def publish_document_template(
         "template_version_id": version_id,
         "effective_date": effective_date,
         "review_date": review_date,
+        "destination_section": confirmed_destination_section,
+        "destination_title": destination_record["title"],
     }
 
 

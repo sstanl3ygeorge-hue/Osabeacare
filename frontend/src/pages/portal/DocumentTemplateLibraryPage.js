@@ -178,6 +178,8 @@ export default function DocumentTemplateLibraryPage() {
   const [classifying, setClassifying] = useState(false);
   const [classification, setClassification] = useState(null);  // ClassificationResult | null
   const [classificationApplied, setClassificationApplied] = useState(false);
+  const [destinationRegister, setDestinationRegister] = useState([]);
+  const [selectedDestinationSection, setSelectedDestinationSection] = useState('');
 
   // States
   const [importing, setImporting] = useState(false);
@@ -208,6 +210,17 @@ export default function DocumentTemplateLibraryPage() {
   const [lastGenerated, setLastGenerated] = useState(null);
 
   const authHeaders = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
+
+  const destinationLookup = useMemo(() => {
+    return Object.fromEntries((destinationRegister || []).map((item) => [item.destination_section, item]));
+  }, [destinationRegister]);
+
+  const suggestedDestinationSection = classification?.suggested_destination_section?.value
+    || templateDetail?.template?.classification?.suggested_destination_section?.value
+    || templateDetail?.template?.suggested_destination_section
+    || '';
+
+  const selectedDestinationRecord = destinationLookup[selectedDestinationSection] || null;
 
   const selectedVersion = useMemo(() => {
     if (!templateDetail?.versions?.length) return null;
@@ -271,6 +284,10 @@ export default function DocumentTemplateLibraryPage() {
     try {
       const response = await axios.get(`${API}/document-templates/${templateId}`, { headers: authHeaders });
       setTemplateDetail(response.data);
+      const suggestedSection = response.data?.template?.suggested_destination_section
+        || response.data?.template?.classification?.suggested_destination_section?.value
+        || '';
+      setSelectedDestinationSection(suggestedSection);
       const firstDraft = (response.data?.versions || []).find(v => v.status === 'draft');
       const current = response.data?.template?.current_version_id;
       setSelectedVersionId(firstDraft?.id || current || response.data?.versions?.[0]?.id || '');
@@ -283,6 +300,25 @@ export default function DocumentTemplateLibraryPage() {
   useEffect(() => {
     fetchTemplates();
   }, [fetchTemplates]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadDestinationRegister = async () => {
+      try {
+        const response = await axios.get(`${API}/document-templates/service-user-destination-register`, {
+          headers: authHeaders,
+        });
+        if (cancelled) return;
+        setDestinationRegister(Array.isArray(response.data?.all_destinations) ? response.data.all_destinations : []);
+      } catch (error) {
+        console.warn('Failed to load service-user destination register', error?.response?.data?.detail || error.message);
+      }
+    };
+    loadDestinationRegister();
+    return () => {
+      cancelled = true;
+    };
+  }, [authHeaders]);
 
   useEffect(() => {
     if (!selectedTemplateId) return;
@@ -337,6 +373,7 @@ export default function DocumentTemplateLibraryPage() {
     setUploadProgress(0);
     setClassification(null);
     setClassificationApplied(false);
+    setSelectedDestinationSection('');
 
     // Auto-classify on file select (filename only — no content uploaded yet)
     triggerClassify(selectedFile.name);
@@ -351,6 +388,7 @@ export default function DocumentTemplateLibraryPage() {
         headers: { ...authHeaders, 'Content-Type': 'multipart/form-data' },
       });
       setClassification(resp.data);
+      setSelectedDestinationSection(resp.data?.suggested_destination_section?.value || '');
     } catch (err) {
       // Classification is non-blocking — silently ignore
       console.warn('Classification skipped', err?.response?.data?.detail || err.message);
@@ -543,13 +581,24 @@ export default function DocumentTemplateLibraryPage() {
       return;
     }
 
+    if (!selectedDestinationSection) {
+      toast.error('Confirm a destination before publish');
+      return;
+    }
+
+    if (suggestedDestinationSection && selectedDestinationSection !== suggestedDestinationSection) {
+      toast.error('Select the suggested destination before publish');
+      return;
+    }
+
     setPublishing(true);
     try {
       await axios.post(
         `${API}/document-templates/${selectedTemplateId}/publish`,
         {
           template_version_id: selectedVersionId,
-          effective_date: effectiveDate || null
+          effective_date: effectiveDate || null,
+          confirmed_destination_section: selectedDestinationSection,
         },
         { headers: authHeaders }
       );
@@ -725,6 +774,12 @@ export default function DocumentTemplateLibraryPage() {
                         value={PLACE_LABELS[classification.system_placement?.value] || classification.system_placement?.value || '—'}
                         confidence={classification.system_placement?.confidence || 0}
                         reasoning={classification.system_placement?.reasoning || ''}
+                      />
+                      <ClassificationRow
+                        label="Suggested Destination"
+                        value={destinationLookup[classification.suggested_destination_section?.value]?.title || classification.suggested_destination_section?.value || '—'}
+                        confidence={classification.suggested_destination_section?.confidence || 0}
+                        reasoning={classification.suggested_destination_section?.reasoning || 'No destination match yet'}
                       />
                       <ClassificationRow
                         label="Frequency"
@@ -1137,6 +1192,29 @@ export default function DocumentTemplateLibraryPage() {
               </div>
 
               <div className="flex flex-wrap gap-2 justify-end pt-2">
+                <div className="w-full space-y-1 rounded-lg border border-slate-200 bg-slate-50 p-3 text-left">
+                  <Label className="text-xs font-semibold text-slate-700">Destination confirmation</Label>
+                  <Select value={selectedDestinationSection} onValueChange={setSelectedDestinationSection}>
+                    <SelectTrigger className="h-8 text-xs">
+                      <SelectValue placeholder="Select a destination" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {destinationRegister.map((destination) => (
+                        <SelectItem key={destination.destination_section} value={destination.destination_section}>
+                          {destination.title} ({destination.destination_section})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-[11px] text-slate-600">
+                    Suggested: {destinationLookup[suggestedDestinationSection]?.title || suggestedDestinationSection || 'none detected'}
+                  </p>
+                  {selectedDestinationRecord && selectedDestinationSection !== suggestedDestinationSection && suggestedDestinationSection && (
+                    <p className="text-[11px] text-amber-700">
+                      This selection does not match the suggested destination.
+                    </p>
+                  )}
+                </div>
                 <Button 
                   variant="outline"
                   onClick={handleSaveMappings} 
@@ -1148,7 +1226,7 @@ export default function DocumentTemplateLibraryPage() {
                 </Button>
                 <Button 
                   onClick={handlePublish} 
-                  disabled={publishing || selectedVersion.status !== 'draft'}
+                  disabled={publishing || selectedVersion.status !== 'draft' || !selectedDestinationSection}
                   className="text-xs"
                 >
                   {publishing ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Rocket className="h-3 w-3 mr-1" />}

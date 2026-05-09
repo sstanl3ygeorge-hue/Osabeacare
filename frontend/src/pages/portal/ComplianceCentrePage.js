@@ -467,6 +467,11 @@ export default function ComplianceCentrePage() {
   };
 
   // ── Policy Template Editor handlers ──────────────────────────────────────
+  // DUAL-PATH BOUNDARY: This editor authors Whistleblowing policy content via
+  // the `policy_templates` collection (structured rendering + ReportLab PDF).
+  // Template Library (document_templates collection) is the SEPARATE file-import
+  // path and must NOT write to org_policies on publish — that would silently
+  // overwrite the version managed here. Keep the two authoring paths isolated.
   const openTemplateEditor = async (policy) => {
     setTemplateEditorPolicy(policy);
     setTemplateEditorOpen(true);

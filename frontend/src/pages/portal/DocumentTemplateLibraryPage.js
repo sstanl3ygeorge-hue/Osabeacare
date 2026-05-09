@@ -253,6 +253,10 @@ export default function DocumentTemplateLibraryPage() {
     return Object.values(mappingDraft).filter(m => !m.system_variable).length;
   }, [mappingDraft]);
 
+  const pendingReviewTemplates = useMemo(() => {
+    return templates.filter(template => template.import_status === 'pending_review');
+  }, [templates]);
+
   // Fetch templates
   const fetchTemplates = useCallback(async () => {
     setLoadingTemplates(true);
@@ -460,12 +464,10 @@ export default function DocumentTemplateLibraryPage() {
     setImporting(true);
     try {
       const response = await axios.post(`${API}/document-templates/import`, formData, {
-        headers: {
-          ...authHeaders,
-          'Content-Type': 'multipart/form-data'
-        },
+        headers: authHeaders,
         onUploadProgress: (progressEvent) => {
-          const progress = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+          const total = progressEvent.total || 0;
+          const progress = total ? Math.round((progressEvent.loaded * 100) / total) : 0;
           setUploadProgress(progress);
         }
       });
@@ -519,7 +521,6 @@ export default function DocumentTemplateLibraryPage() {
   };
 
   const handleSaveReviewedMapping = () => {
-    // Apply quick review choices into the mapping draft for the detail panel
     setMappingDraft(prev => {
       const merged = { ...prev };
       for (const [placeholder, meta] of Object.entries(reviewingPlaceholders)) {
@@ -704,7 +705,13 @@ export default function DocumentTemplateLibraryPage() {
         { headers: authHeaders }
       );
       setArchiveManifest(response.data);
-      toast.success(`Loaded ${response.data.total_templates} templates from archive`);
+      if (response.data?.manifest_available === false || response.data?.total_templates === 0) {
+        setArchivePreview(null);
+        setSelectedArchiveTemplates(new Set());
+        toast.info(response.data?.message || 'Manifest not uploaded/configured');
+      } else {
+        toast.success(`Loaded ${response.data.total_templates} templates from archive`);
+      }
     } catch (error) {
       console.error('Failed to load archive manifest', error);
       toast.error(error.response?.data?.detail || 'Failed to load archive manifest');
@@ -715,7 +722,7 @@ export default function DocumentTemplateLibraryPage() {
 
   const handlePreviewArchiveBatch = async () => {
     if (!archiveManifest || archiveManifest.total_templates === 0) {
-      toast.error('Load archive manifest first');
+      toast.info(archiveManifest?.message || 'Manifest not uploaded/configured');
       return;
     }
 
@@ -728,11 +735,12 @@ export default function DocumentTemplateLibraryPage() {
           templates: selectedFilenames,
           phase: archivePhase,
           folder_filter: archiveFolder,
+          dry_run: true,
         },
         { headers: authHeaders }
       );
       setArchivePreview(response.data);
-      toast.success(`Preview: ${response.data.pending} can import, ${response.data.skipped} duplicates found`);
+      toast.success(`Dry run: ${response.data.ready} ready, ${response.data.skipped} duplicates, ${response.data.missing_source} missing source files`);
     } catch (error) {
       console.error('Failed to preview batch', error);
       toast.error(error.response?.data?.detail || 'Failed to preview batch');
@@ -747,7 +755,13 @@ export default function DocumentTemplateLibraryPage() {
       return;
     }
 
-    if (!window.confirm(`Import ${archivePreview.pending} templates from archive? This cannot be undone.`)) {
+    const readyItems = archivePreview.preview_items.filter(p => p.import_status === 'ready');
+    if (readyItems.length === 0) {
+      toast.info('Run dry run first and resolve any missing or duplicate files');
+      return;
+    }
+
+    if (!window.confirm(`Preload ${readyItems.length} templates from the local archive as drafts for admin review? This will not publish them.`)) {
       return;
     }
 
@@ -756,12 +770,12 @@ export default function DocumentTemplateLibraryPage() {
       const response = await axios.post(
         `${API}/document-templates/archive/batch-import`,
         {
-          manifest_items: archivePreview.preview_items.filter(p => p.import_status === 'pending'),
+          manifest_items: readyItems,
           confirmed: true,
         },
         { headers: authHeaders }
       );
-      toast.success(`Imported ${response.data.imported_count} templates`);
+      toast.success(`Preloaded ${response.data.imported_count} templates for admin review`);
       if (response.data.skipped_count > 0) {
         toast.info(`${response.data.skipped_count} templates were duplicates and skipped`);
       }
@@ -1538,6 +1552,36 @@ export default function DocumentTemplateLibraryPage() {
         </div>
       )}
 
+      {pendingReviewTemplates.length > 0 && (
+        <Card className="border-[#E4E8EB] mb-6">
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Clock className="h-4 w-4" />
+              Archive Preload Review Queue
+            </CardTitle>
+            <p className="text-xs text-text-muted">
+              {pendingReviewTemplates.length} preloaded draft template{pendingReviewTemplates.length !== 1 ? 's' : ''} awaiting admin review.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {pendingReviewTemplates.slice(0, 8).map((template) => (
+              <button
+                key={template.id}
+                type="button"
+                onClick={() => setSelectedTemplateId(template.id)}
+                className="flex w-full items-center justify-between rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-left hover:bg-amber-100"
+              >
+                <div>
+                  <div className="text-sm font-medium text-amber-950">{template.title}</div>
+                  <div className="text-[11px] text-amber-800">{template.original_folder_path || template.archive_source || 'Archive preload'} • {template.doc_code}</div>
+                </div>
+                <Badge className="bg-amber-200 text-amber-900 text-[10px]">Pending Review</Badge>
+              </button>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
       {/* Archive Import Dashboard */}
       <Card className="border-[#E4E8EB]">
         <CardHeader>
@@ -1548,7 +1592,11 @@ export default function DocumentTemplateLibraryPage() {
                 Archive Import Dashboard
               </CardTitle>
               <p className="text-xs text-text-muted mt-1">
-                {archiveManifest ? `${archiveManifest.total_templates} templates available` : 'Load archive manifest to begin import'}
+                {archiveManifest
+                  ? archiveManifest.manifest_available === false
+                    ? (archiveManifest.message || 'Manifest not uploaded/configured')
+                    : `${archiveManifest.total_templates} templates available`
+                  : 'Load archive manifest to begin import'}
               </p>
             </div>
             <Button 
@@ -1565,6 +1613,12 @@ export default function DocumentTemplateLibraryPage() {
 
         {archiveManifest && (
           <CardContent className="space-y-4">
+            {archiveManifest.manifest_available === false ? (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                {archiveManifest.message || 'Manifest not uploaded/configured'}
+              </div>
+            ) : (
+              <>
             {/* Status Summary */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <div className="p-2 rounded-lg bg-red-50 border border-red-200">
@@ -1617,23 +1671,30 @@ export default function DocumentTemplateLibraryPage() {
               <div className="space-y-3">
                 <div className="p-3 rounded-lg bg-blue-50 border border-blue-200">
                   <div className="flex items-center justify-between mb-2">
-                    <div className="text-xs font-semibold text-blue-900">Import Preview</div>
+                    <div className="text-xs font-semibold text-blue-900">Dry Run Preview</div>
                     <Badge className="text-[10px] bg-blue-200 text-blue-900">{archivePreview.total_templates} total</Badge>
                   </div>
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-4 gap-2">
                     <div>
-                      <p className="text-[10px] text-blue-700">Pending Import</p>
-                      <p className="text-sm font-bold text-blue-900">{archivePreview.pending}</p>
+                      <p className="text-[10px] text-blue-700">Ready</p>
+                      <p className="text-sm font-bold text-blue-900">{archivePreview.ready}</p>
                     </div>
                     <div>
                       <p className="text-[10px] text-blue-700">Duplicates</p>
                       <p className="text-sm font-bold text-blue-900">{archivePreview.skipped}</p>
                     </div>
                     <div>
+                      <p className="text-[10px] text-blue-700">Missing Source</p>
+                      <p className="text-sm font-bold text-blue-900">{archivePreview.missing_source}</p>
+                    </div>
+                    <div>
                       <p className="text-[10px] text-blue-700">CRITICAL</p>
                       <p className="text-sm font-bold text-blue-900">{archivePreview.critical}</p>
                     </div>
                   </div>
+                  <p className="mt-2 text-[10px] text-blue-800">
+                    Source root: {archivePreview.archive_root || 'not available'}
+                  </p>
                 </div>
 
                 {/* Templates List */}
@@ -1644,6 +1705,7 @@ export default function DocumentTemplateLibraryPage() {
                         <th className="text-left p-2">Filename</th>
                         <th className="text-left p-2">Folder</th>
                         <th className="text-center p-2">Priority</th>
+                        <th className="text-center p-2">File</th>
                         <th className="text-center p-2">Status</th>
                       </tr>
                     </thead>
@@ -1663,10 +1725,18 @@ export default function DocumentTemplateLibraryPage() {
                           </td>
                           <td className="p-2 text-center">
                             <Badge className={`text-[9px] ${
-                              item.import_status === 'pending' ? 'bg-green-100 text-green-800' :
-                              'bg-yellow-100 text-yellow-800'
+                              item.source_exists ? 'bg-blue-100 text-blue-800' : 'bg-red-100 text-red-800'
                             }`}>
-                              {item.import_status === 'pending' ? '✓ Import' : '⚠ Skip'}
+                              {item.source_exists ? 'Found' : 'Missing'}
+                            </Badge>
+                          </td>
+                          <td className="p-2 text-center">
+                            <Badge className={`text-[9px] ${
+                              item.import_status === 'ready' ? 'bg-green-100 text-green-800' :
+                              item.import_status === 'duplicate' ? 'bg-yellow-100 text-yellow-800' :
+                              'bg-red-100 text-red-800'
+                            }`}>
+                              {item.import_status === 'ready' ? 'Ready' : item.import_status === 'duplicate' ? 'Duplicate' : 'Missing Source'}
                             </Badge>
                           </td>
                         </tr>
@@ -1688,11 +1758,11 @@ export default function DocumentTemplateLibraryPage() {
                   </Button>
                   <Button 
                     onClick={handleBatchImportArchive}
-                    disabled={archiveImporting}
+                    disabled={archiveImporting || archivePreview.ready === 0}
                     className="flex-1 text-xs"
                   >
                     {archiveImporting ? <Loader2 className="h-3 w-3 mr-2 animate-spin" /> : <Rocket className="h-3 w-3 mr-2" />}
-                    Confirm & Import
+                    Confirm & Preload Drafts
                   </Button>
                 </div>
               </div>
@@ -1728,6 +1798,8 @@ export default function DocumentTemplateLibraryPage() {
               {archiveLoading ? <Loader2 className="h-3 w-3 mr-2 animate-spin" /> : <RefreshCw className="h-3 w-3 mr-2" />}
               Check Import Status
             </Button>
+              </>
+            )}
           </CardContent>
         )}
       </Card>

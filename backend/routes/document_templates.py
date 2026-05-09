@@ -13,6 +13,7 @@ Phased implementation:
 
 import io
 import asyncio
+import hashlib
 import re
 import uuid
 import logging
@@ -40,6 +41,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Document Template Engine"])
 _indexes_ready = False
 _indexes_lock = asyncio.Lock()
+LOCAL_ARCHIVE_PRELOAD_ROOT = Path(r"C:\Users\sstan\Downloads\Osabea Healthcare Solutions Ltd (2)")
+FAST_TRACK_ARCHIVE_PHASES = ("phase_1_critical", "phase_2_high")
 
 
 WORKFLOW_AREAS = {
@@ -128,6 +131,7 @@ class ArchiveImportRequest(BaseModel):
     templates: List[str] = []  # List of filenames to import
     phase: Optional[str] = None  # 'phase_1_critical', 'phase_2_high', etc.
     folder_filter: Optional[str] = None
+    dry_run: bool = True
 
 
 class ArchiveImportBatchRequest(BaseModel):
@@ -218,6 +222,274 @@ def _gen_doc_code(title: str, category: Optional[str] = None) -> str:
             prefix = cleaned[:6]
     slug = re.sub(r"[^A-Za-z0-9]+", "", title.upper())[:10] or "TEMPLATE"
     return f"{prefix}-{slug}-{uuid.uuid4().hex[:6].upper()}"
+
+
+def _normalize_archive_title(filename: str) -> str:
+    stem = Path(filename).stem
+    cleaned = re.sub(r"[_-]+", " ", stem)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned.title() or "Imported Template"
+
+
+def _manifest_phase_keys(phase: Optional[str]) -> List[str]:
+    if not phase or phase == "phase_1_critical+phase_2_high":
+        return list(FAST_TRACK_ARCHIVE_PHASES)
+    return [phase]
+
+
+def _manifest_templates_for_phase(manifest: Dict[str, Any], phase: Optional[str]) -> List[Dict[str, Any]]:
+    templates: List[Dict[str, Any]] = []
+    for phase_key in _manifest_phase_keys(phase):
+        templates.extend(manifest.get("phases", {}).get(phase_key, []))
+    return templates
+
+
+def _resolve_archive_preload_root(manifest: Dict[str, Any]) -> Optional[Path]:
+    candidates: List[Path] = [LOCAL_ARCHIVE_PRELOAD_ROOT]
+    archive_root = manifest.get("archive_root")
+    if archive_root:
+        candidates.append(Path(archive_root))
+
+    seen_paths = set()
+    for candidate in candidates:
+        try:
+            resolved = candidate.expanduser().resolve()
+        except Exception:
+            continue
+        if str(resolved) in seen_paths:
+            continue
+        seen_paths.add(str(resolved))
+        if resolved.exists() and resolved.is_dir():
+            return resolved
+    return None
+
+
+def _resolve_archive_source_file(archive_root: Path, folder_path: str, filename: str) -> Optional[Path]:
+    try:
+        root = archive_root.resolve()
+        candidate = (root / folder_path / filename).resolve()
+        candidate.relative_to(root)
+    except Exception:
+        return None
+    if candidate.exists() and candidate.is_file():
+        return candidate
+    return None
+
+
+def _hash_bytes_sha256(file_bytes: bytes) -> str:
+    return hashlib.sha256(file_bytes).hexdigest()
+
+
+async def _build_archive_preload_preview(
+    db,
+    manifest: Dict[str, Any],
+    *,
+    phase: Optional[str] = None,
+    folder_filter: Optional[str] = None,
+    selected_filenames: Optional[List[str]] = None,
+    dry_run: bool = True,
+) -> Dict[str, Any]:
+    archive_root = _resolve_archive_preload_root(manifest)
+    templates = _manifest_templates_for_phase(manifest, phase)
+
+    if selected_filenames:
+        selected = set(selected_filenames)
+        templates = [t for t in templates if t.get("filename") in selected]
+    if folder_filter:
+        templates = [t for t in templates if t.get("folder_path") == folder_filter]
+
+    preview_items = []
+    ready_count = 0
+    duplicate_count = 0
+    missing_source_count = 0
+    for template in templates:
+        filename = template.get("filename")
+        folder_path = template.get("folder_path")
+        file_hash = template.get("file_hash")
+        source_path = _resolve_archive_source_file(archive_root, folder_path, filename) if archive_root else None
+        duplicate_info = await _check_duplicate_template(db, filename, folder_path, file_hash)
+
+        import_status = "ready"
+        if duplicate_info:
+            import_status = "duplicate"
+            duplicate_count += 1
+        elif not source_path:
+            import_status = "missing_source"
+            missing_source_count += 1
+        else:
+            ready_count += 1
+
+        preview_items.append({
+            "filename": filename,
+            "folder_path": folder_path,
+            "original_folder_path": folder_path,
+            "detected_type": template.get("detected_type"),
+            "destination_section": template.get("destination_section"),
+            "confidence": template.get("confidence"),
+            "priority": template.get("priority", "MEDIUM"),
+            "import_status": import_status,
+            "duplicate_check": duplicate_info,
+            "file_size": template.get("file_size"),
+            "file_hash": file_hash,
+            "normalized_filename": _sanitize_filename(filename),
+            "clean_title": _normalize_archive_title(filename),
+            "source_exists": bool(source_path),
+            "source_path": str(source_path) if source_path else None,
+            "dry_run": dry_run,
+        })
+
+    return {
+        "dry_run": dry_run,
+        "archive_root": str(archive_root) if archive_root else manifest.get("archive_root"),
+        "source_root_available": bool(archive_root),
+        "total_templates": len(preview_items),
+        "ready": ready_count,
+        "pending": ready_count,
+        "skipped": duplicate_count,
+        "missing_source": missing_source_count,
+        "critical": len([t for t in preview_items if t["priority"] == "CRITICAL"]),
+        "high": len([t for t in preview_items if t["priority"] == "HIGH"]),
+        "preview_items": preview_items,
+    }
+
+
+async def _create_archive_preload_draft(
+    db,
+    *,
+    manifest_item: ArchiveImportManifestItem,
+    archive_root: Path,
+    user: dict,
+    now_iso: str,
+) -> Dict[str, Any]:
+    filename = manifest_item.filename
+    folder_path = manifest_item.folder_path
+    source_path = _resolve_archive_source_file(archive_root, folder_path, filename)
+    if not source_path:
+        raise FileNotFoundError(f"Archive source file not found: {folder_path} / {filename}")
+
+    file_bytes = source_path.read_bytes()
+    if not file_bytes:
+        raise ValueError(f"Archive source file is empty: {filename}")
+    if len(file_bytes) > 40 * 1024 * 1024:
+        raise ValueError(f"Archive source file exceeds 40MB limit: {filename}")
+
+    actual_hash = _hash_bytes_sha256(file_bytes)
+    if manifest_item.file_hash and manifest_item.file_hash != actual_hash:
+        raise ValueError(f"Archive source hash mismatch: {filename}")
+
+    lower_name = filename.lower()
+    if lower_name.endswith(".docx"):
+        extracted_text, extracted_metadata, detected_placeholders = _extract_docx_template_data(file_bytes)
+    elif lower_name.endswith(".pdf"):
+        extracted_text, extracted_metadata, detected_placeholders = _extract_pdf_template_data(file_bytes)
+    else:
+        raise ValueError(f"Unsupported archive file type: {filename}")
+
+    stored = await _store_imported_file(file_bytes, filename)
+    classification_result = _classify_document(filename=filename, text_sample=(extracted_text[:3000] if extracted_text else ""))
+    classification = classification_result.model_dump()
+    clean_title = _normalize_archive_title(filename)
+    normalized_filename = _sanitize_filename(filename)
+    suggested_destination_section = manifest_item.destination_section or (classification.get("suggested_destination_section") or {}).get("value")
+
+    template_id = str(uuid.uuid4())
+    version_id = str(uuid.uuid4())
+    review_period_months = int(classification_result.review_cycle_months.value)
+    review_date = _compute_review_date(now_iso[:10], review_period_months)
+    doc_code = _gen_doc_code(clean_title, classification_result.category.value)
+
+    template_doc = {
+        "id": template_id,
+        "doc_code": doc_code,
+        "title": clean_title,
+        "clean_title": clean_title,
+        "normalized_filename": normalized_filename,
+        "category": classification_result.category.value,
+        "document_type": classification_result.document_type.value,
+        "source_provider": "CQC Expert",
+        "owner_role": classification_result.admin_owner_role.value,
+        "review_period_months": review_period_months,
+        "current_version_id": version_id,
+        "status": "draft",
+        "workflow_area": classification_result.workflow_area.value,
+        "classification": classification,
+        "suggested_destination_section": suggested_destination_section,
+        "import_status": "pending_review",
+        "import_source": "archive_preload",
+        "import_phase": manifest_item.priority,
+        "archive_source": folder_path,
+        "archive_filename": filename,
+        "archive_hash": actual_hash,
+        "archive_detected_type": manifest_item.detected_type,
+        "original_filename": filename,
+        "original_folder_path": folder_path,
+        "imported_at": now_iso,
+        "imported_by": user["user_id"],
+        "created_by": user["user_id"],
+        "created_at": now_iso,
+        "updated_at": now_iso,
+    }
+
+    extracted_metadata = {
+        **(extracted_metadata or {}),
+        "source_type": "archive_preload",
+        "original_filename": filename,
+        "original_folder_path": folder_path,
+        "normalized_filename": normalized_filename,
+        "clean_title": clean_title,
+        "source_provider": "CQC Expert",
+    }
+
+    version_doc = {
+        "id": version_id,
+        "template_id": template_id,
+        "version": 1,
+        "original_filename": filename,
+        "original_folder_path": folder_path,
+        "normalized_filename": normalized_filename,
+        "storage_path": stored.get("storage_path"),
+        "storage_url": stored.get("public_url"),
+        "local_path": stored.get("local_path"),
+        "extracted_text": extracted_text,
+        "extracted_metadata": extracted_metadata,
+        "detected_placeholders": detected_placeholders,
+        "placeholder_map": _build_placeholder_map_from_detected(detected_placeholders),
+        "effective_date": now_iso[:10],
+        "review_date": review_date,
+        "published_at": None,
+        "published_by": None,
+        "status": "draft",
+        "created_at": now_iso,
+        "updated_at": now_iso,
+        "created_by": user["user_id"],
+    }
+
+    await db.document_templates.insert_one(template_doc)
+    await db.document_template_versions.insert_one(version_doc)
+
+    await _write_document_audit_event(
+        db=db,
+        actor_id=user["user_id"],
+        document_type="document_template",
+        document_id=template_id,
+        action="archive_preload_import",
+        before={},
+        after={
+            "doc_code": doc_code,
+            "title": clean_title,
+            "archive_source": folder_path,
+            "archive_filename": filename,
+            "import_status": "pending_review",
+        },
+        reason=f"Preloaded from local archive source (Phase: {manifest_item.priority})",
+    )
+
+    return {
+        "template_id": template_id,
+        "version_id": version_id,
+        "doc_code": doc_code,
+        "title": clean_title,
+    }
 
 
 def _hex_to_rgb_tuple(hex_text: str) -> Optional[Tuple[int, int, int]]:
@@ -2099,22 +2371,55 @@ async def list_document_audit_events(
 # ============================================================================
 
 def _load_import_manifest() -> Dict[str, Any]:
-    """Load IMPORT_MANIFEST.json from workspace root."""
-    try:
-        manifest_path = Path(__file__).resolve().parents[2] / "IMPORT_MANIFEST.json"
-        if manifest_path.exists():
-            import json
-            with open(manifest_path, 'r') as f:
-                return json.load(f)
-    except Exception as e:
-        logging.warning(f"Failed to load IMPORT_MANIFEST.json: {e}")
-    return {"archive_root": "", "total_templates": 0, "phases": {}}
+    """Load IMPORT_MANIFEST.json from repo root, backend root, or current runtime cwd."""
+    current_file = Path(__file__).resolve()
+    candidate_paths = [
+        current_file.parents[2] / "IMPORT_MANIFEST.json",
+        current_file.parents[1] / "IMPORT_MANIFEST.json",
+        Path.cwd() / "IMPORT_MANIFEST.json",
+        Path.cwd().parent / "IMPORT_MANIFEST.json",
+    ]
+
+    seen_paths = set()
+    for manifest_path in candidate_paths:
+        normalized_path = str(manifest_path.resolve()) if manifest_path.exists() else str(manifest_path)
+        if normalized_path in seen_paths:
+            continue
+        seen_paths.add(normalized_path)
+
+        try:
+            if manifest_path.exists():
+                import json
+                with open(manifest_path, "r", encoding="utf-8") as f:
+                    manifest = json.load(f)
+                manifest.setdefault("archive_root", "")
+                manifest.setdefault("total_templates", 0)
+                manifest.setdefault("phases", {})
+                manifest["manifest_available"] = bool(manifest.get("phases"))
+                manifest["message"] = "Manifest loaded" if manifest["manifest_available"] else "Manifest file is empty"
+                manifest["manifest_path"] = str(manifest_path)
+                return manifest
+        except Exception as e:
+            logging.warning(f"Failed to load IMPORT_MANIFEST.json from {manifest_path}: {e}")
+
+    return {
+        "archive_root": "",
+        "total_templates": 0,
+        "phases": {},
+        "templates": [],
+        "manifest_available": False,
+        "message": "Manifest not uploaded/configured",
+        "manifest_path": None,
+    }
 
 
 async def _check_duplicate_template(
     db, filename: str, folder_path: str, file_hash: str
 ) -> Optional[Dict[str, Any]]:
     """Check if template already exists (by filename, normalized title, or hash)."""
+    if db is None:
+        return None
+
     # Check by exact filename + folder path
     existing = await db.document_templates.find_one({
         "archive_filename": filename,
@@ -2165,18 +2470,21 @@ async def get_archive_import_manifest(
     Supports phase and folder filtering.
     """
     manifest = _load_import_manifest()
-    
+
     if not manifest.get("phases"):
-        raise HTTPException(status_code=404, detail="Import manifest not found or empty")
+        return {
+            "archive_root": manifest.get("archive_root", ""),
+            "total_templates": 0,
+            "templates": [],
+            "phase_selected": phase or "phase_1_critical+phase_2_high",
+            "folder_selected": folder,
+            "manifest_available": False,
+            "message": manifest.get("message") or "Manifest not uploaded/configured",
+            "manifest_path": manifest.get("manifest_path"),
+        }
     
     # Filter by phase if requested
-    if phase:
-        templates = manifest.get("phases", {}).get(phase, [])
-    else:
-        # Return Phase 1 + Phase 2 by default (Fast-Track)
-        phase1 = manifest.get("phases", {}).get("phase_1_critical", [])
-        phase2 = manifest.get("phases", {}).get("phase_2_high", [])
-        templates = phase1 + phase2
+    templates = _manifest_templates_for_phase(manifest, phase)
     
     # Filter by folder if requested
     if folder:
@@ -2199,10 +2507,14 @@ async def get_archive_import_manifest(
     
     return {
         "archive_root": manifest.get("archive_root"),
+        "source_root": str(_resolve_archive_preload_root(manifest)) if _resolve_archive_preload_root(manifest) else None,
         "total_templates": len(templates),
         "templates": templates,
         "phase_selected": phase or "phase_1_critical+phase_2_high",
         "folder_selected": folder,
+        "manifest_available": True,
+        "message": manifest.get("message") or "Manifest loaded",
+        "manifest_path": manifest.get("manifest_path"),
     }
 
 
@@ -2217,59 +2529,14 @@ async def preview_archive_batch_import(
     """
     db = get_db()
     manifest = _load_import_manifest()
-    
-    # Get templates from manifest
-    all_templates = []
-    for phase_key, phase_templates in manifest.get("phases", {}).items():
-        if body.phase and body.phase != phase_key:
-            continue
-        all_templates.extend(phase_templates)
-    
-    # Filter by selected filenames if specified
-    if body.templates:
-        all_templates = [t for t in all_templates if t.get("filename") in body.templates]
-    
-    # Filter by folder if specified
-    if body.folder_filter:
-        all_templates = [t for t in all_templates if t.get("folder_path") == body.folder_filter]
-    
-    preview_items = []
-    for template in all_templates:
-        filename = template.get("filename")
-        folder_path = template.get("folder_path")
-        file_hash = template.get("file_hash")
-        
-        # Check for duplicates
-        duplicate_info = await _check_duplicate_template(db, filename, folder_path, file_hash)
-        
-        preview_item = {
-            "filename": filename,
-            "folder_path": folder_path,
-            "detected_type": template.get("detected_type"),
-            "destination_section": template.get("destination_section"),
-            "confidence": template.get("confidence"),
-            "priority": template.get("priority", "MEDIUM"),
-            "import_status": "skipped" if duplicate_info else "pending",
-            "duplicate_check": duplicate_info,
-            "file_size": template.get("file_size"),
-            "file_hash": file_hash,
-        }
-        preview_items.append(preview_item)
-    
-    # Count by status and priority
-    pending_count = len([t for t in preview_items if t["import_status"] == "pending"])
-    skipped_count = len([t for t in preview_items if t["import_status"] == "skipped"])
-    critical_count = len([t for t in preview_items if t["priority"] == "CRITICAL"])
-    high_count = len([t for t in preview_items if t["priority"] == "HIGH"])
-    
-    return {
-        "total_templates": len(preview_items),
-        "pending": pending_count,
-        "skipped": skipped_count,
-        "critical": critical_count,
-        "high": high_count,
-        "preview_items": preview_items,
-    }
+    return await _build_archive_preload_preview(
+        db,
+        manifest,
+        phase=body.phase,
+        folder_filter=body.folder_filter,
+        selected_filenames=body.templates,
+        dry_run=body.dry_run,
+    )
 
 
 @router.post("/document-templates/archive/batch-import")
@@ -2293,7 +2560,9 @@ async def batch_import_from_archive(
     now_iso = _utc_now_iso()
     
     manifest = _load_import_manifest()
-    archive_root = manifest.get("archive_root")
+    archive_root = _resolve_archive_preload_root(manifest)
+    if not archive_root:
+        raise HTTPException(status_code=404, detail="Local archive preload source not found")
     
     imported_ids = []
     skipped_items = []
@@ -2318,99 +2587,14 @@ async def batch_import_from_archive(
                 })
                 continue
             
-            # Create template record with import metadata
-            template_id = str(uuid.uuid4())
-            version_id = str(uuid.uuid4())
-            
-            # Build title from filename
-            title = filename.replace(".docx", "").replace(".pdf", "").replace("_", " ")
-            title = re.sub(r"\s+", " ", title).title()
-            
-            # Generate doc code
-            doc_code = _gen_doc_code(title, detected_type)
-            
-            # Classify based on archive metadata
-            classification = _classify_document(filename, "")  # Use filename-only for now
-            
-            # Create template doc with import status
-            template_doc = {
-                "id": template_id,
-                "doc_code": doc_code,
-                "title": title,
-                "category": classification.category.value,
-                "document_type": classification.document_type.value,
-                "source_provider": "Archive Migration",
-                "owner_role": classification.admin_owner_role.value,
-                "review_period_months": int(classification.review_cycle_months.value),
-                "current_version_id": version_id,
-                "status": "draft",
-                "workflow_area": classification.workflow_area.value,
-                "classification": classification.model_dump(),
-                "suggested_destination_section": destination_section,
-                # Import metadata for tracking
-                "import_status": "pending",
-                "import_source": "archive_migration",
-                "import_phase": priority,
-                "archive_source": folder_path,
-                "archive_filename": filename,
-                "archive_hash": file_hash,
-                "archive_detected_type": detected_type,
-                "imported_at": now_iso,
-                "imported_by": user["user_id"],
-                "created_by": user["user_id"],
-                "created_at": now_iso,
-                "updated_at": now_iso,
-            }
-            
-            # Create version doc
-            version_doc = {
-                "id": version_id,
-                "template_id": template_id,
-                "version": 1,
-                "original_filename": filename,
-                "storage_path": None,  # Will be populated if file is retrieved from archive
-                "storage_url": None,
-                "local_path": None,
-                "extracted_text": "",  # Will be extracted on-demand from archive
-                "extracted_metadata": {
-                    "source_type": "archive",
-                    "archive_folder": folder_path,
-                    "archive_filename": filename,
-                    "detected_type": detected_type,
-                },
-                "detected_placeholders": [],
-                "placeholder_map": {},
-                "effective_date": now_iso[:10],
-                "review_date": _compute_review_date(now_iso[:10], int(classification.review_cycle_months.value)),
-                "published_at": None,
-                "published_by": None,
-                "status": "draft",
-                "created_at": now_iso,
-                "updated_at": now_iso,
-                "created_by": user["user_id"],
-            }
-            
-            await db.document_templates.insert_one(template_doc)
-            await db.document_template_versions.insert_one(version_doc)
-            
-            await _write_document_audit_event(
-                db=db,
-                actor_id=user["user_id"],
-                document_type="document_template",
-                document_id=template_id,
-                action="archive_import_batch",
-                before={},
-                after={
-                    "doc_code": doc_code,
-                    "title": title,
-                    "archive_source": folder_path,
-                    "archive_filename": filename,
-                    "import_status": "pending",
-                },
-                reason=f"Imported from archive migration batch (Phase: {priority})",
+            created = await _create_archive_preload_draft(
+                db,
+                manifest_item=manifest_item,
+                archive_root=archive_root,
+                user=user,
+                now_iso=now_iso,
             )
-            
-            imported_ids.append(template_id)
+            imported_ids.append(created["template_id"])
             
         except Exception as e:
             failed_items.append({
@@ -2421,7 +2605,7 @@ async def batch_import_from_archive(
     
     await log_audit_action(
         user["user_id"],
-        "batch_import_archive",
+        "batch_import_archive_preload",
         "document_template",
         "batch",
         {
@@ -2432,7 +2616,7 @@ async def batch_import_from_archive(
     )
     
     return {
-        "message": "Batch import completed",
+        "message": "Archive preload completed",
         "imported_count": len(imported_ids),
         "imported_template_ids": imported_ids,
         "skipped_count": len(skipped_items),
@@ -2451,7 +2635,7 @@ async def get_archive_import_status(
     
     pending_imports = await db.document_templates.find(
         {
-            "import_status": {"$in": ["pending", "needs_review"]},
+            "import_status": {"$in": ["pending", "needs_review", "pending_review"]},
         },
         {"_id": 0}
     ).sort("imported_at", -1).to_list(1000)

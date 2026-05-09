@@ -175,10 +175,10 @@ export default function DocumentTemplateLibraryPage() {
 
   // Filtering
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterCategory, setFilterCategory] = useState('');
-  const [filterWorkflow, setFilterWorkflow] = useState('');
-  const [filterStatus, setFilterStatus] = useState('');
-  const [filterProvider, setFilterProvider] = useState('');
+  const [filterCategory, setFilterCategory] = useState('all');
+  const [filterWorkflow, setFilterWorkflow] = useState('all');
+  const [filterStatus, setFilterStatus] = useState('all');
+  const [filterProvider, setFilterProvider] = useState('all');
 
   // Placeholder mapping
   const [manualPlaceholder, setManualPlaceholder] = useState('');
@@ -233,16 +233,16 @@ export default function DocumentTemplateLibraryPage() {
       );
     }
     
-    if (filterCategory) {
+    if (filterCategory && filterCategory !== 'all') {
       filtered = filtered.filter(t => t.category === filterCategory);
     }
-    if (filterWorkflow) {
+    if (filterWorkflow && filterWorkflow !== 'all') {
       filtered = filtered.filter(t => t.workflow_area === filterWorkflow);
     }
-    if (filterStatus) {
+    if (filterStatus && filterStatus !== 'all') {
       filtered = filtered.filter(t => t.status === filterStatus);
     }
-    if (filterProvider) {
+    if (filterProvider && filterProvider !== 'all') {
       filtered = filtered.filter(t => t.source_provider === filterProvider);
     }
     
@@ -838,7 +838,7 @@ export default function DocumentTemplateLibraryPage() {
                     <SelectValue placeholder="Category" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">All Categories</SelectItem>
+                    <SelectItem value="all">All Categories</SelectItem>
                     {CATEGORIES.map((cat) => (
                       <SelectItem key={cat} value={cat}>{cat}</SelectItem>
                     ))}
@@ -850,7 +850,7 @@ export default function DocumentTemplateLibraryPage() {
                     <SelectValue placeholder="Workflow" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">All Workflows</SelectItem>
+                    <SelectItem value="all">All Workflows</SelectItem>
                     {WORKFLOW_AREAS.map((item) => (
                       <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>
                     ))}
@@ -862,7 +862,7 @@ export default function DocumentTemplateLibraryPage() {
                     <SelectValue placeholder="Status" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">All Statuses</SelectItem>
+                    <SelectItem value="all">All Statuses</SelectItem>
                     <SelectItem value="draft">Draft</SelectItem>
                     <SelectItem value="published">Published</SelectItem>
                     <SelectItem value="archived">Archived</SelectItem>
@@ -875,7 +875,7 @@ export default function DocumentTemplateLibraryPage() {
                       <SelectValue placeholder="Provider" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">All Providers</SelectItem>
+                      <SelectItem value="all">All Providers</SelectItem>
                       {[...new Set(templates.map(t => t.source_provider))].map((prov) => (
                         <SelectItem key={prov} value={prov}>{prov}</SelectItem>
                       ))}

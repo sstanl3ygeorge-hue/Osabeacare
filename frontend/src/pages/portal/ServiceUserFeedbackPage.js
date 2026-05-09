@@ -58,6 +58,19 @@ const RATING_LABELS = {
   5: 'Excellent'
 };
 
+const getServiceUserDisplayName = (serviceUser) => {
+  if (!serviceUser) return '';
+  if (serviceUser.full_name && String(serviceUser.full_name).trim()) {
+    return String(serviceUser.full_name).trim();
+  }
+  const first = String(serviceUser.first_name || '').trim();
+  const last = String(serviceUser.last_name || '').trim();
+  const combined = `${first} ${last}`.trim();
+  if (combined) return combined;
+  if (serviceUser.service_user_code) return String(serviceUser.service_user_code);
+  return String(serviceUser.id || 'Unknown Service User');
+};
+
 const ServiceUserFeedbackPage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const serviceUserIdFilter = searchParams.get('service_user_id') || '';
@@ -239,10 +252,11 @@ const ServiceUserFeedbackPage = () => {
                     value={newFeedback.service_user_id} 
                     onValueChange={(v) => {
                       const su = serviceUsers.find(s => s.id === v);
+                      const selectedName = getServiceUserDisplayName(su);
                       setNewFeedback({
                         ...newFeedback, 
                         service_user_id: v,
-                        service_user_name: su ? `${su.first_name} ${su.last_name}` : ''
+                        service_user_name: selectedName
                       });
                     }}
                   >
@@ -252,7 +266,7 @@ const ServiceUserFeedbackPage = () => {
                     <SelectContent>
                       {serviceUsers.map(su => (
                         <SelectItem key={su.id} value={su.id}>
-                          {su.first_name} {su.last_name}
+                          {getServiceUserDisplayName(su)}
                         </SelectItem>
                       ))}
                     </SelectContent>

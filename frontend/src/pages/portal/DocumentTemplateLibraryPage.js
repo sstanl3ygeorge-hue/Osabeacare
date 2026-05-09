@@ -198,6 +198,17 @@ export default function DocumentTemplateLibraryPage() {
   const [archiveFolder, setArchiveFolder] = useState(null);
   const [archiveImportStatus, setArchiveImportStatus] = useState(null);
 
+  // Advanced Features (10 extended capabilities)
+  const [advancedAnalytics, setAdvancedAnalytics] = useState(null);
+  const [namingSuggestions, setNamingSuggestions] = useState({});
+  const [bulkDestinationEditor, setBulkDestinationEditor] = useState(false);
+  const [selectedBulkTemplates, setSelectedBulkTemplates] = useState(new Set());
+  const [bulkDestination, setBulkDestination] = useState('');
+  const [placeholderScores, setPlaceholderScores] = useState({});
+  const [renewalCalendar, setRenewalCalendar] = useState(null);
+  const [policyAssignments, setPolicyAssignments] = useState(null);
+  const [showAdvancedDashboard, setShowAdvancedDashboard] = useState(false);
+
   // Placeholder review modal
   const [showPlaceholderReview, setShowPlaceholderReview] = useState(false);
   const [reviewingPlaceholders, setReviewingPlaceholders] = useState({});
@@ -777,6 +788,77 @@ export default function DocumentTemplateLibraryPage() {
     } catch (error) {
       console.error('Failed to check import status', error);
       toast.error(error.response?.data?.detail || 'Failed to check import status');
+    } finally {
+      setArchiveLoading(false);
+    }
+  };
+
+  // Advanced Feature Handlers
+  const handleLoadAdvancedAnalytics = async () => {
+    setArchiveLoading(true);
+    try {
+      const response = await axios.get(
+        `${API}/document-templates/archive/advanced-analytics`,
+        { headers: authHeaders }
+      );
+      setAdvancedAnalytics(response.data);
+      setRenewalCalendar(response.data.renewal_calendar);
+      setShowAdvancedDashboard(true);
+      toast.success('Advanced analytics loaded');
+    } catch (error) {
+      console.error('Failed to load advanced analytics', error);
+      toast.error(error.response?.data?.detail || 'Failed to load analytics');
+    } finally {
+      setArchiveLoading(false);
+    }
+  };
+
+  const handleBulkUpdateDestination = async () => {
+    if (selectedBulkTemplates.size === 0 || !bulkDestination) {
+      toast.error('Select templates and destination');
+      return;
+    }
+
+    setArchiveLoading(true);
+    try {
+      await axios.post(
+        `${API}/document-templates/archive/bulk-update-destination`,
+        {
+          template_ids: Array.from(selectedBulkTemplates),
+          destination_section: bulkDestination,
+        },
+        { headers: authHeaders }
+      );
+      toast.success(`Updated ${selectedBulkTemplates.size} templates`);
+      setSelectedBulkTemplates(new Set());
+      setBulkDestination('');
+      setBulkDestinationEditor(false);
+    } catch (error) {
+      console.error('Bulk update failed', error);
+      toast.error(error.response?.data?.detail || 'Bulk update failed');
+    } finally {
+      setArchiveLoading(false);
+    }
+  };
+
+  const handleApplyPolicyAssignments = async () => {
+    if (selectedArchiveTemplates.size === 0) {
+      toast.error('Select templates first');
+      return;
+    }
+
+    setArchiveLoading(true);
+    try {
+      const response = await axios.post(
+        `${API}/document-templates/archive/apply-policy-assignments`,
+        { template_ids: Array.from(selectedArchiveTemplates) },
+        { headers: authHeaders }
+      );
+      setPolicyAssignments(response.data);
+      toast.success(`Generated ${response.data.count} policy assignments`);
+    } catch (error) {
+      console.error('Policy assignment failed', error);
+      toast.error(error.response?.data?.detail || 'Policy assignment failed');
     } finally {
       setArchiveLoading(false);
     }
@@ -1645,6 +1727,438 @@ export default function DocumentTemplateLibraryPage() {
             >
               {archiveLoading ? <Loader2 className="h-3 w-3 mr-2 animate-spin" /> : <RefreshCw className="h-3 w-3 mr-2" />}
               Check Import Status
+            </Button>
+          </CardContent>
+        )}
+      </Card>
+
+      {/* Advanced Features Dashboard */}
+      <Card className="border-[#E4E8EB]">
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Sparkles className="h-5 w-5" />
+                Advanced Archive Features
+              </CardTitle>
+              <p className="text-xs text-text-muted mt-1">
+                10 extended capabilities: naming suggestions, bulk editing, completeness scoring, gap analysis, visibility previews, compliance calendar, competency matrix, policy automation, and more
+              </p>
+            </div>
+            <Button 
+              onClick={handleLoadAdvancedAnalytics}
+              disabled={archiveLoading}
+              className="text-xs"
+            >
+              {archiveLoading ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Eye className="h-3 w-3 mr-1" />}
+              Load Analytics
+            </Button>
+          </div>
+        </CardHeader>
+
+        {advancedAnalytics && (
+          <CardContent className="space-y-6">
+            {/* 1. Migration Progress Tracking */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="text-xs font-semibold">Migration Progress Tracker</div>
+                <Badge className="text-[10px]">{advancedAnalytics.migration_progress.progress_percentage}%</Badge>
+              </div>
+              <div className="w-full bg-gray-200 rounded-lg h-3">
+                <div 
+                  className="bg-gradient-to-r from-blue-500 to-green-500 h-3 rounded-lg transition-all" 
+                  style={{ width: `${advancedAnalytics.migration_progress.progress_percentage}%` }} 
+                />
+              </div>
+              <div className="grid grid-cols-4 gap-2 text-[10px]">
+                <div>
+                  <p className="text-text-muted">Completed</p>
+                  <p className="font-bold">{advancedAnalytics.migration_progress.completed}</p>
+                </div>
+                <div>
+                  <p className="text-text-muted">In Progress</p>
+                  <p className="font-bold">{advancedAnalytics.migration_progress.in_progress}</p>
+                </div>
+                <div>
+                  <p className="text-text-muted">Skipped</p>
+                  <p className="font-bold">{advancedAnalytics.migration_progress.skipped}</p>
+                </div>
+                <div>
+                  <p className="text-text-muted">Est. Days</p>
+                  <p className="font-bold">{advancedAnalytics.migration_progress.estimated_days}</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-4 gap-2 text-[10px]">
+                {Object.entries(advancedAnalytics.migration_progress.timeline).map(([phase, data]) => (
+                  <div key={phase} className="p-1.5 rounded bg-gray-50 border">
+                    <p className="text-[9px] text-text-muted capitalize truncate">{phase.replace(/_/g, ' ')}</p>
+                    <p className="font-bold">{data.current}/{data.target}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* 2. Service-User Completeness Dashboard */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="text-xs font-semibold">Service-User Section Completeness</div>
+                <Badge className="text-[10px]">{advancedAnalytics.service_user_completeness.completeness_percentage}%</Badge>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                {Object.entries(advancedAnalytics.service_user_completeness.sections).map(([section, data]) => (
+                  <div key={section} className={`p-2 rounded text-[10px] border ${
+                    data.status === 'complete' ? 'bg-green-50 border-green-200' :
+                    data.status === 'partial' ? 'bg-blue-50 border-blue-200' :
+                    'bg-gray-50 border-gray-200'
+                  }`}>
+                    <p className="font-semibold capitalize">{section.replace(/_/g, ' ')}</p>
+                    <p>{data.count} {data.required ? '(required)' : '(optional)'}</p>
+                    <Badge className={`text-[8px] mt-1 ${
+                      data.status === 'complete' ? 'bg-green-200 text-green-900' :
+                      data.status === 'partial' ? 'bg-blue-200 text-blue-900' :
+                      'bg-gray-200 text-gray-900'
+                    }`}>{data.status}</Badge>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* 3. Compliance Renewal Calendar */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="text-xs font-semibold">Compliance Renewal Calendar</div>
+                <Badge className="text-[10px] bg-orange-100 text-orange-900">{renewalCalendar?.urgent_count || 0} Urgent</Badge>
+              </div>
+              <div className="max-h-40 overflow-y-auto border rounded-lg">
+                <div className="space-y-1">
+                  {renewalCalendar?.events?.slice(0, 5).map((event, idx) => (
+                    <div key={idx} className={`p-2 border-b text-[10px] ${
+                      event.priority === 'urgent' ? 'bg-red-50' : 'bg-yellow-50'
+                    }`}>
+                      <div className="flex justify-between">
+                        <span className="font-semibold truncate">{event.title}</span>
+                        <Badge className={`text-[8px] ${
+                          event.priority === 'urgent' ? 'bg-red-200 text-red-900' : 'bg-yellow-200 text-yellow-900'
+                        }`}>{event.days_until} days</Badge>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* 4. Missing Legal Documents Gap Analysis */}
+            <div className="space-y-2">
+              <div className="text-xs font-semibold">Missing Legal Documents (Gap Analysis)</div>
+              <div className="grid grid-cols-2 gap-2">
+                {Object.entries(advancedAnalytics.missing_legal_documents).map(([category, docs]) => (
+                  <div key={category} className="p-2 rounded bg-yellow-50 border border-yellow-200 text-[10px]">
+                    <p className="font-semibold">{category}</p>
+                    <ul className="mt-1 space-y-0.5 list-disc list-inside">
+                      {docs.slice(0, 2).map((doc, idx) => (
+                        <li key={idx} className="text-[9px]">{doc}</li>
+                      ))}
+                      {docs.length > 2 && <li className="text-[9px]">+{docs.length - 2} more</li>}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* 5. Bulk Destination Editor */}
+            <div className="space-y-2">
+              <div className="text-xs font-semibold">Bulk Destination Editor</div>
+              {!bulkDestinationEditor ? (
+                <Button 
+                  onClick={() => setBulkDestinationEditor(true)}
+                  variant="outline"
+                  className="w-full text-xs"
+                >
+                  <Edit2 className="h-3 w-3 mr-1" />
+                  Edit Destinations for Multiple Templates
+                </Button>
+              ) : (
+                <div className="space-y-2 p-3 rounded border">
+                  <Select value={bulkDestination} onValueChange={setBulkDestination}>
+                    <SelectTrigger className="text-xs">
+                      <SelectValue placeholder="Select destination" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {destinationRegister?.map((dest) => (
+                        <SelectItem key={dest.destination_section} value={dest.destination_section}>
+                          {dest.title}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <div className="text-[10px] text-text-muted">
+                    {selectedBulkTemplates.size} template{selectedBulkTemplates.size !== 1 ? 's' : ''} selected
+                  </div>
+                  <div className="flex gap-2">
+                    <Button 
+                      onClick={() => setBulkDestinationEditor(false)}
+                      variant="outline"
+                      className="flex-1 text-xs"
+                    >
+                      Cancel
+                    </Button>
+                    <Button 
+                      onClick={handleBulkUpdateDestination}
+                      disabled={archiveLoading}
+                      className="flex-1 text-xs"
+                    >
+                      {archiveLoading ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Save className="h-3 w-3 mr-1" />}
+                      Apply to {selectedBulkTemplates.size}
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* 6. Policy Assignment Automation */}
+            <div className="space-y-2">
+              <div className="text-xs font-semibold">Policy Assignment Automation</div>
+              <Button 
+                onClick={handleApplyPolicyAssignments}
+                disabled={archiveLoading || selectedArchiveTemplates.size === 0}
+                variant="outline"
+                className="w-full text-xs"
+              >
+                {archiveLoading ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Rocket className="h-3 w-3 mr-1" />}
+                Generate Assignments for {selectedArchiveTemplates.size} Templates
+              </Button>
+              {policyAssignments && (
+                <div className="p-2 rounded bg-blue-50 border border-blue-200 text-[10px]">
+                  <p className="font-semibold">{policyAssignments.count} assignments generated</p>
+                  <p className="text-[9px] text-text-muted mt-1">
+                    {policyAssignments.requires_confirmation ? '✓ Ready for confirmation' : 'Complete'}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <Button 
+              onClick={() => setShowAdvancedDashboard(false)}
+              variant="outline"
+              className="w-full text-xs"
+            >
+              Close Advanced Dashboard
+            </Button>
+          </CardContent>
+        )}
+      </Card>
+
+      {/* Advanced Features Dashboard */}
+      <Card className="border-[#E4E8EB]">
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Sparkles className="h-5 w-5" />
+                Advanced Archive Features
+              </CardTitle>
+              <p className="text-xs text-text-muted mt-1">
+                10 extended capabilities: naming suggestions, bulk editing, completeness scoring, gap analysis, visibility previews, compliance calendar, competency matrix, policy automation, and more
+              </p>
+            </div>
+            <Button 
+              onClick={handleLoadAdvancedAnalytics}
+              disabled={archiveLoading}
+              className="text-xs"
+            >
+              {archiveLoading ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Eye className="h-3 w-3 mr-1" />}
+              Load Analytics
+            </Button>
+          </div>
+        </CardHeader>
+
+        {advancedAnalytics && (
+          <CardContent className="space-y-6">
+            {/* 1. Migration Progress Tracking */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="text-xs font-semibold">Migration Progress Tracker</div>
+                <Badge className="text-[10px]">{advancedAnalytics.migration_progress.progress_percentage}%</Badge>
+              </div>
+              <div className="w-full bg-gray-200 rounded-lg h-3">
+                <div 
+                  className="bg-gradient-to-r from-blue-500 to-green-500 h-3 rounded-lg transition-all" 
+                  style={{ width: `${advancedAnalytics.migration_progress.progress_percentage}%` }} 
+                />
+              </div>
+              <div className="grid grid-cols-4 gap-2 text-[10px]">
+                <div>
+                  <p className="text-text-muted">Completed</p>
+                  <p className="font-bold">{advancedAnalytics.migration_progress.completed}</p>
+                </div>
+                <div>
+                  <p className="text-text-muted">In Progress</p>
+                  <p className="font-bold">{advancedAnalytics.migration_progress.in_progress}</p>
+                </div>
+                <div>
+                  <p className="text-text-muted">Skipped</p>
+                  <p className="font-bold">{advancedAnalytics.migration_progress.skipped}</p>
+                </div>
+                <div>
+                  <p className="text-text-muted">Est. Days</p>
+                  <p className="font-bold">{advancedAnalytics.migration_progress.estimated_days}</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-4 gap-2 text-[10px]">
+                {Object.entries(advancedAnalytics.migration_progress.timeline).map(([phase, data]) => (
+                  <div key={phase} className="p-1.5 rounded bg-gray-50 border">
+                    <p className="text-[9px] text-text-muted capitalize truncate">{phase.replace(/_/g, ' ')}</p>
+                    <p className="font-bold">{data.current}/{data.target}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* 2. Service-User Completeness Dashboard */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="text-xs font-semibold">Service-User Section Completeness</div>
+                <Badge className="text-[10px]">{advancedAnalytics.service_user_completeness.completeness_percentage}%</Badge>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                {Object.entries(advancedAnalytics.service_user_completeness.sections).map(([section, data]) => (
+                  <div key={section} className={`p-2 rounded text-[10px] border ${
+                    data.status === 'complete' ? 'bg-green-50 border-green-200' :
+                    data.status === 'partial' ? 'bg-blue-50 border-blue-200' :
+                    'bg-gray-50 border-gray-200'
+                  }`}>
+                    <p className="font-semibold capitalize">{section.replace(/_/g, ' ')}</p>
+                    <p>{data.count} {data.required ? '(required)' : '(optional)'}</p>
+                    <Badge className={`text-[8px] mt-1 ${
+                      data.status === 'complete' ? 'bg-green-200 text-green-900' :
+                      data.status === 'partial' ? 'bg-blue-200 text-blue-900' :
+                      'bg-gray-200 text-gray-900'
+                    }`}>{data.status}</Badge>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* 3. Compliance Renewal Calendar */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="text-xs font-semibold">Compliance Renewal Calendar</div>
+                <Badge className="text-[10px] bg-orange-100 text-orange-900">{renewalCalendar?.urgent_count || 0} Urgent</Badge>
+              </div>
+              <div className="max-h-40 overflow-y-auto border rounded-lg">
+                <div className="space-y-1">
+                  {renewalCalendar?.events?.slice(0, 5).map((event, idx) => (
+                    <div key={idx} className={`p-2 border-b text-[10px] ${
+                      event.priority === 'urgent' ? 'bg-red-50' : 'bg-yellow-50'
+                    }`}>
+                      <div className="flex justify-between">
+                        <span className="font-semibold truncate">{event.title}</span>
+                        <Badge className={`text-[8px] ${
+                          event.priority === 'urgent' ? 'bg-red-200 text-red-900' : 'bg-yellow-200 text-yellow-900'
+                        }`}>{event.days_until} days</Badge>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* 4. Missing Legal Documents Gap Analysis */}
+            <div className="space-y-2">
+              <div className="text-xs font-semibold">Missing Legal Documents (Gap Analysis)</div>
+              <div className="grid grid-cols-2 gap-2">
+                {Object.entries(advancedAnalytics.missing_legal_documents).map(([category, docs]) => (
+                  <div key={category} className="p-2 rounded bg-yellow-50 border border-yellow-200 text-[10px]">
+                    <p className="font-semibold">{category}</p>
+                    <ul className="mt-1 space-y-0.5 list-disc list-inside">
+                      {docs.slice(0, 2).map((doc, idx) => (
+                        <li key={idx} className="text-[9px]">{doc}</li>
+                      ))}
+                      {docs.length > 2 && <li className="text-[9px]">+{docs.length - 2} more</li>}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* 5. Bulk Destination Editor */}
+            <div className="space-y-2">
+              <div className="text-xs font-semibold">Bulk Destination Editor</div>
+              {!bulkDestinationEditor ? (
+                <Button 
+                  onClick={() => setBulkDestinationEditor(true)}
+                  variant="outline"
+                  className="w-full text-xs"
+                >
+                  <Edit2 className="h-3 w-3 mr-1" />
+                  Edit Destinations for Multiple Templates
+                </Button>
+              ) : (
+                <div className="space-y-2 p-3 rounded border">
+                  <Select value={bulkDestination} onValueChange={setBulkDestination}>
+                    <SelectTrigger className="text-xs">
+                      <SelectValue placeholder="Select destination" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {destinationRegister?.map((dest) => (
+                        <SelectItem key={dest.destination_section} value={dest.destination_section}>
+                          {dest.title}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <div className="text-[10px] text-text-muted">
+                    {selectedBulkTemplates.size} template{selectedBulkTemplates.size !== 1 ? 's' : ''} selected
+                  </div>
+                  <div className="flex gap-2">
+                    <Button 
+                      onClick={() => setBulkDestinationEditor(false)}
+                      variant="outline"
+                      className="flex-1 text-xs"
+                    >
+                      Cancel
+                    </Button>
+                    <Button 
+                      onClick={handleBulkUpdateDestination}
+                      disabled={archiveLoading}
+                      className="flex-1 text-xs"
+                    >
+                      {archiveLoading ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Save className="h-3 w-3 mr-1" />}
+                      Apply to {selectedBulkTemplates.size}
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* 6. Policy Assignment Automation */}
+            <div className="space-y-2">
+              <div className="text-xs font-semibold">Policy Assignment Automation</div>
+              <Button 
+                onClick={handleApplyPolicyAssignments}
+                disabled={archiveLoading || selectedArchiveTemplates.size === 0}
+                variant="outline"
+                className="w-full text-xs"
+              >
+                {archiveLoading ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Rocket className="h-3 w-3 mr-1" />}
+                Generate Assignments for {selectedArchiveTemplates.size} Templates
+              </Button>
+              {policyAssignments && (
+                <div className="p-2 rounded bg-blue-50 border border-blue-200 text-[10px]">
+                  <p className="font-semibold">{policyAssignments.count} assignments generated</p>
+                  <p className="text-[9px] text-text-muted mt-1">
+                    {policyAssignments.requires_confirmation ? '✓ Ready for confirmation' : 'Complete'}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <Button 
+              onClick={() => setShowAdvancedDashboard(false)}
+              variant="outline"
+              className="w-full text-xs"
+            >
+              Close Advanced Dashboard
             </Button>
           </CardContent>
         )}

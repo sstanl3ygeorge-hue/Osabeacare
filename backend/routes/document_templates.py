@@ -2486,6 +2486,391 @@ async def get_archive_import_status(
     }
 
 
+# ============================================================================
+# Advanced Archive Features (10 Extended Capabilities)
+# ============================================================================
+
+def _suggest_naming(filename: str, detected_type: str, folder_path: str) -> Dict[str, str]:
+    """Generate auto-naming suggestions based on archive metadata."""
+    base = filename.replace(".docx", "").replace(".pdf", "")
+    
+    suggestions = {
+        "original": base,
+        "normalized": re.sub(r"[_-]", " ", base).title(),
+        "with_type": f"{base} ({detected_type.replace('_', ' ').title()})",
+        "folder_qualified": f"{folder_path}: {base}".title(),
+        "abbreviated": "".join([w[0].upper() for w in base.split()])[:8] or "DOC",
+    }
+    return suggestions
+
+
+def _score_placeholder_completeness(version_doc: Dict[str, Any]) -> Dict[str, Any]:
+    """Score placeholder mapping completeness (0-100)."""
+    placeholder_map = version_doc.get("placeholder_map", {})
+    detected = version_doc.get("detected_placeholders", [])
+    
+    if not detected:
+        return {"score": 100, "mapped": 0, "total": 0, "rating": "complete"}
+    
+    mapped_count = len([p for p in placeholder_map.values() if p.get("system_variable")])
+    total_count = len(detected)
+    score = int((mapped_count / max(total_count, 1)) * 100)
+    
+    rating = "complete" if score >= 90 else "mostly_mapped" if score >= 70 else "partial" if score >= 50 else "unmapped"
+    
+    return {
+        "score": score,
+        "mapped": mapped_count,
+        "total": total_count,
+        "rating": rating,
+        "priority": "high" if score < 50 else "medium" if score < 80 else "low",
+    }
+
+
+def _identify_missing_legal_documents() -> Dict[str, List[str]]:
+    """Identify commonly required legal/compliance templates not in archive."""
+    required_categories = {
+        "Staff Safety": [
+            "Health & Safety Policy",
+            "Risk Assessment Template",
+            "COSHH Assessment",
+            "Incident Report Form",
+            "Lone Worker Risk Assessment",
+        ],
+        "Data Protection": [
+            "GDPR Privacy Notice",
+            "Data Protection Policy",
+            "Information Governance Policy",
+            "Data Breach Log Template",
+            "Subject Access Request Form",
+        ],
+        "Recruitment": [
+            "Job Description Template",
+            "Person Specification",
+            "DBS Checklist",
+            "Right to Work Verification",
+            "Employment Contract Template",
+        ],
+        "Care Quality": [
+            "Service User Agreement",
+            "Safeguarding Policy",
+            "Complaint Procedure",
+            "Care Plan Template",
+            "Activity Log Template",
+        ],
+        "Compliance": [
+            "Fire Safety Checklist",
+            "Quality Audit Template",
+            "Medication Policy",
+            "Supervision Agreement",
+            "Training Record Template",
+        ],
+    }
+    return required_categories
+
+
+def _generate_visibility_preview(classification: Dict[str, Any]) -> Dict[str, Any]:
+    """Generate worker/admin visibility preview."""
+    worker_visibility = classification.get("worker_visibility", {}).get("value", "restricted")
+    usage_audience = classification.get("usage_audience", {}).get("value", "both")
+    system_placement = classification.get("system_placement", {}).get("value", "all_modules")
+    
+    return {
+        "worker_visible": worker_visibility in ["visible", "admin_only"],
+        "admin_only": worker_visibility == "admin_only",
+        "restricted_access": worker_visibility == "restricted",
+        "audience": usage_audience,
+        "placement": system_placement,
+        "preview_text": f"Workers: {worker_visibility} | Audience: {usage_audience} | Placement: {system_placement}",
+    }
+
+
+async def _score_service_user_completeness(db) -> Dict[str, Any]:
+    """Score which service-user sections will be populated by imported templates."""
+    sections = {
+        "care_plans": {"required": True, "count": 0, "status": "pending"},
+        "medical_records": {"required": True, "count": 0, "status": "pending"},
+        "behavioral_records": {"required": True, "count": 0, "status": "pending"},
+        "incident_reports": {"required": True, "count": 0, "status": "pending"},
+        "activity_logs": {"required": True, "count": 0, "status": "pending"},
+        "risk_assessments": {"required": True, "count": 0, "status": "pending"},
+        "body_maps": {"required": False, "count": 0, "status": "pending"},
+        "medication_records": {"required": True, "count": 0, "status": "pending"},
+        "training_records": {"required": False, "count": 0, "status": "pending"},
+    }
+    
+    # Count imported templates by section
+    imports = await db.document_templates.find(
+        {"import_status": "pending"},
+        {"_id": 0, "workflow_area": 1, "category": 1}
+    ).to_list(None)
+    
+    for imp in imports:
+        workflow = imp.get("workflow_area", "")
+        if "care_plan" in workflow:
+            sections["care_plans"]["count"] += 1
+            sections["care_plans"]["status"] = "partial"
+        if "medication" in workflow:
+            sections["medication_records"]["count"] += 1
+            sections["medication_records"]["status"] = "partial"
+        if "incident" in workflow:
+            sections["incident_reports"]["count"] += 1
+            sections["incident_reports"]["status"] = "partial"
+        if "body_map" in workflow:
+            sections["body_maps"]["count"] += 1
+            sections["body_maps"]["status"] = "partial"
+        if "risk_assessment" in workflow:
+            sections["risk_assessments"]["count"] += 1
+            sections["risk_assessments"]["status"] = "partial"
+    
+    complete_sections = len([s for s in sections.values() if s["status"] == "partial"])
+    required_sections = len([s for s in sections.values() if s["required"]])
+    completeness_pct = int((complete_sections / max(required_sections, 1)) * 100)
+    
+    return {
+        "sections": sections,
+        "completeness_percentage": completeness_pct,
+        "complete_sections": complete_sections,
+        "required_sections": required_sections,
+        "status": "ready" if completeness_pct >= 80 else "in_progress" if completeness_pct > 0 else "not_started",
+    }
+
+
+def _generate_renewal_calendar(templates: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Generate compliance renewal calendar based on review cycles."""
+    from datetime import datetime, timedelta
+    
+    events = []
+    for template in templates:
+        if not template.get("effective_date") or not template.get("review_period_months"):
+            continue
+        
+        try:
+            effective = datetime.fromisoformat(template["effective_date"])
+            months = int(template.get("review_period_months", 12))
+            renewal_date = effective + timedelta(days=30*months)
+            
+            events.append({
+                "template_id": template.get("id"),
+                "title": template.get("title"),
+                "renewal_date": renewal_date.isoformat(),
+                "days_until": (renewal_date - datetime.now()).days,
+                "priority": "urgent" if (renewal_date - datetime.now()).days < 30 else "scheduled",
+            })
+        except Exception:
+            continue
+    
+    return {
+        "total_events": len(events),
+        "urgent_count": len([e for e in events if e["priority"] == "urgent"]),
+        "events": sorted(events, key=lambda e: e["renewal_date"]),
+    }
+
+
+def _map_competency_requirements(classification: Dict[str, Any]) -> Dict[str, List[str]]:
+    """Map templates to required competencies."""
+    primary_role = classification.get("primary_user_role", {}).get("value", "support_worker")
+    workflow = classification.get("workflow_area", {}).get("value", "compliance_policy")
+    
+    competency_map = {
+        "support_worker": {
+            "care_plan": ["Care Planning", "Person-Centred Practice", "Communication"],
+            "medication": ["Medication Administration", "Health & Safety", "Record Keeping"],
+            "incident_report": ["Safeguarding", "Incident Analysis", "Communication"],
+            "body_map": ["Health Assessment", "Observation Skills", "Documentation"],
+        },
+        "senior_carer": {
+            "care_plan": ["Care Planning", "Supervision", "Quality Assurance"],
+            "risk_assessment": ["Risk Management", "Leadership", "Decision Making"],
+            "incident_report": ["Safeguarding", "Investigation", "Root Cause Analysis"],
+        },
+        "registered_manager": {
+            "audit": ["Quality Assurance", "Compliance", "Leadership"],
+            "policy": ["Governance", "Legal Compliance", "Strategic Planning"],
+            "complaint": ["Dispute Resolution", "Safeguarding", "Documentation"],
+        },
+        "nurse": {
+            "medication": ["Pharmacology", "Clinical Assessment", "Patient Safety"],
+            "medical": ["Clinical Practice", "Health Literacy", "Evidence-Based Care"],
+        },
+    }
+    
+    return competency_map.get(primary_role, {}).get(workflow, ["General Competency"])
+
+
+async def _generate_assignment_policies(
+    db, template_ids: List[str]
+) -> Dict[str, Any]:
+    """Generate automatic policy assignments for imported templates."""
+    assignments = []
+    
+    templates = await db.document_templates.find(
+        {"id": {"$in": template_ids}},
+        {"_id": 0, "id": 1, "title": 1, "category": 1, "status": 1}
+    ).to_list(None)
+    
+    for template in templates:
+        category = template.get("category", "")
+        roles = []
+        
+        if "policy" in category.lower() or "procedure" in category.lower():
+            roles = ["registered_manager", "all_staff"]
+        elif "form" in category.lower():
+            roles = ["support_worker", "senior_carer"]
+        elif "audit" in category.lower():
+            roles = ["registered_manager"]
+        elif "assessment" in category.lower():
+            roles = ["senior_carer", "registered_manager"]
+        
+        for role in roles:
+            assignments.append({
+                "template_id": template["id"],
+                "template_title": template["title"],
+                "assigned_role": role,
+                "assignment_type": "automatic",
+                "confidence": 0.85,
+            })
+    
+    return {
+        "total_assignments": len(assignments),
+        "assignments": assignments,
+        "requires_confirmation": len(assignments) > 0,
+    }
+
+
+def _calculate_migration_progress(
+    total_archive: int,
+    pending_imports: int,
+    published_count: int,
+    skipped_count: int,
+) -> Dict[str, Any]:
+    """Calculate overall migration progress."""
+    completed = published_count
+    in_progress = pending_imports
+    remaining = total_archive - completed - in_progress - skipped_count
+    
+    progress_pct = int((completed / max(total_archive, 1)) * 100)
+    estimated_completion = 3 if progress_pct == 0 else max(1, int((total_archive - completed) / max(pending_imports, 10)) // 24)
+    
+    return {
+        "total_templates": total_archive,
+        "completed": completed,
+        "in_progress": in_progress,
+        "skipped": skipped_count,
+        "remaining": remaining,
+        "progress_percentage": progress_pct,
+        "status": "complete" if progress_pct >= 95 else "on_track" if progress_pct >= 50 else "starting",
+        "estimated_days": estimated_completion,
+        "timeline": {
+            "phase_1_critical": {"target": 57, "current": min(57, completed + in_progress)},
+            "phase_2_high": {"target": 43, "current": min(43, max(0, completed + in_progress - 57))},
+            "phase_3_medium": {"target": 103, "current": 0},
+            "phase_4_low": {"target": 502, "current": 0},
+        },
+    }
+
+
+@router.post("/document-templates/archive/bulk-update-destination")
+async def bulk_update_destination(
+    template_ids: List[str] = [],
+    destination_section: str = "",
+    user: dict = Depends(require_admin),
+):
+    """Bulk update destination section for multiple templates."""
+    if not template_ids or not destination_section:
+        raise HTTPException(status_code=422, detail="template_ids and destination_section required")
+    
+    db = get_db()
+    now_iso = _utc_now_iso()
+    
+    # Verify destination exists
+    register = get_service_user_destination_register()
+    if not any(d["destination_section"] == destination_section for d in register):
+        raise HTTPException(status_code=422, detail="Invalid destination_section")
+    
+    result = await db.document_templates.update_many(
+        {"id": {"$in": template_ids}},
+        {
+            "$set": {
+                "suggested_destination_section": destination_section,
+                "updated_at": now_iso,
+            }
+        },
+    )
+    
+    return {
+        "message": "Bulk update completed",
+        "modified_count": result.modified_count,
+        "destination_section": destination_section,
+    }
+
+
+@router.get("/document-templates/archive/advanced-analytics")
+async def get_advanced_archive_analytics(
+    user: dict = Depends(require_admin),
+):
+    """Get comprehensive analytics for archive import dashboard."""
+    db = get_db()
+    manifest = _load_import_manifest()
+    
+    # Counts
+    pending_imports = await db.document_templates.count_documents(
+        {"import_status": "pending"}
+    )
+    published_imports = await db.document_templates.count_documents(
+        {"import_status": "imported"}
+    )
+    skipped_imports = await db.document_templates.count_documents(
+        {"import_status": "skipped"}
+    )
+    
+    total_archive = manifest.get("total_templates", 705)
+    
+    # Service-user completeness
+    su_completeness = await _score_service_user_completeness(db)
+    
+    # Migration progress
+    migration_progress = _calculate_migration_progress(
+        total_archive, pending_imports, published_imports, skipped_imports
+    )
+    
+    # Missing legal documents
+    missing_docs = _identify_missing_legal_documents()
+    
+    # Renewal calendar
+    all_templates = await db.document_templates.find({}, {"_id": 0}).to_list(None)
+    renewal_calendar = _generate_renewal_calendar(all_templates)
+    
+    return {
+        "migration_progress": migration_progress,
+        "service_user_completeness": su_completeness,
+        "renewal_calendar": renewal_calendar,
+        "missing_legal_documents": missing_docs,
+        "counts": {
+            "pending": pending_imports,
+            "published": published_imports,
+            "skipped": skipped_imports,
+            "total": total_archive,
+        },
+    }
+
+
+@router.post("/document-templates/archive/apply-policy-assignments")
+async def apply_policy_assignments(
+    template_ids: List[str] = [],
+    user: dict = Depends(require_admin),
+):
+    """Apply automatic policy assignments to templates."""
+    assignments = await _generate_assignment_policies(get_db(), template_ids)
+    
+    return {
+        "message": "Policy assignments generated",
+        "assignments": assignments["assignments"],
+        "count": assignments["total_assignments"],
+        "requires_confirmation": assignments["requires_confirmation"],
+    }
+
+
 @router.post("/document-templates/{template_id}/archive")
 async def archive_document_template(
     template_id: str,

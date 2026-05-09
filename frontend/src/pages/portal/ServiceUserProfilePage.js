@@ -870,6 +870,7 @@ export default function ServiceUserProfilePage() {
             section={currentSection}
             sectionId={activeTab}
             onUpload={() => openUploadDialog(activeTab)}
+            onViewDocument={handleViewUploadedDocument}
             onVerify={handleVerifyDocument}
             onDelete={handleDeleteDocument}
           />
@@ -1952,34 +1953,60 @@ function CarePlansTab({
 }
 
 // Section Tab Component
-function SectionTab({ section, sectionId, onUpload, onVerify, onDelete }) {
+function SectionTab({ section, sectionId, onUpload, onViewDocument, onVerify, onDelete }) {
   if (!section) {
     return <p className="text-text-muted">Section not found</p>;
   }
 
+  // Section-specific helper text
+  const sectionHelpers = {
+    '1_personal_referral': 'Upload referral forms and initial personal information documents.',
+    '2_consent_contracts': 'Maintain all consent, service agreements, and contractual documents.',
+    '3_assessments': 'Store initial and ongoing needs and capacity assessments.',
+    '5_risk_assessments': 'Document all risk assessments including falls, medication, and moving & handling.',
+    '6_monitoring': 'Log daily monitoring records, fluid charts, and repositioning records.',
+    '7_medication': 'Maintain MAR (Medication Administration Record) charts and prescriptions.',
+    '8_health_visits': 'Record GP visits, hospital appointments, and professional visits.',
+    '9_reviews': 'Document care reviews, quality checks, and feedback sessions.',
+    '10_correspondence': 'Archive general letters and correspondence.',
+  };
+  const helperText = sectionHelpers[sectionId];
+
   return (
     <div className="space-y-4">
       {/* Section Header */}
-      <div className="flex items-center justify-between">
-        <div>
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex-1">
           <h2 className="text-lg font-semibold text-text-primary">
             Section {section.section_number}: {section.name}
           </h2>
           <p className="text-sm text-text-muted">{section.description}</p>
+          {helperText && <p className="text-xs text-blue-600 mt-2">{helperText}</p>}
+          <div className="flex items-center gap-2 mt-2">
+            <span className="text-xs font-medium text-text-muted">Documents:</span>
+            <span className={`text-xs px-2 py-0.5 rounded-full ${
+              section.document_count > 0 ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
+            }`}>
+              {section.document_count || 0}
+            </span>
+          </div>
         </div>
-        <Button onClick={onUpload}>
+        <Button onClick={onUpload} className="whitespace-nowrap">
           <Plus className="h-4 w-4 mr-2" />
           Add Document
         </Button>
       </div>
       
-      {/* Document Types */}
-      <div className="flex flex-wrap gap-2">
-        {section.document_types?.map((type) => (
-          <span key={type} className="px-2 py-1 rounded bg-gray-100 text-xs text-text-muted">
-            {type.replace(/_/g, ' ')}
-          </span>
-        ))}
+      {/* Document Types Legend */}
+      <div className="p-3 rounded-lg bg-blue-50 border border-blue-100">
+        <p className="text-xs font-medium text-blue-900 mb-2">Expected document types for this section:</p>
+        <div className="flex flex-wrap gap-1">
+          {section.document_types?.map((type) => (
+            <span key={type} className="px-2 py-0.5 rounded bg-blue-100 text-xs text-blue-700">
+              {type.replace(/_/g, ' ')}
+            </span>
+          ))}
+        </div>
       </div>
       
       {/* Documents List */}
@@ -1988,76 +2015,124 @@ function SectionTab({ section, sectionId, onUpload, onVerify, onDelete }) {
           <FileText className="h-12 w-12 text-gray-300 mx-auto mb-4" />
           <h3 className="text-sm font-medium text-text-primary mb-2">No Documents Yet</h3>
           <p className="text-xs text-text-muted mb-4">
-            Upload documents for this section
+            Start by uploading the required documents for this section.
           </p>
           <Button size="sm" onClick={onUpload}>
             <Upload className="h-4 w-4 mr-2" />
-            Upload Document
+            Upload First Document
           </Button>
         </div>
       ) : (
-        <div className="space-y-3">
-          {section.documents.map((doc) => (
-            <div 
-              key={doc.id}
-              className="flex items-center justify-between p-4 rounded-lg bg-gray-50 border border-gray-100"
-            >
-              <div className="flex items-center gap-4">
-                <div className="p-2 rounded-lg bg-white border border-gray-200">
-                  <FileText className="h-5 w-5 text-primary" />
-                </div>
-                <div>
-                  <p className="font-medium text-text-primary">{doc.title}</p>
-                  <div className="flex items-center gap-2 text-xs text-text-muted mt-1">
-                    {doc.document_type && (
-                      <span className="px-2 py-0.5 rounded bg-gray-200">
-                        {doc.document_type.replace(/_/g, ' ')}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-sm font-medium text-text-primary">Documents ({section.documents.length})</p>
+            <Button variant="ghost" size="sm" onClick={onUpload}>
+              <Plus className="h-4 w-4 mr-1" />
+              Add More
+            </Button>
+          </div>
+          <div className="space-y-2">
+            {section.documents.map((doc) => {
+              // Check if document is expiring soon (within 30 days)
+              const expiryDate = doc.expiry_date ? new Date(doc.expiry_date) : null;
+              const now = new Date();
+              const daysUntilExpiry = expiryDate ? Math.ceil((expiryDate - now) / (1000 * 60 * 60 * 24)) : null;
+              const isExpired = daysUntilExpiry !== null && daysUntilExpiry < 0;
+              const isExpiringSoon = daysUntilExpiry !== null && daysUntilExpiry >= 0 && daysUntilExpiry <= 30;
+              
+              const containerClass = `flex items-center justify-between p-3 rounded-lg border transition-colors ${
+                isExpired 
+                  ? 'bg-red-50 border-red-100' 
+                  : isExpiringSoon 
+                  ? 'bg-amber-50 border-amber-100' 
+                  : 'bg-gray-50 border-gray-100'
+              }`;
+
+              const iconContainerClass = `p-1.5 rounded-lg flex-shrink-0 ${
+                isExpired 
+                  ? 'bg-red-100' 
+                  : isExpiringSoon 
+                  ? 'bg-amber-100' 
+                  : 'bg-white border border-gray-200'
+              }`;
+
+              const iconClass = `h-4 w-4 ${
+                isExpired 
+                  ? 'text-red-600' 
+                  : isExpiringSoon 
+                  ? 'text-amber-600' 
+                  : 'text-primary'
+              }`;
+              
+              return (
+                <div 
+                  key={doc.id}
+                  className={containerClass}
+                >
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <div className={iconContainerClass}>
+                      <FileText className={iconClass} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-sm text-text-primary truncate">{doc.title}</p>
+                      <div className="flex items-center gap-1 text-xs text-text-muted mt-0.5 flex-wrap">
+                        {doc.document_type && (
+                          <span className="px-1.5 py-0.25 rounded bg-gray-200 text-gray-700 whitespace-nowrap">
+                            {doc.document_type.replace(/_/g, ' ')}
+                          </span>
+                        )}
+                        <span className="whitespace-nowrap">Uploaded {formatBackendDate(doc.uploaded_at)}</span>
+                        {isExpired && (
+                          <span className="text-red-600 font-medium whitespace-nowrap">Expired</span>
+                        )}
+                        {isExpiringSoon && !isExpired && (
+                          <span className="text-amber-600 font-medium whitespace-nowrap">Expires in {daysUntilExpiry} days</span>
+                        )}
+                        {doc.expiry_date && !isExpired && !isExpiringSoon && (
+                          <span className="whitespace-nowrap">Expires {formatBackendDate(doc.expiry_date)}</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+                    {doc.verified ? (
+                      <span className="flex items-center gap-1 px-2 py-1 rounded-full bg-green-100 text-green-700 text-xs font-medium whitespace-nowrap">
+                        <Check className="h-3 w-3" />
+                        Verified
                       </span>
+                    ) : (
+                      <Button variant="outline" size="sm" onClick={() => onVerify(doc.id)} className="text-xs h-7">
+                        <Check className="h-3 w-3 mr-1" />
+                        Verify
+                      </Button>
                     )}
-                    <span>Uploaded {formatBackendDate(doc.uploaded_at)}</span>
-                    {doc.expiry_date && (
-                      <span className="text-amber-600">Expires {formatBackendDate(doc.expiry_date)}</span>
-                    )}
+                    
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0">
+                          <MoreVertical className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => onViewDocument(doc)}>
+                          <Eye className="h-4 w-4 mr-2" />
+                          View Document
+                        </DropdownMenuItem>
+                        <DropdownMenuItem 
+                          onClick={() => onDelete(doc.id)}
+                          className="text-red-600"
+                        >
+                          <Trash2 className="h-4 w-4 mr-2" />
+                          Delete
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </div>
                 </div>
-              </div>
-              
-              <div className="flex items-center gap-2">
-                {doc.verified ? (
-                  <span className="flex items-center gap-1 px-2 py-1 rounded bg-green-100 text-green-700 text-xs">
-                    <Check className="h-3 w-3" />
-                    Verified
-                  </span>
-                ) : (
-                  <Button variant="outline" size="sm" onClick={() => onVerify(doc.id)}>
-                    <Check className="h-4 w-4 mr-1" />
-                    Verify
-                  </Button>
-                )}
-                
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="sm">
-                      <MoreVertical className="h-4 w-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={() => handleViewUploadedDocument(doc)}>
-                      <Eye className="h-4 w-4 mr-2" />
-                      View Document
-                    </DropdownMenuItem>
-                    <DropdownMenuItem 
-                      onClick={() => onDelete(doc.id)}
-                      className="text-red-600"
-                    >
-                      <Trash2 className="h-4 w-4 mr-2" />
-                      Delete
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-            </div>
-          ))}
+              );
+            })}
+          </div>
         </div>
       )}
     </div>

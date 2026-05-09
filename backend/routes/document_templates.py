@@ -116,6 +116,22 @@ class RenewalCompleteRequest(BaseModel):
     approved_by: Optional[str] = None
 
 
+class ClassificationPrediction(BaseModel):
+    value: str
+    confidence: float   # 0.0 – 1.0
+    reasoning: str
+
+
+class ClassificationResult(BaseModel):
+    category: ClassificationPrediction
+    document_type: ClassificationPrediction
+    workflow_area: ClassificationPrediction
+    usage_audience: ClassificationPrediction   # worker | admin | both
+    frequency: ClassificationPrediction        # daily | per_incident | monthly | annual | one_off
+    review_cycle_months: ClassificationPrediction
+    suggested_title: Optional[str] = None
+
+
 def _is_admin_user(user: Dict[str, Any]) -> bool:
     role = str((user or {}).get("role") or "").lower()
     return role in {"admin", "super_admin"}
@@ -783,6 +799,198 @@ async def _ensure_renewal_record_for_active_template(
         },
         reason="Auto-created on template publish",
     )
+
+
+# ---------------------------------------------------------------------------
+# Classification Engine
+# ---------------------------------------------------------------------------
+
+def _classify_document(filename: str, text_sample: str = "") -> ClassificationResult:
+    """
+    Rule-based document classification.
+    Accepts a filename and optional text sample extracted from the document.
+    Returns structured predictions with confidence scores.
+    """
+    combined = (filename + " " + text_sample).lower()
+    stem = Path(filename).stem.lower().replace("_", " ").replace("-", " ")
+
+    # --- Category & document_type ---
+    # Ordered from most specific to least specific
+    CAT_RULES: List[Tuple[str, str, List[str]]] = [
+        # (category, document_type, trigger_keywords)
+        ("Policy", "policy", ["policy", "pol-"]),
+        ("Procedure", "procedure", ["procedure", "proc-", "process", "sop"]),
+        ("Form", "form", ["form", "sheet", "log", "register"]),
+        ("Checklist", "checklist", ["checklist", "check list", "chk-"]),
+        ("Assessment", "assessment", ["assessment", "ass-", "appraisal", "evaluation"]),
+        ("Agreement", "agreement", ["agreement", "contract", "declaration", "consent"]),
+        ("Certificate", "certificate", ["certificate", "cert-", "qualification"]),
+        ("Record", "record", ["record", "rec-", "diary", "chart", "tracker"]),
+        ("Incident", "incident", ["incident", "accident", "near miss", "datix"]),
+        ("Report", "report", ["report", "rpt-"]),
+    ]
+
+    cat_value = "Policy"
+    cat_doc_type = "policy"
+    cat_conf = 0.45
+    cat_reasoning = "Default fallback — no category keywords matched"
+    for cat, doc_type, kws in CAT_RULES:
+        if any(k in combined for k in kws):
+            cat_value = cat
+            cat_doc_type = doc_type
+            cat_conf = 0.90 if any(k in stem for k in kws) else 0.72
+            cat_reasoning = f"Matched keyword(s): {[k for k in kws if k in combined]}"
+            break
+
+    # --- Workflow area ---
+    WF_RULES: List[Tuple[str, List[str], float]] = [
+        ("body_map", ["body map", "body chart", "skin integrity"], 0.97),
+        ("medication", ["medication", "mar sheet", "medicine", "drug", "controlled drug", "blister", "prescri"], 0.97),
+        ("incident_report", ["incident", "accident", "near miss", "datix", "riddor"], 0.95),
+        ("risk_assessment", ["risk assessment", "risk assess", "coshh", "lone worker risk", "hazard"], 0.94),
+        ("care_plan", ["care plan", "support plan", "daily notes", "outcome-based"], 0.93),
+        ("complaint", ["complaint", "compliment", "grievance", "feedback form"], 0.93),
+        ("insurance_certificate", ["insurance", "employers liability", "public liability", "indemnity"], 0.96),
+        ("audit", ["audit", "cqc audit", "mock inspection", "self assessment"], 0.91),
+        ("service_user_record", ["service user", "person centred", "service user record", "su record"], 0.88),
+        ("staff_onboarding", ["induction", "onboarding", "dbs", "reference check", "right to work", "new starter", "probation"], 0.90),
+        ("compliance_policy", ["policy", "procedure", "health and safety", "fire safety", "information governance", "gdpr", "equality", "whistleblowing"], 0.75),
+    ]
+
+    wf_value = "compliance_policy"
+    wf_conf = 0.40
+    wf_reasoning = "Default fallback — no workflow keyword matched"
+    for wf, kws, conf in WF_RULES:
+        if any(k in combined for k in kws):
+            matched = [k for k in kws if k in combined]
+            boost = 0.05 if any(k in stem for k in kws) else 0.0
+            wf_value = wf
+            wf_conf = min(1.0, conf + boost)
+            wf_reasoning = f"Matched: {matched}"
+            break
+
+    # --- Usage audience ---
+    AUD_RULES: List[Tuple[str, List[str], float]] = [
+        ("admin", ["registered manager", "manager only", "senior only", "directors", "leadership", "hr only"], 0.92),
+        ("worker", ["support worker", "care worker", "carer", "staff signature", "keyworker"], 0.88),
+        ("both", ["all staff", "organisation", "whole team", "everyone", "staff and management"], 0.80),
+    ]
+
+    aud_value = "both"
+    aud_conf = 0.50
+    aud_reasoning = "Default — shared document assumed"
+    # Override by document category context
+    if cat_value in ("Policy", "Procedure"):
+        aud_value = "both"
+        aud_conf = 0.65
+        aud_reasoning = "Policies and procedures typically apply to all staff"
+    if cat_value in ("Assessment", "Checklist", "Form"):
+        aud_value = "worker"
+        aud_conf = 0.60
+        aud_reasoning = "Operational forms typically completed by frontline workers"
+    for aud, kws, conf in AUD_RULES:
+        if any(k in combined for k in kws):
+            aud_value = aud
+            aud_conf = conf
+            aud_reasoning = f"Matched: {[k for k in kws if k in combined]}"
+            break
+
+    # --- Frequency ---
+    FREQ_RULES: List[Tuple[str, List[str], float]] = [
+        ("daily", ["daily", "every day", "each day", "day sheet", "daily record"], 0.95),
+        ("per_shift", ["per shift", "each shift", "shift handover", "handover"], 0.90),
+        ("per_incident", ["per incident", "incident-specific", "as and when", "as required", "near miss"], 0.92),
+        ("weekly", ["weekly", "each week", "every week"], 0.90),
+        ("monthly", ["monthly", "each month", "every month"], 0.90),
+        ("quarterly", ["quarterly", "every quarter", "q1", "q2", "q3", "q4"], 0.88),
+        ("annual", ["annual", "yearly", "year", "once a year"], 0.85),
+        ("one_off", ["one off", "once only", "single use", "initial", "induction", "registration"], 0.85),
+    ]
+
+    # Contextual defaults by category
+    freq_defaults = {
+        "Policy": ("annual", 0.55, "Policies are typically reviewed annually"),
+        "Procedure": ("annual", 0.55, "Procedures are typically reviewed annually"),
+        "Assessment": ("annual", 0.50, "Assessments are often annual"),
+        "Form": ("per_incident", 0.55, "Forms are typically completed per incident or need"),
+        "Checklist": ("daily", 0.52, "Checklists are often used daily"),
+        "Record": ("daily", 0.52, "Records are usually maintained daily"),
+        "Incident": ("per_incident", 0.70, "Incident documents are completed per incident"),
+        "Certificate": ("annual", 0.75, "Certificates are typically renewed annually"),
+        "Agreement": ("one_off", 0.70, "Agreements are typically one-off documents"),
+        "Report": ("monthly", 0.50, "Reports are often produced monthly"),
+    }
+    freq_value, freq_conf, freq_reasoning = freq_defaults.get(
+        cat_value, ("annual", 0.45, "Default fallback")
+    )
+    for freq, kws, conf in FREQ_RULES:
+        if any(k in combined for k in kws):
+            freq_value = freq
+            freq_conf = conf
+            freq_reasoning = f"Matched: {[k for k in kws if k in combined]}"
+            break
+
+    # --- Review cycle months ---
+    REV_RULES: List[Tuple[int, List[str], float]] = [
+        (6, ["six month", "6 month", "half yearly", "half year"], 0.95),
+        (12, ["annual review", "annually review", "yearly review", "12 month", "one year review"], 0.95),
+        (24, ["two year", "2 year", "every two years", "biennial"], 0.95),
+        (36, ["three year", "3 year", "every three years"], 0.95),
+    ]
+
+    rev_defaults = {
+        "Policy": (12, 0.75, "Policies default to 12-month review cycle"),
+        "Procedure": (24, 0.65, "Procedures often reviewed every 2 years"),
+        "Form": (12, 0.60, "Forms reviewed annually"),
+        "Checklist": (12, 0.60, "Checklists reviewed annually"),
+        "Assessment": (12, 0.70, "Assessments reviewed annually"),
+        "Agreement": (12, 0.65, "Agreements reviewed annually"),
+        "Certificate": (12, 0.85, "Certificates renewed annually"),
+        "Record": (12, 0.55, "Records reviewed annually"),
+        "Incident": (12, 0.55, "Incident documents reviewed annually"),
+        "Report": (12, 0.55, "Reports reviewed annually"),
+    }
+    rev_months, rev_conf, rev_reasoning = rev_defaults.get(
+        cat_value, (12, 0.50, "Default 12-month review cycle")
+    )
+    for months, kws, conf in REV_RULES:
+        if any(k in combined for k in kws):
+            rev_months = months
+            rev_conf = conf
+            rev_reasoning = f"Matched explicit review period keywords: {[k for k in kws if k in combined]}"
+            break
+
+    # --- Suggested title ---
+    raw_stem = Path(filename).stem.replace("_", " ").replace("-", " ").strip()
+    # Strip common noise prefixes
+    for noise in ("V1", "V2", "V3", "DRAFT", "FINAL", "COPY", "template"):
+        raw_stem = re.sub(rf"\b{noise}\b", "", raw_stem, flags=re.IGNORECASE).strip()
+    suggested_title = re.sub(r"\s+", " ", raw_stem).title() if raw_stem else None
+
+    return ClassificationResult(
+        category=ClassificationPrediction(value=cat_value, confidence=cat_conf, reasoning=cat_reasoning),
+        document_type=ClassificationPrediction(value=cat_doc_type, confidence=cat_conf, reasoning=cat_reasoning),
+        workflow_area=ClassificationPrediction(value=wf_value, confidence=wf_conf, reasoning=wf_reasoning),
+        usage_audience=ClassificationPrediction(value=aud_value, confidence=aud_conf, reasoning=aud_reasoning),
+        frequency=ClassificationPrediction(value=freq_value, confidence=freq_conf, reasoning=freq_reasoning),
+        review_cycle_months=ClassificationPrediction(value=str(rev_months), confidence=rev_conf, reasoning=rev_reasoning),
+        suggested_title=suggested_title,
+    )
+
+
+@router.post("/document-templates/classify")
+async def classify_document_template(
+    filename: str = Form(...),
+    text_sample: Optional[str] = Form(default=""),
+    user: dict = Depends(require_admin),
+) -> ClassificationResult:
+    """
+    Lightweight classification endpoint — accepts filename + optional text sample.
+    Returns structured predictions with confidence scores and human-readable reasoning.
+    No file is stored. Safe to call on file select before import.
+    """
+    result = _classify_document(filename=filename, text_sample=text_sample or "")
+    return result
 
 
 @router.post("/document-templates/import")

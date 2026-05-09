@@ -12,7 +12,7 @@ import { Textarea } from '../../components/ui/textarea';
 import { Badge } from '../../components/ui/badge';
 import { 
   Loader2, Upload, RefreshCw, Save, Rocket, FileText, Plus, Eye, Edit2, 
-  Archive, Search, AlertCircle, CheckCircle2, Clock 
+  Archive, Search, AlertCircle, CheckCircle2, Clock, Sparkles, ThumbsUp, RotateCcw as Reset
 } from 'lucide-react';
 
 const API = API_BASE;
@@ -92,6 +92,35 @@ function StatusBadge({ status }) {
   return <Badge className={`${variants[status] || variants.draft} border`}>{status}</Badge>;
 }
 
+// Human-readable labels for classification values
+const FREQ_LABELS = {
+  daily: 'Daily', per_shift: 'Per Shift', per_incident: 'Per Incident',
+  weekly: 'Weekly', monthly: 'Monthly', quarterly: 'Quarterly',
+  annual: 'Annual', one_off: 'One-Off',
+};
+const AUD_LABELS = { worker: 'Frontline Workers', admin: 'Admin / Manager', both: 'All Staff' };
+
+function ConfidencePill({ confidence }) {
+  const pct = Math.round(confidence * 100);
+  const color = pct >= 85 ? 'bg-green-100 text-green-800' : pct >= 60 ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800';
+  return <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono ${color}`}>{pct}%</span>;
+}
+
+function ClassificationRow({ label, value, confidence, reasoning }) {
+  return (
+    <div className="flex items-start justify-between gap-2 py-1.5 border-b last:border-0">
+      <div className="text-xs text-text-muted w-24 shrink-0">{label}</div>
+      <div className="flex-1 text-right">
+        <div className="flex items-center justify-end gap-1.5">
+          <span className="text-xs font-semibold text-text-primary">{value}</span>
+          <ConfidencePill confidence={confidence} />
+        </div>
+        <p className="text-[10px] text-text-muted mt-0.5 leading-tight">{reasoning}</p>
+      </div>
+    </div>
+  );
+}
+
 function RenewalBadge({ renewalDueDate }) {
   if (!renewalDueDate) return null;
   const daysUntilDue = Math.floor((new Date(renewalDueDate) - new Date()) / (1000 * 60 * 60 * 24));
@@ -127,6 +156,11 @@ export default function DocumentTemplateLibraryPage() {
   const [reviewPeriodMonths, setReviewPeriodMonths] = useState('12');
   const [effectiveDate, setEffectiveDate] = useState('');
   const [generatedDocCode, setGeneratedDocCode] = useState('');
+
+  // Classification engine
+  const [classifying, setClassifying] = useState(false);
+  const [classification, setClassification] = useState(null);  // ClassificationResult | null
+  const [classificationApplied, setClassificationApplied] = useState(false);
 
   // States
   const [importing, setImporting] = useState(false);
@@ -284,6 +318,42 @@ export default function DocumentTemplateLibraryPage() {
     setFile(selectedFile);
     setFileError('');
     setUploadProgress(0);
+    setClassification(null);
+    setClassificationApplied(false);
+
+    // Auto-classify on file select (filename only — no content uploaded yet)
+    triggerClassify(selectedFile.name);
+  };
+
+  const triggerClassify = async (filename) => {
+    setClassifying(true);
+    try {
+      const fd = new FormData();
+      fd.append('filename', filename);
+      const resp = await axios.post(`${API}/document-templates/classify`, fd, {
+        headers: { ...authHeaders, 'Content-Type': 'multipart/form-data' },
+      });
+      setClassification(resp.data);
+    } catch (err) {
+      // Classification is non-blocking — silently ignore
+      console.warn('Classification skipped', err?.response?.data?.detail || err.message);
+    } finally {
+      setClassifying(false);
+    }
+  };
+
+  const applyClassification = () => {
+    if (!classification) return;
+    const c = classification;
+    setCategory(c.category.value);
+    setDocumentType(c.document_type.value);
+    const wfMatch = WORKFLOW_AREAS.find(w => w.value === c.workflow_area.value);
+    if (wfMatch) setWorkflowArea(wfMatch.value);
+    setReviewPeriodMonths(c.review_cycle_months.value);
+    if (c.suggested_title) setTitle(prev => prev || c.suggested_title);
+    setGeneratedDocCode(generateDocCode(c.category.value, c.workflow_area.value));
+    setClassificationApplied(true);
+    toast.success('Classification applied — review and confirm before importing');
   };
 
   // Handle import with placeholder review
@@ -575,6 +645,77 @@ export default function DocumentTemplateLibraryPage() {
                 </div>
               )}
             </div>
+
+            {/* Classification Preview */}
+            {(classifying || classification) && (
+              <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-blue-900">
+                    <Sparkles className="h-3.5 w-3.5" />
+                    Auto Classification
+                  </div>
+                  {classifying && <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500" />}
+                  {classificationApplied && <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />}
+                </div>
+
+                {classification && (
+                  <>
+                    <div className="space-y-0">
+                      <ClassificationRow
+                        label="Category"
+                        value={classification.category.value}
+                        confidence={classification.category.confidence}
+                        reasoning={classification.category.reasoning}
+                      />
+                      <ClassificationRow
+                        label="Workflow"
+                        value={WORKFLOW_AREAS.find(w => w.value === classification.workflow_area.value)?.label || classification.workflow_area.value}
+                        confidence={classification.workflow_area.confidence}
+                        reasoning={classification.workflow_area.reasoning}
+                      />
+                      <ClassificationRow
+                        label="Audience"
+                        value={AUD_LABELS[classification.usage_audience.value] || classification.usage_audience.value}
+                        confidence={classification.usage_audience.confidence}
+                        reasoning={classification.usage_audience.reasoning}
+                      />
+                      <ClassificationRow
+                        label="Frequency"
+                        value={FREQ_LABELS[classification.frequency.value] || classification.frequency.value}
+                        confidence={classification.frequency.confidence}
+                        reasoning={classification.frequency.reasoning}
+                      />
+                      <ClassificationRow
+                        label="Review"
+                        value={`${classification.review_cycle_months.value} months`}
+                        confidence={classification.review_cycle_months.confidence}
+                        reasoning={classification.review_cycle_months.reasoning}
+                      />
+                    </div>
+
+                    {!classificationApplied ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={applyClassification}
+                        className="w-full text-xs h-7 bg-blue-700 hover:bg-blue-800 text-white"
+                      >
+                        <ThumbsUp className="h-3 w-3 mr-1" />
+                        Apply Classification to Form
+                      </Button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setClassificationApplied(false)}
+                        className="text-[10px] text-blue-700 underline w-full text-center"
+                      >
+                        <Reset className="inline h-2.5 w-2.5 mr-0.5" />Revert to manual
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
 
             <div className="space-y-1">
               <Label className="text-xs font-semibold">Title (Optional)</Label>

@@ -126,8 +126,12 @@ class ClassificationResult(BaseModel):
     category: ClassificationPrediction
     document_type: ClassificationPrediction
     workflow_area: ClassificationPrediction
-    usage_audience: ClassificationPrediction   # worker | admin | both
-    frequency: ClassificationPrediction        # daily | per_incident | monthly | annual | one_off
+    usage_audience: ClassificationPrediction      # worker | admin | both
+    primary_user_role: ClassificationPrediction   # support_worker | senior_carer | nurse | registered_manager | hr_manager | all_staff
+    admin_owner_role: ClassificationPrediction    # registered_manager | compliance_lead | hr_manager | clinical_lead | finance
+    worker_visibility: ClassificationPrediction   # visible | restricted | admin_only
+    system_placement: ClassificationPrediction    # compliance_hub | care_plan_module | incident_module | staff_profile | medication_module | service_user_record | all_modules
+    frequency: ClassificationPrediction           # daily | per_shift | per_incident | weekly | monthly | quarterly | annual | one_off
     review_cycle_months: ClassificationPrediction
     suggested_title: Optional[str] = None
 
@@ -967,11 +971,138 @@ def _classify_document(filename: str, text_sample: str = "") -> ClassificationRe
         raw_stem = re.sub(rf"\b{noise}\b", "", raw_stem, flags=re.IGNORECASE).strip()
     suggested_title = re.sub(r"\s+", " ", raw_stem).title() if raw_stem else None
 
+    # --- Primary user role --- who primarily completes / uses this document
+    PUR_RULES: List[Tuple[str, List[str], float]] = [
+        ("nurse",               ["medication", "mar sheet", "medicine", "drug", "controlled drug", "prescri", "clinical"], 0.87),
+        ("registered_manager",  ["registered manager", "audit", "cqc", "mock inspection", "complaint", "grievance",
+                                  "insurance", "employers liability", "indemnity", "directors"], 0.88),
+        ("hr_manager",          ["dbs", "induction", "onboarding", "right to work", "new starter", "probation",
+                                  "employment", "reference check", "hr only"], 0.88),
+        ("senior_carer",        ["care plan", "support plan", "risk assessment", "risk assess", "body map",
+                                  "skin integrity", "outcome-based"], 0.83),
+        ("support_worker",      ["daily record", "daily notes", "handover", "daily log", "shift",
+                                  "body chart", "observation", "activity"], 0.84),
+        ("all_staff",           ["all staff", "whole team", "organisation", "health and safety",
+                                  "fire safety", "gdpr", "equality", "whistleblowing"], 0.75),
+    ]
+    # Category-based defaults
+    pur_defaults = {
+        "Policy":      ("all_staff",           0.60, "Policies apply to all staff by default"),
+        "Procedure":   ("all_staff",           0.55, "Procedures apply to all staff by default"),
+        "Form":        ("support_worker",      0.58, "Operational forms typically completed by frontline staff"),
+        "Checklist":   ("support_worker",      0.58, "Checklists typically used by frontline staff"),
+        "Assessment":  ("senior_carer",        0.62, "Assessments typically led by senior carers"),
+        "Agreement":   ("registered_manager", 0.65, "Agreements typically signed off by manager"),
+        "Certificate": ("registered_manager", 0.70, "Certificates held by management"),
+        "Record":      ("support_worker",      0.60, "Day-to-day records completed by frontline"),
+        "Incident":    ("support_worker",      0.65, "Incident forms initiated by frontline staff"),
+        "Report":      ("registered_manager", 0.58, "Reports produced by management"),
+    }
+    pur_value, pur_conf, pur_reasoning = pur_defaults.get(
+        cat_value, ("all_staff", 0.45, "Default fallback")
+    )
+    for role, kws, conf in PUR_RULES:
+        if any(k in combined for k in kws):
+            pur_value = role
+            pur_conf = conf
+            pur_reasoning = f"Matched: {[k for k in kws if k in combined]}"
+            break
+
+    # --- Admin owner role --- who is responsible for maintaining / approving
+    AOR_RULES: List[Tuple[str, List[str], float]] = [
+        ("finance",           ["insurance", "employers liability", "public liability", "indemnity",
+                               "premium", "renewal certificate", "financial"], 0.87),
+        ("hr_manager",        ["dbs", "induction", "onboarding", "right to work", "employment",
+                               "reference", "probation", "contract of employment", "new starter"], 0.88),
+        ("clinical_lead",     ["medication", "mar sheet", "drug", "controlled drug", "prescri",
+                               "care plan", "clinical", "nursing"], 0.84),
+        ("compliance_lead",   ["policy", "procedure", "audit", "cqc", "mock inspection",
+                               "gdpr", "equality", "health and safety", "fire safety",
+                               "information governance", "whistleblowing"], 0.85),
+        ("registered_manager", ["complaint", "grievance", "safeguarding", "serious incident",
+                                 "risk assessment", "body map", "service user record"], 0.82),
+    ]
+    aor_value = "registered_manager"
+    aor_conf = 0.55
+    aor_reasoning = "Default — registered manager owns most operational documents"
+    for role, kws, conf in AOR_RULES:
+        if any(k in combined for k in kws):
+            aor_value = role
+            aor_conf = conf
+            aor_reasoning = f"Matched: {[k for k in kws if k in combined]}"
+            break
+
+    # --- Worker visibility --- can frontline workers see/access this?
+    VIS_RULES: List[Tuple[str, List[str], float]] = [
+        ("visible",    ["daily record", "daily notes", "handover", "body map", "body chart",
+                         "activity", "observation", "care plan", "support plan", "medication",
+                         "mar sheet", "daily log", "shift"], 0.86),
+        ("restricted", ["incident", "accident", "near miss", "risk assessment",
+                         "complaint", "grievance", "riddor"], 0.78),
+        ("admin_only", ["audit", "cqc", "mock inspection", "insurance", "employers liability",
+                         "indemnity", "dbs", "employment", "contract", "right to work",
+                         "induction", "probation", "financial", "directors"], 0.84),
+    ]
+    # Category-based defaults for visibility
+    vis_cat_defaults = {
+        "Policy":      ("admin_only",  0.62, "Policies are admin-maintained; worker access read-only after sign-off"),
+        "Procedure":   ("admin_only",  0.58, "Procedures admin-maintained"),
+        "Form":        ("visible",     0.60, "Operational forms visible to workers"),
+        "Checklist":   ("visible",     0.62, "Checklists visible to frontline staff"),
+        "Assessment":  ("restricted",  0.58, "Assessments may contain sensitive data"),
+        "Agreement":   ("admin_only",  0.65, "Agreements held by admin"),
+        "Certificate": ("admin_only",  0.70, "Certificates stored by admin"),
+        "Record":      ("visible",     0.62, "Day-to-day records visible to frontline"),
+        "Incident":    ("restricted",  0.68, "Incident reports have restricted downstream access"),
+        "Report":      ("admin_only",  0.60, "Management reports restricted to admin"),
+    }
+    vis_value, vis_conf, vis_reasoning = vis_cat_defaults.get(
+        cat_value, ("restricted", 0.45, "Default fallback")
+    )
+    for vis, kws, conf in VIS_RULES:
+        if any(k in combined for k in kws):
+            vis_value = vis
+            vis_conf = conf
+            vis_reasoning = f"Matched: {[k for k in kws if k in combined]}"
+            break
+
+    # --- System placement --- which UI module should this document appear in?
+    PLACE_RULES: List[Tuple[str, List[str], float]] = [
+        ("medication_module",    ["medication", "mar sheet", "drug", "controlled drug",
+                                   "prescri", "blister", "medicine"], 0.96),
+        ("incident_module",      ["incident", "accident", "near miss", "datix", "riddor"], 0.95),
+        ("care_plan_module",     ["care plan", "support plan", "outcome-based",
+                                   "daily notes", "handover"], 0.92),
+        ("care_plan_module",     ["body map", "body chart", "skin integrity"], 0.94),
+        ("service_user_record",  ["service user", "person centred", "su record"], 0.90),
+        ("staff_profile",        ["dbs", "induction", "onboarding", "right to work", "employment",
+                                   "new starter", "probation", "reference check"], 0.91),
+        ("compliance_hub",       ["policy", "procedure", "audit", "cqc", "mock inspection",
+                                   "health and safety", "fire safety", "gdpr", "equality",
+                                   "whistleblowing", "insurance", "indemnity",
+                                   "information governance", "complaint", "grievance"], 0.84),
+    ]
+    place_value = "all_modules"
+    place_conf = 0.40
+    place_reasoning = "Default fallback — no specific module placement detected"
+    for place, kws, conf in PLACE_RULES:
+        if any(k in combined for k in kws):
+            matched_p = [k for k in kws if k in combined]
+            boost_p = 0.03 if any(k in stem for k in kws) else 0.0
+            place_value = place
+            place_conf = min(1.0, conf + boost_p)
+            place_reasoning = f"Matched: {matched_p}"
+            break
+
     return ClassificationResult(
         category=ClassificationPrediction(value=cat_value, confidence=cat_conf, reasoning=cat_reasoning),
         document_type=ClassificationPrediction(value=cat_doc_type, confidence=cat_conf, reasoning=cat_reasoning),
         workflow_area=ClassificationPrediction(value=wf_value, confidence=wf_conf, reasoning=wf_reasoning),
         usage_audience=ClassificationPrediction(value=aud_value, confidence=aud_conf, reasoning=aud_reasoning),
+        primary_user_role=ClassificationPrediction(value=pur_value, confidence=pur_conf, reasoning=pur_reasoning),
+        admin_owner_role=ClassificationPrediction(value=aor_value, confidence=aor_conf, reasoning=aor_reasoning),
+        worker_visibility=ClassificationPrediction(value=vis_value, confidence=vis_conf, reasoning=vis_reasoning),
+        system_placement=ClassificationPrediction(value=place_value, confidence=place_conf, reasoning=place_reasoning),
         frequency=ClassificationPrediction(value=freq_value, confidence=freq_conf, reasoning=freq_reasoning),
         review_cycle_months=ClassificationPrediction(value=str(rev_months), confidence=rev_conf, reasoning=rev_reasoning),
         suggested_title=suggested_title,
@@ -1043,6 +1174,12 @@ async def import_document_template(
 
     stored = await _store_imported_file(file_bytes, filename)
 
+    # Re-classify using extracted text (richer signal than filename alone)
+    text_sample_for_classify = extracted_text[:3000] if extracted_text else ""
+    post_import_classification = _classify_document(
+        filename=filename, text_sample=text_sample_for_classify
+    ).model_dump()
+
     detected_title = extracted_metadata.get("detected_title")
     final_title = (title or detected_title or "Imported Template").strip()
     final_doc_code = (doc_code or _gen_doc_code(final_title, category)).strip()
@@ -1066,6 +1203,7 @@ async def import_document_template(
         "current_version_id": version_id,
         "status": "draft",
         "workflow_area": workflow_area,
+        "classification": post_import_classification,
         "created_by": user["user_id"],
         "created_at": now_iso,
         "updated_at": now_iso,
@@ -1128,6 +1266,7 @@ async def import_document_template(
     return {
         "template": template_doc,
         "version": version_doc,
+        "classification": post_import_classification,
     }
 
 

@@ -99,6 +99,23 @@ const FREQ_LABELS = {
   annual: 'Annual', one_off: 'One-Off',
 };
 const AUD_LABELS = { worker: 'Frontline Workers', admin: 'Admin / Manager', both: 'All Staff' };
+const PUR_LABELS = {
+  support_worker: 'Support Worker', senior_carer: 'Senior Carer', nurse: 'Nurse',
+  registered_manager: 'Registered Manager', hr_manager: 'HR Manager', all_staff: 'All Staff',
+};
+const AOR_LABELS = {
+  registered_manager: 'Registered Manager', compliance_lead: 'Compliance Lead',
+  hr_manager: 'HR Manager', clinical_lead: 'Clinical Lead', finance: 'Finance',
+};
+const VIS_LABELS = {
+  visible: 'Visible to Workers', restricted: 'Restricted Access', admin_only: 'Admin Only',
+};
+const PLACE_LABELS = {
+  compliance_hub: 'Compliance Hub', care_plan_module: 'Care Plan Module',
+  incident_module: 'Incident Module', staff_profile: 'Staff Profile',
+  medication_module: 'Medication Module', service_user_record: 'Service User Record',
+  all_modules: 'All Modules',
+};
 
 function ConfidencePill({ confidence }) {
   const pct = Math.round(confidence * 100);
@@ -396,6 +413,12 @@ export default function DocumentTemplateLibraryPage() {
 
       const importedTemplate = response.data?.template;
       const importedVersion = response.data?.version;
+      // Use the richer post-import classification (uses extracted text, not just filename)
+      const postImportClassification = response.data?.classification;
+      if (postImportClassification) {
+        setClassification(postImportClassification);
+        setClassificationApplied(false); // let admin re-review the richer result
+      }
 
       // Show placeholder review modal
       if (importedVersion?.detected_placeholders) {
@@ -678,6 +701,30 @@ export default function DocumentTemplateLibraryPage() {
                         value={AUD_LABELS[classification.usage_audience.value] || classification.usage_audience.value}
                         confidence={classification.usage_audience.confidence}
                         reasoning={classification.usage_audience.reasoning}
+                      />
+                      <ClassificationRow
+                        label="User Role"
+                        value={PUR_LABELS[classification.primary_user_role?.value] || classification.primary_user_role?.value || '—'}
+                        confidence={classification.primary_user_role?.confidence || 0}
+                        reasoning={classification.primary_user_role?.reasoning || ''}
+                      />
+                      <ClassificationRow
+                        label="Owner"
+                        value={AOR_LABELS[classification.admin_owner_role?.value] || classification.admin_owner_role?.value || '—'}
+                        confidence={classification.admin_owner_role?.confidence || 0}
+                        reasoning={classification.admin_owner_role?.reasoning || ''}
+                      />
+                      <ClassificationRow
+                        label="Visibility"
+                        value={VIS_LABELS[classification.worker_visibility?.value] || classification.worker_visibility?.value || '—'}
+                        confidence={classification.worker_visibility?.confidence || 0}
+                        reasoning={classification.worker_visibility?.reasoning || ''}
+                      />
+                      <ClassificationRow
+                        label="Placement"
+                        value={PLACE_LABELS[classification.system_placement?.value] || classification.system_placement?.value || '—'}
+                        confidence={classification.system_placement?.confidence || 0}
+                        reasoning={classification.system_placement?.reasoning || ''}
                       />
                       <ClassificationRow
                         label="Frequency"

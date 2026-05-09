@@ -17298,10 +17298,15 @@ async def upload_requirement_evidence(
     
     # Get requirement definition
     all_items = get_mandatory_items_for_role(employee.get('role', ''))
-    requirement = next((item for item in all_items if item['id'] == requirement_id), None)
+    normalized_requirement_id = str(requirement_id or '').strip()
+    # Legacy alias support: some frontend paths still send right_to_work_check.
+    # Canonical requirement id in mandatory items is right_to_work.
+    if normalized_requirement_id == "right_to_work_check":
+        normalized_requirement_id = "right_to_work"
+    requirement = next((item for item in all_items if item['id'] == normalized_requirement_id), None)
     
     if not requirement:
-        logger.error(f"Upload failed: Invalid requirement_id {requirement_id}")
+        logger.error(f"Upload failed: Invalid requirement_id {requirement_id} (normalized={normalized_requirement_id})")
         raise HTTPException(status_code=400, detail=f"Invalid requirement_id: {requirement_id}")
     
     now = datetime.now(timezone.utc).isoformat()
@@ -17312,15 +17317,30 @@ async def upload_requirement_evidence(
     first_name = (employee.get('first_name') or 'Unknown').strip()
     last_name = (employee.get('last_name') or 'Employee').strip()
     employee_name = f"{first_name}{last_name}".replace(' ', '_')
-    req_slug = requirement_id.replace('_', '-')
+    req_slug = normalized_requirement_id.replace('_', '-')
     storage_filename = f"{employee_name}_{req_slug}_{uuid.uuid4().hex[:8]}.{ext}"
-    path = f"{APP_NAME}/evidence/{employee_id}/{requirement_id}/{storage_filename}"
+    path = f"{APP_NAME}/evidence/{employee_id}/{normalized_requirement_id}/{storage_filename}"
     
     try:
         data = await file.read()
         logger.info(f"Uploading to storage: path={path}, size={len(data)} bytes, type={file.content_type}")
-        result = put_object(path, data, file.content_type or "application/octet-stream")
-        logger.info(f"Storage upload successful: {result}")
+        # Use Supabase storage for consistency with working employee-document flows.
+        # Avoid legacy objstore (emergent) to prevent 402 Payment Required.
+        from supabase_storage import is_supabase_storage_configured, upload_to_supabase
+        if not is_supabase_storage_configured():
+            raise HTTPException(status_code=500, detail="Supabase storage is not configured")
+        upload_result = await upload_to_supabase(
+            data,
+            storage_filename,
+            bucket="documents",
+            folder=f"evidence/{employee_id}/{normalized_requirement_id}",
+            content_type=file.content_type or "application/octet-stream",
+        )
+        stored_file_url = upload_result.get("url")
+        if not stored_file_url:
+            raise HTTPException(status_code=500, detail="Supabase upload failed: no file URL returned")
+        result = {"path": stored_file_url}
+        logger.info(f"Storage upload successful: {stored_file_url}")
     except Exception as e:
         logger.error(f"Storage upload failed: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to upload file: {str(e)}")
@@ -17416,7 +17436,7 @@ async def upload_requirement_evidence(
             # Log the update
             await log_audit_action(user['user_id'], "training_evidence_added", "training_record", record_id, {
                 "training_name": training_name,
-                "requirement_id": requirement_id,
+                "requirement_id": normalized_requirement_id,
                 "filename": file.filename,
                 "expiry_date": calculated_expiry,
                 "action": "added_evidence"
@@ -17439,7 +17459,7 @@ async def upload_requirement_evidence(
                 "uploaded_at": now,
                 "evidence_files": [evidence_file],
                 "verified": False,
-                "requirement_id": requirement_id,
+                    "requirement_id": normalized_requirement_id,
                 "created_at": now,
                 "updated_at": now,
                 **_build_training_evidence_metadata(
@@ -17453,7 +17473,7 @@ async def upload_requirement_evidence(
             # Log the creation
             await log_audit_action(user['user_id'], "training_record_created", "training_record", record_id, {
                 "training_name": training_name,
-                "requirement_id": requirement_id,
+                "requirement_id": normalized_requirement_id,
                 "filename": file.filename,
                 "expiry_date": calculated_expiry,
                 "action": "created_with_evidence"
@@ -17469,7 +17489,7 @@ async def upload_requirement_evidence(
         # while compliance queries filter them out (causing "silent success" bug)
         existing = await db.employee_documents.find_one({
             "employee_id": employee_id,
-            "requirement_id": requirement_id,
+            "requirement_id": normalized_requirement_id,
             "status": {"$nin": EXCLUDED_DOC_STATUSES}
         }, {"_id": 0})
         

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import { useAuth } from '../../context/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
@@ -1557,12 +1557,17 @@ Internal Contact: Registered Manager / Designated Safeguarding Lead — Ebahi Il
           <p className="text-text-muted">Organisation-level compliance management for CQC readiness</p>
         </div>
         
-        {isAdmin() && policies.length === 0 && (
-          <Button onClick={handleSeedPolicies} className="bg-primary hover:bg-primary-hover text-white rounded-xl">
-            <Plus className="h-4 w-4 mr-2" />
-            Initialize Compliance Items
+        <div className="flex items-center gap-2">
+          <Button asChild variant="outline" className="rounded-xl">
+            <Link to="/portal/template-library">Template Library</Link>
           </Button>
-        )}
+          {isAdmin() && policies.length === 0 && (
+            <Button onClick={handleSeedPolicies} className="bg-primary hover:bg-primary-hover text-white rounded-xl">
+              <Plus className="h-4 w-4 mr-2" />
+              Initialize Compliance Items
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* CQC Compliance Summary */}

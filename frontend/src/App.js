@@ -37,6 +37,7 @@ import AuditViewPage from "./pages/portal/AuditViewPage";
 import DBSRegisterPage from "./pages/portal/DBSRegisterPage";
 import SettingsPage from "./pages/portal/SettingsPage";
 import TemplatesPage from "./pages/portal/TemplatesPage";
+import DocumentTemplateLibraryPage from "./pages/portal/DocumentTemplateLibraryPage";
 import FormEditorPage from "./pages/portal/FormEditorPage";
 import ComplianceCentrePage from "./pages/portal/ComplianceCentrePage";
 import ServiceUsersPage from "./pages/portal/ServiceUsersPage";
@@ -117,6 +118,7 @@ function AppRouter() {
         <Route path="training" element={<TrainingPage />} />
         <Route path="dbs-register" element={<DBSRegisterPage />} />
         <Route path="templates" element={<TemplatesPage />} />
+        <Route path="template-library" element={<DocumentTemplateLibraryPage />} />
         <Route path="compliance-centre" element={<ComplianceCentrePage />} />
         <Route path="cqc-dashboard" element={<Navigate to="/portal/compliance-centre?tab=insights" replace />} />
         <Route path="feedback" element={<ServiceUserFeedbackPage />} />

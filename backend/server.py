@@ -21554,9 +21554,21 @@ async def upload_employee_document(
     elif ext.lower() in ['webp']:
         detected_content_type = "image/webp"
     
-    # Upload to storage
+    # Upload to storage (Supabase primary; legacy fallback)
     data = await file.read()
-    result = put_object(path, data, detected_content_type)
+    try:
+        upload_result = await upload_to_supabase(
+            file_content=data,
+            storage_path=path,
+            content_type=detected_content_type
+        )
+        file_url = upload_result.get("url") or upload_result.get("path")
+        storage_path = upload_result.get("storage_path") or path
+    except Exception as exc:
+        logger.warning("employee_document_supabase_upload_failed doc_id=%s error=%s", doc_id, exc)
+        result = put_object(path, data, detected_content_type)
+        file_url = result["path"]
+        storage_path = path
     
     now = datetime.now(timezone.utc).isoformat()
     
@@ -21564,7 +21576,8 @@ async def upload_employee_document(
     await db.employee_documents.update_one(
         {"id": doc_id},
         {"$set": {
-            "file_url": result["path"],
+            "file_url": file_url,
+            "storage_path": storage_path,
             "original_filename": file.filename,
             "file_type": detected_content_type,  # Store content type
             "content_type": detected_content_type,  # Backup field

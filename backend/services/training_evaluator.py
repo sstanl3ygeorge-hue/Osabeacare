@@ -940,7 +940,9 @@ def resolve_mandatory_training_code(training_name: str):
 # ---------------------------------------------------------------------------
 
 # Statuses that mean the requirement is currently satisfied (not blocking).
-_SATISFIED_STATUSES = frozenset({"verified", "due_soon"})
+# `due_soon` remains valid for warning/amber UX, but it must not be treated
+# as fully current/verified in top-level completion percentages.
+_SATISFIED_STATUSES = frozenset({"verified"})
 
 
 def _record_requires_reverification(record: Optional[dict]) -> bool:

@@ -99,6 +99,42 @@ class PlaceholderMappingUpdate(BaseModel):
     manually_added_placeholders: List[str] = []
 
 
+# Archive import models for Fast-Track implementation
+class ArchiveImportManifestItem(BaseModel):
+    filename: str
+    folder_path: str
+    file_size: int
+    file_hash: str
+    extension: str
+    detected_type: str
+    destination_section: str
+    confidence: float
+    priority: str
+    notes: Optional[str] = None
+
+
+class ArchiveImportPreview(BaseModel):
+    filename: str
+    folder_path: str
+    detected_type: str
+    destination_section: str
+    confidence: float
+    priority: str
+    import_status: str = "pending"
+    duplicate_check: Optional[Dict[str, Any]] = None
+
+
+class ArchiveImportRequest(BaseModel):
+    templates: List[str] = []  # List of filenames to import
+    phase: Optional[str] = None  # 'phase_1_critical', 'phase_2_high', etc.
+    folder_filter: Optional[str] = None
+
+
+class ArchiveImportBatchRequest(BaseModel):
+    manifest_items: List[ArchiveImportManifestItem] = []
+    confirmed: bool = False
+
+
 class PublishTemplateRequest(BaseModel):
     template_version_id: Optional[str] = None
     effective_date: Optional[str] = None
@@ -1575,18 +1611,20 @@ async def publish_document_template(
         },
     )
 
+    update_set = {
+        "status": "active",
+        "current_version_id": version_id,
+        "updated_at": now_iso,
+        "destination_section": confirmed_destination_section,
+        "destination_confirmed_at": now_iso,
+        "destination_confirmed_by": user["user_id"],
+    }
+    if template.get("import_status"):
+        update_set["import_status"] = "imported"
+
     await db.document_templates.update_one(
         {"id": template_id},
-        {
-            "$set": {
-                "status": "active",
-                "current_version_id": version_id,
-                "updated_at": now_iso,
-                "destination_section": confirmed_destination_section,
-                "destination_confirmed_at": now_iso,
-                "destination_confirmed_by": user["user_id"],
-            }
-        },
+        {"$set": update_set},
     )
 
     # Archive other published versions for immutability and single active stream
@@ -2054,6 +2092,398 @@ async def list_document_audit_events(
 
     docs = await db.document_audit_events.find(filt, {"_id": 0}).sort("timestamp", -1).to_list(limit)
     return docs
+
+
+# ============================================================================
+# Archive Import Fast-Track Implementation (Phase 1 + Phase 2)
+# ============================================================================
+
+def _load_import_manifest() -> Dict[str, Any]:
+    """Load IMPORT_MANIFEST.json from workspace root."""
+    try:
+        manifest_path = Path(__file__).resolve().parents[2] / "IMPORT_MANIFEST.json"
+        if manifest_path.exists():
+            import json
+            with open(manifest_path, 'r') as f:
+                return json.load(f)
+    except Exception as e:
+        logging.warning(f"Failed to load IMPORT_MANIFEST.json: {e}")
+    return {"archive_root": "", "total_templates": 0, "phases": {}}
+
+
+async def _check_duplicate_template(
+    db, filename: str, folder_path: str, file_hash: str
+) -> Optional[Dict[str, Any]]:
+    """Check if template already exists (by filename, normalized title, or hash)."""
+    # Check by exact filename + folder path
+    existing = await db.document_templates.find_one({
+        "archive_filename": filename,
+        "archive_source": folder_path,
+    }, {"_id": 0, "id": 1, "title": 1})
+    if existing:
+        return {
+            "type": "exact_filename_match",
+            "existing_id": existing["id"],
+            "existing_title": existing.get("title"),
+        }
+    
+    # Check by filename alone (case-insensitive)
+    filename_lower = filename.lower()
+    existing = await db.document_templates.find_one({
+        "archive_filename": {"$regex": f"^{re.escape(filename)}$", "$options": "i"},
+    }, {"_id": 0, "id": 1, "title": 1})
+    if existing:
+        return {
+            "type": "filename_match_case_insensitive",
+            "existing_id": existing["id"],
+            "existing_title": existing.get("title"),
+        }
+    
+    # Check by file hash
+    if file_hash:
+        existing = await db.document_templates.find_one({
+            "archive_hash": file_hash,
+        }, {"_id": 0, "id": 1, "title": 1})
+        if existing:
+            return {
+                "type": "hash_match",
+                "existing_id": existing["id"],
+                "existing_title": existing.get("title"),
+            }
+    
+    return None
+
+
+@router.get("/document-templates/archive/import-manifest")
+async def get_archive_import_manifest(
+    phase: Optional[str] = Query(default=None),
+    folder: Optional[str] = Query(default=None),
+    user: dict = Depends(require_admin),
+):
+    """
+    Load IMPORT_MANIFEST.json for archive import preview.
+    Supports phase and folder filtering.
+    """
+    manifest = _load_import_manifest()
+    
+    if not manifest.get("phases"):
+        raise HTTPException(status_code=404, detail="Import manifest not found or empty")
+    
+    # Filter by phase if requested
+    if phase:
+        templates = manifest.get("phases", {}).get(phase, [])
+    else:
+        # Return Phase 1 + Phase 2 by default (Fast-Track)
+        phase1 = manifest.get("phases", {}).get("phase_1_critical", [])
+        phase2 = manifest.get("phases", {}).get("phase_2_high", [])
+        templates = phase1 + phase2
+    
+    # Filter by folder if requested
+    if folder:
+        templates = [t for t in templates if t.get("folder_path") == folder]
+    
+    # Add priority labels and status
+    for template in templates:
+        if not template.get("priority"):
+            phase_key = next(
+                (k for k, v in manifest.get("phases", {}).items() if template in v),
+                None
+            )
+            if "critical" in str(phase_key):
+                template["priority"] = "CRITICAL"
+            elif "high" in str(phase_key):
+                template["priority"] = "HIGH"
+            else:
+                template["priority"] = "MEDIUM"
+        template["import_status"] = "pending"
+    
+    return {
+        "archive_root": manifest.get("archive_root"),
+        "total_templates": len(templates),
+        "templates": templates,
+        "phase_selected": phase or "phase_1_critical+phase_2_high",
+        "folder_selected": folder,
+    }
+
+
+@router.post("/document-templates/archive/preview-batch")
+async def preview_archive_batch_import(
+    body: ArchiveImportRequest,
+    user: dict = Depends(require_admin),
+):
+    """
+    Preview templates before batch import.
+    Check for duplicates and conflicts.
+    """
+    db = get_db()
+    manifest = _load_import_manifest()
+    
+    # Get templates from manifest
+    all_templates = []
+    for phase_key, phase_templates in manifest.get("phases", {}).items():
+        if body.phase and body.phase != phase_key:
+            continue
+        all_templates.extend(phase_templates)
+    
+    # Filter by selected filenames if specified
+    if body.templates:
+        all_templates = [t for t in all_templates if t.get("filename") in body.templates]
+    
+    # Filter by folder if specified
+    if body.folder_filter:
+        all_templates = [t for t in all_templates if t.get("folder_path") == body.folder_filter]
+    
+    preview_items = []
+    for template in all_templates:
+        filename = template.get("filename")
+        folder_path = template.get("folder_path")
+        file_hash = template.get("file_hash")
+        
+        # Check for duplicates
+        duplicate_info = await _check_duplicate_template(db, filename, folder_path, file_hash)
+        
+        preview_item = {
+            "filename": filename,
+            "folder_path": folder_path,
+            "detected_type": template.get("detected_type"),
+            "destination_section": template.get("destination_section"),
+            "confidence": template.get("confidence"),
+            "priority": template.get("priority", "MEDIUM"),
+            "import_status": "skipped" if duplicate_info else "pending",
+            "duplicate_check": duplicate_info,
+            "file_size": template.get("file_size"),
+            "file_hash": file_hash,
+        }
+        preview_items.append(preview_item)
+    
+    # Count by status and priority
+    pending_count = len([t for t in preview_items if t["import_status"] == "pending"])
+    skipped_count = len([t for t in preview_items if t["import_status"] == "skipped"])
+    critical_count = len([t for t in preview_items if t["priority"] == "CRITICAL"])
+    high_count = len([t for t in preview_items if t["priority"] == "HIGH"])
+    
+    return {
+        "total_templates": len(preview_items),
+        "pending": pending_count,
+        "skipped": skipped_count,
+        "critical": critical_count,
+        "high": high_count,
+        "preview_items": preview_items,
+    }
+
+
+@router.post("/document-templates/archive/batch-import")
+async def batch_import_from_archive(
+    body: ArchiveImportBatchRequest,
+    user: dict = Depends(require_admin),
+):
+    """
+    Batch import templates from archive.
+    Templates are created as DRAFT with import_status='pending'.
+    No automatic publish — requires admin confirmation via publish endpoint.
+    """
+    if not body.confirmed:
+        raise HTTPException(
+            status_code=422,
+            detail="Admin must confirm batch import before proceeding"
+        )
+    
+    db = get_db()
+    await _ensure_template_indexes(db)
+    now_iso = _utc_now_iso()
+    
+    manifest = _load_import_manifest()
+    archive_root = manifest.get("archive_root")
+    
+    imported_ids = []
+    skipped_items = []
+    failed_items = []
+    
+    for manifest_item in body.manifest_items:
+        try:
+            filename = manifest_item.filename
+            folder_path = manifest_item.folder_path
+            file_hash = manifest_item.file_hash
+            detected_type = manifest_item.detected_type
+            destination_section = manifest_item.destination_section
+            priority = manifest_item.priority
+            
+            # Check for duplicate
+            duplicate_info = await _check_duplicate_template(db, filename, folder_path, file_hash)
+            if duplicate_info:
+                skipped_items.append({
+                    "filename": filename,
+                    "reason": f"Duplicate: {duplicate_info['type']}",
+                    "conflict": duplicate_info,
+                })
+                continue
+            
+            # Create template record with import metadata
+            template_id = str(uuid.uuid4())
+            version_id = str(uuid.uuid4())
+            
+            # Build title from filename
+            title = filename.replace(".docx", "").replace(".pdf", "").replace("_", " ")
+            title = re.sub(r"\s+", " ", title).title()
+            
+            # Generate doc code
+            doc_code = _gen_doc_code(title, detected_type)
+            
+            # Classify based on archive metadata
+            classification = _classify_document(filename, "")  # Use filename-only for now
+            
+            # Create template doc with import status
+            template_doc = {
+                "id": template_id,
+                "doc_code": doc_code,
+                "title": title,
+                "category": classification.category.value,
+                "document_type": classification.document_type.value,
+                "source_provider": "Archive Migration",
+                "owner_role": classification.admin_owner_role.value,
+                "review_period_months": int(classification.review_cycle_months.value),
+                "current_version_id": version_id,
+                "status": "draft",
+                "workflow_area": classification.workflow_area.value,
+                "classification": classification.model_dump(),
+                "suggested_destination_section": destination_section,
+                # Import metadata for tracking
+                "import_status": "pending",
+                "import_source": "archive_migration",
+                "import_phase": priority,
+                "archive_source": folder_path,
+                "archive_filename": filename,
+                "archive_hash": file_hash,
+                "archive_detected_type": detected_type,
+                "imported_at": now_iso,
+                "imported_by": user["user_id"],
+                "created_by": user["user_id"],
+                "created_at": now_iso,
+                "updated_at": now_iso,
+            }
+            
+            # Create version doc
+            version_doc = {
+                "id": version_id,
+                "template_id": template_id,
+                "version": 1,
+                "original_filename": filename,
+                "storage_path": None,  # Will be populated if file is retrieved from archive
+                "storage_url": None,
+                "local_path": None,
+                "extracted_text": "",  # Will be extracted on-demand from archive
+                "extracted_metadata": {
+                    "source_type": "archive",
+                    "archive_folder": folder_path,
+                    "archive_filename": filename,
+                    "detected_type": detected_type,
+                },
+                "detected_placeholders": [],
+                "placeholder_map": {},
+                "effective_date": now_iso[:10],
+                "review_date": _compute_review_date(now_iso[:10], int(classification.review_cycle_months.value)),
+                "published_at": None,
+                "published_by": None,
+                "status": "draft",
+                "created_at": now_iso,
+                "updated_at": now_iso,
+                "created_by": user["user_id"],
+            }
+            
+            await db.document_templates.insert_one(template_doc)
+            await db.document_template_versions.insert_one(version_doc)
+            
+            await _write_document_audit_event(
+                db=db,
+                actor_id=user["user_id"],
+                document_type="document_template",
+                document_id=template_id,
+                action="archive_import_batch",
+                before={},
+                after={
+                    "doc_code": doc_code,
+                    "title": title,
+                    "archive_source": folder_path,
+                    "archive_filename": filename,
+                    "import_status": "pending",
+                },
+                reason=f"Imported from archive migration batch (Phase: {priority})",
+            )
+            
+            imported_ids.append(template_id)
+            
+        except Exception as e:
+            failed_items.append({
+                "filename": manifest_item.filename,
+                "error": str(e),
+            })
+            logging.error(f"Failed to import {manifest_item.filename}: {e}")
+    
+    await log_audit_action(
+        user["user_id"],
+        "batch_import_archive",
+        "document_template",
+        "batch",
+        {
+            "imported_count": len(imported_ids),
+            "skipped_count": len(skipped_items),
+            "failed_count": len(failed_items),
+        },
+    )
+    
+    return {
+        "message": "Batch import completed",
+        "imported_count": len(imported_ids),
+        "imported_template_ids": imported_ids,
+        "skipped_count": len(skipped_items),
+        "skipped_items": skipped_items,
+        "failed_count": len(failed_items),
+        "failed_items": failed_items,
+    }
+
+
+@router.get("/document-templates/archive/import-status")
+async def get_archive_import_status(
+    user: dict = Depends(require_admin),
+):
+    """Get status of pending archive imports."""
+    db = get_db()
+    
+    pending_imports = await db.document_templates.find(
+        {
+            "import_status": {"$in": ["pending", "needs_review"]},
+        },
+        {"_id": 0}
+    ).sort("imported_at", -1).to_list(1000)
+    
+    published_imports = await db.document_templates.find(
+        {
+            "import_status": "imported",
+        },
+        {"_id": 0}
+    ).sort("updated_at", -1).to_list(1000)
+    
+    skipped_imports = await db.document_templates.find(
+        {
+            "import_status": "skipped",
+        },
+        {"_id": 0}
+    ).sort("updated_at", -1).to_list(1000)
+    
+    return {
+        "pending": {
+            "count": len(pending_imports),
+            "templates": pending_imports,
+        },
+        "published": {
+            "count": len(published_imports),
+            "templates": published_imports,
+        },
+        "skipped": {
+            "count": len(skipped_imports),
+            "templates": skipped_imports,
+        },
+    }
 
 
 @router.post("/document-templates/{template_id}/archive")

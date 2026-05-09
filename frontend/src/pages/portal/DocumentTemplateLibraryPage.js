@@ -188,6 +188,16 @@ export default function DocumentTemplateLibraryPage() {
   const [generating, setGenerating] = useState(false);
   const [archiving, setArchiving] = useState(false);
 
+  // Archive import
+  const [archiveManifest, setArchiveManifest] = useState(null);
+  const [archivePreview, setArchivePreview] = useState(null);
+  const [selectedArchiveTemplates, setSelectedArchiveTemplates] = useState(new Set());
+  const [archiveLoading, setArchiveLoading] = useState(false);
+  const [archiveImporting, setArchiveImporting] = useState(false);
+  const [archivePhase, setArchivePhase] = useState('phase_1_critical+phase_2_high');
+  const [archiveFolder, setArchiveFolder] = useState(null);
+  const [archiveImportStatus, setArchiveImportStatus] = useState(null);
+
   // Placeholder review modal
   const [showPlaceholderReview, setShowPlaceholderReview] = useState(false);
   const [reviewingPlaceholders, setReviewingPlaceholders] = useState({});
@@ -671,6 +681,104 @@ export default function DocumentTemplateLibraryPage() {
       toast.error(error.response?.data?.detail || 'Failed to archive template');
     } finally {
       setArchiving(false);
+    }
+  };
+
+  // Archive import handlers
+  const handleLoadArchiveManifest = async () => {
+    setArchiveLoading(true);
+    try {
+      const response = await axios.get(
+        `${API}/document-templates/archive/import-manifest`,
+        { headers: authHeaders }
+      );
+      setArchiveManifest(response.data);
+      toast.success(`Loaded ${response.data.total_templates} templates from archive`);
+    } catch (error) {
+      console.error('Failed to load archive manifest', error);
+      toast.error(error.response?.data?.detail || 'Failed to load archive manifest');
+    } finally {
+      setArchiveLoading(false);
+    }
+  };
+
+  const handlePreviewArchiveBatch = async () => {
+    if (!archiveManifest || archiveManifest.total_templates === 0) {
+      toast.error('Load archive manifest first');
+      return;
+    }
+
+    setArchiveLoading(true);
+    try {
+      const selectedFilenames = Array.from(selectedArchiveTemplates);
+      const response = await axios.post(
+        `${API}/document-templates/archive/preview-batch`,
+        {
+          templates: selectedFilenames,
+          phase: archivePhase,
+          folder_filter: archiveFolder,
+        },
+        { headers: authHeaders }
+      );
+      setArchivePreview(response.data);
+      toast.success(`Preview: ${response.data.pending} can import, ${response.data.skipped} duplicates found`);
+    } catch (error) {
+      console.error('Failed to preview batch', error);
+      toast.error(error.response?.data?.detail || 'Failed to preview batch');
+    } finally {
+      setArchiveLoading(false);
+    }
+  };
+
+  const handleBatchImportArchive = async () => {
+    if (!archivePreview || archivePreview.total_templates === 0) {
+      toast.error('Create preview first');
+      return;
+    }
+
+    if (!window.confirm(`Import ${archivePreview.pending} templates from archive? This cannot be undone.`)) {
+      return;
+    }
+
+    setArchiveImporting(true);
+    try {
+      const response = await axios.post(
+        `${API}/document-templates/archive/batch-import`,
+        {
+          manifest_items: archivePreview.preview_items.filter(p => p.import_status === 'pending'),
+          confirmed: true,
+        },
+        { headers: authHeaders }
+      );
+      toast.success(`Imported ${response.data.imported_count} templates`);
+      if (response.data.skipped_count > 0) {
+        toast.info(`${response.data.skipped_count} templates were duplicates and skipped`);
+      }
+      setArchivePreview(null);
+      setSelectedArchiveTemplates(new Set());
+      await fetchTemplates();
+    } catch (error) {
+      console.error('Batch import failed', error);
+      toast.error(error.response?.data?.detail || 'Batch import failed');
+    } finally {
+      setArchiveImporting(false);
+    }
+  };
+
+  const handleCheckImportStatus = async () => {
+    setArchiveLoading(true);
+    try {
+      const response = await axios.get(
+        `${API}/document-templates/archive/import-status`,
+        { headers: authHeaders }
+      );
+      setArchiveImportStatus(response.data);
+      toast.success(`${response.data.pending.count} pending, ${response.data.published.count} imported`);
+    } catch (error) {
+      console.error('Failed to check import status', error);
+      toast.error(error.response?.data?.detail || 'Failed to check import status');
+    } finally {
+      setArchiveLoading(false);
     }
   };
 
@@ -1347,6 +1455,200 @@ export default function DocumentTemplateLibraryPage() {
           </Card>
         </div>
       )}
+
+      {/* Archive Import Dashboard */}
+      <Card className="border-[#E4E8EB]">
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Archive className="h-5 w-5" />
+                Archive Import Dashboard
+              </CardTitle>
+              <p className="text-xs text-text-muted mt-1">
+                {archiveManifest ? `${archiveManifest.total_templates} templates available` : 'Load archive manifest to begin import'}
+              </p>
+            </div>
+            <Button 
+              onClick={handleLoadArchiveManifest}
+              disabled={archiveLoading}
+              variant="outline"
+              className="text-xs"
+            >
+              {archiveLoading ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Upload className="h-3 w-3 mr-1" />}
+              Load Archive
+            </Button>
+          </div>
+        </CardHeader>
+
+        {archiveManifest && (
+          <CardContent className="space-y-4">
+            {/* Status Summary */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="p-2 rounded-lg bg-red-50 border border-red-200">
+                <p className="text-[10px] text-red-700 font-semibold">CRITICAL</p>
+                <p className="text-lg font-bold text-red-900">57</p>
+                <p className="text-[10px] text-red-600">Care plans, incidents</p>
+              </div>
+              <div className="p-2 rounded-lg bg-orange-50 border border-orange-200">
+                <p className="text-[10px] text-orange-700 font-semibold">HIGH</p>
+                <p className="text-lg font-bold text-orange-900">43</p>
+                <p className="text-[10px] text-orange-600">Audits, HR, ops</p>
+              </div>
+              <div className="p-2 rounded-lg bg-yellow-50 border border-yellow-200">
+                <p className="text-[10px] text-yellow-700 font-semibold">MEDIUM</p>
+                <p className="text-lg font-bold text-yellow-900">103</p>
+                <p className="text-[10px] text-yellow-600">Compliance lib</p>
+              </div>
+              <div className="p-2 rounded-lg bg-gray-50 border border-gray-200">
+                <p className="text-[10px] text-gray-700 font-semibold">LOW</p>
+                <p className="text-lg font-bold text-gray-900">502</p>
+                <p className="text-[10px] text-gray-600">Archival</p>
+              </div>
+            </div>
+
+            {/* Preview Section */}
+            {!archivePreview ? (
+              <div className="space-y-3">
+                <div className="text-xs font-semibold text-text-primary">Phase Selection</div>
+                <Select value={archivePhase} onValueChange={setArchivePhase}>
+                  <SelectTrigger className="text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="phase_1_critical+phase_2_high">Phase 1 + 2 (Fast-Track: 100 templates)</SelectItem>
+                    <SelectItem value="phase_1_critical">Phase 1 Only (Critical: 57 templates)</SelectItem>
+                    <SelectItem value="phase_2_high">Phase 2 Only (High: 43 templates)</SelectItem>
+                  </SelectContent>
+                </Select>
+
+                <Button 
+                  onClick={handlePreviewArchiveBatch}
+                  disabled={archiveLoading}
+                  className="w-full text-xs"
+                >
+                  {archiveLoading ? <Loader2 className="h-3 w-3 mr-2 animate-spin" /> : <Eye className="h-3 w-3 mr-2" />}
+                  Preview Templates
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="p-3 rounded-lg bg-blue-50 border border-blue-200">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="text-xs font-semibold text-blue-900">Import Preview</div>
+                    <Badge className="text-[10px] bg-blue-200 text-blue-900">{archivePreview.total_templates} total</Badge>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <p className="text-[10px] text-blue-700">Pending Import</p>
+                      <p className="text-sm font-bold text-blue-900">{archivePreview.pending}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-blue-700">Duplicates</p>
+                      <p className="text-sm font-bold text-blue-900">{archivePreview.skipped}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-blue-700">CRITICAL</p>
+                      <p className="text-sm font-bold text-blue-900">{archivePreview.critical}</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Templates List */}
+                <div className="max-h-96 overflow-y-auto border rounded-lg">
+                  <table className="w-full text-[11px]">
+                    <thead className="sticky top-0 bg-gray-50 border-b">
+                      <tr>
+                        <th className="text-left p-2">Filename</th>
+                        <th className="text-left p-2">Folder</th>
+                        <th className="text-center p-2">Priority</th>
+                        <th className="text-center p-2">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {archivePreview.preview_items?.map((item, idx) => (
+                        <tr key={idx} className="border-b hover:bg-gray-50">
+                          <td className="p-2 truncate">{item.filename}</td>
+                          <td className="p-2 text-text-muted text-[10px]">{item.folder_path}</td>
+                          <td className="p-2 text-center">
+                            <Badge className={`text-[9px] ${
+                              item.priority === 'CRITICAL' ? 'bg-red-100 text-red-800' :
+                              item.priority === 'HIGH' ? 'bg-orange-100 text-orange-800' :
+                              'bg-gray-100 text-gray-800'
+                            }`}>
+                              {item.priority}
+                            </Badge>
+                          </td>
+                          <td className="p-2 text-center">
+                            <Badge className={`text-[9px] ${
+                              item.import_status === 'pending' ? 'bg-green-100 text-green-800' :
+                              'bg-yellow-100 text-yellow-800'
+                            }`}>
+                              {item.import_status === 'pending' ? '✓ Import' : '⚠ Skip'}
+                            </Badge>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="flex gap-2">
+                  <Button 
+                    onClick={() => {
+                      setArchivePreview(null);
+                      setSelectedArchiveTemplates(new Set());
+                    }}
+                    variant="outline"
+                    className="flex-1 text-xs"
+                  >
+                    Back
+                  </Button>
+                  <Button 
+                    onClick={handleBatchImportArchive}
+                    disabled={archiveImporting}
+                    className="flex-1 text-xs"
+                  >
+                    {archiveImporting ? <Loader2 className="h-3 w-3 mr-2 animate-spin" /> : <Rocket className="h-3 w-3 mr-2" />}
+                    Confirm & Import
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Import Status Check */}
+            {archiveImportStatus && (
+              <div className="p-3 rounded-lg bg-green-50 border border-green-200">
+                <div className="text-xs font-semibold text-green-900 mb-2">Import Status</div>
+                <div className="grid grid-cols-3 gap-2">
+                  <div>
+                    <p className="text-[10px] text-green-700">Pending Review</p>
+                    <p className="text-sm font-bold text-green-900">{archiveImportStatus.pending.count}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-green-700">Published</p>
+                    <p className="text-sm font-bold text-green-900">{archiveImportStatus.published.count}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-green-700">Skipped</p>
+                    <p className="text-sm font-bold text-green-900">{archiveImportStatus.skipped.count}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <Button 
+              onClick={handleCheckImportStatus}
+              disabled={archiveLoading}
+              variant="outline"
+              className="w-full text-xs"
+            >
+              {archiveLoading ? <Loader2 className="h-3 w-3 mr-2 animate-spin" /> : <RefreshCw className="h-3 w-3 mr-2" />}
+              Check Import Status
+            </Button>
+          </CardContent>
+        )}
+      </Card>
     </div>
   );
 }

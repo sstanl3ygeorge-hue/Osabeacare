@@ -242,7 +242,23 @@ def _normalize_archive_title(filename: str) -> str:
     stem = _strip_archive_provider_prefix(Path(filename).stem) or Path(filename).stem
     cleaned = re.sub(r"[_-]+", " ", stem)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
-    return cleaned.title() or "Imported Template"
+    title = cleaned.title()
+
+    # Readability polish for common joined phrases in the archive source names.
+    title = re.sub(r"\bNutrition\s+Hydration\s+Assessment\s+Plan\b", "Nutrition & Hydration Assessment & Plan", title, flags=re.IGNORECASE)
+    title = re.sub(r"\bMedication\s+Assessment\s+Plan\b", "Medication Assessment & Plan", title, flags=re.IGNORECASE)
+    title = re.sub(r"\bPolicy\s*&?\s*Procedure\b", "Policy & Procedure", title, flags=re.IGNORECASE)
+    title = re.sub(r"\bAccident\s*,?\s*Incident\b", "Accident & Incident", title, flags=re.IGNORECASE)
+
+    # Preserve key acronyms and collapse dotted variants used in source files.
+    title = re.sub(r"\bMar\b", "MAR", title)
+    title = re.sub(r"\bPrn\b", "PRN", title)
+    title = re.sub(r"\bCoshh\b", "COSHH", title)
+    title = re.sub(r"\bQ\s*&?\s*A\b", "Q&A", title)
+    title = re.sub(r"\bD\.?\s*S\.?\s*L\.?\b", "DSL", title)
+    title = re.sub(r"\bD\.?\s*S\.?\s*O\.?\b", "DSO", title)
+
+    return title or "Imported Template"
 
 
 def _normalize_archive_filename(filename: str) -> str:

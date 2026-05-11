@@ -1159,14 +1159,16 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
                 "type": "proof_of_address",
                 "name": "Proof of Address (need 2)",
                 "action": "upload",
-                "rejection": get_rejection_details(rejected_poa_doc)
+                "rejection": get_rejection_details(rejected_poa_doc),
+                "poa_upload_needed": True,
             })
         else:
-            # No POA docs - add to missing
+            # No POA docs - add to missing (poa_upload_needed ensures active workers see it)
             missing_docs.append({
                 "type": "proof_of_address",
                 "name": "Proof of Address (need 2)",
-                "action": "upload"
+                "action": "upload",
+                "poa_upload_needed": True,
             })
     elif len(poa_docs) == 1:
         # Only 1 POA doc - show it with partial status
@@ -1191,11 +1193,23 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             "verified_by_name": poa_doc.get("verification_stamp_by_name") or poa_doc.get("verified_by_name"),
             "verified_at": poa_doc.get("verification_stamp_at") or poa_doc.get("verified_at"),
         })
-        missing_docs.append({
-            "type": "proof_of_address_2",
-            "name": "Second Proof of Address (need 1 more)",
-            "action": "upload"
-        })
+        # Second slot: surface rejected PoA info so the worker sees the rejection reason
+        if rejected_poa_docs:
+            rejected_poa_docs.sort(key=lambda x: x.get("updated_at") or x.get("uploaded_at") or "", reverse=True)
+            missing_docs.append({
+                "type": "proof_of_address_2",
+                "name": "Second Proof of Address (replacement required)",
+                "action": "upload",
+                "rejection": get_rejection_details(rejected_poa_docs[0]),
+                "poa_upload_needed": True,
+            })
+        else:
+            missing_docs.append({
+                "type": "proof_of_address_2",
+                "name": "Second Proof of Address (need 1 more)",
+                "action": "upload",
+                "poa_upload_needed": True,
+            })
     else:
         # 2+ POA docs - show ALL of them (sync with admin view)
         poa_docs.sort(key=lambda x: x.get("uploaded_at") or "", reverse=True)

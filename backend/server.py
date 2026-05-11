@@ -22251,7 +22251,7 @@ async def request_document_replacement(
                         </div>
                         <p>Please log in to your worker portal and upload a new document as soon as possible:</p>
                         <p style="text-align: center; margin: 30px 0;">
-                            <a href="{PORTAL_URL}/portal/worker" style="background-color: #0d6c6c; color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; font-weight: bold;">
+                            <a href="{PORTAL_URL}/worker/dashboard" style="background-color: #0d6c6c; color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; font-weight: bold;">
                                 Upload New Document
                             </a>
                         </p>

@@ -3266,8 +3266,8 @@ export default function WorkerDashboard() {
           </Card>
         )}
 
-        {/* Missing Documents - Show for onboarding OR if there are rejected docs */}
-        {((!isActiveEmployee && visibleMissingDocuments.length > 0) || visibleMissingDocuments.some(d => d.rejection)) && (
+        {/* Missing Documents - Show for onboarding, rejected docs, or pending PoA upload slots */}
+        {((!isActiveEmployee && visibleMissingDocuments.length > 0) || visibleMissingDocuments.some(d => d.rejection) || visibleMissingDocuments.some(d => d.poa_upload_needed)) && (
           <Card className="shadow-md border-0" data-testid="missing-documents-section">
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center gap-2 text-lg">

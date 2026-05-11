@@ -1410,7 +1410,6 @@ export default function WorkerDashboard() {
         {
           headers: {
             Authorization: `Bearer ${token}`,
-            'Content-Type': 'multipart/form-data'
           }
         }
       );
@@ -1419,7 +1418,7 @@ export default function WorkerDashboard() {
       await fetchCvStatus();
       await fetchDashboard();
     } catch (error) {
-      const message = typeof error.response?.data?.detail === 'string' ? error.response.data.detail : 'Failed to upload CV';
+      const message = getApiErrorMessage(error, 'Failed to upload CV');
       toast.error(message);
     } finally {
       setUploading(null);
@@ -1701,6 +1700,41 @@ export default function WorkerDashboard() {
     }
   };
 
+  const getApiErrorMessage = (error, fallbackMessage) => {
+    const detail = error?.response?.data?.detail;
+
+    if (typeof detail === 'string' && detail.trim()) {
+      return detail;
+    }
+
+    if (Array.isArray(detail) && detail.length > 0) {
+      const first = detail[0];
+      if (typeof first === 'string' && first.trim()) {
+        return first;
+      }
+      if (first && typeof first === 'object') {
+        if (typeof first.msg === 'string' && first.msg.trim()) {
+          return first.msg;
+        }
+        if (typeof first.message === 'string' && first.message.trim()) {
+          return first.message;
+        }
+      }
+    }
+
+    if (detail && typeof detail === 'object') {
+      if (typeof detail.message === 'string' && detail.message.trim()) {
+        return detail.message;
+      }
+      if (typeof detail.error === 'string' && detail.error.trim()) {
+        return detail.error;
+      }
+    }
+
+    const fallback = error?.response?.data?.message || error?.message;
+    return typeof fallback === 'string' && fallback.trim() ? fallback : fallbackMessage;
+  };
+
   const handleFileUpload = async (requirementId, file) => {
     if (!file) return;
     
@@ -1724,7 +1758,7 @@ export default function WorkerDashboard() {
       toast.success('Document uploaded successfully! Awaiting admin verification.');
       fetchDashboard(); // Refresh data
     } catch (error) {
-      const message = typeof error.response?.data?.detail === 'string' ? error.response.data.detail : 'Failed to upload document';
+      const message = getApiErrorMessage(error, 'Failed to upload document');
       toast.error(message);
     } finally {
       setUploading(null);
@@ -1761,7 +1795,7 @@ export default function WorkerDashboard() {
       toast.success(`${files.length} file${files.length > 1 ? 's' : ''} uploaded successfully! Awaiting admin verification.`);
       fetchDashboard();
     } catch (error) {
-      const message = typeof error.response?.data?.detail === 'string' ? error.response.data.detail : 'Failed to upload documents';
+      const message = getApiErrorMessage(error, 'Failed to upload documents');
       toast.error(message);
     } finally {
       setUploading(null);

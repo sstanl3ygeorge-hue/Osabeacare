@@ -1712,15 +1712,14 @@ export default function WorkerDashboard() {
     
     try {
       await axios.post(
-        `${API}/worker/upload-document/${requirementId}`,
-        formData,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'multipart/form-data'
+          `${API}/worker/upload-document/${requirementId}`,
+          formData,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            }
           }
-        }
-      );
+        );
       
       toast.success('Document uploaded successfully! Awaiting admin verification.');
       fetchDashboard(); // Refresh data
@@ -1749,15 +1748,14 @@ export default function WorkerDashboard() {
         const suffix = files.length > 1 ? (i === 0 ? '_front' : '_back') : '';
         
         await axios.post(
-          `${API}/worker/upload-document/${requirementId}${suffix}`,
-          formData,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-              'Content-Type': 'multipart/form-data'
+            `${API}/worker/upload-document/${requirementId}${suffix}`,
+            formData,
+            {
+              headers: {
+                Authorization: `Bearer ${token}`,
+              }
             }
-          }
-        );
+          );
       }
       
       toast.success(`${files.length} file${files.length > 1 ? 's' : ''} uploaded successfully! Awaiting admin verification.`);

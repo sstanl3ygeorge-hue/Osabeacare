@@ -51,7 +51,7 @@ from pymongo.errors import BulkWriteError, DuplicateKeyError, PyMongoError
 SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_CONFLICTS_FILE = SCRIPT_DIR / "template_migration_conflicts.json"
 
-WINDOWS_PATH_RE = re.compile(r"(?i)(?:^[A-Z]:\\|[A-Z]:/|\\\\|/Users/|/home/|/mnt/)")
+WINDOWS_PATH_RE = re.compile(r"(?i)(?:(?:^|\s)[A-Z]:\\|(?:^|\s)[A-Z]:/|(?:^|\s)\\\\|/Users/|/home/|/mnt/)")
 
 
 def parse_args() -> argparse.Namespace:
@@ -294,6 +294,8 @@ def classify_version_conflicts(
 def sanitize_for_production(doc: Dict[str, Any], *, migration_tag: str, now_iso: str, collection: str) -> Dict[str, Any]:
     cleaned = copy.deepcopy(doc)
     cleaned.pop("_id", None)
+    cleaned.pop("local_path", None)
+    cleaned.pop("original_folder_path", None)  # Windows-specific metadata
     cleaned["migration_tag"] = migration_tag
     cleaned["migrated_at"] = now_iso
 
@@ -362,7 +364,8 @@ def build_migration_plan(
             hits = collect_local_path_hits(source_doc)
             for hit in hits:
                 field_name = hit["field"]
-                if field_name.endswith("local_path") or field_name == "local_path":
+                # Strip local path fields and original_folder_path (these are Windows-specific metadata)
+                if field_name.endswith("local_path") or field_name == "local_path" or "original_folder_path" in field_name:
                     stripped_local_path_count += 1
                     row["local_path_issues"].append(
                         {

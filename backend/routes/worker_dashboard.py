@@ -2357,7 +2357,8 @@ async def worker_upload_document(
     safe_filename = sanitize_filename(file.filename)
     safe_filename = f"{uuid.uuid4().hex[:8]}_{safe_filename}"
     
-    storage_path = f"documents/{employee_id}/{safe_filename}"
+    # Store key relative to bucket root (do not prefix with bucket name).
+    storage_path = f"employee-documents/{employee_id}/{safe_filename}"
     
     content_type = detected_type or file.content_type or "application/octet-stream"
     put_object(storage_path, contents, content_type)

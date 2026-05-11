@@ -807,9 +807,36 @@ async def retrieve_file_bytes(file_url: str) -> tuple:
         try:
             from supabase_storage import get_supabase_public_url, is_supabase_storage_configured
             if is_supabase_storage_configured() and not ref.startswith(("http://", "https://")):
-                content = await download_file_from_storage(get_supabase_public_url(ref.lstrip("/")))
-                if content:
-                    return content, _EXT_CONTENT_TYPES.get(ext_local, "application/octet-stream")
+                raw_path = ref.lstrip("/")
+                supabase_url = os.environ.get("SUPABASE_URL", "").rstrip("/")
+                supabase_bucket = os.environ.get("SUPABASE_STORAGE_BUCKET", "documents")
+
+                # Try multiple path/url variants for backward compatibility:
+                # - normalized public URL helper
+                # - raw public URL (keeps bucket-like prefixes embedded in key)
+                # - authenticated object endpoints (for private buckets)
+                candidate_urls = [get_supabase_public_url(raw_path)]
+                if supabase_url:
+                    candidate_urls.extend([
+                        f"{supabase_url}/storage/v1/object/public/{supabase_bucket}/{raw_path}",
+                        f"{supabase_url}/storage/v1/object/{supabase_bucket}/{raw_path}",
+                    ])
+                    bucket_prefix = f"{supabase_bucket}/"
+                    if raw_path.startswith(bucket_prefix):
+                        stripped_path = raw_path[len(bucket_prefix):]
+                        candidate_urls.extend([
+                            f"{supabase_url}/storage/v1/object/public/{supabase_bucket}/{stripped_path}",
+                            f"{supabase_url}/storage/v1/object/{supabase_bucket}/{stripped_path}",
+                        ])
+
+                seen_urls = set()
+                for candidate_url in candidate_urls:
+                    if not candidate_url or candidate_url in seen_urls:
+                        continue
+                    seen_urls.add(candidate_url)
+                    content = await download_file_from_storage(candidate_url)
+                    if content:
+                        return content, _EXT_CONTENT_TYPES.get(ext_local, "application/octet-stream")
                 attempts.append(f"supabase-path-empty:{ref}")
         except Exception as e:
             attempts.append(f"supabase-path-error:{ref}:{e}")

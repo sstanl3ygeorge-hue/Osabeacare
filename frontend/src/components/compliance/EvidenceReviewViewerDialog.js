@@ -203,13 +203,38 @@ export default function EvidenceReviewViewerDialog({
     isFormReview && /staff health questionnaire|health questionnaire/i.test(formName || '');
   const fileName = isFormReview ? `${(formName || 'Form').replace(/\s+/g, '_')}.pdf` : (file?.file_name || file?.name || 'Document');
   const docId = file?.id || file?.file_id;
-  // Normalise file URL — backend evidence URLs are often relative (/api/...)
+  const protectedDocUrl = docId ? `${API}/employee-documents/${docId}/file` : null;
+  // Normalise file URL for all legacy/current shapes.
+  // Some payloads still carry raw storage keys (e.g. documents/employee/file.pdf)
+  // or non-/api relative paths that cannot be fetched directly from the web app origin.
   const rawFileUrl = isFormReview
     ? (formSubmissionId ? `${API}/form-submissions/${formSubmissionId}/download-pdf` : null)
-    : (file?.file_url || (docId ? `/api/employee-documents/${docId}/file` : null));
-  const fileUrl = (!isFormReview && rawFileUrl && rawFileUrl.startsWith('/api/'))
-    ? `${API}${rawFileUrl.substring(4)}`
-    : rawFileUrl;
+    : (file?.file_url || protectedDocUrl);
+
+  let fileUrl = rawFileUrl;
+  if (!isFormReview && rawFileUrl) {
+    const raw = String(rawFileUrl).trim();
+    const isHttp = /^https?:\/\//i.test(raw);
+    const isApiRelative = raw.startsWith('/api/');
+    const isAppRelative = raw.startsWith('/');
+    const looksLikeStorageKey =
+      raw.startsWith('documents/') ||
+      raw.startsWith('/documents/') ||
+      raw.startsWith('uploads/') ||
+      raw.startsWith('/uploads/');
+
+    if (isHttp) {
+      fileUrl = raw;
+    } else if (isApiRelative) {
+      fileUrl = `${API}${raw.substring(4)}`;
+    } else if (looksLikeStorageKey) {
+      fileUrl = protectedDocUrl;
+    } else if (isAppRelative) {
+      fileUrl = `${API}${raw}`;
+    } else {
+      fileUrl = protectedDocUrl;
+    }
+  }
   const fileType = isFormReview ? 'pdf' : getFileType(contentType, fileName);
   const hasMetMinViewTime = viewSeconds >= MIN_VIEW_SECONDS;
 
